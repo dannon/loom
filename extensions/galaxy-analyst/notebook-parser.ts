@@ -160,27 +160,52 @@ export function parseFrontmatter(content: string): NotebookFrontmatter | null {
 }
 
 /**
- * Parse a fenced YAML block
+ * Parse a scalar YAML value string into a JS value
+ */
+function parseYamlValue(raw: string): unknown {
+  const value = raw.replace(/^["']|["']$/g, "");
+  if (value === "true") return true;
+  if (value === "false") return false;
+  if (value === "null") return null;
+  if (/^\d+$/.test(value)) return parseInt(value, 10);
+  return value;
+}
+
+/**
+ * Parse a fenced YAML block with nested objects and arrays.
+ * Handles the subset of YAML used by our notebook format:
+ * scalar values, nested objects (via indentation), and arrays (via - prefix).
  */
 function parseYamlBlock(block: string): Record<string, unknown> | null {
   try {
     const lines = block.split("\n");
-    const result: Record<string, unknown> = {};
-    let currentKey: string | null = null;
-    let currentArray: unknown[] | null = null;
-    let indent = 0;
+
+    // Stack tracks nested objects: each entry is [indent, target-object]
+    const root: Record<string, unknown> = {};
+    const stack: Array<{ indent: number; obj: Record<string, unknown> }> = [
+      { indent: -1, obj: root },
+    ];
+    let currentArray: { key: string; parent: Record<string, unknown>; items: unknown[] } | null = null;
 
     for (const line of lines) {
-      // Skip empty lines
       if (!line.trim()) continue;
 
-      // Array item
+      // Array item: "  - value" or "  - key: value"
       const arrayMatch = line.match(/^(\s*)-\s*(.*)$/);
-      if (arrayMatch && currentArray !== null) {
+      if (arrayMatch) {
         const value = arrayMatch[2].trim();
-        // Handle quoted strings
-        const unquoted = value.replace(/^["']|["']$/g, "");
-        currentArray.push(unquoted || value);
+        if (currentArray) {
+          // Check if array item is a key-value pair (e.g., "- name: foo")
+          const kvInArray = value.match(/^(\w+):\s*(.+)$/);
+          if (kvInArray) {
+            const itemObj: Record<string, unknown> = {};
+            itemObj[kvInArray[1]] = parseYamlValue(kvInArray[2]);
+            // Peek ahead for continuation of this object (multi-line array items)
+            currentArray.items.push(itemObj);
+          } else {
+            currentArray.items.push(parseYamlValue(value));
+          }
+        }
         continue;
       }
 
@@ -188,41 +213,53 @@ function parseYamlBlock(block: string): Record<string, unknown> | null {
       const kvMatch = line.match(/^(\s*)(\w+):\s*(.*)$/);
       if (kvMatch) {
         const [, spaces, key, rawValue] = kvMatch;
-        const newIndent = spaces.length;
+        const indent = spaces.length;
 
-        // If we were building an array, save it
-        if (currentArray !== null && currentKey) {
-          result[currentKey] = currentArray;
+        // Flush any pending array
+        if (currentArray) {
+          currentArray.parent[currentArray.key] = currentArray.items;
           currentArray = null;
         }
 
-        // Top-level key
-        if (newIndent === 0 || newIndent <= indent) {
-          currentKey = key;
-          indent = newIndent;
+        // Pop stack back to the right nesting level
+        while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
+          stack.pop();
+        }
 
-          if (rawValue === "") {
-            // Could be start of array or nested object
-            currentArray = [];
-          } else {
-            // Parse value
-            const value = rawValue.replace(/^["']|["']$/g, "");
-            if (value === "true") result[key] = true;
-            else if (value === "false") result[key] = false;
-            else if (value === "null") result[key] = null;
-            else if (/^\d+$/.test(value)) result[key] = parseInt(value, 10);
-            else result[key] = value;
+        const target = stack[stack.length - 1].obj;
+
+        if (rawValue === "" || rawValue.trim() === "") {
+          // Could be nested object or array — create object optimistically.
+          // If the next line starts with "- ", parseArray handling will convert it.
+          const child: Record<string, unknown> = {};
+          target[key] = child;
+          stack.push({ indent, obj: child });
+
+          // Peek: if next non-empty line starts with "- ", treat as array
+          const nextIdx = lines.indexOf(line) + 1;
+          for (let i = nextIdx; i < lines.length; i++) {
+            const nextLine = lines[i];
+            if (!nextLine.trim()) continue;
+            if (nextLine.match(/^\s*-\s/)) {
+              // It's an array, not an object
+              delete target[key];
+              stack.pop();
+              currentArray = { key, parent: target, items: [] };
+            }
+            break;
           }
+        } else {
+          target[key] = parseYamlValue(rawValue);
         }
       }
     }
 
-    // Save any remaining array
-    if (currentArray !== null && currentKey) {
-      result[currentKey] = currentArray;
+    // Flush any remaining array
+    if (currentArray) {
+      currentArray.parent[currentArray.key] = currentArray.items;
     }
 
-    return result;
+    return root;
   } catch {
     return null;
   }
