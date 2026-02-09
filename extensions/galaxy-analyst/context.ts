@@ -21,7 +21,7 @@ export function setupContextInjection(pi: ExtensionAPI): void {
       // No active plan - provide minimal guidance
       return {
         systemPrompt: `
-## Galaxy Analyst Status
+## gxypi Status
 No active analysis plan. To start a new analysis:
 1. Discuss the research question and data with the researcher
 2. Use \`analysis_plan_create\` to create a structured plan
@@ -74,7 +74,7 @@ Galaxy: ${state.galaxyConnected ? 'Connected' : 'Not connected'}
 
       ctx.ui.setStatus("galaxy-plan", statusText);
     } else {
-      ctx.ui.setStatus("galaxy-plan", "🔬 Galaxy Analyst ready");
+      ctx.ui.setStatus("galaxy-plan", "🔬 gxypi ready");
     }
   });
 }

@@ -1,5 +1,5 @@
 /**
- * Integration tests for the Galaxy Analyst extension.
+ * Integration tests for the gxypi extension.
  *
  * Creates a minimal mock ExtensionAPI that captures all registrations,
  * then loads the extension and verifies everything registered correctly.

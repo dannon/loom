@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Pi-Galaxy-Analyst Installer
+# gxypi Installer
 #
 # One-line install:
-#   curl -fsSL https://raw.githubusercontent.com/galaxyproject/pi-galaxy-analyst/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/galaxyproject/gxypi/main/install.sh | bash
 #
 # Or download and run:
 #   chmod +x install.sh && ./install.sh
@@ -25,7 +25,7 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 echo ""
 echo -e "${GREEN}╔════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║     Pi-Galaxy-Analyst Installer            ║${NC}"
+echo -e "${GREEN}║     gxypi Installer                        ║${NC}"
 echo -e "${GREEN}║     Galaxy Co-Scientist for Bioinformatics ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
 echo ""
@@ -104,22 +104,22 @@ else
     fi
 fi
 
-# Clone/update pi-galaxy-analyst
-INSTALL_DIR="$HOME/.pi-galaxy-analyst"
-info "Installing pi-galaxy-analyst..."
+# Clone/update gxypi
+INSTALL_DIR="$HOME/.gxypi"
+info "Installing gxypi..."
 
 if [ -d "$INSTALL_DIR" ]; then
     info "Updating existing installation..."
     cd "$INSTALL_DIR"
     git pull origin main 2>/dev/null || warn "Could not update, using existing version"
 else
-    git clone https://github.com/galaxyproject/pi-galaxy-analyst.git "$INSTALL_DIR" 2>/dev/null || {
+    git clone https://github.com/galaxyproject/gxypi.git "$INSTALL_DIR" 2>/dev/null || {
         # If repo doesn't exist yet, use local copy if available
         if [ -d "$(dirname "$0")" ] && [ -f "$(dirname "$0")/package.json" ]; then
             info "Using local installation..."
             cp -r "$(dirname "$0")" "$INSTALL_DIR"
         else
-            error "Could not clone pi-galaxy-analyst. Repository may not be public yet."
+            error "Could not clone gxypi. Repository may not be public yet."
         fi
     }
 fi
@@ -179,19 +179,19 @@ elif [ -f "$MCP_CONFIG" ]; then
 fi
 
 # Create a launcher script
-LAUNCHER="$HOME/.local/bin/galaxy-analyst"
+LAUNCHER="$HOME/.local/bin/gxypi"
 mkdir -p "$HOME/.local/bin"
 
 cat > "$LAUNCHER" << 'EOF'
 #!/usr/bin/env bash
 #
-# Galaxy Analyst - Launch Pi with Galaxy co-scientist configuration
+# gxypi - Launch Pi with Galaxy co-scientist configuration
 #
 
 # Check for Galaxy credentials
 if [ -z "$GALAXY_URL" ] || [ -z "$GALAXY_API_KEY" ]; then
     # Check config file
-    CONFIG_FILE="$HOME/.galaxy-analyst.env"
+    CONFIG_FILE="$HOME/.gxypi.env"
     if [ -f "$CONFIG_FILE" ]; then
         source "$CONFIG_FILE"
     fi
@@ -201,7 +201,7 @@ fi
 if [ -z "$GALAXY_URL" ] || [ -z "$GALAXY_API_KEY" ]; then
     echo ""
     echo "╔════════════════════════════════════════════╗"
-    echo "║     Galaxy Analyst - First Time Setup      ║"
+    echo "║     gxypi - First Time Setup               ║"
     echo "╚════════════════════════════════════════════╝"
     echo ""
     echo "I need your Galaxy credentials to connect."
@@ -230,12 +230,12 @@ if [ -z "$GALAXY_URL" ] || [ -z "$GALAXY_API_KEY" ]; then
     SAVE_CREDS="${SAVE_CREDS:-Y}"
 
     if [[ "$SAVE_CREDS" =~ ^[Yy] ]]; then
-        cat > "$HOME/.galaxy-analyst.env" << ENVEOF
+        cat > "$HOME/.gxypi.env" << ENVEOF
 export GALAXY_URL="$GALAXY_URL"
 export GALAXY_API_KEY="$GALAXY_API_KEY"
 ENVEOF
-        chmod 600 "$HOME/.galaxy-analyst.env"
-        echo "Credentials saved to ~/.galaxy-analyst.env"
+        chmod 600 "$HOME/.gxypi.env"
+        echo "Credentials saved to ~/.gxypi.env"
     fi
 
     echo ""
@@ -245,7 +245,7 @@ export GALAXY_URL
 export GALAXY_API_KEY
 
 echo ""
-echo "Starting Galaxy Analyst..."
+echo "Starting gxypi..."
 echo "Connected to: $GALAXY_URL"
 echo ""
 echo "Tips:"
@@ -263,7 +263,7 @@ success "Launcher created at $LAUNCHER"
 
 # Add to PATH reminder
 if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-    warn "Add ~/.local/bin to your PATH to use 'galaxy-analyst' command"
+    warn "Add ~/.local/bin to your PATH to use 'gxypi' command"
     echo ""
     echo "Add this to your ~/.bashrc or ~/.zshrc:"
     echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
@@ -276,13 +276,13 @@ echo -e "${GREEN}╔════════════════════
 echo -e "${GREEN}║     Installation Complete!                 ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
 echo ""
-echo "To start Galaxy Analyst:"
+echo "To start gxypi:"
 echo ""
-echo "  galaxy-analyst"
+echo "  gxypi"
 echo ""
 echo "Or if ~/.local/bin is not in PATH:"
 echo ""
-echo "  ~/.local/bin/galaxy-analyst"
+echo "  ~/.local/bin/gxypi"
 echo ""
 echo "The first time you run it, you'll be asked for your Galaxy"
 echo "server URL and API key."

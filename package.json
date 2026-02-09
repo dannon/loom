@@ -1,5 +1,5 @@
 {
-  "name": "pi-galaxy-analyst",
+  "name": "gxypi",
   "version": "0.1.0",
   "description": "Pi.dev package for Galaxy bioinformatics analysis with plan-based workflows",
   "keywords": [
@@ -13,7 +13,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/galaxyproject/pi-galaxy-analyst"
+    "url": "https://github.com/galaxyproject/gxypi"
   },
   "pi": {
     "extensions": [

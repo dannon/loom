@@ -1,5 +1,5 @@
 /**
- * Galaxy Analyst Extension for Pi.dev
+ * gxypi - Galaxy co-scientist extension for Pi.dev
  *
  * Provides plan-based analysis orchestration for Galaxy bioinformatics workflows.
  * Manages analysis state, registers custom tools, and injects context.
@@ -43,7 +43,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
             `Loaded notebook: ${plan.title} (${completed}/${plan.steps.length} steps)`,
             "info"
           );
-          ctx.ui.notify("Galaxy Analyst extension loaded", "info");
+          ctx.ui.notify("gxypi loaded", "info");
           return;
         }
       } else if (notebooks.length > 1) {
@@ -75,7 +75,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
       // Session manager may not be available in all contexts
     }
 
-    ctx.ui.notify("Galaxy Analyst extension loaded", "info");
+    ctx.ui.notify("gxypi loaded", "info");
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -245,7 +245,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
       const plan = getCurrentPlan();
 
       const lines: string[] = [];
-      lines.push("🔬 Galaxy Analyst Status");
+      lines.push("🔬 gxypi Status");
       lines.push("");
 
       // Connection status

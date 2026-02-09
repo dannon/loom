@@ -1,10 +1,10 @@
-# Pi-Galaxy-Analyst
+# gxypi
 
 A [Pi.dev](https://pi.dev) package that transforms Pi into a Galaxy-focused co-scientist agent for bioinformatics analysis.
 
 ## What It Does
 
-Pi-Galaxy-Analyst provides a **complete research lifecycle platform** — a structured approach to bioinformatics workflows covering everything from problem definition through publication:
+gxypi provides a **complete research lifecycle platform** — a structured approach to bioinformatics workflows covering everything from problem definition through publication:
 
 ```
 ┌────────────┐   ┌────────────┐   ┌────────────┐   ┌────────────┐   ┌────────────┐
@@ -31,12 +31,12 @@ The agent works WITH you, not FOR you — you make the decisions, it helps execu
 ### One-Line Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/galaxyproject/pi-galaxy-analyst/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/galaxyproject/gxypi/main/install.sh | bash
 ```
 
 Then run:
 ```bash
-galaxy-analyst
+gxypi
 ```
 
 The first time you run it, you'll be prompted for your Galaxy server URL and API key.
@@ -46,7 +46,7 @@ The first time you run it, you'll be prompted for your Galaxy server URL and API
 - **Pi coding agent** — The AI agent framework
 - **pi-mcp-adapter** — Connects Pi to MCP servers
 - **galaxy-mcp** — MCP server for Galaxy API
-- **pi-galaxy-analyst** — This package (skills + extensions)
+- **gxypi** — This package (skills + extensions)
 
 ## Manual Installation
 
@@ -67,9 +67,9 @@ npm install -g @mariozechner/pi-coding-agent
 # 2. Install pi-mcp-adapter
 pi install npm:pi-mcp-adapter
 
-# 3. Clone and install pi-galaxy-analyst
-git clone https://github.com/galaxyproject/pi-galaxy-analyst.git
-pi install git:./pi-galaxy-analyst
+# 3. Clone and install gxypi
+git clone https://github.com/galaxyproject/gxypi.git
+pi install git:./gxypi
 
 # 4. Clone galaxy-mcp
 git clone https://github.com/galaxyproject/galaxy-mcp.git ~/.galaxy-mcp
@@ -229,7 +229,7 @@ The extension registers tools for each phase:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                  pi-galaxy-analyst                       │
+│                        gxypi                             │
 │  ┌──────────────────┐  ┌────────────────────────────┐  │
 │  │    Extensions    │  │          Skills            │  │
 │  │ - state.ts       │  │ - analysis-plan            │  │

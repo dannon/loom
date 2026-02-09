@@ -1,4 +1,4 @@
-# Pi-Galaxy-Analyst: AI-Assisted Bioinformatics with Full Reproducibility
+# gxypi: AI-Assisted Bioinformatics with Full Reproducibility
 
 ## The Problem
 
@@ -11,7 +11,7 @@ Bioinformatics analyses are complex, multi-step workflows where:
 
 ## The Solution
 
-Pi-Galaxy-Analyst is an AI co-scientist that:
+gxypi is an AI co-scientist that:
 
 1. **Structures every analysis** with a formal plan before execution
 2. **Documents every decision** with rationale and researcher approval
@@ -205,7 +205,7 @@ checkpoint:
 
 ### For Reproducibility
 
-| Traditional Approach | With Pi-Galaxy-Analyst |
+| Traditional Approach | With gxypi |
 |---------------------|------------------------|
 | "I think we used HISAT2..." | Decision logged with rationale |
 | "Check the Galaxy history" | Direct links to every dataset |
@@ -241,7 +241,7 @@ checkpoint:
 
 - Galaxy account (usegalaxy.org or local instance)
 - Pi.dev CLI (`pip install pi-cli`)
-- This extension (`pi install pi-galaxy-analyst`)
+- This extension (`pi install gxypi`)
 
 ### Privacy & Security
 
