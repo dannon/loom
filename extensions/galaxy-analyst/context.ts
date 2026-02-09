@@ -17,6 +17,20 @@ export function setupContextInjection(pi: ExtensionAPI): void {
     const plan = getCurrentPlan();
     const state = getState();
 
+    // Build Galaxy connection context
+    const hasCredentials = process.env.GALAXY_URL && process.env.GALAXY_API_KEY;
+    let galaxyContext: string;
+    if (state.galaxyConnected) {
+      galaxyContext = `Galaxy: Connected to ${process.env.GALAXY_URL || 'unknown'}`;
+      if (state.currentHistoryId) {
+        galaxyContext += `\nCurrent history: ${state.currentHistoryId}`;
+      }
+    } else if (hasCredentials) {
+      galaxyContext = `Galaxy: Credentials available but not yet connected. Call galaxy_connect with url="${process.env.GALAXY_URL}" and api_key="${process.env.GALAXY_API_KEY}" before using any Galaxy tools.`;
+    } else {
+      galaxyContext = 'Galaxy: Not connected. Use /connect to set credentials.';
+    }
+
     if (!plan) {
       // No active plan - provide minimal guidance
       return {
@@ -28,8 +42,7 @@ No active analysis plan. To start a new analysis:
 3. Add steps with \`analysis_plan_add_step\`
 4. Activate with \`analysis_plan_activate\` when ready
 
-Galaxy connection: ${state.galaxyConnected ? 'Connected' : 'Not connected'}
-${state.currentHistoryId ? `Current history: ${state.currentHistoryId}` : ''}
+${galaxyContext}
 `
       };
     }
@@ -50,7 +63,7 @@ ${planSummary}
 - Create QC checkpoints with \`analysis_checkpoint\`
 - Use \`analysis_plan_get\` for full plan details
 
-Galaxy: ${state.galaxyConnected ? 'Connected' : 'Not connected'}
+${galaxyContext}
 `
     };
   });

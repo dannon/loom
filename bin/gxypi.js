@@ -36,6 +36,16 @@ if (!mcpConfig.mcpServers?.galaxy) {
   writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
 }
 
+// Propagate persisted Galaxy credentials to process.env so the extension can
+// auto-connect on session start without requiring /connect every time
+const galaxyEnv = mcpConfig.mcpServers?.galaxy?.env;
+if (galaxyEnv?.GALAXY_URL && !process.env.GALAXY_URL) {
+  process.env.GALAXY_URL = galaxyEnv.GALAXY_URL;
+}
+if (galaxyEnv?.GALAXY_API_KEY && !process.env.GALAXY_API_KEY) {
+  process.env.GALAXY_API_KEY = galaxyEnv.GALAXY_API_KEY;
+}
+
 // Build args: inject both extensions, pass through everything else
 const args = ["-e", mcpAdapterPath, "-e", extensionPath, ...process.argv.slice(2)];
 
