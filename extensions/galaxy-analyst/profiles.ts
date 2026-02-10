@@ -1,0 +1,139 @@
+/**
+ * Galaxy server profile management
+ *
+ * Stores named profiles in ~/.pi/agent/galaxy-profiles.json.
+ * Each profile holds a URL + API key. The active profile's credentials
+ * are synced to mcp.json's env block so the Galaxy MCP server sees them.
+ */
+
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+
+export interface GalaxyProfile {
+  url: string;
+  apiKey: string;
+}
+
+export interface GalaxyProfiles {
+  active: string | null;
+  profiles: Record<string, GalaxyProfile>;
+}
+
+function agentDir(): string {
+  return process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+}
+
+export function getProfilesPath(): string {
+  return path.join(agentDir(), "galaxy-profiles.json");
+}
+
+export function loadProfiles(): GalaxyProfiles {
+  const p = getProfilesPath();
+  if (fs.existsSync(p)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(p, "utf-8"));
+      return {
+        active: data.active ?? null,
+        profiles: data.profiles ?? {},
+      };
+    } catch {
+      return { active: null, profiles: {} };
+    }
+  }
+  return { active: null, profiles: {} };
+}
+
+function writeProfiles(profiles: GalaxyProfiles): void {
+  const p = getProfilesPath();
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(profiles, null, 2));
+}
+
+/**
+ * Derive a short profile name from a Galaxy server URL.
+ * https://test.galaxyproject.org/ → "test-galaxyproject"
+ * https://usegalaxy.org/ → "usegalaxy-org"
+ * http://localhost:8080/ → "localhost-8080"
+ */
+export function profileNameFromUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    let host = parsed.hostname;
+    // Include port for non-standard ports
+    if (parsed.port) {
+      host += `-${parsed.port}`;
+    }
+    // Replace dots with hyphens, drop trailing TLD-only segments for cleaner names
+    return host.replace(/\./g, "-").replace(/-+$/, "");
+  } catch {
+    // Fallback: slugify the whole string
+    return url.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+  }
+}
+
+/**
+ * Save a profile (insert or update), mark it active, and sync to mcp.json.
+ */
+export function saveProfile(name: string, url: string, apiKey: string): void {
+  const profiles = loadProfiles();
+  profiles.profiles[name] = { url, apiKey };
+  profiles.active = name;
+  writeProfiles(profiles);
+  syncMcpConfig(url, apiKey);
+}
+
+/**
+ * Switch to an existing profile. Updates active marker, syncs mcp.json,
+ * and sets process.env so the current session picks it up immediately.
+ */
+export function switchProfile(name: string): boolean {
+  const profiles = loadProfiles();
+  const profile = profiles.profiles[name];
+  if (!profile) return false;
+
+  profiles.active = name;
+  writeProfiles(profiles);
+
+  process.env.GALAXY_URL = profile.url;
+  process.env.GALAXY_API_KEY = profile.apiKey;
+  syncMcpConfig(profile.url, profile.apiKey);
+  return true;
+}
+
+/**
+ * Remove a profile. If it was active, clears the active marker.
+ */
+export function deleteProfile(name: string): boolean {
+  const profiles = loadProfiles();
+  if (!profiles.profiles[name]) return false;
+
+  delete profiles.profiles[name];
+  if (profiles.active === name) {
+    const remaining = Object.keys(profiles.profiles);
+    profiles.active = remaining.length > 0 ? remaining[0] : null;
+  }
+  writeProfiles(profiles);
+  return true;
+}
+
+/**
+ * Keep mcp.json's galaxy env block in sync with the given credentials.
+ */
+export function syncMcpConfig(url: string, apiKey: string): void {
+  try {
+    const mcpPath = path.join(agentDir(), "mcp.json");
+    if (!fs.existsSync(mcpPath)) return;
+
+    const config = JSON.parse(fs.readFileSync(mcpPath, "utf-8"));
+    if (config.mcpServers?.galaxy) {
+      config.mcpServers.galaxy.env = {
+        GALAXY_URL: url,
+        GALAXY_API_KEY: apiKey,
+      };
+      fs.writeFileSync(mcpPath, JSON.stringify(config, null, 2));
+    }
+  } catch {
+    // Non-fatal
+  }
+}

@@ -22,6 +22,12 @@ import {
   saveNotebook,
 } from "./state";
 import type { AnalysisPlan } from "./types";
+import {
+  loadProfiles,
+  saveProfile,
+  switchProfile,
+  profileNameFromUrl,
+} from "./profiles";
 
 export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
 
@@ -192,68 +198,123 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Register /connect command for Galaxy connection with interactive prompt
+  // Register /connect command for Galaxy connection with profile support
   // ─────────────────────────────────────────────────────────────────────────────
   pi.registerCommand("connect", {
-    description: "Connect to Galaxy server (prompts for credentials if not set)",
-    handler: async (_args, ctx) => {
-      // Check environment variables first
-      let galaxyUrl = process.env.GALAXY_URL;
-      let apiKey = process.env.GALAXY_API_KEY;
+    description: "Connect to Galaxy server. Use /connect to pick a profile or add a new one, /connect <name> to switch.",
+    handler: async (args, ctx) => {
+      const { profiles, active } = loadProfiles();
+      const profileNames = Object.keys(profiles);
 
-      // If not set, prompt interactively
-      if (!galaxyUrl) {
-        galaxyUrl = await ctx.ui.input(
-          "Galaxy Server URL",
-          "https://usegalaxy.org"
-        );
-        if (!galaxyUrl) {
+      // /connect <name> — switch to a named profile
+      const requestedName = args?.trim();
+      if (requestedName) {
+        if (switchProfile(requestedName)) {
+          ctx.ui.notify(`Switched to ${requestedName} (${profiles[requestedName].url})`, "info");
+          pi.sendUserMessage(
+            `Please connect to Galaxy at ${profiles[requestedName].url} using the API key from environment variables.`
+          );
+        } else {
+          ctx.ui.notify(`Unknown profile "${requestedName}". Use /profiles to see available profiles.`, "warning");
+        }
+        return;
+      }
+
+      // /connect (no args) — depends on how many profiles exist
+      if (profileNames.length > 1) {
+        // Multiple profiles: let user pick or add a new server
+        const choices = profileNames.map(name => {
+          const marker = name === active ? "* " : "  ";
+          return `${marker}${name} (${profiles[name].url})`;
+        });
+        choices.push("  Add new server...");
+
+        const selection = await ctx.ui.select("Select Galaxy server", choices);
+        if (selection === undefined || selection === null) {
           ctx.ui.notify("Connection cancelled", "warning");
           return;
         }
-      }
 
-      if (!apiKey) {
-        ctx.ui.notify(
-          "To get your API key: Log into Galaxy → User → Preferences → Manage API Key",
-          "info"
-        );
-        apiKey = await ctx.ui.input("Galaxy API Key");
-        if (!apiKey) {
-          ctx.ui.notify("Connection cancelled - API key required", "warning");
+        const selectedIndex = typeof selection === 'number' ? selection : choices.indexOf(selection);
+
+        if (selectedIndex >= 0 && selectedIndex < profileNames.length) {
+          // Picked an existing profile
+          const name = profileNames[selectedIndex];
+          switchProfile(name);
+          ctx.ui.notify(`Switched to ${name} (${profiles[name].url})`, "info");
+          pi.sendUserMessage(
+            `Please connect to Galaxy at ${profiles[name].url} using the API key from environment variables.`
+          );
           return;
         }
+        // Fall through to "add new server" flow below
+      } else if (profileNames.length === 1 && active && process.env.GALAXY_URL && process.env.GALAXY_API_KEY) {
+        // One profile, already active — just connect
+        ctx.ui.notify(`Connecting to ${profiles[active].url}...`, "info");
+        pi.sendUserMessage(
+          `Please connect to Galaxy at ${profiles[active].url} using the API key from environment variables.`
+        );
+        return;
       }
 
-      // Set for this session
+      // No profiles, or user chose "Add new server" — prompt for credentials
+      const galaxyUrl = await ctx.ui.input(
+        "Galaxy Server URL",
+        "https://usegalaxy.org"
+      );
+      if (!galaxyUrl) {
+        ctx.ui.notify("Connection cancelled", "warning");
+        return;
+      }
+
+      ctx.ui.notify(
+        "To get your API key: Log into Galaxy → User → Preferences → Manage API Key",
+        "info"
+      );
+      const apiKey = await ctx.ui.input("Galaxy API Key");
+      if (!apiKey) {
+        ctx.ui.notify("Connection cancelled - API key required", "warning");
+        return;
+      }
+
+      // Save as a new profile
+      const name = profileNameFromUrl(galaxyUrl);
+      saveProfile(name, galaxyUrl, apiKey);
+
       process.env.GALAXY_URL = galaxyUrl;
       process.env.GALAXY_API_KEY = apiKey;
 
-      // Persist credentials to MCP config so Galaxy MCP picks them up on restart
-      try {
-        const agentDir = process.env.PI_CODING_AGENT_DIR
-          || path.join(os.homedir(), '.pi', 'agent');
-        const mcpConfigPath = path.join(agentDir, 'mcp.json');
-        if (fs.existsSync(mcpConfigPath)) {
-          const config = JSON.parse(fs.readFileSync(mcpConfigPath, 'utf-8'));
-          if (config.mcpServers?.galaxy) {
-            config.mcpServers.galaxy.env = {
-              GALAXY_URL: galaxyUrl,
-              GALAXY_API_KEY: apiKey,
-            };
-            fs.writeFileSync(mcpConfigPath, JSON.stringify(config, null, 2));
-          }
-        }
-      } catch {
-        // Non-fatal — credentials are still in process.env for this session
-      }
+      ctx.ui.notify(`Saved profile "${name}" and connecting to ${galaxyUrl}...`, "info");
 
-      ctx.ui.notify(`Connecting to ${galaxyUrl}...`, "info");
-
-      // Send message to trigger the agent to call mcp__galaxy__connect
       pi.sendUserMessage(
         `Please connect to Galaxy at ${galaxyUrl} using the API key from environment variables.`
       );
+    },
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Register /profiles command to list saved Galaxy server profiles
+  // ─────────────────────────────────────────────────────────────────────────────
+  pi.registerCommand("profiles", {
+    description: "List saved Galaxy server profiles",
+    handler: async (_args, ctx) => {
+      const { profiles, active } = loadProfiles();
+      const names = Object.keys(profiles);
+
+      if (names.length === 0) {
+        ctx.ui.notify("No saved profiles. Use /connect to add one.", "info");
+        return;
+      }
+
+      const lines: string[] = ["Galaxy Server Profiles", ""];
+      for (const name of names) {
+        const marker = name === active ? "*" : " ";
+        lines.push(`  ${marker} ${name} (${profiles[name].url})`);
+      }
+      lines.push("");
+      lines.push("Use /connect <name> to switch, or /connect to add a new server.");
+
+      ctx.ui.setWidget("profiles-view", lines);
     },
   });
 
