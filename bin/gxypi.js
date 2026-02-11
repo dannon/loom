@@ -8,6 +8,9 @@ import { homedir } from "os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// gxypi is a standalone product — suppress Pi's own update notifications
+process.env.PI_SKIP_VERSION_CHECK = "1";
+
 // Resolve extension paths relative to this script
 const extensionPath = resolve(__dirname, "../extensions/galaxy-analyst");
 
