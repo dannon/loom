@@ -29,15 +29,20 @@ if (existsSync(mcpConfigPath)) {
   mcpConfig = JSON.parse(readFileSync(mcpConfigPath, "utf-8"));
 }
 
-if (!mcpConfig.mcpServers?.galaxy) {
-  mcpConfig.mcpServers = mcpConfig.mcpServers || {};
+mcpConfig.mcpServers = mcpConfig.mcpServers || {};
+if (!mcpConfig.mcpServers.galaxy) {
   mcpConfig.mcpServers.galaxy = {
     command: "uvx",
     args: ["galaxy-mcp"],
   };
-  mkdirSync(dirname(mcpConfigPath), { recursive: true });
-  writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
 }
+// Expose Galaxy tools as direct (first-class) tools so the LLM can call them
+// by name instead of going through the mcp() proxy gateway
+if (!mcpConfig.mcpServers.galaxy.directTools) {
+  mcpConfig.mcpServers.galaxy.directTools = true;
+}
+mkdirSync(dirname(mcpConfigPath), { recursive: true });
+writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
 
 // Load Galaxy credentials from profiles (source of truth) or migrate from mcp.json
 const profilesPath = join(agentDir, "galaxy-profiles.json");
