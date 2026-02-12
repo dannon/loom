@@ -1822,4 +1822,118 @@ Returns suggested figures with Galaxy tools that can generate them.`,
       };
     },
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // GTN TUTORIAL FETCH
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Tool: Fetch GTN tutorial content
+  // ─────────────────────────────────────────────────────────────────────────────
+  pi.registerTool({
+    name: "gtn_fetch",
+    label: "Fetch GTN Tutorial",
+    description: `Fetch a Galaxy Training Network (GTN) tutorial page and return its content as
+readable text. Only URLs on training.galaxyproject.org are allowed. Use this to read tutorial
+instructions, tool names, parameters, and workflow steps so you can follow along and reproduce
+analyses in Galaxy.`,
+    parameters: Type.Object({
+      url: Type.String({
+        description: "URL of the GTN tutorial page (must be on training.galaxyproject.org)"
+      }),
+    }),
+    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+      const GTN_HOST = "training.galaxyproject.org";
+
+      let parsed: URL;
+      try {
+        parsed = new URL(params.url);
+      } catch {
+        return {
+          content: [{ type: "text", text: `Error: Invalid URL "${params.url}"` }],
+          details: { error: true },
+        };
+      }
+
+      if (parsed.hostname !== GTN_HOST) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Only URLs on ${GTN_HOST} are allowed. Got: ${parsed.hostname}`,
+          }],
+          details: { error: true },
+        };
+      }
+
+      try {
+        const response = await fetch(params.url, { signal });
+
+        if (!response.ok) {
+          return {
+            content: [{
+              type: "text",
+              text: `Error: Failed to fetch tutorial (HTTP ${response.status})`,
+            }],
+            details: { error: true },
+          };
+        }
+
+        const html = await response.text();
+
+        // Strip blocks that contribute nothing but noise
+        const stripped = html
+          .replace(/<script[\s\S]*?<\/script>/gi, '')
+          .replace(/<style[\s\S]*?<\/style>/gi, '')
+          .replace(/<nav[\s\S]*?<\/nav>/gi, '')
+          .replace(/<header[\s\S]*?<\/header>/gi, '')
+          .replace(/<footer[\s\S]*?<\/footer>/gi, '');
+
+        // Try to extract the main tutorial content area
+        let body = stripped;
+        const mainMatch = stripped.match(/<main[\s\S]*?>([\s\S]*?)<\/main>/i)
+          || stripped.match(/<article[\s\S]*?>([\s\S]*?)<\/article>/i)
+          || stripped.match(/<div[^>]+class="[^"]*tutorial-content[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/i);
+        if (mainMatch) {
+          body = mainMatch[1];
+        }
+
+        // Remove remaining HTML tags
+        let text = body.replace(/<[^>]+>/g, ' ');
+
+        // Decode common HTML entities
+        text = text
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/&nbsp;/g, ' ')
+          .replace(/&#(\d+);/g, (_m, code) => String.fromCharCode(Number(code)));
+
+        // Normalize whitespace
+        text = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+
+        return {
+          content: [{
+            type: "text",
+            text,
+          }],
+          details: { url: params.url, length: text.length },
+        };
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Error fetching tutorial: ${msg}` }],
+          details: { error: true },
+        };
+      }
+    },
+    renderResult: (result) => {
+      const d = result.details as { url?: string; length?: number; error?: boolean } | undefined;
+      if (d?.error) {
+        return new Text("❌ GTN fetch failed");
+      }
+      return new Text(`📖 Fetched GTN tutorial (${d?.length || 0} chars)`);
+    },
+  });
 }
