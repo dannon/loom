@@ -35,6 +35,10 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // Session initialization
   // ─────────────────────────────────────────────────────────────────────────────
   pi.on("session_start", async (_event, ctx) => {
+    // Collapse tool output by default so the user sees compact summaries
+    // instead of raw MCP calls and full JSON responses
+    ctx.ui.setToolsExpanded(false);
+
     // Reset state on new session
     resetState();
 
