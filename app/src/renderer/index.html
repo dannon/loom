@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>gxypi</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="chat-panel">
+        <div id="messages"></div>
+        <div id="input-bar">
+          <textarea
+            id="chat-input"
+            placeholder="Ask gxypi anything..."
+            rows="1"
+          ></textarea>
+          <button id="send-btn" title="Send">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 2L11 13" /><path d="M22 2L15 22L11 13L2 9L22 2Z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div id="divider"></div>
+      <div id="sidebar">
+        <div id="sidebar-header">
+          <span class="sidebar-title">Status</span>
+          <span id="agent-status" class="status-dot stopped" title="Agent stopped"></span>
+        </div>
+        <div id="sidebar-content"></div>
+      </div>
+    </div>
+
+    <!-- Modal overlay for extension UI dialogs -->
+    <div id="modal-overlay" class="hidden">
+      <div id="modal-container"></div>
+    </div>
+
+    <!-- Toast container -->
+    <div id="toast-container"></div>
+
+    <script type="module" src="app.ts"></script>
+  </body>
+</html>
