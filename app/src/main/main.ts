@@ -1,14 +1,43 @@
 import { app, BrowserWindow, Menu, dialog } from "electron";
-import { mkdirSync, appendFileSync } from "node:fs";
+import { mkdirSync, appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { registerIpcHandlers } from "./ipc-handlers.js";
 import { AgentManager } from "./agent.js";
 
-const LOG_FILE = path.join(os.homedir(), ".gxypi", "debug.log");
+const GXYPI_DIR = path.join(os.homedir(), ".gxypi");
+const LOG_FILE = path.join(GXYPI_DIR, "debug.log");
+const WINDOW_STATE_FILE = path.join(GXYPI_DIR, "window-state.json");
+
+const DEBUG = process.argv.includes("--debug") || !!process.env.GXYPI_DEBUG;
+
 function debugLog(...args: unknown[]): void {
+  if (!DEBUG) return;
   const line = `[${new Date().toISOString()}] ${args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}\n`;
   try { appendFileSync(LOG_FILE, line); } catch {}
+}
+
+interface WindowState {
+  x?: number;
+  y?: number;
+  width: number;
+  height: number;
+}
+
+function loadWindowState(): WindowState {
+  try {
+    const data = readFileSync(WINDOW_STATE_FILE, "utf-8");
+    const state = JSON.parse(data) as WindowState;
+    if (state.width > 0 && state.height > 0) return state;
+  } catch {}
+  return { width: 1200, height: 800 };
+}
+
+function saveWindowState(win: BrowserWindow): void {
+  try {
+    const bounds = win.getBounds();
+    writeFileSync(WINDOW_STATE_FILE, JSON.stringify(bounds));
+  } catch {}
 }
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
@@ -31,10 +60,10 @@ function getDefaultCwd(): string {
 
 function createWindow(cwd: string): void {
   log("creating window, cwd:", cwd);
+  const saved = loadWindowState();
 
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    ...saved,
     minWidth: 700,
     minHeight: 500,
     title: "gxypi",
@@ -67,6 +96,10 @@ function createWindow(cwd: string): void {
     debugLog("renderer did-finish-load, starting agent");
     log("renderer loaded, starting agent");
     agentManager!.start();
+  });
+
+  mainWindow.on("close", () => {
+    if (mainWindow) saveWindowState(mainWindow);
   });
 
   mainWindow.on("closed", () => {
@@ -155,7 +188,7 @@ function buildMenu(): void {
 }
 
 app.whenReady().then(() => {
-  debugLog("app ready, LOG_FILE:", LOG_FILE);
+  debugLog("app ready");
   log("app ready");
   buildMenu();
 

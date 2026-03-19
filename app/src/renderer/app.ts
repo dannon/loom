@@ -13,7 +13,7 @@ const gxypi = window.gxypi;
 
 console.log("[gxypi] renderer loaded");
 if (!gxypi) {
-  console.error("[gxypi] FATAL: window.gxypi is undefined — preload script may have failed");
+  console.error("[gxypi] FATAL: window.gxypi is undefined -- preload script may have failed");
 }
 
 const chatPanel = new ChatPanel(
@@ -103,13 +103,42 @@ gxypi.onUiRequest((request) => {
 
 const statusDot = document.getElementById("agent-status")!;
 
+const errorBanner = document.createElement("div");
+errorBanner.className = "error-banner hidden";
+document.getElementById("chat-panel")!.prepend(errorBanner);
+
+function showErrorBanner(message: string): void {
+  errorBanner.innerHTML = "";
+
+  const text = document.createElement("span");
+  text.textContent = message;
+
+  const restartBtn = document.createElement("button");
+  restartBtn.className = "error-restart-btn";
+  restartBtn.textContent = "Restart Agent";
+  restartBtn.addEventListener("click", () => {
+    hideErrorBanner();
+    gxypi.restartAgent();
+  });
+
+  errorBanner.appendChild(text);
+  errorBanner.appendChild(restartBtn);
+  errorBanner.classList.remove("hidden");
+}
+
+function hideErrorBanner(): void {
+  errorBanner.classList.add("hidden");
+}
+
 gxypi.onAgentStatus((status, msg) => {
   console.log("[gxypi] status:", status, msg || "");
   statusDot.className = `status-dot ${status}`;
   statusDot.title = msg || status;
 
   if (status === "error") {
-    showToast(msg || "Agent error", "error");
+    showErrorBanner(msg || "Agent crashed unexpectedly");
+  } else if (status === "running") {
+    hideErrorBanner();
   }
 });
 
