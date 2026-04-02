@@ -4,6 +4,8 @@ An AI co-scientist for [Galaxy](https://galaxyproject.org) bioinformatics, built
 
 gxypi turns Pi into a structured analysis partner — it creates plans, runs Galaxy tools, documents every decision, and saves everything to a persistent notebook you can share, resume, and reproduce.
 
+The primary product experience is terminal-first. The Electron app in [`app/`](/Users/dannon/work/pi-galaxy-analyst/app) is an optional shell around the same runtime, not the only supported way to use gxypi.
+
 ## Current Status
 
 gxypi is implemented and locally tested, but live Galaxy validation is still in progress.
@@ -36,6 +38,30 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 ## Usage
+
+### CLI-First
+
+The main supported ways to run gxypi without Electron are:
+
+```bash
+gxypi
+```
+
+```bash
+npx gxypi
+```
+
+```bash
+node bin/gxypi.js --provider anthropic --model claude-sonnet-4-5-20250929
+```
+
+You can also load just the extension into Pi directly:
+
+```bash
+pi --no-extensions -e ./extensions/galaxy-analyst
+```
+
+If you are validating or debugging the terminal path, prefer these commands before using the desktop app.
 
 ```
 $ gxypi
@@ -181,6 +207,27 @@ Pi supports any OpenAI-compatible API. To use a local provider like [LiteLLM](ht
 You'll also need a `~/.pi/agent/models.json` to tell Pi the model's capabilities (context window, token limits, etc.) — see the Pi documentation for the format. The config file handles provider selection and API keys; `models.json` handles the model metadata that Pi needs for request sizing.
 
 Alternatively, pass flags directly: `gxypi --provider litellm --model your-model-name`.
+
+## Terminal-Only Validation
+
+For non-Electron validation, use the CLI/runtime path directly:
+
+```bash
+npm run typecheck
+npm test
+npm run validate:provenance
+pi --no-extensions -e ./extensions/galaxy-analyst
+```
+
+Then validate the wrapper itself in a plain working directory:
+
+```bash
+mkdir -p /tmp/gxypi-cli-validation
+cd /tmp/gxypi-cli-validation
+node /Users/dannon/work/pi-galaxy-analyst/bin/gxypi.js --provider litellm --model gpt-oss-120b
+```
+
+For a full terminal-only runbook, see [docs/terminal-validation.md](/Users/dannon/work/pi-galaxy-analyst/docs/terminal-validation.md).
 
 ## Tool Reference
 
