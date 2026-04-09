@@ -405,52 +405,80 @@ body::before {
 
 #sidebar-content {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Sidebar tab bar */
+.sidebar-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.sidebar-tab {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, background 0.15s;
+}
+
+.sidebar-tab:hover {
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-tab.active {
+  color: var(--accent);
+  background: rgba(255, 215, 0, 0.1);
+}
+
+/* Sidebar status bar (always visible above content) */
+.sidebar-status-bar {
+  padding: 0 12px;
+  flex-shrink: 0;
+}
+
+.sidebar-status-bar:empty {
+  display: none;
+}
+
+.sidebar-status-item {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-status-item:last-child {
+  border-bottom: none;
+}
+
+/* Sidebar tab content area */
+.sidebar-tab-content {
+  flex: 1;
   overflow-y: auto;
   padding: 12px 16px;
 }
 
-#sidebar-content::-webkit-scrollbar {
+.sidebar-tab-content::-webkit-scrollbar {
   width: 4px;
 }
 
-#sidebar-content::-webkit-scrollbar-thumb {
+.sidebar-tab-content::-webkit-scrollbar-thumb {
   background: var(--border-strong);
   border-radius: 2px;
-}
-
-/* Sidebar widget sections */
-.widget-section {
-  margin-bottom: 16px;
-}
-
-.widget-section-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 0;
-  cursor: pointer;
-  user-select: none;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  transition: color 0.15s;
-}
-
-.widget-section-header:hover {
-  color: var(--accent);
-}
-
-.widget-section-header .chevron {
-  transition: transform 0.15s;
-  font-size: 10px;
-}
-
-.widget-section.collapsed .chevron {
-  transform: rotate(-90deg);
-}
-
-.widget-section.collapsed .widget-lines {
-  display: none;
 }
 
 .widget-lines {
