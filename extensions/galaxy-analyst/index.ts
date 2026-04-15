@@ -48,57 +48,66 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
     // Reset state on new session
     resetState();
 
-    // First, check for notebooks in the current working directory
-    const cwd = process.cwd();
-    try {
-      const notebooks = await findNotebooks(cwd);
+    // LOOM_FRESH_SESSION=1 → shell (or user) wants a clean slate. Skip the
+    // notebook auto-load and the session-entry restore. Orbit's /new slash
+    // command sets this; any future shell can do the same.
+    const freshSession = process.env.LOOM_FRESH_SESSION === "1";
 
-      if (notebooks.length === 1) {
-        // Auto-load single notebook
-        const plan = await loadNotebook(notebooks[0].path);
-        if (plan) {
-          const completed = plan.steps.filter(s => s.status === 'completed').length;
+    if (!freshSession) {
+      // First, check for notebooks in the current working directory
+      const cwd = process.cwd();
+      try {
+        const notebooks = await findNotebooks(cwd);
+
+        if (notebooks.length === 1) {
+          // Auto-load single notebook
+          const plan = await loadNotebook(notebooks[0].path);
+          if (plan) {
+            const completed = plan.steps.filter(s => s.status === 'completed').length;
+            ctx.ui.notify(
+              `Loaded notebook: ${plan.title} (${completed}/${plan.steps.length} steps)`,
+              "info"
+            );
+          }
+        } else if (notebooks.length > 1) {
+          // Multiple notebooks found - notify user
           ctx.ui.notify(
-            `Loaded notebook: ${plan.title} (${completed}/${plan.steps.length} steps)`,
+            `Found ${notebooks.length} notebooks. Use analysis_notebook_open to select one.`,
             "info"
           );
         }
-      } else if (notebooks.length > 1) {
-        // Multiple notebooks found - notify user
-        ctx.ui.notify(
-          `Found ${notebooks.length} notebooks. Use analysis_notebook_open to select one.`,
-          "info"
+      } catch {
+        // Notebook loading failed, fall back to session entries
+      }
+
+      // Fall back to restoring from session entries
+      try {
+        const entries = ctx.sessionManager?.getEntries?.() || [];
+        const planEntries = entries.filter(
+          (e) => e.type === "custom" && (e as { customType?: string }).customType === "galaxy_analyst_plan"
         );
-      }
-    } catch {
-      // Notebook loading failed, fall back to session entries
-    }
 
-    // Fall back to restoring from session entries
-    try {
-      const entries = ctx.sessionManager?.getEntries?.() || [];
-      const planEntries = entries.filter(
-        (e) => e.type === "custom" && (e as { customType?: string }).customType === "galaxy_analyst_plan"
-      );
-
-      if (planEntries.length > 0) {
-        const latestEntry = planEntries[planEntries.length - 1] as { type: "custom"; data?: unknown };
-        if (latestEntry.data) {
-          restorePlan(latestEntry.data as AnalysisPlan);
-          ctx.ui.notify(`Restored plan: ${(latestEntry.data as AnalysisPlan).title}`, "info");
+        if (planEntries.length > 0) {
+          const latestEntry = planEntries[planEntries.length - 1] as { type: "custom"; data?: unknown };
+          if (latestEntry.data) {
+            restorePlan(latestEntry.data as AnalysisPlan);
+            ctx.ui.notify(`Restored plan: ${(latestEntry.data as AnalysisPlan).title}`, "info");
+          }
         }
+      } catch {
+        // Session manager may not be available in all contexts
       }
-    } catch {
-      // Session manager may not be available in all contexts
     }
 
     // Populate sidebar tabs immediately
     await refreshSidebar(ctx);
 
-    // Skip the initial LLM greeting on --continue restarts (model switch,
-    // preferences save, mode toggle): chat history is already restored and
-    // the user already saw the previous greeting; a new one would be redundant.
-    if (process.argv.includes("--continue")) {
+    // Skip the initial LLM greeting in two cases:
+    // 1. Fresh session (LOOM_FRESH_SESSION=1) -- user wants to type immediately.
+    // 2. --continue restart (model switch, preferences save, mode toggle) --
+    //    chat history is already restored and the user already saw the
+    //    previous greeting; a new one would be redundant.
+    if (freshSession || process.argv.includes("--continue")) {
       return;
     }
 
