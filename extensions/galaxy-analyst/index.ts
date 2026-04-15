@@ -8,6 +8,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { registerPlanTools } from "./tools";
 import { setupContextInjection } from "./context";
+import { setupUIBridge } from "./ui-bridge";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -30,6 +31,11 @@ import {
 } from "./profiles";
 
 export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // UI bridge: structured plan events for shell consumers
+  // ─────────────────────────────────────────────────────────────────────────────
+  setupUIBridge(pi);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Session initialization

@@ -70,6 +70,25 @@ let state: AnalystState = {
   notebookLoaded: false,
 };
 
+// Plan change listeners for the UI bridge
+type PlanChangeListener = (plan: AnalysisPlan | null) => void;
+const planChangeListeners: PlanChangeListener[] = [];
+
+/** Register a callback that fires on every plan mutation. Returns unsubscribe function. */
+export function onPlanChange(listener: PlanChangeListener): () => void {
+  planChangeListeners.push(listener);
+  return () => {
+    const idx = planChangeListeners.indexOf(listener);
+    if (idx >= 0) planChangeListeners.splice(idx, 1);
+  };
+}
+
+function notifyPlanChange(): void {
+  for (const listener of planChangeListeners) {
+    listener(state.currentPlan);
+  }
+}
+
 export function getState(): AnalystState {
   return state;
 }
@@ -93,6 +112,7 @@ export function restorePlan(plan: AnalysisPlan): void {
   if (plan.galaxy.historyId) {
     state.currentHistoryId = plan.galaxy.historyId;
   }
+  notifyPlanChange();
 }
 
 /**
@@ -133,6 +153,7 @@ export function createPlan(params: {
 
   state.currentPlan = plan;
   state.recentPlanIds = [plan.id, ...state.recentPlanIds.slice(0, 9)];
+  notifyPlanChange();
 
   return plan;
 }
@@ -153,6 +174,7 @@ export function setPlanStatus(status: AnalysisPlan['status']): void {
   }
   state.currentPlan.status = status;
   state.currentPlan.updated = new Date().toISOString();
+  notifyPlanChange();
 }
 
 /**
@@ -198,6 +220,7 @@ export function addStep(params: {
 
   state.currentPlan.steps.push(step);
   state.currentPlan.updated = new Date().toISOString();
+  notifyPlanChange();
 
   return step;
 }
@@ -246,6 +269,7 @@ export function addWorkflowStep(params: {
 
   state.currentPlan.steps.push(step);
   state.currentPlan.updated = new Date().toISOString();
+  notifyPlanChange();
 
   return step;
 }
@@ -365,6 +389,7 @@ export function updateStepStatus(
     step.result = result;
   }
   state.currentPlan.updated = new Date().toISOString();
+  notifyPlanChange();
 
   return step;
 }
@@ -472,6 +497,7 @@ export function setPhase(phase: LifecyclePhase): void {
   }
   state.currentPlan.phase = phase;
   state.currentPlan.updated = new Date().toISOString();
+  notifyPlanChange();
 }
 
 /**
