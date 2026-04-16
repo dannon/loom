@@ -400,6 +400,12 @@ export function generateNotebook(plan: AnalysisPlan): string {
     lines.push("## Publication Materials");
     lines.push("");
 
+    // Authoritative structured block for the parser.
+    lines.push("```yaml");
+    lines.push(`publication_json: '${escapeJsonInYaml(plan.publication)}'`);
+    lines.push("```");
+    lines.push("");
+
     const pub = plan.publication;
     lines.push(`**Status**: ${pub.status.replace('_', ' ')}`);
     if (pub.targetJournal) {

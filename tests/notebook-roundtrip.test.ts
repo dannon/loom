@@ -636,6 +636,95 @@ describe("notebook with lifecycle phases", () => {
     expect(markdown).toContain("Volcano Plot");
   });
 
+  it("round-trips publication materials through parse", () => {
+    const plan = createPlan({
+      title: "Publication RT",
+      researchQuestion: "Q",
+      dataDescription: "D",
+      expectedOutcomes: [],
+      constraints: [],
+    });
+
+    initPublication("Nature Methods");
+    addFigure({
+      name: "Volcano Plot",
+      type: "volcano",
+      dataSource: "step-3",
+      status: "generated",
+      galaxyDatasetId: "gx-vol-1",
+      description: "Differentially expressed genes",
+      suggestedTool: "ggplot2",
+    });
+    addFigure({
+      name: "Heatmap",
+      type: "heatmap",
+      dataSource: "step-4",
+      status: "planned",
+    });
+
+    const publication = plan.publication!;
+    publication.methodsDraft = {
+      text: "Reads were aligned with HISAT2.",
+      toolVersions: [
+        {
+          toolId: "toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2/2.2.1",
+          toolName: "HISAT2",
+          version: "2.2.1",
+          stepId: "2",
+          parameters: { threads: 4 },
+        },
+      ],
+      generatedAt: "2026-03-01T00:00:00Z",
+      lastUpdated: "2026-03-01T00:00:00Z",
+    };
+    publication.supplementaryData.push({
+      id: "sup-1",
+      name: "DE gene list",
+      type: "table",
+      description: "Full DE results",
+      exportFormat: "tsv",
+    });
+    publication.dataSharing = {
+      repository: "zenodo",
+      accession: "10.5281/zenodo.example",
+      submissionDate: "2026-03-05",
+      status: "submitted",
+      preparedFiles: ["de-table.tsv", "methods.pdf"],
+    };
+    publication.status = "ready_for_review";
+
+    const markdown = generateNotebook(plan);
+    const parsed = parseNotebook(markdown);
+    const restored = notebookToPlan(parsed!);
+
+    expect(restored.publication).toBeTruthy();
+    expect(restored.publication!.status).toBe("ready_for_review");
+    expect(restored.publication!.targetJournal).toBe("Nature Methods");
+    expect(restored.publication!.figures).toHaveLength(2);
+    expect(restored.publication!.figures[0]).toMatchObject({
+      name: "Volcano Plot",
+      type: "volcano",
+      galaxyDatasetId: "gx-vol-1",
+      suggestedTool: "ggplot2",
+    });
+    expect(restored.publication!.methodsDraft?.text).toBe(
+      "Reads were aligned with HISAT2."
+    );
+    expect(restored.publication!.methodsDraft?.toolVersions[0].version).toBe(
+      "2.2.1"
+    );
+    expect(restored.publication!.methodsDraft?.toolVersions[0].parameters).toEqual({
+      threads: 4,
+    });
+    expect(restored.publication!.supplementaryData).toHaveLength(1);
+    expect(restored.publication!.supplementaryData[0].exportFormat).toBe("tsv");
+    expect(restored.publication!.dataSharing?.repository).toBe("zenodo");
+    expect(restored.publication!.dataSharing?.preparedFiles).toEqual([
+      "de-table.tsv",
+      "methods.pdf",
+    ]);
+  });
+
   it("round-trips plan with BRC context", () => {
     const plan = createPlan({
       title: "BRC Context Test",

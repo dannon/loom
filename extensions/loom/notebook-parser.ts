@@ -47,6 +47,7 @@ export interface ParsedNotebook {
   interpretation?: InterpretationFindings;
   dataProvenance?: DataProvenance;
   researchQuestionDetails?: ResearchQuestion;
+  publication?: PublicationMaterials;
 }
 
 export interface NotebookFrontmatter {
@@ -504,6 +505,25 @@ export function parseInterpretation(content: string): InterpretationFindings | u
 }
 
 /**
+ * Parse the authoritative publication_json block from the Publication Materials section.
+ * Covers methods draft, figures, supplementary data, and data sharing info.
+ */
+export function parsePublicationMaterials(content: string): PublicationMaterials | undefined {
+  const section = getSection(content, "Publication Materials");
+  if (!section) return undefined;
+
+  const match = section.match(/publication_json:\s*'([\s\S]*?)'\s*\n/);
+  if (!match) return undefined;
+
+  try {
+    const json = match[1].replace(/''/g, "'");
+    return JSON.parse(json) as PublicationMaterials;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Parse the authoritative research_question_json block from the Research Context
  * section. Returns hypothesis, PICO, and literature references that the markdown
  * rendering shows but does not preserve in parse-friendly form.
@@ -616,6 +636,7 @@ export function parseNotebook(content: string): ParsedNotebook | null {
     interpretation: parseInterpretation(content),
     dataProvenance: parseDataProvenance(content),
     researchQuestionDetails: parseResearchQuestionDetails(content),
+    publication: parsePublicationMaterials(content),
   };
 }
 
@@ -752,6 +773,10 @@ export function notebookToPlan(notebook: ParsedNotebook): AnalysisPlan {
 
   if (notebook.researchQuestionDetails) {
     plan.researchQuestion = notebook.researchQuestionDetails;
+  }
+
+  if (notebook.publication) {
+    plan.publication = notebook.publication;
   }
 
   return plan;
