@@ -3,7 +3,7 @@
  *
  * Brain-side runtime that plan-orchestrates Galaxy bioinformatics analyses.
  * Manages analysis state, registers custom tools, and injects context.
- * Consumed by shells (the gxypi CLI, the Orbit Electron app, future web UIs).
+ * Consumed by shells (the Loom CLI, the Orbit Electron app, future web UIs).
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";

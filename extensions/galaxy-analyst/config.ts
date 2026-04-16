@@ -2,7 +2,7 @@
  * Consolidated config file for Loom (~/.loom/config.json).
  *
  * This is the brain-level configuration shared by every consumer -- the
- * gxypi CLI, Orbit, and any future shell all read and write the same
+ * Loom CLI, Orbit, and any future shell all read and write the same
  * file. Shell-specific state (window layout, theme, etc.) lives in each
  * shell's own directory, not here.
  *

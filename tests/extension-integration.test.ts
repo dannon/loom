@@ -1,5 +1,5 @@
 /**
- * Integration tests for the gxypi extension.
+ * Integration tests for the Loom extension.
  *
  * Creates a minimal mock ExtensionAPI that captures all registrations,
  * then loads the extension and verifies everything registered correctly.
@@ -285,7 +285,7 @@ describe("provenance notebook sync", () => {
   });
 
   it("persists data provenance section after sample and file updates", async () => {
-    const tempDir = await mkdtemp(path.join(os.tmpdir(), "gxypi-provenance-"));
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "loom-provenance-"));
     process.chdir(tempDir);
 
     const { api, tools } = createFakeExtensionAPI();

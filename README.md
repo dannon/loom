@@ -7,8 +7,8 @@ Loom weaves the threads of a research project -- question, data, analysis, inter
 This repo hosts both the brain and a reference shell:
 
 - **Loom** is the *brain* -- the Pi.dev agent runtime in [`extensions/galaxy-analyst/`](extensions/galaxy-analyst/) plus the RPC contract it exposes. Plan state, notebook persistence, Galaxy integration, the five-phase lifecycle, provenance.
-- **`gxypi`** is the terminal CLI consumer. First-class and the primary validation path. Installed from npm; reads brain-level config from `~/.loom/config.json`.
-- **Orbit** (in [`app/`](app/)) is the Electron desktop shell -- chat + dual-pane artifact layout with a Galaxy-themed step graph. Orbit is optional; the `gxypi` CLI is a supported standalone path.
+- **`loom`** is the terminal CLI consumer. First-class and the primary validation path. Installed from npm; reads brain-level config from `~/.loom/config.json`.
+- **Orbit** (in [`app/`](app/)) is the Electron desktop shell -- chat + dual-pane artifact layout with a Galaxy-themed step graph. Orbit is optional; the `loom` CLI is a supported standalone path.
 
 Future shells -- a Galaxy-embedded web UI, a hosted server mode, anything else -- can talk to the same brain over RPC.
 
@@ -16,10 +16,10 @@ The repo is still named `pi-galaxy-analyst`; a rename is a follow-up. Loom is th
 
 ## How it works
 
-1. You open Orbit (or run `gxypi`) in an analysis directory and describe what you want to do.
+1. You open Orbit (or run `loom`) in an analysis directory and describe what you want to do.
 2. The agent builds a formal plan -- research question, phased steps, dependencies -- and stores it in a markdown notebook committed to git on every change.
 3. Each step runs as a Galaxy user-defined tool (default) or a local command, with the agent logging decisions and QC checkpoints as it goes.
-4. In Orbit, the artifact pane auto-reveals the Plan tab, the Steps tab renders a React Flow DAG, and the Notebook tab shows the live markdown record. In `gxypi`, the same state is viewable via slash commands.
+4. In Orbit, the artifact pane auto-reveals the Plan tab, the Steps tab renders a React Flow DAG, and the Notebook tab shows the live markdown record. In `loom`, the same state is viewable via slash commands.
 5. Come back the next day -- opening the same directory resumes the plan from the notebook, in either consumer.
 
 ## Architecture
@@ -27,7 +27,7 @@ The repo is still named `pi-galaxy-analyst`; a rename is a follow-up. Loom is th
 ```
 Brain (Loom)                                  Shells
 ────────────                                  ──────
-extensions/galaxy-analyst/                    bin/gxypi.js              terminal CLI
+extensions/galaxy-analyst/                    bin/loom.js              terminal CLI
   index.ts      extension entry               app/                      Orbit Electron shell
   state.ts      plan + notebook state           src/main/               Node.js main process
   tools.ts      34 LLM-callable tools           src/preload/            window.orbit bridge
@@ -65,22 +65,22 @@ Implemented and locally tested; live Galaxy end-to-end validation is still in pr
 - Galaxy brand dark theme with Inter + JetBrains Mono fonts bundled locally
 - Session continuity: `--continue` on restart (model switch, preference save, Local/Remote toggle) preserves chat history; `/new` starts a clean slate; first launch in a directory with an existing Pi session auto-resumes
 
-### What gxypi ships today
+### What the Loom CLI ships today
 
-Everything brain-side works through the CLI. The display is a terminal UI instead of a React artifact pane; structured widget events collapse down to text summaries. Slash commands (`/plan`, `/status`, `/notebook`, `/plan-decisions`, `/connect`, `/profiles`) behave the same. You can use `gxypi` without ever launching Orbit.
+Everything brain-side works through the CLI. The display is a terminal UI instead of a React artifact pane; structured widget events collapse down to text summaries. Slash commands (`/plan`, `/status`, `/notebook`, `/plan-decisions`, `/connect`, `/profiles`) behave the same. You can use `loom` without ever launching Orbit.
 
 ## Install
 
 ### Quick path -- CLI only
 
 ```bash
-npm install -g gxypi
+npm install -g loom
 ```
 
 Or run without installing:
 
 ```bash
-npx gxypi
+npx loom
 ```
 
 You'll also need [uv](https://docs.astral.sh/uv/) for the Galaxy MCP server (invoked automatically via `uvx`):
@@ -109,7 +109,7 @@ npm start                              # from app/
 Or use the CLI:
 
 ```bash
-node bin/gxypi.js                      # from repo root
+node bin/loom.js                      # from repo root
 ```
 
 #### Linux (Ubuntu/Debian)
@@ -163,14 +163,14 @@ Keep your analysis data inside `~/` (the Linux filesystem) -- `/mnt/c/` paths ar
 
 In Orbit, on first launch, the welcome screen asks for an LLM provider + key and (optionally) a Galaxy server. You need at least one of: [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/), or [Google AI](https://aistudio.google.com/). Local providers like [Ollama](https://ollama.com/) and LiteLLM work too.
 
-In `gxypi`, the equivalent is editing `~/.loom/config.json` (see [Configuration](#configuration)) or running `gxypi --provider anthropic` and following the OAuth prompts.
+In `loom`, the equivalent is editing `~/.loom/config.json` (see [Configuration](#configuration)) or running `loom --provider anthropic` and following the OAuth prompts.
 
 ## Usage
 
-### CLI (`gxypi`)
+### CLI (`loom`)
 
 ```bash
-gxypi
+loom
 ```
 
 ```
@@ -200,7 +200,7 @@ Pi:  I'll help you set up a structured analysis. Let me start by refining
 Come back the next day to the same directory and everything resumes:
 
 ```
-$ gxypi
+$ loom
 
 Pi:  Loaded notebook: RNA-seq Drug Treatment (1/5 steps completed)
 
@@ -234,7 +234,7 @@ Keyboard shortcuts:
 
 ## Configuration
 
-Loom uses a single brain-level config at `~/.loom/config.json`. Every consumer (the `gxypi` CLI, Orbit, any future shell) reads and writes it:
+Loom uses a single brain-level config at `~/.loom/config.json`. Every consumer (the `loom` CLI, Orbit, any future shell) reads and writes it:
 
 ```json
 {
@@ -287,7 +287,7 @@ Pi supports any OpenAI-compatible API. For [LiteLLM](https://litellm.ai/), [Olla
 
 You'll also need `~/.pi/agent/models.json` for model capability metadata (context window, token limits) -- see Pi's documentation. The Loom config handles provider selection and API keys; `models.json` handles model metadata Pi needs for request sizing.
 
-Or pass flags directly: `gxypi --provider litellm --model your-model-name`.
+Or pass flags directly: `loom --provider litellm --model your-model-name`.
 
 ## Commands
 
@@ -377,9 +377,9 @@ pi --no-extensions -e ./extensions/galaxy-analyst
 Then validate the wrapper in a plain working directory:
 
 ```bash
-mkdir -p /tmp/gxypi-cli-validation
-cd /tmp/gxypi-cli-validation
-node /path/to/pi-galaxy-analyst/bin/gxypi.js --provider litellm --model gpt-oss-120b
+mkdir -p /tmp/loom-cli-validation
+cd /tmp/loom-cli-validation
+node /path/to/pi-galaxy-analyst/bin/loom.js --provider litellm --model gpt-oss-120b
 ```
 
 For a full terminal-only runbook, see [docs/terminal-validation.md](docs/terminal-validation.md). For the provenance notebook regression, see [docs/live-validation-checklist.md](docs/live-validation-checklist.md).

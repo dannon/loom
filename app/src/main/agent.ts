@@ -5,8 +5,8 @@ import fs from "node:fs";
 import os from "node:os";
 import type { BrowserWindow } from "electron";
 
-// Resolve the gxypi entry point relative to the app
-const GXYPI_BIN = path.resolve(__dirname, "../../../bin/gxypi.js");
+// Resolve the loom entry point relative to the app
+const LOOM_BIN = path.resolve(__dirname, "../../../bin/loom.js");
 
 export type AgentStatus = "running" | "stopped" | "error";
 
@@ -86,7 +86,7 @@ export class AgentManager {
     const wantsContinue =
       !this.nextStartIsFresh &&
       (this.hasStartedBefore || this.hasExistingSession());
-    const args = [GXYPI_BIN, "--mode", "rpc"];
+    const args = [LOOM_BIN, "--mode", "rpc"];
     if (wantsContinue) {
       args.push("--continue");
     }
@@ -94,7 +94,7 @@ export class AgentManager {
 
     const fresh = this.nextStartIsFresh;
     this.nextStartIsFresh = false;
-    log("starting agent", { bin: GXYPI_BIN, cwd: this.cwd, continue: args.includes("--continue"), fresh });
+    log("starting agent", { bin: LOOM_BIN, cwd: this.cwd, continue: args.includes("--continue"), fresh });
 
     try {
       this.process = spawn("node", args, {

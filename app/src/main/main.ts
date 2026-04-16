@@ -54,7 +54,7 @@ let procMonitor: ProcMonitor | null = null;
 
 function getDefaultCwd(): string {
   // Priority: env var > brain config.defaultCwd > hardcoded default
-  let cwd = process.env.LOOM_CWD || process.env.GXYPI_CWD;
+  let cwd = process.env.LOOM_CWD;
   if (!cwd) {
     try {
       const configPath = path.join(LOOM_DIR, "config.json");

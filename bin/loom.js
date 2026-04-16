@@ -8,7 +8,7 @@ import { homedir } from "os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// gxypi is a standalone product — suppress Pi's own update notifications
+// Loom is a standalone product — suppress Pi's own update notifications
 process.env.PI_SKIP_VERSION_CHECK = "1";
 
 // Resolve extension paths relative to this script
@@ -78,7 +78,7 @@ async function handleInformationalCommand() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Loom brain-level config (~/.loom/config.json)
 //
-// Shared by every consumer (gxypi CLI, Orbit, future shells). The CLI only
+// Shared by every consumer (loom CLI, Orbit, future shells). The CLI only
 // reads/writes it; it doesn't own the schema. Shell-specific state lives in
 // each shell's own dir.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -357,7 +357,7 @@ function checkLLMProvider() {
     } catch {}
   }
 
-  console.error(`gxypi requires an LLM provider to function.
+  console.error(`loom requires an LLM provider to function.
 
 Set up one of the following:
 
@@ -376,7 +376,7 @@ Set up one of the following:
 
   3. Custom provider (~/.pi/agent/models.json):
      For local/self-hosted models via litellm, ollama, etc.
-     See: https://github.com/galaxyproject/gxypi#providers
+     See: https://github.com/galaxyproject/pi-galaxy-analyst#local-llms
 
   4. OAuth login:
      Run with --provider anthropic (or openai, google, etc.)
