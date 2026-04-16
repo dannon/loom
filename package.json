@@ -41,7 +41,7 @@
   "devDependencies": {
     "@mariozechner/pi-ai": "^0.67.3",
     "@types/uuid": "^9.0.0",
-    "typescript": "^5.0.0",
+    "typescript": "^6.0.2",
     "vitest": "^4.1.4"
   }
 }
