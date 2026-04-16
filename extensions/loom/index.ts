@@ -31,6 +31,7 @@ import {
   switchProfile,
   profileNameFromUrl,
 } from "./profiles";
+import { LoomWidgetKey, encodeMarkdownWidget } from "../../shared/loom-shell-contract.js";
 
 export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
 
@@ -273,7 +274,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
         lines.push(`   ⚠️  ${pendingDecisions.length} decision(s) pending approval`);
       }
 
-      ctx.ui.setWidget("plan-view", lines);
+      ctx.ui.setWidget(LoomWidgetKey.PlanView, encodeMarkdownWidget(lines.join("\n")));
     },
   });
 
@@ -517,7 +518,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
           return;
         }
         const header = `> \`${notebookPath}\`\n\n`;
-        ctx.ui.setWidget("notebook", [header + content]);
+        ctx.ui.setWidget(LoomWidgetKey.Notebook, encodeMarkdownWidget(header + content));
         return;
       }
 
@@ -536,7 +537,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
       } else {
         lines.push(`No notebooks found in \`${cwd}\`.`, "", "Create a plan, then use `analysis_notebook_create`.");
       }
-      ctx.ui.setWidget("notebook", [lines.join("\n")]);
+      ctx.ui.setWidget(LoomWidgetKey.Notebook, encodeMarkdownWidget(lines.join("\n")));
     },
   });
 

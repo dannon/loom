@@ -6,17 +6,12 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { AnalysisPlan, AnalysisStep } from "./types.js";
 import { onPlanChange, formatPlanSummary, getCurrentPlan } from "./state.js";
-
-/** The step shape shells expect (e.g. the React step-graph renderer). */
-export interface ShellStep {
-  id: string;
-  name: string;
-  description: string;
-  status: "pending" | "in_progress" | "completed" | "failed" | "skipped";
-  dependsOn: string[];
-  result?: string;
-  command?: string;
-}
+import {
+  LoomWidgetKey,
+  encodeJsonWidget,
+  encodeMarkdownWidget,
+  type ShellStep,
+} from "../../shared/loom-shell-contract.js";
 
 function toShellStep(step: AnalysisStep): ShellStep {
   return {
@@ -45,12 +40,12 @@ function emitPlanWidgets(
 
   if (md !== last.planMd) {
     last.planMd = md;
-    ctx.ui.setWidget("plan", md.split("\n"));
+    ctx.ui.setWidget(LoomWidgetKey.Plan, encodeMarkdownWidget(md));
   }
 
   if (stepsJson !== last.stepsJson) {
     last.stepsJson = stepsJson;
-    ctx.ui.setWidget("steps", [stepsJson]);
+    ctx.ui.setWidget(LoomWidgetKey.Steps, encodeJsonWidget(toShellSteps(plan)));
   }
 }
 

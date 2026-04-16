@@ -75,6 +75,12 @@ import {
   type GalaxyWorkflowResponse,
   type GalaxyInvocationResponse,
 } from "./galaxy-api";
+import {
+  LoomWidgetKey,
+  encodeJsonWidget,
+  type ResultBlock,
+  type ParameterFormPayload,
+} from "../../shared/loom-shell-contract.js";
 
 export function registerPlanTools(pi: ExtensionAPI): void {
 
@@ -2693,7 +2699,7 @@ analyses in Galaxy.`,
       caption: Type.Optional(Type.String({ description: "Caption for image or file link" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const block = {
+      const block: ResultBlock = {
         stepName: params.stepName,
         type: params.type,
         content: params.content,
@@ -2702,7 +2708,7 @@ analyses in Galaxy.`,
         path: params.path,
         caption: params.caption,
       };
-      ctx.ui.setWidget("results", [JSON.stringify(block)]);
+      ctx.ui.setWidget(LoomWidgetKey.Results, encodeJsonWidget(block));
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ success: true, message: "Result displayed." }) }],
         details: { type: params.type },
@@ -2753,13 +2759,13 @@ analyses in Galaxy.`,
       })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const spec = {
+      const spec: ParameterFormPayload = {
         planId: getCurrentPlan()?.id || "",
         title: params.title,
         description: params.description,
         groups: params.groups,
       };
-      ctx.ui.setWidget("parameters", [JSON.stringify(spec)]);
+      ctx.ui.setWidget(LoomWidgetKey.Parameters, encodeJsonWidget(spec));
       const paramNames = params.groups.flatMap(g => g.params.map(p => p.name));
       return {
         content: [{

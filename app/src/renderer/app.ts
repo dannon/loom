@@ -2,6 +2,14 @@ import { ChatPanel } from "./chat/chat-panel.js";
 import { ShellPanel } from "./chat/shell-panel.js";
 import { ArtifactPanel } from "./artifacts/artifact-panel.js";
 import { StepGraph } from "./artifacts/step-graph-react.js";
+import {
+  LoomWidgetKey,
+  decodeJsonWidget,
+  decodeMarkdownWidget,
+  type ResultBlock,
+  type ParameterFormPayload,
+  type ShellStep,
+} from "../../../shared/loom-shell-contract.js";
 
 declare global {
   interface Window {
@@ -970,9 +978,9 @@ window.orbit.onUiRequest((request) => {
     const key = request.widgetKey as string;
     const lines = request.widgetLines as string[] | undefined;
 
-    if (key === "plan" && lines) {
+    if (key === LoomWidgetKey.Plan && lines) {
       console.log("[orbit] plan widget received, lines:", lines.length);
-      artifacts.setPlanText(lines.join("\n"));
+      artifacts.setPlanText(decodeMarkdownWidget(lines));
       // First plan: auto-reveal artifact pane and switch to Plan tab.
       if (!hasShownPlanOnce) {
         setArtifactCollapsed(false);
@@ -983,43 +991,43 @@ window.orbit.onUiRequest((request) => {
       }
     }
 
-    if (key === "steps" && lines) {
+    if (key === LoomWidgetKey.Steps && lines) {
       console.log("[orbit] steps widget received, count:", lines[0]?.length);
       try {
-        const steps = JSON.parse(lines[0]);
+        const steps = decodeJsonWidget<ShellStep[]>(lines);
         console.log("[orbit] parsed steps:", steps.length);
         stepGraph.render(steps);
         markTabNew("steps");
       } catch (e) { console.error("[orbit] steps parse error:", e); }
     }
 
-    if (key === "results" && lines) {
+    if (key === LoomWidgetKey.Results && lines) {
       try {
-        const block = JSON.parse(lines[0]);
+        const block = decodeJsonWidget<ResultBlock>(lines);
         artifacts.addResultBlock(block);
         markTabNew("results");
       } catch { /* ignore parse errors */ }
     }
 
     // Legacy alias: /plan slash command emits "plan-view" — route to Plan tab.
-    if (key === "plan-view" && lines) {
-      artifacts.setPlanText(lines.join("\n"));
+    if (key === LoomWidgetKey.PlanView && lines) {
+      artifacts.setPlanText(decodeMarkdownWidget(lines));
       if (!hasShownPlanOnce) { switchTab("plan"); hasShownPlanOnce = true; }
       else { markTabNew("plan"); }
     }
 
     // /notebook dumps the live notebook.md content — route to Notebook tab.
-    if (key === "notebook" && lines) {
-      artifacts.setNotebookMarkdown(lines.join("\n"));
+    if (key === LoomWidgetKey.Notebook && lines) {
+      artifacts.setNotebookMarkdown(decodeMarkdownWidget(lines));
       setArtifactCollapsed(false);
       switchTab("results");
     }
 
     // Phase 4: parameter form — replaces plan view
-    if (key === "parameters" && lines) {
+    if (key === LoomWidgetKey.Parameters && lines) {
       console.log("[orbit] parameters widget received, lines[0] length:", lines[0]?.length);
       try {
-        const spec = JSON.parse(lines[0]);
+        const spec = decodeJsonWidget<ParameterFormPayload>(lines);
         console.log("[orbit] parsed spec:", spec.title, spec.groups?.length, "groups");
         artifacts.showParameters(spec);
         switchTab("plan");
