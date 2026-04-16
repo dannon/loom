@@ -72,12 +72,16 @@ export interface ParsedStep {
     tool_id?: string;
     workflow_id?: string;
     trs_id?: string;
+    parameters?: Record<string, unknown>;
   };
   inputs: Array<{ name: string; dataset_ids?: string[] }>;
   outputs: Array<{ dataset_id: string; name: string; url?: string }>;
   job_id?: string;
   job_url?: string;
   invocation_id?: string;
+  completed_at?: string;
+  summary?: string;
+  qc_passed?: boolean | null;
   workflow_structure?: {
     step_count: number;
     tools?: string[];
@@ -306,22 +310,46 @@ export function parseStepBlocks(content: string): ParsedStep[] {
         };
       }
 
+      const executionData = (stepData.execution as Record<string, unknown>) || {};
+      let parameters: Record<string, unknown> | undefined;
+      if (typeof executionData.parameters === "string" && executionData.parameters.length > 0) {
+        try {
+          parameters = JSON.parse(executionData.parameters) as Record<string, unknown>;
+        } catch {
+          // Bad JSON — drop rather than crash
+        }
+      } else if (executionData.parameters && typeof executionData.parameters === "object") {
+        parameters = executionData.parameters as Record<string, unknown>;
+      }
+
+      const qcPassedRaw = stepData.qc_passed;
+      const qcPassed =
+        typeof qcPassedRaw === "boolean"
+          ? qcPassedRaw
+          : qcPassedRaw === null
+          ? null
+          : undefined;
+
       steps.push({
         id: String(stepData.id || ""),
         name: String(stepData.name || ""),
         status: (stepData.status as StepStatus) || "pending",
         description: String(stepData.description || ""),
         execution: {
-          type: ((stepData.execution as Record<string, unknown>)?.type as ExecutionType) || "tool",
-          tool_id: (stepData.execution as Record<string, unknown>)?.tool_id as string | undefined,
-          workflow_id: (stepData.execution as Record<string, unknown>)?.workflow_id as string | undefined,
-          trs_id: (stepData.execution as Record<string, unknown>)?.trs_id as string | undefined,
+          type: (executionData.type as ExecutionType) || "tool",
+          tool_id: executionData.tool_id as string | undefined,
+          workflow_id: executionData.workflow_id as string | undefined,
+          trs_id: executionData.trs_id as string | undefined,
+          parameters,
         },
         inputs: (stepData.inputs as Array<{ name: string; dataset_ids?: string[] }>) || [],
         outputs: (stepData.outputs as Array<{ dataset_id: string; name: string; url?: string }>) || [],
         job_id: stepData.job_id as string | undefined,
         job_url: stepData.job_url as string | undefined,
         invocation_id: stepData.invocation_id as string | undefined,
+        completed_at: stepData.completed_at as string | undefined,
+        summary: stepData.summary as string | undefined,
+        qc_passed: qcPassed,
         workflow_structure: workflowStructure,
       });
     }
@@ -569,6 +597,23 @@ export function notebookToPlan(notebook: ParsedNotebook): AnalysisPlan {
       };
     }
 
+    const hasResult =
+      step.job_id ||
+      step.invocation_id ||
+      step.completed_at ||
+      step.summary ||
+      step.qc_passed !== undefined;
+
+    const result: StepResult | undefined = hasResult
+      ? {
+          completedAt: step.completed_at || "",
+          jobId: step.job_id,
+          invocationId: step.invocation_id,
+          summary: step.summary || "",
+          qcPassed: step.qc_passed === undefined ? null : step.qc_passed,
+        }
+      : undefined;
+
     return {
       id: step.id,
       name: step.name,
@@ -579,6 +624,7 @@ export function notebookToPlan(notebook: ParsedNotebook): AnalysisPlan {
         toolId: step.execution.tool_id,
         workflowId: step.execution.workflow_id,
         trsId: step.execution.trs_id,
+        parameters: step.execution.parameters,
       },
       inputs: step.inputs.map((i) => ({
         name: i.name,
@@ -591,15 +637,7 @@ export function notebookToPlan(notebook: ParsedNotebook): AnalysisPlan {
         name: o.name,
         datatype: "",
       })),
-      result: step.job_id
-        ? {
-            completedAt: "",
-            jobId: step.job_id,
-            invocationId: step.invocation_id,
-            summary: "",
-            qcPassed: null,
-          }
-        : undefined,
+      result,
       workflowStructure,
       dependsOn: [],
     };

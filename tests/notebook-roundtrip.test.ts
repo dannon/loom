@@ -20,6 +20,7 @@ import {
   setBRCOrganism,
   setBRCAssembly,
   setBRCWorkflow,
+  getCurrentPlan,
 } from "../extensions/loom/state";
 import { generateNotebook } from "../extensions/loom/notebook-writer";
 import { parseNotebook, notebookToPlan, parseFrontmatter } from "../extensions/loom/notebook-parser";
@@ -181,6 +182,70 @@ describe("notebook round-trip", () => {
     expect(restored.title).toBe("Minimal Plan");
     expect(restored.steps).toHaveLength(0);
     expect(restored.decisions).toHaveLength(0);
+  });
+
+  it("preserves step.description through round-trip", () => {
+    const original = buildTestPlan();
+    const markdown = generateNotebook(original);
+    const parsed = parseNotebook(markdown);
+    const restored = notebookToPlan(parsed!);
+
+    expect(restored.steps[0].description).toBe(
+      "Run FastQC on all raw FASTQ files"
+    );
+    expect(restored.steps[1].description).toBe(
+      "Align reads to human reference genome with HISAT2"
+    );
+  });
+
+  it("preserves step.execution.parameters through round-trip", () => {
+    createPlan({
+      title: "Params Test",
+      researchQuestion: "Q",
+      dataDescription: "D",
+      expectedOutcomes: [],
+      constraints: [],
+    });
+    addStep({
+      name: "Parameterized Tool",
+      description: "A tool with explicit parameters",
+      executionType: "tool",
+      toolId: "tool-x",
+      inputs: [],
+      expectedOutputs: [],
+      dependsOn: [],
+      parameters: {
+        threshold: 0.05,
+        mode: "strict",
+        enable: true,
+        tags: ["a", "b"],
+      },
+    });
+
+    const plan = getCurrentPlan()!;
+    const markdown = generateNotebook(plan);
+    const parsed = parseNotebook(markdown);
+    const restored = notebookToPlan(parsed!);
+
+    expect(restored.steps[0].execution.parameters).toEqual({
+      threshold: 0.05,
+      mode: "strict",
+      enable: true,
+      tags: ["a", "b"],
+    });
+  });
+
+  it("preserves step.result.completedAt/summary/qcPassed through round-trip", () => {
+    const original = buildTestPlan();
+    const markdown = generateNotebook(original);
+    const parsed = parseNotebook(markdown);
+    const restored = notebookToPlan(parsed!);
+
+    expect(restored.steps[0].result?.completedAt).toBe("2026-02-06T10:30:00Z");
+    expect(restored.steps[0].result?.summary).toBe(
+      "All 6 samples pass quality thresholds"
+    );
+    expect(restored.steps[0].result?.qcPassed).toBe(true);
   });
 
   it("preserves galaxy connection info", () => {

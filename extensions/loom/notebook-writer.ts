@@ -191,6 +191,9 @@ export function generateNotebook(plan: AnalysisPlan): string {
     lines.push(`  id: "${step.id}"`);
     lines.push(`  name: "${step.name}"`);
     lines.push(`  status: ${step.status}`);
+    if (step.description) {
+      lines.push(`  description: "${escapeYamlString(step.description)}"`);
+    }
     lines.push("  execution:");
     lines.push(`    type: ${step.execution.type}`);
     if (step.execution.toolId) {
@@ -201,6 +204,9 @@ export function generateNotebook(plan: AnalysisPlan): string {
     }
     if (step.execution.trsId) {
       lines.push(`    trs_id: "${step.execution.trsId}"`);
+    }
+    if (step.execution.parameters && Object.keys(step.execution.parameters).length > 0) {
+      lines.push(`    parameters: '${escapeJsonInYaml(step.execution.parameters)}'`);
     }
 
     if (step.workflowStructure) {
@@ -230,6 +236,15 @@ export function generateNotebook(plan: AnalysisPlan): string {
     }
     if (step.result?.invocationId) {
       lines.push(`  invocation_id: "${step.result.invocationId}"`);
+    }
+    if (step.result?.completedAt) {
+      lines.push(`  completed_at: "${step.result.completedAt}"`);
+    }
+    if (step.result?.summary) {
+      lines.push(`  summary: "${escapeYamlString(step.result.summary)}"`);
+    }
+    if (step.result && step.result.qcPassed !== null && step.result.qcPassed !== undefined) {
+      lines.push(`  qc_passed: ${step.result.qcPassed}`);
     }
 
     lines.push("```");
@@ -517,6 +532,14 @@ function escapeYamlString(str: string): string {
 }
 
 /**
+ * Serialize an object to a JSON string safe to embed inside single-quoted YAML.
+ * Single quotes are escaped by doubling them (YAML convention).
+ */
+function escapeJsonInYaml(obj: unknown): string {
+  return JSON.stringify(obj).replace(/'/g, "''");
+}
+
+/**
  * Update frontmatter field in notebook content
  */
 export function updateFrontmatter(
@@ -747,6 +770,9 @@ export function addStepSection(content: string, step: AnalysisStep): string {
   lines.push(`  id: "${step.id}"`);
   lines.push(`  name: "${step.name}"`);
   lines.push(`  status: ${step.status}`);
+  if (step.description) {
+    lines.push(`  description: "${escapeYamlString(step.description)}"`);
+  }
   lines.push("  execution:");
   lines.push(`    type: ${step.execution.type}`);
   if (step.execution.toolId) {
@@ -757,6 +783,9 @@ export function addStepSection(content: string, step: AnalysisStep): string {
   }
   if (step.execution.trsId) {
     lines.push(`    trs_id: "${step.execution.trsId}"`);
+  }
+  if (step.execution.parameters && Object.keys(step.execution.parameters).length > 0) {
+    lines.push(`    parameters: '${escapeJsonInYaml(step.execution.parameters)}'`);
   }
 
   if (step.workflowStructure) {

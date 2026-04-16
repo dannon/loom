@@ -187,6 +187,7 @@ export function addStep(params: {
   toolId?: string;
   workflowId?: string;
   trsId?: string;
+  parameters?: Record<string, unknown>;
   inputs: Array<{ name: string; description: string; fromStep?: string }>;
   expectedOutputs: string[];
   dependsOn: string[];
@@ -207,6 +208,7 @@ export function addStep(params: {
       toolId: params.toolId,
       workflowId: params.workflowId,
       trsId: params.trsId,
+      parameters: params.parameters,
     },
     inputs: params.inputs.map(i => ({
       name: i.name,
