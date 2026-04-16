@@ -12,7 +12,7 @@ Future shells -- a Galaxy-embedded web UI, a hosted server mode, anything else -
 
 1. You open Orbit (or run `loom`) in an analysis directory and describe what you want to do.
 2. The agent builds a formal plan -- research question, phased steps, dependencies -- and stores it in a markdown notebook committed to git on every change.
-3. Each step runs as a Galaxy user-defined tool (default) or a local command, with the agent logging decisions and QC checkpoints as it goes.
+3. Real jobs are expected to run in Galaxy by default. Local mode is an escape hatch for exceptional cases, not the normal execution path, and currently has weaker guarantees than the Galaxy path.
 4. In Orbit, the artifact pane auto-reveals the Plan tab, the Steps tab renders a React Flow DAG, and the Notebook tab shows the live markdown record. In `loom`, the same state is viewable via slash commands.
 5. Come back the next day -- opening the same directory resumes the plan from the notebook, in either consumer.
 
@@ -37,8 +37,8 @@ extensions/loom/                    bin/loom.js              terminal CLI
 
 Implemented and locally tested; live Galaxy end-to-end validation is still in progress.
 
-- TypeScript typecheck passes against `@mariozechner/pi-coding-agent` `0.55.0`
-- Local automated suite: 122 tests passing
+- TypeScript typecheck passes against `@mariozechner/pi-coding-agent` `0.67.3`
+- Local automated suite: 131 tests passing
 - Notebook persistence, plan state, workflow metadata, BRC context, and extension registration are covered by tests
 - Provenance notebook sync has a dedicated regression check via `npm run validate:provenance`
 - Runtime validation has confirmed extension loading, Galaxy connection/history state bridging, and notebook rewriting for `data_set_source`
@@ -50,10 +50,10 @@ Implemented and locally tested; live Galaxy end-to-end validation is still in pr
 - Plan tab with rendered markdown + raw edit modes and a parameter form for reviewing step arguments
 - Steps tab: React Flow + dagre DAG of the analysis plan with live status coloring
 - Notebook tab: the live `notebook.md` rendered as markdown (refresh with `/notebook`) plus typed result blocks from `report_result`
-- Chat: streaming, thinking indicator, tool cards, queue-while-streaming (`/btw`)
+- Chat: streaming, thinking indicator, tool cards, queue-while-streaming
 - Process monitor strip: live CPU / memory / runtime for every subprocess the agent spawns
 - Cost / token header with pricing for Claude 4.5 & 4.6, GPT-4o, Gemini 2.5, and local providers
-- Local / Remote execution toggle in the masthead -- Remote registers the Galaxy MCP server, Local strips it entirely
+- Local / Remote execution toggle in the masthead -- Remote is the supported Galaxy-first execution path; Local strips Galaxy MCP and acts as a guarded bypass for non-standard/debug flows
 - Preferences dialog (`Cmd/Ctrl+,`): provider / model / API key, Galaxy credentials, default working directory
 - First-run welcome screen: one-page setup for LLM key, optional Galaxy profile, working directory
 - Galaxy brand dark theme with Inter + JetBrains Mono fonts bundled locally
@@ -223,7 +223,7 @@ The artifact pane starts collapsed; as soon as the agent creates a plan, it auto
 Keyboard shortcuts:
 - `Cmd/Ctrl+\` -- collapse / expand the artifact pane
 - `Cmd/Ctrl+,` -- open Preferences
-- `Cmd/Ctrl+O` -- switch working directory (does not restart the session; notifies the agent instead)
+- `Cmd/Ctrl+O` -- switch working directory and restart into a fresh agent session for that directory
 - `Esc` -- dismiss modal prompts
 
 ## Configuration
@@ -251,7 +251,7 @@ Loom uses a single brain-level config at `~/.loom/config.json`. Every consumer (
 }
 ```
 
-All sections are optional. If `llm` is missing, consumers fall back to environment variables or OAuth login. If `galaxy` is missing, use `/connect` to add a server interactively -- credentials save to the config automatically. `executionMode` is `"remote"` by default (registers Galaxy MCP, Galaxy UDTs are the primary execution path); `"local"` strips Galaxy MCP for exploratory work.
+All sections are optional. If `llm` is missing, consumers fall back to environment variables or OAuth login. If `galaxy` is missing, use `/connect` to add a server interactively -- credentials save to the config automatically. `executionMode` is `"remote"` by default (registers Galaxy MCP, Galaxy UDTs are the primary and preferred execution path). `"local"` strips Galaxy MCP and should be treated as an escape hatch, not a peer runtime.
 
 Orbit-specific state (window geometry, pane preferences) lives in `~/.orbit/` so multiple shells can coexist without stepping on each other.
 
@@ -297,7 +297,7 @@ Or pass flags directly: `loom --provider litellm --model your-model-name`.
 | `/profiles` | List saved Galaxy server profiles |
 | `/new` | Start a fresh session (Orbit only) |
 
-In Orbit, plan-related slash commands are active in the plan editor: `/review`, `/test`, `/execute`, `/run`.
+In Orbit, plan-related slash commands are active in the plan editor: `/review`, `/test`, `/execute`, `/run`. These are designed around the Galaxy-first path; Local mode should be treated as an override/debug path until a fuller local runtime exists.
 
 ## Tool reference
 
@@ -319,7 +319,7 @@ Loom registers 34 brain-level tools across the five-phase lifecycle:
 
 ## Five-phase lifecycle
 
-Loom guides analyses through five phases. You can move between them freely -- the phases shape the agent's defaults without locking you in.
+Loom guides analyses through five phases. Forward transitions are validated so the notebook reflects a defensible research lifecycle rather than an arbitrary label change.
 
 1. **Problem Definition** -- refine the research question (PICO framework), add literature references.
 2. **Data Acquisition** -- track data sources (GEO, SRA, local), register samples, generate samplesheets, link to Galaxy datasets.
