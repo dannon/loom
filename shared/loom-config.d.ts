@@ -10,6 +10,12 @@ export interface LoomConfig {
   };
   executionMode?: "local" | "remote";
   defaultCwd?: string;
+  /**
+   * Absolute path to a gxy-sketches checkout. When set, Loom scans the
+   * corpus for sketches matching the active plan (by tool IDs, workflow
+   * ID, or tags) and injects the content into the system prompt.
+   */
+  sketchCorpusPath?: string;
 }
 
 export function getConfigDir(): string;

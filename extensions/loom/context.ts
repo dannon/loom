@@ -8,6 +8,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { getCurrentPlan, getState, formatPlanSummary, getWorkflowSteps, getBRCContext } from "./state";
 import { loadConfig } from "./config";
+import {
+  loadSketchCorpus,
+  matchSketchesForPlan,
+  renderSketchForPrompt,
+} from "./sketches";
 
 /** Build the execution-mode block injected into every system prompt. */
 function buildExecutionModeContext(): string {
@@ -112,6 +117,24 @@ ${buildExecutionModeContext()}
     // Active plan - inject summary
     const planSummary = formatPlanSummary(plan);
 
+    // Sketch corpus matching (gxy-sketches analysis scaffolding)
+    let sketchSection = "";
+    try {
+      const cfg = loadConfig();
+      if (cfg.sketchCorpusPath) {
+        const corpus = loadSketchCorpus(cfg.sketchCorpusPath);
+        const matches = matchSketchesForPlan(plan, corpus).slice(0, 2);
+        if (matches.length > 0) {
+          sketchSection =
+            "\n" +
+            matches.map((m) => renderSketchForPrompt(m)).join("\n---\n\n") +
+            "\n";
+        }
+      }
+    } catch (err) {
+      console.warn("[sketches] context injection failed:", err);
+    }
+
     // Workflow guidance if plan has workflow steps
     const workflowSteps = plan.steps.filter(s => s.execution.type === 'workflow');
     const activeInvocations = getWorkflowSteps();
@@ -172,7 +195,7 @@ ${planSummary}
 - One sentence when one sentence suffices. Never repeat what the user said.
 - Do NOT use exclamation marks, "Great!", "Excellent!", "Sure!", or similar.
 - Minimize emoji usage. Plain text is preferred.
-${workflowContext}${brcSection}
+${workflowContext}${brcSection}${sketchSection}
 ${galaxyContext}
 ${buildExecutionModeContext()}
 `
