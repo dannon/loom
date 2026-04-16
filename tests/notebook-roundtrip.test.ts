@@ -401,6 +401,81 @@ describe("notebook with lifecycle phases", () => {
     expect(markdown).toContain("control_1_R1.fastq.gz");
   });
 
+  it("round-trips data provenance through parse", () => {
+    const plan = createPlan({
+      title: "Provenance RT",
+      researchQuestion: "Q",
+      dataDescription: "D",
+      expectedOutcomes: [],
+      constraints: [],
+    });
+
+    setDataProvenance({
+      source: "geo",
+      accession: "GSE12345",
+      downloadDate: "2026-02-01T00:00:00Z",
+      importHistory: "hist-import-42",
+    });
+    addSample({
+      id: "s1",
+      name: "Control_1",
+      condition: "control",
+      replicate: 1,
+      metadata: { tissue: "liver", donor: "A" },
+      files: ["f1", "f2"],
+    });
+    addSample({
+      id: "s2",
+      name: "Treated_1",
+      condition: "treated",
+      replicate: 1,
+      metadata: {},
+      files: ["f3"],
+    });
+    addDataFile({
+      id: "f1",
+      name: "control_1_R1.fastq.gz",
+      type: "fastq",
+      readType: "paired",
+      pairedWith: "f2",
+      galaxyDatasetId: "gx-f1",
+    });
+    addDataFile({ id: "f2", name: "control_1_R2.fastq.gz", type: "fastq", readType: "paired", pairedWith: "f1" });
+    addDataFile({ id: "f3", name: "treated_1.bam", type: "bam" });
+
+    const markdown = generateNotebook(plan);
+    const parsed = parseNotebook(markdown);
+    const restored = notebookToPlan(parsed!);
+
+    expect(restored.dataProvenance).toBeTruthy();
+    expect(restored.dataProvenance!.source).toBe("geo");
+    expect(restored.dataProvenance!.accession).toBe("GSE12345");
+    expect(restored.dataProvenance!.downloadDate).toBe("2026-02-01T00:00:00Z");
+    expect(restored.dataProvenance!.importHistory).toBe("hist-import-42");
+
+    expect(restored.dataProvenance!.samples).toHaveLength(2);
+    expect(restored.dataProvenance!.samples[0]).toMatchObject({
+      id: "s1",
+      name: "Control_1",
+      condition: "control",
+      replicate: 1,
+      files: ["f1", "f2"],
+      metadata: { tissue: "liver", donor: "A" },
+    });
+    expect(restored.dataProvenance!.samples[1].files).toEqual(["f3"]);
+
+    expect(restored.dataProvenance!.originalFiles).toHaveLength(3);
+    expect(restored.dataProvenance!.originalFiles[0]).toMatchObject({
+      id: "f1",
+      name: "control_1_R1.fastq.gz",
+      type: "fastq",
+      readType: "paired",
+      pairedWith: "f2",
+      galaxyDatasetId: "gx-f1",
+    });
+    expect(restored.dataProvenance!.originalFiles[2].type).toBe("bam");
+  });
+
   it("includes interpretation findings in notebook", () => {
     const plan = createPlan({
       title: "Interpretation Test",

@@ -137,6 +137,8 @@ export function generateNotebook(plan: AnalysisPlan): string {
   if (plan.dataProvenance) {
     lines.push("## Data Provenance");
     lines.push("");
+    renderDataProvenanceYaml(lines, plan.dataProvenance);
+
     const dp = plan.dataProvenance;
     lines.push(`**Source**: ${dp.source.toUpperCase()}`);
     if (dp.accession) lines.push(`**Accession**: ${dp.accession}`);
@@ -496,6 +498,21 @@ export function renderBRCContextSection(brc: BRCContext): string {
   }
 
   return lines.join("\n");
+}
+
+/**
+ * Render a provenance YAML block. Authoritative for the parser;
+ * the markdown tables below it are display-only.
+ *
+ * The block uses a single JSON string value rather than native YAML
+ * nesting because our YAML parser can't handle multi-line array items.
+ * Treat it as structured data on disk; humans read the tables below.
+ */
+function renderDataProvenanceYaml(lines: string[], dp: DataProvenance): void {
+  lines.push("```yaml");
+  lines.push(`provenance_json: '${escapeJsonInYaml(dp)}'`);
+  lines.push("```");
+  lines.push("");
 }
 
 /**

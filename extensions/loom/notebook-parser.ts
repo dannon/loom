@@ -45,6 +45,7 @@ export interface ParsedNotebook {
   events: ParsedEvent[];
   galaxyReferences: GalaxyReference[];
   interpretation?: InterpretationFindings;
+  dataProvenance?: DataProvenance;
 }
 
 export interface NotebookFrontmatter {
@@ -502,6 +503,27 @@ export function parseInterpretation(content: string): InterpretationFindings | u
 }
 
 /**
+ * Parse the Data Provenance YAML block (authoritative) from the Data Provenance section.
+ * The block is a single `provenance_json: '<json>'` line to bypass nested-array
+ * limits of the handwritten YAML parser.
+ */
+export function parseDataProvenance(content: string): DataProvenance | undefined {
+  const section = getSection(content, "Data Provenance");
+  if (!section) return undefined;
+
+  const match = section.match(/provenance_json:\s*'([\s\S]*?)'\s*\n/);
+  if (!match) return undefined;
+
+  try {
+    const json = match[1].replace(/''/g, "'");
+    const dp = JSON.parse(json) as DataProvenance;
+    return dp;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Parse the BRC Catalog Context section
  */
 export function parseBRCContext(content: string): BRCContext | undefined {
@@ -571,6 +593,7 @@ export function parseNotebook(content: string): ParsedNotebook | null {
     events: parseEventBlocks(content),
     galaxyReferences: parseGalaxyReferences(content),
     interpretation: parseInterpretation(content),
+    dataProvenance: parseDataProvenance(content),
   };
 }
 
@@ -699,6 +722,10 @@ export function notebookToPlan(notebook: ParsedNotebook): AnalysisPlan {
 
   if (notebook.interpretation) {
     plan.interpretation = notebook.interpretation;
+  }
+
+  if (notebook.dataProvenance) {
+    plan.dataProvenance = notebook.dataProvenance;
   }
 
   return plan;
