@@ -85,6 +85,7 @@ export interface ParsedStep {
   completed_at?: string;
   summary?: string;
   qc_passed?: boolean | null;
+  parameter_overrides?: Record<string, unknown>;
   workflow_structure?: {
     step_count: number;
     tools?: string[];
@@ -333,6 +334,17 @@ export function parseStepBlocks(content: string): ParsedStep[] {
           ? null
           : undefined;
 
+      let parameterOverrides: Record<string, unknown> | undefined;
+      if (typeof stepData.parameter_overrides === "string" && stepData.parameter_overrides.length > 0) {
+        try {
+          parameterOverrides = JSON.parse(stepData.parameter_overrides) as Record<string, unknown>;
+        } catch {
+          // bad JSON, drop rather than crash
+        }
+      } else if (stepData.parameter_overrides && typeof stepData.parameter_overrides === "object") {
+        parameterOverrides = stepData.parameter_overrides as Record<string, unknown>;
+      }
+
       steps.push({
         id: String(stepData.id || ""),
         name: String(stepData.name || ""),
@@ -353,6 +365,7 @@ export function parseStepBlocks(content: string): ParsedStep[] {
         completed_at: stepData.completed_at as string | undefined,
         summary: stepData.summary as string | undefined,
         qc_passed: qcPassed,
+        parameter_overrides: parameterOverrides,
         workflow_structure: workflowStructure,
       });
     }
@@ -705,6 +718,7 @@ export function notebookToPlan(notebook: ParsedNotebook): AnalysisPlan {
       })),
       result,
       workflowStructure,
+      parameterOverrides: step.parameter_overrides,
       dependsOn: [],
     };
   });

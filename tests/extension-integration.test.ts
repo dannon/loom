@@ -123,6 +123,7 @@ const EXPECTED_TOOLS = [
   "workflow_to_plan",
   "workflow_invocation_link",
   "workflow_invocation_check",
+  "workflow_set_overrides",
 
   // BRC Catalog Context
   "brc_set_context",

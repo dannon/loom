@@ -322,6 +322,11 @@ export interface AnalysisStep {
   // Workflow metadata (when executionType is 'workflow')
   workflowStructure?: WorkflowStructure;
 
+  // Per-invocation parameter overrides (deviations from workflow defaults).
+  // Keyed by the workflow step id or tool param name. Passed straight to
+  // galaxy-mcp invoke_workflow as the `params` argument.
+  parameterOverrides?: Record<string, unknown>;
+
   // Dependencies
   dependsOn: string[];
 }

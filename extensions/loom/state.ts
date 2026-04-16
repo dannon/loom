@@ -941,6 +941,32 @@ export function updateFigure(figureId: string, updates: Partial<FigureSpec>): Fi
 }
 
 /**
+ * Set per-step workflow parameter overrides. Merges with existing overrides
+ * on the step (so repeated calls accumulate rather than clobber). Returns
+ * the final override map for the step.
+ */
+export function setStepParameterOverrides(
+  stepId: string,
+  overrides: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!state.currentPlan) {
+    throw new Error("No active plan");
+  }
+
+  const step = state.currentPlan.steps.find((s) => s.id === stepId);
+  if (!step) {
+    throw new Error(`Step ${stepId} not found`);
+  }
+
+  const merged = { ...(step.parameterOverrides || {}), ...overrides };
+  step.parameterOverrides = merged;
+  state.currentPlan.updated = new Date().toISOString();
+  notifyPlanChange();
+
+  return merged;
+}
+
+/**
  * Update Galaxy connection state
  */
 export function setGalaxyConnection(connected: boolean, historyId?: string, serverUrl?: string): void {
