@@ -28,6 +28,7 @@ export class AgentManager {
   private idCounter = 0;
   private cwd: string;
   private hasStartedBefore = false;  // → use --continue on restart to preserve chat history
+  private nextStartSkipContinue = false; // → restart in a new cwd without resuming old chat
   private nextStartIsFresh = false;  // → tells extension to skip notebook auto-load on next start
 
   constructor(window: BrowserWindow, cwd: string) {
@@ -38,6 +39,7 @@ export class AgentManager {
   /** Reset session continuity (e.g. when switching to a new analysis directory). */
   resetSession(): void {
     this.hasStartedBefore = false;
+    this.nextStartSkipContinue = false;
     this.nextStartIsFresh = true;
   }
 
@@ -48,6 +50,20 @@ export class AgentManager {
     }
     this.cwd = cwd;
     log("cwd set to", cwd);
+  }
+
+  switchCwd(cwd: string): boolean {
+    if (cwd === this.cwd) return false;
+    this.cwd = cwd;
+    this.hasStartedBefore = false;
+    this.nextStartSkipContinue = true;
+    this.nextStartIsFresh = false;
+    log("switching cwd to", cwd);
+    if (this.process) {
+      this.stop();
+      this.start();
+    }
+    return true;
   }
 
   getCwd(): string {
@@ -84,6 +100,7 @@ export class AgentManager {
     // - On first launch (!hasStartedBefore), only if a Pi session exists for this cwd
     // Fresh /new sessions bypass this (nextStartIsFresh → no --continue).
     const wantsContinue =
+      !this.nextStartSkipContinue &&
       !this.nextStartIsFresh &&
       (this.hasStartedBefore || this.hasExistingSession());
     const args = [LOOM_BIN, "--mode", "rpc"];
@@ -91,6 +108,7 @@ export class AgentManager {
       args.push("--continue");
     }
     this.hasStartedBefore = true;
+    this.nextStartSkipContinue = false;
 
     const fresh = this.nextStartIsFresh;
     this.nextStartIsFresh = false;

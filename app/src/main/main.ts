@@ -212,10 +212,10 @@ function buildMenu(): void {
             });
             if (result.canceled || result.filePaths.length === 0) return;
             const dir = result.filePaths[0];
-            log("switching cwd to:", dir);
-            agentManager.setCwd(dir);
-            // Notify renderer to update UI and inform agent — no restart
-            mainWindow.webContents.send("agent:cwd-changed", dir);
+            if (agentManager.switchCwd(dir)) {
+              log("switched cwd to:", dir);
+              mainWindow.webContents.send("agent:cwd-changed", dir);
+            }
           },
         },
       ],

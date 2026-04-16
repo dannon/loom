@@ -356,15 +356,39 @@ async function refreshCwd(): Promise<void> {
   } catch { /* getCwd not available yet */ }
 }
 
+function resetUiForFreshContext(): void {
+  chat.clear();
+  artifacts.clear();
+  clearPendingMessage();
+  sessionUsage.input = 0;
+  sessionUsage.output = 0;
+  sessionUsage.cacheRead = 0;
+  sessionUsage.cacheWrite = 0;
+  turnUsage.input = 0;
+  turnUsage.output = 0;
+  turnUsage.cacheRead = 0;
+  turnUsage.cacheWrite = 0;
+  renderUsage();
+  streaming = false;
+  hasShownPlanOnce = false;
+  sendBtn.classList.remove("hidden");
+  abortBtn.classList.add("hidden");
+  statusBadge.textContent = "Ready";
+  statusBadge.className = "status-badge";
+  setArtifactCollapsed(false);
+  switchTab("results");
+}
+
 function applyCwdChange(dir: string): void {
+  resetUiForFreshContext();
   cwdPathEl.textContent = dir;
   cwdPathEl.title = dir;
-  window.orbit.prompt(`[system] Analysis directory changed to: ${dir}`);
+  chat.addInfoMessage(`<i>Switched analysis directory to <code>${dir.replace(/</g, "&lt;")}</code>.</i>`);
+  hasShownStartupWelcome = false;
 }
 
 cwdChangeBtn.addEventListener("click", async () => {
-  const dir = await window.orbit.selectDirectory();
-  if (dir) applyCwdChange(dir);
+  await window.orbit.selectDirectory();
 });
 
 // File > Open Analysis Directory menu triggers this
@@ -553,36 +577,13 @@ async function showCwdWelcome(): Promise<void> {
 }
 
 async function resetSession(): Promise<void> {
-  chat.clear();
-  artifacts.clear();
-  clearPendingMessage();
-  // Reset usage counters
-  sessionUsage.input = 0;
-  sessionUsage.output = 0;
-  sessionUsage.cacheRead = 0;
-  sessionUsage.cacheWrite = 0;
-  turnUsage.input = 0;
-  turnUsage.output = 0;
-  turnUsage.cacheRead = 0;
-  turnUsage.cacheWrite = 0;
-  renderUsage();
+  resetUiForFreshContext();
 
   await window.orbit.resetSession();
 
   // Fresh session has no greeting turn, so agent_end never fires.
   // Clear streaming state explicitly so the input is usable immediately.
-  streaming = false;
-  hasShownPlanOnce = false;
-  sendBtn.classList.remove("hidden");
-  abortBtn.classList.add("hidden");
-  statusBadge.textContent = "Ready";
-  statusBadge.className = "status-badge";
-
   chat.addInfoMessage("<i>Started fresh session.</i>");
-
-  // Open artifact pane on Notebook tab so the fresh session starts visible.
-  setArtifactCollapsed(false);
-  switchTab("results");
 
   // Reset startup-welcome flag so the onAgentStatus handler re-runs
   // the cwd welcome when the new agent reports "running".

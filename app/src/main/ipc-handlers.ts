@@ -65,9 +65,8 @@ export function registerIpcHandlers(agent: AgentManager): void {
       properties: ["openDirectory", "createDirectory"],
     });
     const dir = result.filePaths[0] ?? null;
-    if (dir) {
+    if (dir && agent.switchCwd(dir)) {
       log("directory changed to:", dir);
-      agent.setCwd(dir);
     }
     return dir;
   });
