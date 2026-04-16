@@ -134,6 +134,9 @@ const EXPECTED_TOOLS = [
   // Tool Version Resolution
   "analysis_resolve_versions",
 
+  // Assertions
+  "analysis_assert",
+
   // Shell-facing tools (structured widget emitters)
   "report_result",
   "analyze_plan_parameters",
