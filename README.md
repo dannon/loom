@@ -1,4 +1,4 @@
-# Loom
+# Loom & Orbit
 
 An AI research harness for [Galaxy](https://galaxyproject.org) bioinformatics, built on [Pi.dev](https://pi.dev).
 
