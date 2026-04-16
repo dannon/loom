@@ -404,6 +404,17 @@ describe("session restore precedence", () => {
 });
 
 describe("command definitions", () => {
+  const originalCwd = process.cwd();
+
+  beforeEach(() => {
+    resetState();
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    resetState();
+  });
+
   it("all commands have descriptions and handlers", () => {
     const { api, commands } = createFakeExtensionAPI();
     galaxyAnalystExtension(api);
@@ -415,6 +426,8 @@ describe("command definitions", () => {
   });
 
   it("review command delegates execution policy to the brain", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "loom-cmd-"));
+    process.chdir(tempDir);
     const { api, commands, tools, userMessages } = createFakeExtensionAPI();
     galaxyAnalystExtension(api);
 
@@ -440,6 +453,8 @@ describe("command definitions", () => {
   });
 
   it("execute command receives structured saved parameters", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "loom-cmd-"));
+    process.chdir(tempDir);
     const { api, commands, tools, userMessages } = createFakeExtensionAPI();
     galaxyAnalystExtension(api);
 
@@ -469,7 +484,20 @@ describe("command definitions", () => {
 });
 
 describe("tool execution", () => {
+  const originalCwd = process.cwd();
+
+  beforeEach(() => {
+    resetState();
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    resetState();
+  });
+
   it("analysis_plan_create executes and returns plan data", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "loom-tool-"));
+    process.chdir(tempDir);
     const { api, tools } = createFakeExtensionAPI();
     galaxyAnalystExtension(api);
 
@@ -497,6 +525,8 @@ describe("tool execution", () => {
   });
 
   it("analysis_plan_get returns plan details after creation", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "loom-tool-"));
+    process.chdir(tempDir);
     const { api, tools } = createFakeExtensionAPI();
     galaxyAnalystExtension(api);
 
@@ -523,6 +553,8 @@ describe("tool execution", () => {
   });
 
   it("analysis_set_phase rejects invalid lifecycle jumps", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "loom-tool-"));
+    process.chdir(tempDir);
     const { api, tools } = createFakeExtensionAPI();
     galaxyAnalystExtension(api);
 
@@ -557,6 +589,8 @@ describe("tool execution", () => {
   });
 
   it("full lifecycle: create plan → add step → update step → log decision", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "loom-tool-"));
+    process.chdir(tempDir);
     const { api, tools } = createFakeExtensionAPI();
     galaxyAnalystExtension(api);
 
