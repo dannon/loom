@@ -196,13 +196,83 @@ if (loomConfig.llm?.apiKey) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Configure Galaxy MCP based on executionMode
+// Load Galaxy credentials: consolidated config → legacy profiles → env vars
 //
-// Remote (default): register the Galaxy MCP server so the LLM can call
-// Galaxy tools directly. Reproducibility + large-scale compute lives here.
-// Local: strip Galaxy MCP entirely. The LLM has no Galaxy tools available,
-// only local run_command / plan management / notebook updates. This is what
-// the "Local" toggle in Orbit's masthead actually flips.
+// We resolve credentials BEFORE registering Galaxy MCP so we only start the
+// MCP server when credentials actually exist. No credentials = no MCP server
+// = no confusing "tool not found" errors on first run.
+// ─────────────────────────────────────────────────────────────────────────────
+
+let galaxyUrl = process.env.GALAXY_URL || null;
+let galaxyApiKey = process.env.GALAXY_API_KEY || null;
+
+if (!isInformationalCommand) {
+  // 1. Consolidated config
+  if (!galaxyUrl && loomConfig.galaxy?.active && loomConfig.galaxy.profiles) {
+    const active = loomConfig.galaxy.profiles[loomConfig.galaxy.active];
+    if (active) {
+      galaxyUrl = active.url;
+      galaxyApiKey = active.apiKey;
+    }
+  }
+
+  // 2. Legacy galaxy-profiles.json
+  if (!galaxyUrl) {
+    const profilesPath = join(agentDir, "galaxy-profiles.json");
+
+    if (!existsSync(profilesPath)) {
+      // One-time migration: if mcp.json has Galaxy credentials, create a profile
+      const mcpPath = join(agentDir, "mcp.json");
+      if (existsSync(mcpPath)) {
+        try {
+          const existing = JSON.parse(readFileSync(mcpPath, "utf-8"));
+          const galaxyEnv = existing.mcpServers?.galaxy?.env;
+          if (galaxyEnv?.GALAXY_URL && galaxyEnv?.GALAXY_API_KEY) {
+            const url = galaxyEnv.GALAXY_URL;
+            const apiKey = galaxyEnv.GALAXY_API_KEY;
+            let profileName;
+            try {
+              const parsed = new URL(url);
+              profileName = parsed.hostname.replace(/\./g, "-");
+              if (parsed.port) profileName += `-${parsed.port}`;
+            } catch {
+              profileName = "default";
+            }
+            mkdirSync(dirname(profilesPath), { recursive: true });
+            writeFileSync(profilesPath, JSON.stringify({
+              active: profileName,
+              profiles: { [profileName]: { url, apiKey } },
+            }, null, 2));
+          }
+        } catch {}
+      }
+    }
+
+    if (existsSync(profilesPath)) {
+      try {
+        const profiles = JSON.parse(readFileSync(profilesPath, "utf-8"));
+        const active = profiles.profiles?.[profiles.active];
+        if (active) {
+          galaxyUrl = active.url;
+          galaxyApiKey = active.apiKey;
+        }
+      } catch {}
+    }
+  }
+
+  // Publish to env so the extension can read them
+  if (galaxyUrl) process.env.GALAXY_URL = galaxyUrl;
+  if (galaxyApiKey) process.env.GALAXY_API_KEY = galaxyApiKey;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Configure Galaxy MCP based on executionMode + credential availability
+//
+// Remote (default) WITH credentials: register Galaxy MCP so the LLM can call
+// Galaxy tools directly.
+// Remote WITHOUT credentials: skip Galaxy MCP -- the greeting will tell the
+// user about /connect. No MCP server = no "tool not found" noise.
+// Local: strip Galaxy MCP entirely.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const executionMode = loomConfig.executionMode || "remote";
@@ -216,98 +286,25 @@ if (!isInformationalCommand) {
 
   mcpConfig.mcpServers = mcpConfig.mcpServers || {};
 
-  if (executionMode === "remote") {
-    if (!mcpConfig.mcpServers.galaxy) {
-      mcpConfig.mcpServers.galaxy = {
-        command: "uvx",
-        args: ["galaxy-mcp"],
-      };
-    }
-    // Expose Galaxy tools as direct (first-class) tools so the LLM can call
-    // them by name instead of going through the mcp() proxy gateway.
-    if (!mcpConfig.mcpServers.galaxy.directTools) {
-      mcpConfig.mcpServers.galaxy.directTools = true;
-    }
+  const hasGalaxyCredentials = galaxyUrl && galaxyApiKey;
+
+  if (executionMode === "remote" && hasGalaxyCredentials) {
+    mcpConfig.mcpServers.galaxy = {
+      command: "uvx",
+      args: ["galaxy-mcp"],
+      directTools: true,
+      env: {
+        GALAXY_URL: galaxyUrl,
+        GALAXY_API_KEY: galaxyApiKey,
+      },
+    };
   } else {
-    // Local mode: tear down Galaxy MCP if it was previously registered.
+    // Local mode or no credentials: tear down Galaxy MCP
     delete mcpConfig.mcpServers.galaxy;
   }
 
   mkdirSync(dirname(mcpConfigPath), { recursive: true });
   writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Load Galaxy credentials: consolidated config → legacy profiles → mcp.json
-// ─────────────────────────────────────────────────────────────────────────────
-
-let galaxyLoaded = false;
-
-// 1. Consolidated config
-if (!isInformationalCommand && loomConfig.galaxy?.active && loomConfig.galaxy.profiles) {
-  const active = loomConfig.galaxy.profiles[loomConfig.galaxy.active];
-  if (active) {
-    if (!process.env.GALAXY_URL) process.env.GALAXY_URL = active.url;
-    if (!process.env.GALAXY_API_KEY) process.env.GALAXY_API_KEY = active.apiKey;
-
-    if (mcpConfig.mcpServers?.galaxy) {
-      mcpConfig.mcpServers.galaxy.env = {
-        GALAXY_URL: active.url,
-        GALAXY_API_KEY: active.apiKey,
-      };
-      writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
-    }
-    galaxyLoaded = true;
-  }
-}
-
-// 2. Legacy galaxy-profiles.json (for setups that haven't migrated yet)
-if (!isInformationalCommand && !galaxyLoaded) {
-  const profilesPath = join(agentDir, "galaxy-profiles.json");
-
-  if (!existsSync(profilesPath)) {
-    // One-time migration: if mcp.json has Galaxy credentials, create a profile from them
-    const galaxyEnv = mcpConfig.mcpServers?.galaxy?.env;
-    if (galaxyEnv?.GALAXY_URL && galaxyEnv?.GALAXY_API_KEY) {
-      const url = galaxyEnv.GALAXY_URL;
-      const apiKey = galaxyEnv.GALAXY_API_KEY;
-      let profileName;
-      try {
-        const parsed = new URL(url);
-        profileName = parsed.hostname.replace(/\./g, "-");
-        if (parsed.port) profileName += `-${parsed.port}`;
-      } catch {
-        profileName = "default";
-      }
-      const profiles = {
-        active: profileName,
-        profiles: { [profileName]: { url, apiKey } },
-      };
-      mkdirSync(dirname(profilesPath), { recursive: true });
-      writeFileSync(profilesPath, JSON.stringify(profiles, null, 2));
-    }
-  }
-
-  if (existsSync(profilesPath)) {
-    try {
-      const profiles = JSON.parse(readFileSync(profilesPath, "utf-8"));
-      const active = profiles.profiles?.[profiles.active];
-      if (active) {
-        if (!process.env.GALAXY_URL) process.env.GALAXY_URL = active.url;
-        if (!process.env.GALAXY_API_KEY) process.env.GALAXY_API_KEY = active.apiKey;
-
-        if (mcpConfig.mcpServers?.galaxy) {
-          mcpConfig.mcpServers.galaxy.env = {
-            GALAXY_URL: active.url,
-            GALAXY_API_KEY: active.apiKey,
-          };
-          writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
-        }
-      }
-    } catch {
-      // Profiles file is corrupt — fall through, /connect still works
-    }
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
