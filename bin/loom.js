@@ -197,70 +197,21 @@ if (loomConfig.llm?.apiKey) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Load Galaxy credentials: consolidated config → legacy profiles → env vars
+// Load Galaxy credentials from ~/.loom/config.json (the single source of truth)
 //
-// We resolve credentials BEFORE registering Galaxy MCP so we only start the
-// MCP server when credentials actually exist. No credentials = no MCP server
-// = no confusing "tool not found" errors on first run.
+// Legacy files (galaxy-profiles.json, mcp.json env blocks) are handled by
+// the one-shot migration above. At runtime we only read from loom config.
 // ─────────────────────────────────────────────────────────────────────────────
 
 let galaxyUrl = process.env.GALAXY_URL || null;
 let galaxyApiKey = process.env.GALAXY_API_KEY || null;
 
-if (!isInformationalCommand) {
-  // 1. Consolidated config
-  if (!galaxyUrl && loomConfig.galaxy?.active && loomConfig.galaxy.profiles) {
-    const active = loomConfig.galaxy.profiles[loomConfig.galaxy.active];
-    if (active) {
-      galaxyUrl = active.url;
-      galaxyApiKey = active.apiKey;
-    }
+if (!isInformationalCommand && !galaxyUrl && loomConfig.galaxy?.active && loomConfig.galaxy.profiles) {
+  const active = loomConfig.galaxy.profiles[loomConfig.galaxy.active];
+  if (active) {
+    galaxyUrl = active.url;
+    galaxyApiKey = active.apiKey;
   }
-
-  // 2. Legacy galaxy-profiles.json
-  if (!galaxyUrl) {
-    const profilesPath = join(agentDir, "galaxy-profiles.json");
-
-    if (!existsSync(profilesPath)) {
-      // One-time migration: if mcp.json has Galaxy credentials, create a profile
-      const mcpPath = join(agentDir, "mcp.json");
-      if (existsSync(mcpPath)) {
-        try {
-          const existing = JSON.parse(readFileSync(mcpPath, "utf-8"));
-          const galaxyEnv = existing.mcpServers?.galaxy?.env;
-          if (galaxyEnv?.GALAXY_URL && galaxyEnv?.GALAXY_API_KEY) {
-            const url = galaxyEnv.GALAXY_URL;
-            const apiKey = galaxyEnv.GALAXY_API_KEY;
-            let profileName;
-            try {
-              const parsed = new URL(url);
-              profileName = parsed.hostname.replace(/\./g, "-");
-              if (parsed.port) profileName += `-${parsed.port}`;
-            } catch {
-              profileName = "default";
-            }
-            mkdirSync(dirname(profilesPath), { recursive: true });
-            writeFileSync(profilesPath, JSON.stringify({
-              active: profileName,
-              profiles: { [profileName]: { url, apiKey } },
-            }, null, 2));
-          }
-        } catch {}
-      }
-    }
-
-    if (existsSync(profilesPath)) {
-      try {
-        const profiles = JSON.parse(readFileSync(profilesPath, "utf-8"));
-        const active = profiles.profiles?.[profiles.active];
-        if (active) {
-          galaxyUrl = active.url;
-          galaxyApiKey = active.apiKey;
-        }
-      } catch {}
-    }
-  }
-
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
