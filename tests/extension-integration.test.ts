@@ -40,6 +40,7 @@ function createFakeExtensionAPI() {
   const handlers = new Map<string, Function[]>();
   const shortcuts = new Map<string, unknown>();
   const entries: unknown[] = [];
+  const userMessages: string[] = [];
 
   const api: ExtensionAPI = {
     on(event: string, handler: Function) {
@@ -60,7 +61,7 @@ function createFakeExtensionAPI() {
       entries.push({ type, data });
     },
     sendMessage() {},
-    sendUserMessage() {},
+    sendUserMessage(message: string) { userMessages.push(message); },
     events: {
       on() {},
       emit() {},
@@ -72,7 +73,7 @@ function createFakeExtensionAPI() {
     registerProvider() {},
   } as unknown as ExtensionAPI;
 
-  return { api, tools, commands, handlers, shortcuts, entries };
+  return { api, tools, commands, handlers, shortcuts, entries, userMessages };
 }
 
 const EXPECTED_TOOLS = [
@@ -141,6 +142,10 @@ const EXPECTED_COMMANDS = [
   "connect",
   "status",
   "notebook",
+  "review",
+  "test",
+  "execute",
+  "run",
 ];
 
 const EXPECTED_EVENTS = [
@@ -407,6 +412,59 @@ describe("command definitions", () => {
       expect(cmd.description, `Command /${name} should have a description`).toBeTruthy();
       expect(typeof cmd.handler, `Command /${name} should have a handler function`).toBe("function");
     }
+  });
+
+  it("review command delegates execution policy to the brain", async () => {
+    const { api, commands, tools, userMessages } = createFakeExtensionAPI();
+    galaxyAnalystExtension(api);
+
+    await tools.get("analysis_plan_create")!.execute(
+      "call-1",
+      {
+        title: "Review Test",
+        researchQuestion: "Q",
+        dataDescription: "D",
+        expectedOutcomes: [],
+        constraints: [],
+      },
+      undefined, undefined, {} as any,
+    );
+
+    await commands.get("review")!.handler("", {
+      ui: { notify() {} },
+    });
+
+    expect(userMessages).toHaveLength(1);
+    expect(userMessages[0]).toContain("The user typed /review.");
+    expect(userMessages[0]).toContain("call analyze_plan_parameters");
+  });
+
+  it("execute command receives structured saved parameters", async () => {
+    const { api, commands, tools, userMessages } = createFakeExtensionAPI();
+    galaxyAnalystExtension(api);
+
+    await tools.get("analysis_plan_create")!.execute(
+      "call-1",
+      {
+        title: "Execute Test",
+        researchQuestion: "Q",
+        dataDescription: "D",
+        expectedOutcomes: [],
+        constraints: [],
+      },
+      undefined, undefined, {} as any,
+    );
+
+    await commands.get("execute")!.handler(JSON.stringify({
+      savedParameters: { organism: "hg38", fdr: 0.05 },
+    }), {
+      ui: { notify() {} },
+    });
+
+    expect(userMessages).toHaveLength(1);
+    expect(userMessages[0]).toContain("The user typed /execute.");
+    expect(userMessages[0]).toContain("\"organism\": \"hg38\"");
+    expect(userMessages[0]).toContain("\"fdr\": 0.05");
   });
 });
 

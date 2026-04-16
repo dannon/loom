@@ -11,6 +11,7 @@ import { registerPlanTools } from "./tools";
 import { setupContextInjection } from "./context";
 import { setupUIBridge } from "./ui-bridge";
 import { registerSessionLifecycle } from "./session-bootstrap";
+import { registerExecutionCommands } from "./execution-commands";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -41,6 +42,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // Register custom tools for plan management
   // ─────────────────────────────────────────────────────────────────────────────
   registerPlanTools(pi);
+  registerExecutionCommands(pi);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Set up context injection

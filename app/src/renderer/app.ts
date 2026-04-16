@@ -1145,8 +1145,7 @@ paramsSaveBtn.addEventListener("click", () => {
 });
 
 function runReviewParams(): void {
-  const text = artifacts.getPlanText();
-  if (!text) {
+  if (!artifacts.getPlanText()) {
     chat.addErrorMessage("No plan to review yet.");
     return;
   }
@@ -1155,19 +1154,11 @@ function runReviewParams(): void {
   statusBadge.textContent = "analyzing parameters…";
   statusBadge.className = "status-badge thinking";
   shell.append("▸ Analyzing plan for critical parameters…", "info");
-  window.orbit.prompt(
-    `The user typed /review. Analyze every tool in the current plan, ` +
-    `identify the CRITICAL biological parameters (hide thread counts, paths, flags, verbose), ` +
-    `and call analyze_plan_parameters with a consolidated form spec grouped by biology concept ` +
-    `(not by tool). Include biologist-friendly help text for every parameter. ` +
-    `Use defaults appropriate for the organism/analysis type. ` +
-    `Plan:\n${text}`
-  );
+  window.orbit.prompt("/review");
 }
 
 function runTestExecution(): void {
-  const text = artifacts.getPlanText();
-  if (!text) {
+  if (!artifacts.getPlanText()) {
     chat.addErrorMessage("No plan to test yet.");
     return;
   }
@@ -1175,25 +1166,11 @@ function runTestExecution(): void {
   artifacts.clearResults();
   chat.addUserMessage("/test");
   artifacts.setParametersDisabled(true);
-  window.orbit.prompt(
-    `The user typed /test. Configured parameters:\n` +
-    `${JSON.stringify(saved, null, 2)}\n\n` +
-    `Sequence of calls (in order):\n` +
-    `1. reset_plan_steps  — clear stale state\n` +
-    `2. generate_test_data  — subsample real files if they exist, otherwise synthesize\n` +
-    `3. For each step: update_step(in_progress, with description reflecting test mode) → ` +
-    `run_command → update_step(completed, with result) → report_result\n\n` +
-    `In test mode, update each step's description to reflect the smaller scope ` +
-    `(e.g., 'Downloading 1 test sample' not '270 samples'). ` +
-    `Tag results as 'TEST RUN' in the markdown. ` +
-    `Do NOT call clear_test_mode — leave test mode on so the user can review. ` +
-    `NO chat narration — let the DAG and Notebook tab show progress.\n\nPlan:\n${text}`
-  );
+  window.orbit.prompt(`/test ${JSON.stringify({ savedParameters: saved })}`);
 }
 
 function runRealExecution(): void {
-  const text = artifacts.getPlanText();
-  if (!text) {
+  if (!artifacts.getPlanText()) {
     chat.addErrorMessage("No plan to execute yet.");
     return;
   }
@@ -1201,15 +1178,7 @@ function runRealExecution(): void {
   artifacts.clearResults();
   chat.addUserMessage("/execute");
   artifacts.setParametersDisabled(true);
-  window.orbit.prompt(
-    `The user typed /execute. Configured parameters:\n` +
-    `${JSON.stringify(saved, null, 2)}\n\n` +
-    `Sequence of calls (in order):\n` +
-    `1. If test mode is active, clear_test_mode  — restore real paths\n` +
-    `2. reset_plan_steps  — clear stale state from any previous run\n` +
-    `3. For each step: update_step(in_progress) → run_command → update_step(completed)\n\n` +
-    `NO chat narration — let the DAG and Notebook tab show progress.\n\nPlan:\n${text}`
-  );
+  window.orbit.prompt(`/execute ${JSON.stringify({ savedParameters: saved })}`);
 }
 
 // ── Preferences ──────────────────────────────────────────────────────────────
