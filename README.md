@@ -18,6 +18,9 @@ Future shells -- a Galaxy-embedded web UI, a hosted server mode, anything else -
 
 ## Architecture
 
+Engineer-facing architecture reference: [docs/architecture.md](docs/architecture.md)
+Repo conventions and developer workflow: [CLAUDE.md](CLAUDE.md)
+
 ```
 Brain (Loom)                                  Shells
 ────────────                                  ──────
