@@ -144,6 +144,7 @@ ${buildExecutionModeContext()}
       workflowContext += '- Use `workflow_to_plan` to add Galaxy workflows as plan steps\n';
       workflowContext += '- Use `workflow_invocation_link` after invoking a workflow via Galaxy MCP\n';
       workflowContext += '- Use `workflow_invocation_check` to poll invocation status\n';
+      workflowContext += '- Use `workflow_set_overrides` to record per-step parameter deviations from defaults. When invoking via galaxy-mcp `invoke_workflow`, pass the step\'s `parameterOverrides` as the `params` argument so the deviation actually flows to Galaxy.\n';
       if (activeInvocations.length > 0) {
         workflowContext += `\n**${activeInvocations.length} active workflow invocation(s)** — check status with \`workflow_invocation_check\`\n`;
       }

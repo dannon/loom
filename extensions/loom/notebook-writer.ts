@@ -260,6 +260,9 @@ export function generateNotebook(plan: AnalysisPlan): string {
     if (step.result && step.result.qcPassed !== null && step.result.qcPassed !== undefined) {
       lines.push(`  qc_passed: ${step.result.qcPassed}`);
     }
+    if (step.parameterOverrides && Object.keys(step.parameterOverrides).length > 0) {
+      lines.push(`  parameter_overrides: '${escapeJsonInYaml(step.parameterOverrides)}'`);
+    }
 
     lines.push("```");
     lines.push("");
@@ -267,6 +270,16 @@ export function generateNotebook(plan: AnalysisPlan): string {
     if (step.workflowStructure) {
       lines.push("");
       lines.push(`**Workflow pipeline**: ${step.workflowStructure.toolNames.join(' -> ')}`);
+    }
+    if (step.parameterOverrides && Object.keys(step.parameterOverrides).length > 0) {
+      lines.push("");
+      lines.push("**Parameter overrides (deviations from workflow defaults):**");
+      lines.push("");
+      lines.push("| Key | Override value |");
+      lines.push("|-----|----------------|");
+      for (const [k, v] of Object.entries(step.parameterOverrides)) {
+        lines.push(`| ${mdTableEscape(k)} | ${mdTableEscape(stringify(v))} |`);
+      }
     }
     lines.push("");
 

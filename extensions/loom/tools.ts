@@ -60,6 +60,8 @@ import {
   resolveExpectedFromPlan,
   // Reported results
   addReportedResult,
+  // Parameter overrides
+  setStepParameterOverrides,
 } from "./state";
 import type {
   StepStatus,
@@ -2828,6 +2830,56 @@ analyses in Galaxy.`,
     renderResult: (result) => {
       const d = result.details as { verdict?: string; kind?: string } | undefined;
       return new Text(`✅ assertion ${d?.kind} → ${d?.verdict}`);
+    },
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Per-step workflow parameter overrides
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  pi.registerTool({
+    name: "workflow_set_overrides",
+    label: "Set workflow parameter overrides",
+    description:
+      "Record per-invocation parameter deviations from the workflow defaults on a " +
+      "plan step. Use this when tuning an existing workflow for a specific locus, sample, " +
+      "or sensitivity setting. The overrides are stored on the step and passed to " +
+      "galaxy-mcp invoke_workflow as its `params` argument on subsequent runs.",
+    parameters: Type.Object({
+      stepId: Type.String({ description: "Plan step id to attach overrides to" }),
+      overrides: Type.Unknown({
+        description:
+          "Object mapping workflow step id or tool param name to the override value. " +
+          "Nested values are preserved verbatim.",
+      }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      if (!getCurrentPlan()) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: "No active plan" }) }],
+          details: { updated: 0 },
+        };
+      }
+
+      try {
+        const overrides = params.overrides as Record<string, unknown>;
+        const merged = setStepParameterOverrides(params.stepId, overrides);
+        await syncToNotebook('frontmatter', { updated: new Date().toISOString() });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ success: true, overrides: merged }) }],
+          details: { stepId: params.stepId, count: Object.keys(merged).length },
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: msg }) }],
+          details: { error: msg },
+        };
+      }
+    },
+    renderResult: (result) => {
+      const d = result.details as { stepId?: string; count?: number } | undefined;
+      return new Text(`⚙️ overrides set on step ${d?.stepId} (${d?.count} key(s))`);
     },
   });
 
