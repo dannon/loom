@@ -5,8 +5,8 @@ import type { TeamSpec } from "../extensions/loom/teams/types";
 const ok = (): TeamSpec => ({
   description: "find relevant RNA-seq papers",
   roles: [
-    { name: "Finder",    system_prompt: "find papers",    tools_read: [] },
-    { name: "Validator", system_prompt: "score relevance", tools_read: [] },
+    { name: "Finder",    system_prompt: "find papers" },
+    { name: "Validator", system_prompt: "score relevance" },
   ],
 });
 
@@ -23,13 +23,13 @@ describe("validateTeamSpec", () => {
   it("rejects more than 2 roles (MVP)", () => {
     const bad: TeamSpec = {
       ...ok(),
-      roles: [...ok().roles, { name: "Extra", system_prompt: "x", tools_read: [] }],
+      roles: [...ok().roles, { name: "Extra", system_prompt: "x" }],
     };
     expect(() => validateTeamSpec(bad)).toThrow(/MVP/);
   });
 
   it("rejects duplicate role names", () => {
-    const r = { name: "Same", system_prompt: "x", tools_read: [] };
+    const r = { name: "Same", system_prompt: "x" };
     const bad: TeamSpec = { ...ok(), roles: [r, { ...r }] };
     expect(() => validateTeamSpec(bad)).toThrow(/unique/);
   });
@@ -37,7 +37,7 @@ describe("validateTeamSpec", () => {
   it("rejects empty role name", () => {
     const bad: TeamSpec = {
       ...ok(),
-      roles: [{ name: "", system_prompt: "x", tools_read: [] }, ok().roles[1]],
+      roles: [{ name: "", system_prompt: "x" }, ok().roles[1]],
     };
     expect(() => validateTeamSpec(bad)).toThrow(/name/);
   });

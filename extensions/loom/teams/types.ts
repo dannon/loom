@@ -13,8 +13,6 @@ export interface TeamSpec {
 export interface RoleSpec {
   name: string;
   system_prompt: string;
-  tools_read: string[];
-  tools_write?: string[];
   model?: string;
 }
 
@@ -33,26 +31,27 @@ export interface TeamTurn {
   round: number;
   role: string;
   content: string;
-  tool_calls?: { name: string; args: unknown; result: unknown }[];
   approved?: boolean;
 }
 
 /**
  * Side-effect surface the dispatcher needs.
- * Injected so the dispatcher is testable without a real Pi runtime.
+ * Injected so the dispatcher is testable without a real LLM runtime.
+ *
+ * MVP: roles are pure-reasoning — each turn is a single LLM call with no
+ * tool access. Main agent pre-gathers any external data and includes it
+ * in TeamSpec.description before dispatching.
  */
 export interface DispatchDeps {
   runRoleTurn: (
     role: RoleSpec,
     systemPreamble: string,
     userMessage: string,
-    tools: unknown[],
     signal: AbortSignal,
   ) => Promise<RoleTurnResult>;
 }
 
 export interface RoleTurnResult {
   content: string;
-  tool_calls?: { name: string; args: unknown; result: unknown }[];
   usage: { input_tokens: number; output_tokens: number };
 }
