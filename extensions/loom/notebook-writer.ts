@@ -23,6 +23,7 @@ import type {
   BiologicalFinding,
   WorkflowStructure,
   Assertion,
+  ReportedResult,
 } from "./types";
 
 /**
@@ -267,6 +268,41 @@ export function generateNotebook(plan: AnalysisPlan): string {
       lines.push("");
       lines.push(`**Workflow pipeline**: ${step.workflowStructure.toolNames.join(' -> ')}`);
     }
+    lines.push("");
+
+    // Result blocks attached to this step (by id or name)
+    const stepResults = (plan.results || []).filter(
+      (r) => r.stepId === step.id || (r.stepName && r.stepName === step.name)
+    );
+    if (stepResults.length > 0) {
+      lines.push("#### Results");
+      lines.push("");
+      for (const r of stepResults) {
+        renderReportedResult(lines, r);
+      }
+    }
+  }
+
+  // Plan-level Results section for results not tied to any step.
+  const attachedIds = new Set(
+    plan.steps.flatMap((s) => [s.id, s.name].filter(Boolean))
+  );
+  const orphanResults = (plan.results || []).filter(
+    (r) => !((r.stepId && attachedIds.has(r.stepId)) || (r.stepName && attachedIds.has(r.stepName)))
+  );
+  if (orphanResults.length > 0) {
+    lines.push("## Results");
+    lines.push("");
+    for (const r of orphanResults) {
+      renderReportedResult(lines, r);
+    }
+  }
+
+  // Authoritative results block for the parser.
+  if (plan.results && plan.results.length > 0) {
+    lines.push("```yaml");
+    lines.push(`results_json: '${escapeJsonInYaml(plan.results)}'`);
+    lines.push("```");
     lines.push("");
   }
 
@@ -615,6 +651,35 @@ function stringify(value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   return JSON.stringify(value);
+}
+
+/**
+ * Render a ReportedResult as human-readable markdown for display below its step.
+ * The authoritative round-trip data lives in the results_json block emitted
+ * elsewhere, so this can be simple and reader-friendly.
+ */
+function renderReportedResult(lines: string[], r: ReportedResult): void {
+  const heading = r.caption ? `**${r.caption}**` : `**${r.id}**`;
+  lines.push(heading);
+  lines.push("");
+
+  if (r.type === "markdown" && r.content) {
+    lines.push(r.content);
+  } else if (r.type === "table" && r.headers && r.rows) {
+    lines.push(`| ${r.headers.join(" | ")} |`);
+    lines.push(`|${r.headers.map(() => "---").join("|")}|`);
+    for (const row of r.rows) {
+      lines.push(`| ${row.join(" | ")} |`);
+    }
+  } else if (r.type === "image" && r.path) {
+    lines.push(`![${r.caption || r.id}](${r.path})`);
+  } else if (r.type === "file" && r.path) {
+    lines.push(`[${r.caption || r.id}](${r.path})`);
+  }
+
+  lines.push("");
+  lines.push(`*Reported: ${r.reportedAt}*`);
+  lines.push("");
 }
 
 /**
