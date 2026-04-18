@@ -115,12 +115,25 @@ export class ChatPanel {
     this.scrollToBottom();
   }
 
-  updateToolCard(id: string, status: "done" | "error", result?: string): void {
+  updateToolCard(
+    id: string,
+    status: "done" | "error",
+    result?: string,
+    details?: TeamDispatchDetails | { kind?: string; [k: string]: unknown },
+  ): void {
     const card = this.toolCards.get(id);
     if (!card) return;
 
     const dot = card.querySelector(".tool-status")!;
     dot.className = `tool-status ${status}`;
+
+    // Specialized branch: team_dispatch details render as a collapsible card.
+    if (details && (details as { kind?: string }).kind === "team_dispatch") {
+      const body = card.querySelector(".tool-card-body")!;
+      body.textContent = "";
+      body.appendChild(renderTeamDispatchCard(details as TeamDispatchDetails));
+      return;
+    }
 
     if (result) {
       const body = card.querySelector(".tool-card-body")!;
@@ -179,4 +192,46 @@ function escapeHtml(text: string): string {
   const el = document.createElement("span");
   el.textContent = text;
   return el.innerHTML;
+}
+
+interface TeamDispatchDetails {
+  kind?: string;
+  spec?: { description?: string; roles?: Array<{ name: string; model?: string }> };
+  turns?: Array<{ round: number; role: string; content?: string; approved?: boolean }>;
+  summary?: string;
+}
+
+function renderTeamDispatchCard(details: TeamDispatchDetails): HTMLElement {
+  const { spec, turns = [], summary } = details;
+  const wrapper = document.createElement("div");
+  wrapper.className = "team-dispatch-card";
+
+  const header = document.createElement("button");
+  header.className = "team-dispatch-header";
+  header.type = "button";
+  const roleLabels = (spec?.roles ?? []).map((r) => r.name).join(" × ");
+  header.textContent = `${roleLabels || "Team"} — ${summary ?? `${turns.length} turn(s)`}`;
+
+  const body = document.createElement("div");
+  body.className = "team-dispatch-body hidden";
+
+  for (const t of turns) {
+    const row = document.createElement("div");
+    row.className = "team-turn";
+    const meta = document.createElement("div");
+    meta.className = "team-turn-meta";
+    const approvedMark = t.approved === true ? " ✓" : t.approved === false ? " ✗" : "";
+    meta.textContent = `Round ${t.round} — ${t.role}${approvedMark}`;
+    const content = document.createElement("pre");
+    content.className = "team-turn-content";
+    content.textContent = t.content ?? "";
+    row.appendChild(meta);
+    row.appendChild(content);
+    body.appendChild(row);
+  }
+
+  header.addEventListener("click", () => body.classList.toggle("hidden"));
+  wrapper.appendChild(header);
+  wrapper.appendChild(body);
+  return wrapper;
 }
