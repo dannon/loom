@@ -189,8 +189,7 @@ export function matchSketchesForPlan(
     }
 
     const tagHits = (frontmatter.tags || []).filter((tag) => {
-      const lower = tag.toLowerCase();
-      return planTags.has(lower) || planKeywords.has(lower);
+      return planTags.has(tag.toLowerCase()) || tagMatches(tag, planKeywords);
     });
     if (tagHits.length > 0) {
       score += tagHits.length * 2;
@@ -206,7 +205,7 @@ export function matchSketchesForPlan(
       reasons.push(`${nameHits.length} name match(es)`);
     }
 
-    if (frontmatter.domain && planKeywords.has(frontmatter.domain.toLowerCase())) {
+    if (frontmatter.domain && tagMatches(frontmatter.domain, planKeywords)) {
       score += 2;
       reasons.push("domain match");
     }
@@ -323,10 +322,27 @@ const STOP_WORDS = new Set([
 ]);
 
 function tokenize(text: string): string[] {
+  // Unicode-aware: split on anything that isn't a letter or number in any
+  // script, so "RNA-seq" tokenizes as ["rna", "seq"] and non-ASCII sketch
+  // metadata (organism names, etc.) survives.
   return text
     .toLowerCase()
-    .split(/[^a-z0-9]+/)
+    .split(/[^\p{L}\p{N}]+/u)
     .filter((t) => t.length > 2 && !STOP_WORDS.has(t));
+}
+
+/**
+ * Match a sketch tag/domain against the plan keyword bag. Tries the whole
+ * lowercased string first (so `single-cell` can match literal `single-cell`
+ * in a plan that hand-wrote the hyphen), then falls back to any token from
+ * the tag matching a keyword (so `rna-seq` still matches a plan that typed
+ * "RNA seq" or "RNA Seq analysis").
+ */
+function tagMatches(tagOrDomain: string, keywords: Set<string>): boolean {
+  const lower = tagOrDomain.toLowerCase();
+  if (keywords.has(lower)) return true;
+  const tokens = tokenize(tagOrDomain);
+  return tokens.some((t) => keywords.has(t));
 }
 
 /**

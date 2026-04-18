@@ -370,6 +370,34 @@ describe("analysis_assert upgrades a seeded draft instead of duplicating it", ()
     expect(finalized.stepId).toBe(stepId);
   });
 
+  it("carries expectedFromPlan metadata through an in-place draft upgrade", () => {
+    makeAlphaGenomePlan();
+    root = makeCorpus({ "alphagenome/SKETCH.md": ALPHAGENOME_SKETCH });
+    seedAssertionsFromSketchCorpus({ corpusPath: root });
+
+    const finalized = recordAssertion({
+      claim: "Top ISM position scored above 3.0 for validated loci",
+      kind: "categorical",
+      expected: "above-3",
+      observed: "above-3",
+      expectedFromPlan: {
+        planId: "prior-run",
+        stepId: "5",
+        field: "result.summary",
+      },
+    });
+
+    // Upgraded in place, no duplicate row, expectedFromPlan landed on the draft.
+    expect(
+      getCurrentPlan()!.assertions!.filter((a) => a.claim === finalized.claim),
+    ).toHaveLength(1);
+    expect(finalized.expectedFromPlan).toEqual({
+      planId: "prior-run",
+      stepId: "5",
+      field: "result.summary",
+    });
+  });
+
   it("does not clobber a finalized assertion that happens to share claim text", () => {
     makeAlphaGenomePlan();
     const finalized = recordAssertion({

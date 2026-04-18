@@ -343,6 +343,64 @@ describe("sketch matching against a plan", () => {
     expect(matchSketchesForPlan(getCurrentPlan()!, corpus)).toEqual([]);
   });
 
+  it("matches hyphenated sketch tags against plan prose with or without the hyphen", () => {
+    const RNA_SEQ_SKETCH = parseSketch(
+      `---
+name: bulk-rnaseq
+tags:
+  - rna-seq
+  - deseq2
+expected_output:
+  - assertions:
+      - DE gene count within tolerance
+---
+
+Body.
+`,
+    )!;
+
+    createPlan({
+      title: "RNA Seq Pasilla analysis",
+      researchQuestion: "Differential expression between treated and untreated",
+      dataDescription: "Paired-end RNA seq reads",
+      expectedOutcomes: [],
+      constraints: [],
+    });
+
+    const corpus = [{ ...RNA_SEQ_SKETCH, filePath: "/tmp/rna/SKETCH.md" }];
+    const matches = matchSketchesForPlan(getCurrentPlan()!, corpus);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].reason).toContain("tag match");
+  });
+
+  it("tokenizes non-ASCII plan prose and sketch names", () => {
+    const UNICODE_SKETCH = parseSketch(
+      `---
+name: mycobactérium-pipeline
+tags:
+  - mycobactérium
+expected_output:
+  - assertions:
+      - Lineage call agrees with TB-Profiler
+---
+
+Body.
+`,
+    )!;
+
+    createPlan({
+      title: "Mycobactérium tuberculosis variant calling",
+      researchQuestion: "Identify resistance mutations in Mycobactérium samples",
+      dataDescription: "Short-read sequencing",
+      expectedOutcomes: [],
+      constraints: [],
+    });
+
+    const corpus = [{ ...UNICODE_SKETCH, filePath: "/tmp/u/SKETCH.md" }];
+    const matches = matchSketchesForPlan(getCurrentPlan()!, corpus);
+    expect(matches.length).toBeGreaterThan(0);
+  });
+
   it("does not match on short shared tool-id prefixes (below length threshold)", () => {
     // Concoct a corpus entry whose tool prefix is too short to be distinctive.
     const SHORT_PREFIX_SKETCH = parseSketch(
@@ -399,5 +457,18 @@ describe("renderSketchForPrompt", () => {
     expect(rendered).toContain("2 tool match(es)");
     expect(rendered).toContain("Top ISM position scored above 3.0");
     expect(rendered).toContain("Run ISM scanner");
+  });
+
+  it("tells the agent how to pre-populate drafts when the sketch has assertions", () => {
+    const parsed = parseSketch(ALPHAGENOME_SKETCH)!;
+    const rendered = renderSketchForPrompt({
+      ...parsed,
+      filePath: "/tmp/SKETCH.md",
+      score: 20,
+      reason: "2 tool match(es)",
+    });
+
+    expect(rendered).toContain("analysis_assertions_from_sketch");
+    expect(rendered).toContain("analysis_assert");
   });
 });
