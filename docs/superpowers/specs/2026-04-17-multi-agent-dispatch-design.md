@@ -125,7 +125,7 @@ return {converged: false, rounds: max_rounds, final_output: current_proposal, ..
 
 ### 5.1 `runAgent(role, user_message)` — direct LLM call
 
-Makes one raw LLM call via `pi-ai`'s `streamSimple` (not an `Agent` — no tool loop):
+Makes one raw LLM call via `pi-ai`'s `completeSimple` (synchronous sibling of `streamSimple` — returns the final `AssistantMessage` once; no streaming consumer needed since each turn's content is used atomically before the next turn starts):
 
 - System prompt: `role.system_prompt` prepended with a universal preamble. The preamble states the team context ("You are one role in a two-agent team collaborating on: ...") and, for the critic role, requires the response to end with a JSON line of shape `{"approved": bool, "critique": string}`.
 - Model resolution: `role.model ?? spec.model ?? ctx.model`; resolved via `ctx.modelRegistry`.
@@ -141,7 +141,7 @@ Scans `text` for the last well-formed JSON object matching `{approved: bool, cri
 
 ### 5.3 Concurrency model
 
-The critic loop is strictly sequential (critic depends on proposer's output; next proposer depends on critic's critique). Each turn is a single `streamSimple` call; no tools, no inner agent loop.
+The critic loop is strictly sequential (critic depends on proposer's output; next proposer depends on critic's critique). Each turn is a single `completeSimple` call; no tools, no inner agent loop.
 
 ## 6. Tool scoping — removed in MVP (see §12)
 
@@ -169,7 +169,7 @@ Final update on completion has summary `"Team converged in ${rounds} rounds"` or
 The renderer (`app/src/renderer/chat/...`) detects `details.kind === "team_dispatch"` and renders:
 
 - **Collapsed:** team label (e.g. `Finder × Validator`), outcome badge (✓ / ⚠), round count.
-- **Expanded:** one row per `TeamTurn` — role label, content, approval indicator on critic turns; any tool calls the role made are nested under their turn using the existing tool-card component.
+- **Expanded:** one row per `TeamTurn` — role label, content, approval indicator on critic turns. (Post-tools rollout — see §12 — will also nest each role's tool calls under its turn using the existing tool-card component; MVP roles make none.)
 
 User's existing "stop" button aborts the main agent's tool, which cascades `AbortSignal` to in-flight team agents.
 
@@ -246,6 +246,6 @@ The parts of the design that need to come back with tools are:
 - A `readonly` metadata field on every Loom tool (or a curated side-list like the one we briefly had).
 - A `filterToolsForRole` helper that enforces the read-only constraint at dispatch time.
 - `TeamTurn.tool_calls` to record tool invocations in the transcript.
-- A Pi-Agent-based `runRoleTurn` (replaces the MVP's `streamSimple` call).
+- A Pi-Agent-based `runRoleTurn` (replaces the MVP's `completeSimple` call).
 
 The dispatcher, validator, critic-parser, and UI integration all stay as-is.
