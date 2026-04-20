@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"sess-basic","timestamp":"2026-04-01T10:00:00Z","cwd":"/tmp/proj"}
+{"type":"message","id":"e1","parentId":null,"timestamp":"2026-04-01T10:00:05Z","message":{"role":"user","content":[{"type":"text","text":"hello from fixture"}]}}
+{"type":"message","id":"e2","parentId":"e1","timestamp":"2026-04-01T10:00:10Z","message":{"role":"assistant","content":[{"type":"text","text":"hi! this is the assistant reply"}]}}
+{"type":"custom","id":"e3","parentId":"e2","timestamp":"2026-04-01T10:00:20Z","customType":"galaxy_analyst_plan","data":{"id":"plan-1","title":"Fixture Plan","notebookPath":"/tmp/proj/notebook.md"}}
