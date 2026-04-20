@@ -1,4 +1,8 @@
 import { marked } from "marked";
+import {
+  TEAM_DISPATCH_KIND,
+  type TeamDispatchDetails,
+} from "../../../../shared/team-dispatch-contract.js";
 
 export class ChatPanel {
   private container: HTMLElement;
@@ -128,7 +132,7 @@ export class ChatPanel {
     dot.className = `tool-status ${status}`;
 
     // Specialized branch: team_dispatch details render as a collapsible card.
-    if (details && (details as { kind?: string }).kind === "team_dispatch") {
+    if (details && (details as { kind?: string }).kind === TEAM_DISPATCH_KIND) {
       const body = card.querySelector(".tool-card-body")!;
       body.textContent = "";
       body.appendChild(renderTeamDispatchCard(details as TeamDispatchDetails));
@@ -192,13 +196,6 @@ function escapeHtml(text: string): string {
   const el = document.createElement("span");
   el.textContent = text;
   return el.innerHTML;
-}
-
-interface TeamDispatchDetails {
-  kind?: string;
-  spec?: { description?: string; roles?: Array<{ name: string; model?: string }> };
-  turns?: Array<{ round: number; role: string; content?: string; approved?: boolean }>;
-  summary?: string;
 }
 
 function renderTeamDispatchCard(details: TeamDispatchDetails): HTMLElement {

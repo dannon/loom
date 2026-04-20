@@ -14,6 +14,8 @@ import type {
   TeamSpec,
   RoleSpec,
 } from "./types";
+import { TEAM_DISPATCH_KIND } from "../../../shared/team-dispatch-contract.js";
+import type { TeamDispatchDetails } from "../../../shared/team-dispatch-contract.js";
 
 const RoleSchema = Type.Object({
   name: Type.String({ minLength: 1 }),
@@ -92,17 +94,18 @@ export function registerTeamTools(pi: ExtensionAPI): void {
       // 3. Drive the loop; stream progress to the tool card.
       const abort = signal ?? new AbortController().signal;
       const result = await runTeamDispatch(spec, deps, abort, (snapshot) => {
+        const details: TeamDispatchDetails = {
+          kind: TEAM_DISPATCH_KIND,
+          spec: {
+            description: spec.description,
+            roles: spec.roles.map((r) => ({ name: r.name, model: r.model ?? spec.model })),
+          },
+          turns: snapshot.turns,
+          summary: `Round ${snapshot.round}/${snapshot.max_rounds} — ${snapshot.current_role} responding…`,
+        };
         onUpdate?.({
           content: [],
-          details: {
-            kind: "team_dispatch",
-            spec: {
-              description: spec.description,
-              roles: spec.roles.map((r) => ({ name: r.name, model: r.model ?? spec.model })),
-            },
-            turns: snapshot.turns,
-            summary: `Round ${snapshot.round}/${snapshot.max_rounds} — ${snapshot.current_role} responding…`,
-          },
+          details,
         });
       });
 
@@ -117,17 +120,18 @@ export function registerTeamTools(pi: ExtensionAPI): void {
               ? `Team errored after ${result.rounds} round${result.rounds === 1 ? "" : "s"}: ${result.error}`
               : `Team did not converge (${result.rounds}/${spec.max_rounds ?? 5} rounds — best-so-far returned)`;
 
+      const finalDetails: TeamDispatchDetails = {
+        kind: TEAM_DISPATCH_KIND,
+        spec: {
+          description: spec.description,
+          roles: spec.roles.map((r) => ({ name: r.name, model: r.model ?? spec.model })),
+        },
+        turns: result.transcript,
+        summary: finalSummary,
+      };
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-        details: {
-          kind: "team_dispatch",
-          spec: {
-            description: spec.description,
-            roles: spec.roles.map((r) => ({ name: r.name, model: r.model ?? spec.model })),
-          },
-          turns: result.transcript,
-          summary: finalSummary,
-        },
+        details: finalDetails,
       };
     },
     renderResult: (result) => {
@@ -170,12 +174,13 @@ function extractText(msg: { content: Array<{ type: string; text?: string }> }): 
 
 function errorResult(err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
+  const details: TeamDispatchDetails = {
+    kind: TEAM_DISPATCH_KIND,
+    error: message,
+    summary: `team_dispatch failed: ${message}`,
+  };
   return {
     content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: message }, null, 2) }],
-    details: {
-      kind: "team_dispatch",
-      error: message,
-      summary: `team_dispatch failed: ${message}`,
-    },
+    details,
   };
 }
