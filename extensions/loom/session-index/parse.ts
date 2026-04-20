@@ -32,7 +32,12 @@ export interface ParseResult {
   notebookPath: string | null;
   /** Latest customType=session_info name, if any. */
   sessionName: string | null;
-  /** Byte offset (exclusive) of the last parsed line in the file. */
+  /**
+   * Byte offset (exclusive) of the last newline-terminated line parsed.
+   * Trailing bytes after the last newline are not consumed -- the next
+   * scan will re-read them, so a torn read while Pi is actively writing
+   * doesn't silently drop the partial line.
+   */
   endOffset: number;
 }
 
@@ -67,10 +72,12 @@ export function parseSessionFile(
   let sessionName: string | null = null;
 
   let lineStart = 0;
-  for (let i = 0; i <= text.length; i++) {
-    if (i !== text.length && text.charCodeAt(i) !== 10 /* \n */) continue;
+  let lastCompleteLineEnd = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) !== 10 /* \n */) continue;
     const raw = text.slice(lineStart, i);
     lineStart = i + 1;
+    lastCompleteLineEnd = i + 1;
     if (raw.length === 0) continue;
     let obj: Record<string, unknown>;
     try {
@@ -144,7 +151,7 @@ export function parseSessionFile(
     tool_calls: toolCalls,
     notebookPath,
     sessionName,
-    endOffset: startOffset + Buffer.byteLength(text, "utf8"),
+    endOffset: startOffset + Buffer.byteLength(text.slice(0, lastCompleteLineEnd), "utf8"),
   };
 }
 
