@@ -14,6 +14,8 @@ import { registerSessionLifecycle } from "./session-bootstrap";
 import { registerExecutionCommands } from "./execution-commands";
 import { registerTeamTools } from "./teams/tool";
 import { isTeamDispatchEnabled } from "./teams/is-enabled";
+import { registerSessionIndexTools } from "./session-index/tools";
+import { isSessionIndexEnabled } from "./session-index/is-enabled";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -47,6 +49,9 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerExecutionCommands(pi);
   if (isTeamDispatchEnabled()) {
     registerTeamTools(pi);
+  }
+  if (isSessionIndexEnabled()) {
+    registerSessionIndexTools(pi);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

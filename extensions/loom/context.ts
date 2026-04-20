@@ -14,6 +14,7 @@ import {
   renderSketchForPrompt,
 } from "./sketches";
 import { isTeamDispatchEnabled } from "./teams/is-enabled";
+import { isSessionIndexEnabled } from "./session-index/is-enabled";
 
 /**
  * System-prompt block describing team_dispatch usage. Empty string when the
@@ -51,6 +52,30 @@ Confirmation heuristic: if the user's request gives concrete roles, task
 framing, and success criteria, dispatch without asking. If the request
 is vague (e.g. "use a team"), propose the TeamSpec in chat and ask the
 user to approve or edit it first.
+`;
+}
+
+/**
+ * System-prompt block describing the session-index tools. Empty when the
+ * experimental flag is off (tools aren't registered either, so mentioning
+ * them would mislead the model).
+ */
+export function buildSessionIndexContext(): string {
+  if (!isSessionIndexEnabled()) return "";
+  return `
+## Prior-session recall
+
+You have access to your prior analysis sessions via \`chat_search\`,
+\`chat_find_tool_calls\`, and \`chat_session_context\`. Use them when:
+
+- The user references past work ("when we worked on X").
+- You need to recall a prior decision or rationale.
+- You want to reuse parameters from a previous session.
+
+Searches default to all sessions across all projects. Pass
+\`scope: 'cwd'\` to scope to the current analysis directory. Retrieved
+entries may pre-date compaction — surface them verbatim when the user
+asks what was said.
 `;
 }
 
@@ -150,7 +175,7 @@ right away without asking clarifying questions first.
 ${brcSection}
 ${galaxyContext}
 ${buildExecutionModeContext()}
-${buildTeamDispatchContext()}`
+${buildTeamDispatchContext()}${buildSessionIndexContext()}`
       };
     }
 
@@ -239,7 +264,7 @@ ${planSummary}
 ${workflowContext}${brcSection}${sketchSection}
 ${galaxyContext}
 ${buildExecutionModeContext()}
-${buildTeamDispatchContext()}`
+${buildTeamDispatchContext()}${buildSessionIndexContext()}`
     };
   });
 
