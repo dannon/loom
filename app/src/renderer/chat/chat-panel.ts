@@ -20,6 +20,32 @@ export class ChatPanel {
       const { scrollTop, scrollHeight, clientHeight } = this.container;
       this.scrollLocked = scrollHeight - scrollTop - clientHeight < 40;
     });
+
+    this.container.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const btn = target.closest<HTMLButtonElement>(
+        ".plan-draft-approve,.plan-draft-edit,.plan-draft-reject",
+      );
+      if (!btn) return;
+      const card = btn.closest<HTMLElement>(".plan-draft-card");
+      const body = card?.dataset.planDraftBody ?? "";
+      let action: "approve" | "edit" | "reject" = "approve";
+      if (btn.classList.contains("plan-draft-edit")) action = "edit";
+      else if (btn.classList.contains("plan-draft-reject")) action = "reject";
+      if (action !== "edit" && card) {
+        card.classList.add(action === "approve" ? "approved" : "rejected");
+        card.querySelectorAll<HTMLButtonElement>(
+          ".plan-draft-approve,.plan-draft-edit,.plan-draft-reject",
+        ).forEach((b) => { b.disabled = true; });
+      }
+      this.container.dispatchEvent(
+        new CustomEvent("plan-draft-action", {
+          detail: { action, body },
+          bubbles: true,
+        }),
+      );
+    });
   }
 
   addUserMessage(text: string): void {
@@ -241,7 +267,9 @@ export class ChatPanel {
     // Preserve tool cards
     const cards = Array.from(this.currentMessage.querySelectorAll(".tool-card"));
 
-    const html = marked.parse(this.currentText, { async: false }) as string;
+    const { text, planBlocks } = extractPlanFences(this.currentText);
+    let html = marked.parse(text, { async: false }) as string;
+    html = injectPlanFenceCards(html, planBlocks);
     this.currentMessage.innerHTML = html + '<span class="cursor-blink"></span>';
 
     // Re-insert tool cards before the cursor
@@ -268,6 +296,64 @@ function escapeHtml(text: string): string {
   const el = document.createElement("span");
   el.textContent = text;
   return el.innerHTML;
+}
+
+const PLAN_FENCE_PLACEHOLDER_PREFIX = "LOOM_PLAN_FENCE_";
+
+/**
+ * Strip ```plan ... ``` fences out of assistant markdown before marked.parse.
+ * Leaves a placeholder paragraph behind so the surrounding prose keeps its
+ * position; extractPlanFences + injectPlanFenceCards swap the placeholders
+ * for rendered draft cards. A trailing unclosed fence is treated as still
+ * in-progress and rendered as a card with whatever text has arrived so far.
+ */
+function extractPlanFences(src: string): { text: string; planBlocks: string[] } {
+  const planBlocks: string[] = [];
+  const re = /```plan\b[^\n]*\n([\s\S]*?)```/g;
+  let text = src.replace(re, (_m, body: string) => {
+    const idx = planBlocks.push(body) - 1;
+    return `\n\n${PLAN_FENCE_PLACEHOLDER_PREFIX}${idx}\n\n`;
+  });
+  const openMatch = /```plan\b[^\n]*\n([\s\S]*)$/.exec(text);
+  if (openMatch) {
+    const idx = planBlocks.push(openMatch[1]) - 1;
+    text = text.slice(0, openMatch.index) +
+      `\n\n${PLAN_FENCE_PLACEHOLDER_PREFIX}${idx}\n\n`;
+  }
+  return { text, planBlocks };
+}
+
+function injectPlanFenceCards(html: string, planBlocks: string[]): string {
+  if (planBlocks.length === 0) return html;
+  const re = new RegExp(
+    `<p>\\s*${PLAN_FENCE_PLACEHOLDER_PREFIX}(\\d+)\\s*</p>`,
+    "g",
+  );
+  return html.replace(re, (_m, idxStr: string) => {
+    const idx = Number(idxStr);
+    const body = planBlocks[idx] ?? "";
+    const bodyHtml = marked.parse(body, { async: false }) as string;
+    const bodyAttr = escapeAttr(body);
+    return (
+      `<div class="plan-draft-card" data-plan-draft-body="${bodyAttr}">` +
+      `<div class="plan-draft-card-header">Plan draft — awaiting your approval</div>` +
+      `<div class="plan-draft-card-body">${bodyHtml}</div>` +
+      `<div class="plan-draft-card-actions">` +
+      `<button type="button" class="plan-btn plan-draft-approve">Approve</button>` +
+      `<button type="button" class="plan-btn plan-draft-edit">Edit</button>` +
+      `<button type="button" class="plan-btn plan-draft-reject">Reject</button>` +
+      `</div>` +
+      `</div>`
+    );
+  });
+}
+
+function escapeAttr(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function renderTeamDispatchCard(details: TeamDispatchDetails): HTMLElement {

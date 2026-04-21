@@ -78,14 +78,23 @@
     <!-- Draggable divider -->
     <div id="divider"></div>
 
-    <!-- Right pane: Notebook -->
+    <!-- Right pane: Notebook / Activity -->
     <div id="artifact-pane" class="pane">
-      <div class="pane-title">Notebook</div>
+      <div class="pane-title pane-tabs" id="artifact-tabs">
+        <button class="pane-tab active" data-tab="notebook">Notebook</button>
+        <button class="pane-tab" data-tab="activity">Activity</button>
+      </div>
       <div id="artifact-content">
         <div id="notebook-view">
           <div class="empty-state">
             <p>The notebook is the running log of your analysis — plan, steps, decisions, and Galaxy references — persisted to a markdown file in your working directory and committed to git on every change.</p>
             <p>It'll appear here once you start a plan. Type <code>/notebook</code> anytime to refresh.</p>
+          </div>
+        </div>
+        <div id="activity-view" class="hidden">
+          <div class="empty-state">
+            <p>The activity log records every plan mutation and session event — a machine-readable timeline backing the notebook.</p>
+            <p>Events will appear here as you work.</p>
           </div>
         </div>
       </div>

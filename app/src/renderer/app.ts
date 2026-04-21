@@ -4,6 +4,8 @@ import { ArtifactPanel } from "./artifacts/artifact-panel.js";
 import {
   LoomWidgetKey,
   decodeMarkdownWidget,
+  decodeJsonWidget,
+  type ShellActivityEvent,
 } from "../../../shared/loom-shell-contract.js";
 
 declare global {
@@ -521,6 +523,25 @@ function submit(): void {
   inputEl.style.height = "auto";
 }
 
+// Plan draft actions from chat cards — forward approve/reject as user messages,
+// pre-fill the input for edit so the researcher can revise before re-sending.
+messagesEl.addEventListener("plan-draft-action", (e) => {
+  const { action, body } = (e as CustomEvent<{ action: string; body: string }>).detail;
+  if (action === "approve") {
+    inputEl.value = "Approve the plan above — proceed to create it with analysis_plan_create.";
+    submit();
+  } else if (action === "reject") {
+    inputEl.value = "Reject the plan above — let's rethink it.";
+    submit();
+  } else if (action === "edit") {
+    inputEl.value =
+      "Here is the plan with my edits — please revise your draft accordingly:\n\n" +
+      "```plan\n" + body + "\n```";
+    inputEl.focus();
+    inputEl.dispatchEvent(new Event("input"));
+  }
+});
+
 /** Flush any queued message after the current turn ends. */
 function flushPendingMessage(): void {
   if (!pendingMessage) return;
@@ -642,11 +663,15 @@ function handleSummarize(raw: string, argStr: string): void {
   }
 
   const label = from === to ? `prompt ${from}` : `prompts ${from}–${to}`;
+  const heading = `## Summary — ${label}`;
   const prompt =
-    `Write a concise summary of the conversation covering ${label} ` +
-    `(content provided below), then append it to the notebook using your notebook tools ` +
-    `as a new section titled "Summary of ${label}". Keep the summary brief — bullets preferred ` +
-    `over prose, focused on decisions, findings, and any Galaxy references.\n\n` +
+    `Append a concise summary of the conversation covering ${label} to the ` +
+    `notebook file (notebook.md) in the current working directory. Use Edit or Write ` +
+    `to append — do NOT regenerate or rewrite existing content.\n\n` +
+    `Use exactly this heading (H2, verbatim) on its own line, followed by a blank line, then the body:\n` +
+    `    ${heading}\n\n` +
+    `Body format: bullet points only, no prose paragraphs. Focus on decisions, findings, ` +
+    `Galaxy references, and open questions. Keep it tight — one line per bullet when possible.\n\n` +
     `--- Chat transcript (${label}) ---\n` +
     transcript +
     `\n--- end transcript ---`;
@@ -1098,10 +1123,18 @@ window.orbit.onUiRequest((request) => {
     const lines = request.widgetLines as string[] | undefined;
 
     // The brain still emits Plan/Steps/Results/PlanView/Parameters widgets,
-    // but the UI no longer surfaces them — only the notebook pane remains.
+    // but the UI no longer surfaces them — only the notebook + activity
+    // tabs of the right pane remain.
     if (key === LoomWidgetKey.Notebook && lines) {
       artifacts.setNotebookMarkdown(decodeMarkdownWidget(lines));
       setArtifactCollapsed(false);
+    } else if (key === LoomWidgetKey.Activity && lines) {
+      try {
+        const events = decodeJsonWidget<ShellActivityEvent[]>(lines);
+        artifacts.setActivityEvents(events);
+      } catch (err) {
+        console.error("activity widget decode failed:", err);
+      }
     }
   }
 });
