@@ -2,3 +2,6 @@ node_modules/
 
 # Test-generated notebook files
 *-notebook.md
+
+# Agent worktrees
+.worktrees/
