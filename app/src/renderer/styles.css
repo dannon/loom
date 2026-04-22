@@ -1264,6 +1264,16 @@ body:not(.artifact-collapsed) #artifact-toggle {
   font-size: 12px;
 }
 
+.modal-actions .plan-btn.danger {
+  background: #7a2027;
+  color: var(--text-bright, #fff);
+  border-color: #a13038;
+}
+
+.modal-actions .plan-btn.danger:hover {
+  background: #8d2731;
+}
+
 /* ── Notebook / Activity Pane ─────────────────────────────────────────────── */
 
 #artifact-content {

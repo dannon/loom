@@ -1,6 +1,8 @@
 import { ipcMain, dialog, BrowserWindow, shell } from "electron";
 import type { AgentManager } from "./agent.js";
+import fs from "node:fs";
 import path from "node:path";
+import { execSync } from "node:child_process";
 import { loadConfig, saveConfig, type LoomConfig } from "./config.js";
 
 function log(...args: unknown[]): void {
@@ -117,6 +119,49 @@ export function registerIpcHandlers(agent: AgentManager): void {
     } catch (err) {
       log("config:save failed:", err);
       return { success: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("notebook:status", (): { exists: boolean; hasContent: boolean } => {
+    const notebookPath = path.join(agent.getCwd(), "notebook.md");
+    if (!fs.existsSync(notebookPath)) return { exists: false, hasContent: false };
+    try {
+      const stat = fs.statSync(notebookPath);
+      return { exists: true, hasContent: stat.size > 0 };
+    } catch {
+      return { exists: true, hasContent: false };
+    }
+  });
+
+  ipcMain.handle("notebook:clear-artifacts", async (): Promise<{ cleared: boolean; error?: string }> => {
+    const cwd = agent.getCwd();
+    const targets = ["notebook.md", "activity.jsonl", "session.jsonl"];
+    const removed: string[] = [];
+    try {
+      for (const name of targets) {
+        const p = path.join(cwd, name);
+        try {
+          const stat = fs.lstatSync(p);
+          if (stat.isSymbolicLink() || stat.isFile()) {
+            fs.rmSync(p);
+            removed.push(name);
+          }
+        } catch {
+          // file didn't exist -- skip
+        }
+      }
+      if (removed.length > 0) {
+        try {
+          execSync(`git add -A ${removed.map((n) => `"${n}"`).join(" ")}`, { cwd, stdio: "ignore" });
+          execSync('git commit -m "Cleared previous analysis"', { cwd, stdio: "ignore" });
+        } catch {
+          // git not available or nothing to commit -- best effort
+        }
+      }
+      return { cleared: true };
+    } catch (err) {
+      log("notebook:clear-artifacts failed:", err);
+      return { cleared: false, error: String(err) };
     }
   });
 

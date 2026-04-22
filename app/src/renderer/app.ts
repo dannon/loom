@@ -683,11 +683,79 @@ function handleSummarize(raw: string, argStr: string): void {
   window.orbit.prompt(prompt);
 }
 
-/** Ask for confirmation, then wipe both panes + restart agent. */
+/**
+ * Ask for confirmation, then wipe both panes + restart agent.
+ *
+ * If the cwd already has a non-empty notebook.md, show a 3-way modal so the
+ * user can pick between keeping the existing notebook (continue adding) or
+ * wiping the slate (delete notebook.md + activity.jsonl, commit the deletion
+ * so it's recoverable from git). No-op notebook → plain confirm.
+ */
 async function confirmAndResetSession(): Promise<void> {
-  const ok = confirm("Start a fresh session? This will erase the current chat and notebook view.");
-  if (!ok) return;
+  let status: { exists: boolean; hasContent: boolean } = { exists: false, hasContent: false };
+  try {
+    status = await window.orbit.notebookStatus();
+  } catch {
+    // IPC unavailable -- fall through to plain confirm.
+  }
+
+  if (!status.hasContent) {
+    const ok = confirm("Start a fresh session? This will erase the current chat and notebook view.");
+    if (!ok) return;
+    await resetSession();
+    return;
+  }
+
+  const choice = await showNewSessionModal();
+  if (choice === "cancel") return;
+
+  if (choice === "fresh") {
+    try {
+      await window.orbit.clearNotebookArtifacts();
+    } catch (err) {
+      chat.addErrorMessage(`Failed to clear notebook artifacts: ${err}`);
+      return;
+    }
+  }
+
   await resetSession();
+}
+
+type NewSessionChoice = "keep" | "fresh" | "cancel";
+
+function showNewSessionModal(): Promise<NewSessionChoice> {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("new-session-overlay");
+    const keepBtn = document.getElementById("new-session-keep") as HTMLButtonElement | null;
+    const freshBtn = document.getElementById("new-session-fresh") as HTMLButtonElement | null;
+    const cancelBtn = document.getElementById("new-session-cancel") as HTMLButtonElement | null;
+    if (!overlay || !keepBtn || !freshBtn || !cancelBtn) {
+      resolve("cancel");
+      return;
+    }
+
+    overlay.classList.remove("hidden");
+
+    const cleanup = (choice: NewSessionChoice) => {
+      overlay.classList.add("hidden");
+      keepBtn.removeEventListener("click", onKeep);
+      freshBtn.removeEventListener("click", onFresh);
+      cancelBtn.removeEventListener("click", onCancel);
+      document.removeEventListener("keydown", onKey);
+      resolve(choice);
+    };
+    const onKeep = () => cleanup("keep");
+    const onFresh = () => cleanup("fresh");
+    const onCancel = () => cleanup("cancel");
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") cleanup("cancel");
+    };
+
+    keepBtn.addEventListener("click", onKeep);
+    freshBtn.addEventListener("click", onFresh);
+    cancelBtn.addEventListener("click", onCancel);
+    document.addEventListener("keydown", onKey);
+  });
 }
 
 /** Wipe chat + artifacts + restart the agent without --continue (fresh Pi.dev session). */

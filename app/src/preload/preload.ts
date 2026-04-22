@@ -51,6 +51,8 @@ export interface OrbitAPI {
   resetSession(): Promise<void>;
   selectDirectory(): Promise<string | null>;
   browseDirectory(): Promise<string | null>;
+  notebookStatus(): Promise<{ exists: boolean; hasContent: boolean }>;
+  clearNotebookArtifacts(): Promise<{ cleared: boolean; error?: string }>;
   onAgentEvent(callback: (event: AgentEvent) => void): () => void;
   onUiRequest(callback: (request: UiRequest) => void): () => void;
   onAgentStatus(
@@ -85,6 +87,8 @@ const api: OrbitAPI = {
   resetSession: () => ipcRenderer.invoke("agent:reset-session"),
   selectDirectory: () => ipcRenderer.invoke("dialog:select-directory"),
   browseDirectory: () => ipcRenderer.invoke("dialog:browse-directory"),
+  notebookStatus: () => ipcRenderer.invoke("notebook:status"),
+  clearNotebookArtifacts: () => ipcRenderer.invoke("notebook:clear-artifacts"),
 
   onAgentEvent: (callback) => {
     const handler = (_e: unknown, event: AgentEvent) => callback(event);
