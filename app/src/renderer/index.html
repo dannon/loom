@@ -12,6 +12,31 @@
 <body>
   <div id="app">
     <div id="app-main">
+    <!-- Left pane: File tree sidebar -->
+    <div id="files-pane" class="pane">
+      <div class="pane-title" id="files-title">
+        <span class="files-title-label">Files</span>
+        <div class="files-title-actions">
+          <button id="files-refresh" class="files-header-btn" title="Refresh file tree">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"/>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+          </button>
+          <button id="files-show-hidden" class="files-header-btn" title="Show hidden files" aria-pressed="false">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div id="files-tree"></div>
+    </div>
+
+    <!-- Draggable divider between files pane and chat -->
+    <div id="files-divider"></div>
+
     <!-- Left pane: Chat -->
     <div id="chat-pane" class="pane">
       <div class="pane-title" id="chat-title">Chat</div>
@@ -83,20 +108,22 @@
       <div class="pane-title pane-tabs" id="artifact-tabs">
         <button class="pane-tab active" data-tab="notebook">Notebook</button>
         <button class="pane-tab" data-tab="activity">Activity</button>
+        <button class="pane-tab" data-tab="file" hidden>File</button>
       </div>
       <div id="artifact-content">
-        <div id="notebook-view">
+        <div id="notebook-view" class="pane-body">
           <div class="empty-state">
             <p>The notebook is the running log of your analysis — plan, steps, decisions, and Galaxy references — persisted to a markdown file in your working directory and committed to git on every change.</p>
             <p>It'll appear here once you start a plan. Type <code>/notebook</code> anytime to refresh.</p>
           </div>
         </div>
-        <div id="activity-view" class="hidden">
+        <div id="activity-view" class="pane-body hidden">
           <div class="empty-state">
             <p>The activity log records every plan mutation and session event — a machine-readable timeline backing the notebook.</p>
             <p>Events will appear here as you work.</p>
           </div>
         </div>
+        <div id="file-view" class="pane-body hidden"></div>
       </div>
     </div>
     </div>
@@ -115,6 +142,11 @@
         <span id="usage-tokens">0 tok</span>
         <span id="usage-cost"></span>
       </div>
+      <button id="files-toggle" title="Toggle files sidebar (Ctrl+B)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+        </svg>
+      </button>
       <div id="cwd-bar">
         <span id="cwd-path" title="Analysis directory">~</span>
         <button id="cwd-change" title="Change directory">change</button>

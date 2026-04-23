@@ -50,25 +50,54 @@ const ACTIVITY_EMPTY_HTML = `
   </div>
 `;
 
-type TabKey = "notebook" | "activity";
+type TabKey = "notebook" | "activity" | "file";
 
 export class ArtifactPanel {
   private notebookEl: HTMLElement;
   private activityEl: HTMLElement;
+  private fileEl: HTMLElement;
+  private fileTabBtn: HTMLButtonElement;
   private tabButtons: HTMLButtonElement[];
+  private activeTab: TabKey = "notebook";
 
   constructor() {
     this.notebookEl = document.getElementById("notebook-view")!;
     this.activityEl = document.getElementById("activity-view")!;
+    this.fileEl = document.getElementById("file-view")!;
     this.tabButtons = Array.from(
       document.querySelectorAll<HTMLButtonElement>("#artifact-tabs .pane-tab"),
     );
+    const fileBtn = this.tabButtons.find((b) => b.dataset.tab === "file");
+    if (!fileBtn) throw new Error("artifact pane: missing File tab button");
+    this.fileTabBtn = fileBtn;
 
     for (const btn of this.tabButtons) {
       btn.addEventListener("click", () => {
         const tab = btn.dataset.tab as TabKey | undefined;
         if (tab) this.selectTab(tab);
       });
+    }
+  }
+
+  /** Returns the File tab container so the FileViewer can mount its DOM. */
+  getFileViewContainer(): HTMLElement {
+    return this.fileEl;
+  }
+
+  /** Reveal the File tab (if hidden) and switch to it. */
+  showFileTab(): void {
+    this.fileTabBtn.hidden = false;
+    this.selectTab("file");
+  }
+
+  /**
+   * Hide the File tab. If the File tab is currently active, switch back to
+   * the notebook tab.
+   */
+  hideFileTab(): void {
+    this.fileTabBtn.hidden = true;
+    if (this.activeTab === "file") {
+      this.selectTab("notebook");
     }
   }
 
@@ -101,11 +130,13 @@ export class ArtifactPanel {
 
   /** Switch the visible tab without touching the stored content. */
   selectTab(tab: TabKey): void {
+    this.activeTab = tab;
     for (const btn of this.tabButtons) {
       btn.classList.toggle("active", btn.dataset.tab === tab);
     }
     this.notebookEl.classList.toggle("hidden", tab !== "notebook");
     this.activityEl.classList.toggle("hidden", tab !== "activity");
+    this.fileEl.classList.toggle("hidden", tab !== "file");
   }
 
   /** Reset both views to their initial empty states. */

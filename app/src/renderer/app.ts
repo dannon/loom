@@ -1,6 +1,8 @@
 import { ChatPanel } from "./chat/chat-panel.js";
 import { ShellPanel } from "./chat/shell-panel.js";
 import { ArtifactPanel } from "./artifacts/artifact-panel.js";
+import { FilesPanel } from "./files/files-panel.js";
+import { FileViewer } from "./files/file-viewer.js";
 import {
   LoomWidgetKey,
   decodeMarkdownWidget,
@@ -32,6 +34,28 @@ const modelIndicatorNameEl = document.getElementById("model-indicator-name")!;
 const chat = new ChatPanel(messagesEl);
 const artifacts = new ArtifactPanel();
 const shell = new ShellPanel(document.getElementById("agent-shell-body")!);
+
+// File tree sidebar + file viewer (wired up further below).
+const filesPanel = new FilesPanel(
+  document.getElementById("files-tree")!,
+  (relPath: string) => void openFileFromTree(relPath),
+);
+const fileViewer = new FileViewer(artifacts.getFileViewContainer());
+
+async function openFileFromTree(relPath: string): Promise<void> {
+  const res = await window.orbit.readFile(relPath);
+  if (!res.ok) {
+    const sizeHint = typeof res.size === "number" ? ` (${res.size} bytes)` : "";
+    chat.addErrorMessage(`Failed to open ${relPath}${sizeHint}: ${res.error}`);
+    return;
+  }
+  const proceed = fileViewer.open(relPath, res.bytes, res.size);
+  if (proceed) {
+    artifacts.showFileTab();
+    setArtifactCollapsed(false);
+    filesPanel.setSelected(relPath);
+  }
+}
 
 let streaming = false;
 
@@ -192,6 +216,90 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     setArtifactCollapsed(!document.body.classList.contains("artifact-collapsed"));
   }
+});
+
+// ── Files sidebar collapse/expand ────────────────────────────────────────────
+
+const FILES_COLLAPSED_KEY = "orbit.filesCollapsed";
+const FILES_WIDTH_KEY = "orbit.filesPaneWidth";
+const filesToggleBtn = document.getElementById("files-toggle")!;
+const filesPaneEl = document.getElementById("files-pane")!;
+const filesDivider = document.getElementById("files-divider")!;
+const filesRefreshBtn = document.getElementById("files-refresh")!;
+const filesShowHiddenBtn = document.getElementById("files-show-hidden")!;
+
+function setFilesCollapsed(collapsed: boolean): void {
+  document.body.classList.toggle("files-collapsed", collapsed);
+  localStorage.setItem(FILES_COLLAPSED_KEY, collapsed ? "1" : "0");
+}
+
+// Restore persisted pane width.
+const savedFilesWidth = parseInt(localStorage.getItem(FILES_WIDTH_KEY) ?? "", 10);
+if (Number.isFinite(savedFilesWidth) && savedFilesWidth >= 160 && savedFilesWidth <= 480) {
+  filesPaneEl.style.flex = `0 0 ${savedFilesWidth}px`;
+}
+
+// Default: visible (users came here to see files).
+const savedFilesCollapsed = localStorage.getItem(FILES_COLLAPSED_KEY);
+setFilesCollapsed(savedFilesCollapsed === "1");
+
+filesToggleBtn.addEventListener("click", () => {
+  setFilesCollapsed(!document.body.classList.contains("files-collapsed"));
+});
+
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && (e.key === "b" || e.key === "B")) {
+    // Allow native Ctrl+B (bold) inside any editable text field — only
+    // intercept when focus is outside inputs/textareas/contenteditable.
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+      return;
+    }
+    e.preventDefault();
+    setFilesCollapsed(!document.body.classList.contains("files-collapsed"));
+  }
+});
+
+filesRefreshBtn.addEventListener("click", () => {
+  void filesPanel.refresh();
+});
+
+filesShowHiddenBtn.addEventListener("click", () => {
+  const next = !filesPanel.isShowingHidden();
+  filesPanel.setShowHidden(next);
+  filesShowHiddenBtn.classList.toggle("active", next);
+  filesShowHiddenBtn.setAttribute("aria-pressed", next ? "true" : "false");
+});
+
+// Files divider (resize) — mirrors the chat/artifact divider logic.
+let filesDragging = false;
+filesDivider.addEventListener("mousedown", (e) => {
+  e.preventDefault();
+  filesDragging = true;
+  filesDivider.classList.add("dragging");
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
+});
+document.addEventListener("mousemove", (e) => {
+  if (!filesDragging) return;
+  const rect = filesPaneEl.getBoundingClientRect();
+  const width = Math.max(160, Math.min(480, e.clientX - rect.left));
+  filesPaneEl.style.flex = `0 0 ${width}px`;
+});
+document.addEventListener("mouseup", () => {
+  if (!filesDragging) return;
+  filesDragging = false;
+  filesDivider.classList.remove("dragging");
+  document.body.style.cursor = "";
+  document.body.style.userSelect = "";
+  const basis = filesPaneEl.style.flex.match(/(\d+(?:\.\d+)?)px/);
+  if (basis) localStorage.setItem(FILES_WIDTH_KEY, String(Math.round(parseFloat(basis[1]))));
+});
+
+// Initial tree population + live updates from the main-process watcher.
+void filesPanel.refresh();
+window.orbit.onFilesChanged(() => {
+  void filesPanel.refresh();
 });
 
 // ── Execution mode toggle (Local / Remote) ───────────────────────────────────
@@ -441,6 +549,12 @@ function applyCwdChange(dir: string): void {
   cwdPathEl.title = dir;
   chat.addInfoMessage(`<i>Switched analysis directory to <code>${dir.replace(/</g, "&lt;")}</code>.</i>`);
   hasShownStartupWelcome = false;
+  // Re-root the file tree, close any open viewer, hide the File tab — the
+  // old relPath is meaningless in the new cwd.
+  fileViewer.close();
+  artifacts.hideFileTab();
+  filesPanel.reset();
+  void filesPanel.refresh();
 }
 
 cwdChangeBtn.addEventListener("click", async () => {
