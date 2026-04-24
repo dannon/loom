@@ -138,13 +138,18 @@ function createWindow(cwd: string): void {
     mainWindow?.focus();
   });
 
-  // Keep the main window on the renderer; external URLs open in new windows.
+  // Keep the main window on the renderer; external URLs (including file://
+  // links from the notebook — IGV viewers, reports, etc.) open in new
+  // Orbit-managed windows so the main app never navigates away.
   mainWindow.webContents.on("will-navigate", (event, url) => {
     const devUrl = MAIN_WINDOW_VITE_DEV_SERVER_URL;
+    // In dev, allow the Vite server URL (hot-reload / in-app routes).
     if (devUrl && url.startsWith(devUrl)) return;
-    if (url.startsWith("file://")) return;
+    // In prod, allow self-refresh of the loaded bundle index.
+    const currentUrl = mainWindow?.webContents.getURL() || "";
+    if (currentUrl && url === currentUrl) return;
     event.preventDefault();
-    log("intercepted external navigation → new window:", url);
+    log("intercepted navigation → new window:", url);
     openExternalUrlWindow(url);
   });
 

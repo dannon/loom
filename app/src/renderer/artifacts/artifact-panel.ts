@@ -19,6 +19,14 @@ const notebookMarked = new Marked({
       const titleAttr = title ? ` title="${escapeAttr(title)}"` : "";
       return `<img src="${escapeAttr(rewritten)}" alt="${escapeAttr(text)}"${titleAttr}>`;
     },
+    link({ href, title, tokens }) {
+      const rewritten = rewriteArtifactHref(href);
+      const titleAttr = title ? ` title="${escapeAttr(title)}"` : "";
+      // Render inner text the same way marked does by default — parse the
+      // token stream recursively so nested emphasis / code survives.
+      const inner = this.parser.parseInline(tokens);
+      return `<a href="${escapeAttr(rewritten)}"${titleAttr}>${inner}</a>`;
+    },
   },
 });
 
