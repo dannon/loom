@@ -761,8 +761,9 @@ function handleSlashCommand(text: string): boolean {
   if (cmd === "chat") {
     // Replay the current session's chat transcript from session.jsonl —
     // recovers chat after a window blank-out without touching the agent.
+    // onSessionHistory bails out if the chat already has content, so we
+    // must not add any info/status message before the replay fires.
     chat.clear();
-    chat.addInfoMessage("<i>Restoring chat from session transcript…</i>");
     void window.orbit.replayChat().then((res) => {
       if (!res.ok) {
         chat.addErrorMessage(`/chat: ${res.error}`);
