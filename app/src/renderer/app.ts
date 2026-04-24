@@ -716,6 +716,7 @@ function slashCommandsHtml(): string {
     `<li><code>/model &lt;name&gt;</code> — switch LLM model</li>` +
     `<li><code>/new</code> — start a fresh session</li>` +
     `<li><code>/resume</code> — restart agent and replay prior session</li>` +
+    `<li><code>/chat</code> — restore the chat pane from the session transcript (no agent restart)</li>` +
     `<li><code>/plan</code> — show current plan summary</li>` +
     `<li><code>/status</code> — show Galaxy connection status</li>` +
     `<li><code>/notebook</code> — show notebook info</li>` +
@@ -754,6 +755,21 @@ function handleSlashCommand(text: string): boolean {
     chat.addUserMessage(text);
     chat.addInfoMessage("<i>Restarting agent with prior session…</i>");
     void window.orbit.restartAgent();
+    return true;
+  }
+
+  if (cmd === "chat") {
+    // Replay the current session's chat transcript from session.jsonl —
+    // recovers chat after a window blank-out without touching the agent.
+    chat.clear();
+    chat.addInfoMessage("<i>Restoring chat from session transcript…</i>");
+    void window.orbit.replayChat().then((res) => {
+      if (!res.ok) {
+        chat.addErrorMessage(`/chat: ${res.error}`);
+      } else if (res.segments === 0) {
+        chat.addInfoMessage("<i>No prior turns to replay in this session.</i>");
+      }
+    });
     return true;
   }
 

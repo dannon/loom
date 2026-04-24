@@ -80,6 +80,7 @@ export interface OrbitAPI {
   onShowSlashCommands(callback: () => void): () => void;
   onProcUpdate(callback: (procs: ProcInfo[]) => void): () => void;
   onSessionHistory(callback: (history: ReplaySegment[]) => void): () => void;
+  replayChat(): Promise<{ ok: true; segments: number } | { ok: false; error: string }>;
 }
 
 const api: OrbitAPI = {
@@ -162,6 +163,7 @@ const api: OrbitAPI = {
     return () => ipcRenderer.removeListener("proc:update", handler);
   },
 
+  replayChat: () => ipcRenderer.invoke("chat:replay"),
   onSessionHistory: (callback) => {
     const handler = (_e: unknown, history: ReplaySegment[]) => callback(history);
     ipcRenderer.on("agent:session-history", handler);

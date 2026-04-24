@@ -1,6 +1,7 @@
 import { ipcMain, dialog, BrowserWindow, shell } from "electron";
 import type { AgentManager } from "./agent.js";
 import { startFilesWatcher } from "./files-handler.js";
+import { loadSessionHistory } from "./session-replay.js";
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
@@ -69,6 +70,22 @@ export function registerIpcHandlers(agent: AgentManager): void {
 
   ipcMain.handle("agent:get-cwd", () => {
     return agent.getCwd();
+  });
+
+  // Replay the current session's chat transcript into the renderer. Used by
+  // the /chat slash command to recover chat after the window blanks out
+  // (e.g. after an accidental file:// navigation). No agent restart — just
+  // re-read session.jsonl and push the ReplaySegment[] back.
+  ipcMain.handle("chat:replay", async (e) => {
+    const window = BrowserWindow.fromWebContents(e.sender);
+    if (!window || window.isDestroyed()) return { ok: false, error: "no window" };
+    try {
+      const history = loadSessionHistory(agent.getCwd());
+      window.webContents.send("agent:session-history", history);
+      return { ok: true, segments: history.length };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   });
 
   ipcMain.handle("dialog:browse-directory", async () => {
