@@ -99,6 +99,14 @@ const turnUsage: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const perModelUsage = new Map<string, Usage>();
 let currentModel: string | null = null;
 
+// Pi's AssistantMessage.usage carries a `cost` object calculated upstream
+// from its authoritative rate table (`calculateCost` in pi-ai/models.js).
+// We accumulate that directly so the footer is immune to rate drift in the
+// local PRICING map. `null` until we've seen at least one Pi-reported cost;
+// after that, it's the source of truth for the footer cost string.
+let sessionCostFromPi: number | null = null;
+let turnCostFromPi: number = 0;
+
 /** Match a model ID against the pricing table (handles date suffixes). */
 function findPricing(model: string): { in: number; out: number; cacheRead?: number; cacheWrite?: number } | null {
   // Exact match first
@@ -142,9 +150,20 @@ function renderUsage(): void {
     `  cache write: ${sessionUsage.cacheWrite.toLocaleString()}` +
     (currentModel ? `\nmodel: ${currentModel}` : "");
 
-  const cost = computeCost(sessionUsage, currentModel);
+  // Prefer Pi's upstream-calculated cost over the renderer's local PRICING
+  // map — eliminates rate-drift as a failure mode. Fall back to local
+  // computation for models Pi doesn't price (e.g., local Ollama models).
+  const cost = sessionCostFromPi ?? computeCost(sessionUsage, currentModel);
   if (cost !== null) {
     usageCostEl.textContent = cost < 0.01 ? "<$0.01" : `$${cost.toFixed(2)}`;
+    const localCost = computeCost(sessionUsage, currentModel);
+    const source = sessionCostFromPi !== null ? "pi-ai" : "local PRICING";
+    usageCostEl.title =
+      `Session cost: $${cost.toFixed(4)}\n` +
+      `Source: ${source}\n` +
+      (sessionCostFromPi !== null && localCost !== null
+        ? `Local fallback would be $${localCost.toFixed(4)}`
+        : "");
     usageCostEl.classList.remove("hidden");
   } else {
     usageCostEl.textContent = "";
@@ -468,7 +487,7 @@ function captureUsage(event: Record<string, unknown>): void {
     renderModelIndicator();
   }
 
-  const u = msg.usage as Partial<Usage> | undefined;
+  const u = msg.usage as (Partial<Usage> & { cost?: { total?: number } }) | undefined;
   if (!u) return;
 
   // turnUsage tracks the in-progress turn's cumulative values
@@ -476,6 +495,10 @@ function captureUsage(event: Record<string, unknown>): void {
   turnUsage.output = u.output ?? turnUsage.output;
   turnUsage.cacheRead = u.cacheRead ?? turnUsage.cacheRead;
   turnUsage.cacheWrite = u.cacheWrite ?? turnUsage.cacheWrite;
+  // Pi's rolling cost for this message (authoritative, computed in pi-ai).
+  if (typeof u.cost?.total === "number") {
+    turnCostFromPi = u.cost.total;
+  }
 }
 
 function commitTurnUsage(): void {
@@ -491,10 +514,27 @@ function commitTurnUsage(): void {
     m.cacheWrite += turnUsage.cacheWrite;
     perModelUsage.set(currentModel, m);
   }
+  if (turnCostFromPi > 0) {
+    sessionCostFromPi = (sessionCostFromPi ?? 0) + turnCostFromPi;
+  }
+  // Diagnostic: log per-message usage + both cost paths so the user can
+  // paper-trail against the provider console to verify accuracy.
+  const localCost = computeCost(turnUsage, currentModel);
+  const sessionLocalCost = computeCost(sessionUsage, currentModel);
+  console.log("[usage]", {
+    model: currentModel,
+    message: { ...turnUsage, cost_pi: turnCostFromPi, cost_local: localCost },
+    session: {
+      ...sessionUsage,
+      cost_pi: sessionCostFromPi,
+      cost_local: sessionLocalCost,
+    },
+  });
   turnUsage.input = 0;
   turnUsage.output = 0;
   turnUsage.cacheRead = 0;
   turnUsage.cacheWrite = 0;
+  turnCostFromPi = 0;
   renderUsage();
 }
 
