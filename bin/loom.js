@@ -118,38 +118,35 @@ if (loomConfig.llm?.apiKey) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Galaxy credential + MCP registration
 //
-// Credentials come from ~/.loom/config.json (written by /connect). In remote
-// mode they're published to env so the extension sees them; in local mode
-// env is scrubbed so the extension doesn't advertise Galaxy tools.
+// Credentials come from ~/.loom/config.json (written by /connect) or env
+// vars (CI/testing). Galaxy MCP registers whenever credentials are present;
+// the agent decides per-plan whether to use Galaxy. The legacy
+// `executionMode` field on config is ignored.
 // ─────────────────────────────────────────────────────────────────────────────
-
-const executionMode = loomConfig.executionMode || "remote";
 
 let galaxyUrl = null;
 let galaxyApiKey = null;
 
-if (executionMode === "remote") {
-  // Config is authoritative; env vars are a fallback for CI / testing
-  if (loomConfig.galaxy?.active && loomConfig.galaxy.profiles) {
-    const active = loomConfig.galaxy.profiles[loomConfig.galaxy.active];
-    if (active) {
-      galaxyUrl = active.url;
-      galaxyApiKey = active.apiKey;
-    }
+if (loomConfig.galaxy?.active && loomConfig.galaxy.profiles) {
+  const active = loomConfig.galaxy.profiles[loomConfig.galaxy.active];
+  if (active) {
+    galaxyUrl = active.url;
+    galaxyApiKey = active.apiKey;
   }
-  if (!galaxyUrl) galaxyUrl = process.env.GALAXY_URL || null;
-  if (!galaxyApiKey) galaxyApiKey = process.env.GALAXY_API_KEY || null;
+}
+if (!galaxyUrl) galaxyUrl = process.env.GALAXY_URL || null;
+if (!galaxyApiKey) galaxyApiKey = process.env.GALAXY_API_KEY || null;
 
-  // Publish to env so the extension can read them
-  if (galaxyUrl && galaxyApiKey) {
-    process.env.GALAXY_URL = galaxyUrl;
-    process.env.GALAXY_API_KEY = galaxyApiKey;
-  }
+// Publish to env so the extension can read them. If credentials are absent,
+// scrub stale env so the extension doesn't see ghosts from a prior session.
+if (galaxyUrl && galaxyApiKey) {
+  process.env.GALAXY_URL = galaxyUrl;
+  process.env.GALAXY_API_KEY = galaxyApiKey;
 } else {
-  // Local mode: scrub Galaxy env so the extension doesn't see stale values
   delete process.env.GALAXY_URL;
   delete process.env.GALAXY_API_KEY;
 }
+
 const mcpConfigPath = join(agentDir, "mcp.json");
 
 let mcpConfig = {};
@@ -162,7 +159,7 @@ if (!isInformationalCommand) {
 
   const hasGalaxyCredentials = galaxyUrl && galaxyApiKey;
 
-  if (executionMode === "remote" && hasGalaxyCredentials) {
+  if (hasGalaxyCredentials) {
     mcpConfig.mcpServers.galaxy = {
       command: "uvx",
       args: ["galaxy-mcp"],
@@ -173,7 +170,7 @@ if (!isInformationalCommand) {
       },
     };
   } else {
-    // Local mode or no credentials: tear down Galaxy MCP
+    // No credentials: tear down Galaxy MCP if present from a previous session.
     delete mcpConfig.mcpServers.galaxy;
   }
 
