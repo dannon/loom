@@ -286,6 +286,19 @@ You'll also need `~/.pi/agent/models.json` for model capability metadata (contex
 
 Or pass flags directly: `loom --provider litellm --model your-model-name`.
 
+## Cost tracking
+
+Orbit's footer shows live in-flight cost for the active session (computed from `usage.cost` returned per stream event by pi-ai). For accurate **historical / per-project / per-model** reporting across all your sessions, run [CodeBurn](https://github.com/getagentseal/codeburn) in a separate terminal:
+
+```bash
+npx codeburn          # interactive TUI dashboard
+npx codeburn today    # today's spend
+npx codeburn month    # this month
+npx codeburn status   # one-liner: today + month totals
+```
+
+CodeBurn auto-detects Loom/Pi sessions under `~/.pi/agent/sessions/` (Pi is a first-class supported provider — no configuration needed) and pulls model pricing from LiteLLM's catalog, so newly-released models work without a Loom update. Each Loom project (= cwd) shows up as a separate row, so you can see what each analysis cost. CSV / JSON export is built in.
+
 ## Commands
 
 ### Slash commands
