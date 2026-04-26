@@ -54,21 +54,29 @@ export class ChatPanel {
     });
   }
 
-  /** Set the cwd so prompt numbers are keyed and persisted per directory. */
+  /**
+   * Bind the chat panel to a cwd. The prompt counter is **not** persisted
+   * across sessions — it's derived live from rendered turns. After replay
+   * (which calls \`addReplayUserMessage\` for every user-role entry in
+   * session.jsonl) the counter equals the replay max; live submissions
+   * grow it from there. This avoids drift caused by local-only slash
+   * commands (e.g. /help, /cost, /summarize) which add a turn in chat
+   * but don't go into session.jsonl, so on restart they wouldn't be
+   * replayed but their counter increments would have leaked through a
+   * persisted store.
+   */
   setCwd(cwd: string): void {
     this.cwd = cwd;
-    this.promptCounter = readStoredCounter(cwd);
+    this.promptCounter = 0;
   }
 
-  /** Erase the stored counter — only for /new sessions. */
+  /** Reset the in-memory counter — only for /new sessions. */
   resetCounter(): void {
     this.promptCounter = 0;
-    clearStoredCounter(this.cwd);
   }
 
   addUserMessage(text: string): void {
     const n = ++this.promptCounter;
-    writeStoredCounter(this.cwd, n);
     const turn = document.createElement("div");
     turn.className = "user-turn";
     turn.dataset.promptNum = String(n);
@@ -95,7 +103,6 @@ export class ChatPanel {
   /** Replay a historical user message with a fixed number (session history restore). */
   addReplayUserMessage(text: string, promptNum: number): void {
     this.promptCounter = Math.max(this.promptCounter, promptNum);
-    writeStoredCounter(this.cwd, this.promptCounter);
     const turn = document.createElement("div");
     turn.className = "user-turn";
     turn.dataset.promptNum = String(promptNum);
@@ -355,28 +362,6 @@ function escapeHtml(text: string): string {
   const el = document.createElement("span");
   el.textContent = text;
   return el.innerHTML;
-}
-
-function promptCounterKey(cwd: string): string {
-  return `orbit.promptCounter.${cwd}`;
-}
-
-function readStoredCounter(cwd: string): number {
-  if (!cwd) return 0;
-  try {
-    const n = parseInt(localStorage.getItem(promptCounterKey(cwd)) ?? "", 10);
-    return Number.isFinite(n) && n >= 0 ? n : 0;
-  } catch { return 0; }
-}
-
-function writeStoredCounter(cwd: string, n: number): void {
-  if (!cwd) return;
-  try { localStorage.setItem(promptCounterKey(cwd), String(n)); } catch {}
-}
-
-function clearStoredCounter(cwd: string): void {
-  if (!cwd) return;
-  try { localStorage.removeItem(promptCounterKey(cwd)); } catch {}
 }
 
 const PLAN_FENCE_PLACEHOLDER_PREFIX = "LOOM_PLAN_FENCE_";
