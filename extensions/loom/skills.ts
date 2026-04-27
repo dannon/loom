@@ -19,6 +19,20 @@ export interface ConfiguredSkillRepo {
   branch: string;
 }
 
+/**
+ * Conservative slug pattern. The name is later joined into a filesystem path
+ * (`~/.loom/cache/skills/<name>/...`); slashes, `..`, and other path-active
+ * characters would let a hand-edited config write outside the cache dir.
+ * Keep to ASCII letters, digits, dot, dash, underscore.
+ */
+const SAFE_NAME_RE = /^[A-Za-z0-9._-]+$/;
+
+export function isSafeSkillName(name: string): boolean {
+  if (typeof name !== "string" || name.length === 0 || name.length > 64) return false;
+  if (name === "." || name === "..") return false;
+  return SAFE_NAME_RE.test(name);
+}
+
 export function listEnabledSkillRepos(): ConfiguredSkillRepo[] {
   const cfg = loadConfig();
   const repos = (cfg.skills?.repos ?? []) as Array<{
@@ -31,6 +45,13 @@ export function listEnabledSkillRepos(): ConfiguredSkillRepo[] {
   for (const r of repos) {
     if (r?.enabled === false) continue;
     if (typeof r?.name !== "string" || typeof r?.url !== "string") continue;
+    if (!isSafeSkillName(r.name)) {
+      console.warn(
+        `[skills] Dropping repo with unsafe name "${r.name}" — ` +
+        `must match /^[A-Za-z0-9._-]+$/ (used as filesystem path)`,
+      );
+      continue;
+    }
     if (!isAllowedSkillUrl(r.url)) {
       console.warn(
         `[skills] Dropping disallowed repo "${r.name}" (${r.url}) — ` +
