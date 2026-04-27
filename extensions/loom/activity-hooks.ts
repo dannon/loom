@@ -22,6 +22,50 @@ const NOISY_TOOLS = new Set([
   "find",
 ]);
 
+// Tools whose argument shape is known to carry credentials. activity.jsonl
+// lives in the project cwd and users may share the dir (commit it, send it
+// over for help) — never persist secrets there.
+const CREDENTIAL_TOOLS = new Set([
+  "galaxy_connect",
+  "galaxy_set_profile",
+]);
+
+// Argument keys that universally indicate secrets, redacted on every tool.
+const CREDENTIAL_KEYS = new Set([
+  "apikey", "api_key",
+  "authorization",
+  "token",
+  "password",
+  "secret",
+  "credentials",
+]);
+
+const REDACTED = "[redacted]";
+
+/**
+ * Walk an args object and replace any credential-looking values with a
+ * placeholder. Mutates a deep clone so the live event still has the
+ * original shape (the upstream tool runner needs it).
+ */
+export function redactArgs(toolName: string, args: unknown): unknown {
+  if (CREDENTIAL_TOOLS.has(toolName)) {
+    // Whole-object redact — opt-in for tools that exist solely to take a
+    // credential. Only the tool name survives in the activity log.
+    return { _redacted: true };
+  }
+  if (args === null || typeof args !== "object") return args;
+  if (Array.isArray(args)) return args.map((v) => redactArgs(toolName, v));
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args as Record<string, unknown>)) {
+    if (CREDENTIAL_KEYS.has(k.toLowerCase())) {
+      out[k] = REDACTED;
+    } else {
+      out[k] = redactArgs(toolName, v);
+    }
+  }
+  return out;
+}
+
 const RESULT_SUMMARY_MAX = 500;
 
 function sessionDir(): string | null {
@@ -60,7 +104,7 @@ export function registerActivityHooks(pi: ExtensionAPI): void {
       payload: {
         toolCallId: event.toolCallId,
         toolName: event.toolName,
-        args: event.args,
+        args: redactArgs(event.toolName, event.args),
       },
     });
   });
