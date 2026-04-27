@@ -230,6 +230,16 @@ function createWindow(cwd: string): void {
 
   mainWindow.on("closed", () => {
     log("window closed");
+    // Tear down everything tied to this window. Without these, on macOS
+    // (where windows can close without quitting the app), a follow-up
+    // `activate` would create a new AgentManager while the previous brain
+    // subprocess kept running — leaking processes and keeping stale FS
+    // watchers / proc-monitor timers alive.
+    try { agentManager?.stop(); } catch (err) { log("agentManager.stop on close failed:", err); }
+    agentManager = null;
+    try { procMonitor?.stop(); } catch (err) { log("procMonitor.stop on close failed:", err); }
+    procMonitor = null;
+    try { stopFilesWatcher(); } catch (err) { log("stopFilesWatcher on close failed:", err); }
     mainWindow = null;
   });
 }
