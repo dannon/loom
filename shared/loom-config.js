@@ -71,5 +71,18 @@ export function loadConfig() {
 export function saveConfig(config) {
   const dir = getConfigDir();
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2) + "\n");
+  const dest = getConfigPath();
+  // Atomic write: never leave a half-written ~/.loom/config.json behind.
+  // A power-loss / process-kill mid-write would otherwise truncate the
+  // config and lose the user's API keys + skills + profiles. The .tmp
+  // file lives next to the dest so the rename is on the same filesystem.
+  const tmp = `${dest}.tmp`;
+  const fd = fs.openSync(tmp, "w", 0o600);
+  try {
+    fs.writeSync(fd, JSON.stringify(config, null, 2) + "\n");
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmp, dest);
 }
