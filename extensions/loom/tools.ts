@@ -16,6 +16,7 @@ import { getNotebookPath } from "./state";
 import {
   readNotebook,
   writeNotebook,
+  withNotebookLock,
   findInvocationBlocks,
   upsertInvocationBlock,
   type InvocationYaml,
@@ -441,7 +442,6 @@ Writes a fenced \`loom-invocation\` YAML block at the end of the notebook. Polli
       const galaxyServerUrl = cfg?.url || "";
 
       try {
-        const content = await readNotebook(notebookPath);
         const inv: InvocationYaml = {
           invocationId: params.invocationId,
           galaxyServerUrl,
@@ -450,8 +450,11 @@ Writes a fenced \`loom-invocation\` YAML block at the end of the notebook. Polli
           submittedAt: new Date().toISOString(),
           status: "in_progress",
         };
-        const updated = upsertInvocationBlock(content, inv);
-        await writeNotebook(notebookPath, updated);
+        await withNotebookLock(notebookPath, async () => {
+          const content = await readNotebook(notebookPath);
+          const updated = upsertInvocationBlock(content, inv);
+          await writeNotebook(notebookPath, updated);
+        });
 
         return {
           content: [{
@@ -537,7 +540,12 @@ interface CheckResultEntry {
   autoAction?: string;
 }
 
-async function checkInvocations(specificId: string | undefined, signal?: AbortSignal) {
+interface CheckInvocationsResult {
+  content: { type: "text"; text: string }[];
+  details: Record<string, unknown>;
+}
+
+async function checkInvocations(specificId: string | undefined, signal?: AbortSignal): Promise<CheckInvocationsResult> {
   const notebookPath = getNotebookPath();
   if (!notebookPath) {
     return {
@@ -553,95 +561,114 @@ async function checkInvocations(specificId: string | undefined, signal?: AbortSi
     };
   }
 
-  let content = await readNotebook(notebookPath);
-  let blocks = findInvocationBlocks(content);
+  // Wrap the entire read-poll-write cycle in a per-path lock so a parallel
+  // check_all or invocation_record can't overlap us and lose updates.
+  // Galaxy GETs run inside the lock — that's intentional: a concurrent
+  // writer must wait for our final upsert.
+  type LockOutcome =
+    | { kind: "early"; result: CheckInvocationsResult }
+    | { kind: "results"; results: CheckResultEntry[] };
+  const lockResult: LockOutcome = await withNotebookLock<LockOutcome>(notebookPath, async () => {
+    let content = await readNotebook(notebookPath);
+    const blocks = findInvocationBlocks(content);
 
-  let toCheck: InvocationYaml[];
-  if (specificId) {
-    const found = blocks.find((b) => b.invocationId === specificId);
-    if (!found) {
+    let toCheck: InvocationYaml[];
+    if (specificId) {
+      const found = blocks.find((b) => b.invocationId === specificId);
+      if (!found) {
+        return {
+          kind: "early",
+          result: {
+            content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: `Invocation ${specificId} not found in notebook.` }) }],
+            details: { error: true } as Record<string, unknown>,
+          },
+        };
+      }
+      toCheck = [found];
+    } else {
+      toCheck = blocks.filter((b) => b.status === "in_progress");
+    }
+
+    if (toCheck.length === 0) {
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: `Invocation ${specificId} not found in notebook.` }) }],
-        details: { error: true } as Record<string, unknown>,
+        kind: "early",
+        result: {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({ success: true, results: [], message: "No in-progress invocations." }),
+          }],
+          details: { checked: 0 } as Record<string, unknown>,
+        },
       };
     }
-    toCheck = [found];
-  } else {
-    toCheck = blocks.filter((b) => b.status === "in_progress");
-  }
 
-  if (toCheck.length === 0) {
-    return {
-      content: [{
-        type: "text" as const,
-        text: JSON.stringify({ success: true, results: [], message: "No in-progress invocations." }),
-      }],
-      details: { checked: 0 } as Record<string, unknown>,
-    };
-  }
+    const results: CheckResultEntry[] = [];
 
-  const results: CheckResultEntry[] = [];
+    for (const block of toCheck) {
+      try {
+        const inv = await galaxyGet<GalaxyInvocationResponse>(
+          `/invocations/${block.invocationId}`,
+          signal,
+        );
 
-  for (const block of toCheck) {
-    try {
-      const inv = await galaxyGet<GalaxyInvocationResponse>(
-        `/invocations/${block.invocationId}`,
-        signal,
-      );
-
-      const summary = { ok: 0, running: 0, queued: 0, error: 0, other: 0 };
-      for (const invStep of inv.steps) {
-        for (const job of invStep.jobs) {
-          if (job.state === "ok") summary.ok++;
-          else if (job.state === "running") summary.running++;
-          else if (job.state === "queued" || job.state === "new" || job.state === "waiting") summary.queued++;
-          else if (job.state === "error" || job.state === "deleted") summary.error++;
-          else summary.other++;
+        const summary = { ok: 0, running: 0, queued: 0, error: 0, other: 0 };
+        for (const invStep of inv.steps) {
+          for (const job of invStep.jobs) {
+            if (job.state === "ok") summary.ok++;
+            else if (job.state === "running") summary.running++;
+            else if (job.state === "queued" || job.state === "new" || job.state === "waiting") summary.queued++;
+            else if (job.state === "error" || job.state === "deleted") summary.error++;
+            else summary.other++;
+          }
         }
+
+        let autoAction: string | undefined;
+        let nextStatus: InvocationYaml["status"] = block.status;
+        let nextSummary = block.summary;
+
+        if (summary.error === 0 && summary.running === 0 && summary.queued === 0 && summary.ok > 0) {
+          nextStatus = "completed";
+          nextSummary = `Workflow completed: ${summary.ok} jobs succeeded`;
+          autoAction = "completed";
+        } else if (summary.error > 0) {
+          nextStatus = "failed";
+          nextSummary = `Workflow failed: ${summary.error} job(s) errored, ${summary.ok} succeeded`;
+          autoAction = "failed";
+        }
+
+        if (nextStatus !== block.status || nextSummary !== block.summary) {
+          const updated: InvocationYaml = { ...block, status: nextStatus, summary: nextSummary };
+          content = upsertInvocationBlock(content, updated);
+        }
+
+        results.push({
+          invocationId: block.invocationId,
+          notebookAnchor: block.notebookAnchor,
+          label: block.label,
+          invocationState: inv.state,
+          jobSummary: summary,
+          autoAction,
+        });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        results.push({
+          invocationId: block.invocationId,
+          notebookAnchor: block.notebookAnchor,
+          label: block.label,
+          invocationState: "error_checking",
+          jobSummary: { ok: 0, running: 0, queued: 0, error: 0, other: 0 },
+          autoAction: `check_error: ${msg}`,
+        });
       }
-
-      let autoAction: string | undefined;
-      let nextStatus: InvocationYaml["status"] = block.status;
-      let nextSummary = block.summary;
-
-      if (summary.error === 0 && summary.running === 0 && summary.queued === 0 && summary.ok > 0) {
-        nextStatus = "completed";
-        nextSummary = `Workflow completed: ${summary.ok} jobs succeeded`;
-        autoAction = "completed";
-      } else if (summary.error > 0) {
-        nextStatus = "failed";
-        nextSummary = `Workflow failed: ${summary.error} job(s) errored, ${summary.ok} succeeded`;
-        autoAction = "failed";
-      }
-
-      if (nextStatus !== block.status || nextSummary !== block.summary) {
-        const updated: InvocationYaml = { ...block, status: nextStatus, summary: nextSummary };
-        content = upsertInvocationBlock(content, updated);
-      }
-
-      results.push({
-        invocationId: block.invocationId,
-        notebookAnchor: block.notebookAnchor,
-        label: block.label,
-        invocationState: inv.state,
-        jobSummary: summary,
-        autoAction,
-      });
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      results.push({
-        invocationId: block.invocationId,
-        notebookAnchor: block.notebookAnchor,
-        label: block.label,
-        invocationState: "error_checking",
-        jobSummary: { ok: 0, running: 0, queued: 0, error: 0, other: 0 },
-        autoAction: `check_error: ${msg}`,
-      });
     }
-  }
 
-  // Persist any status updates back to the file in one write.
-  await writeNotebook(notebookPath, content);
+    // Persist any status updates back to the file in one write.
+    await writeNotebook(notebookPath, content);
+    return { kind: "results", results };
+  });
+
+  if (lockResult.kind === "early") return lockResult.result;
+  const results = lockResult.results;
 
   return {
     content: [{

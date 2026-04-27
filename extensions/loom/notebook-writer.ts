@@ -22,13 +22,38 @@ export function slugify(title: string): string {
 }
 
 /**
- * Write notebook to file.
+ * Per-path mutex chain. Two parallel `upsertInvocationBlock` calls (e.g.
+ * `galaxy_invocation_check_all` polling several invocations concurrently)
+ * would race read-modify-write on the same notebook file: each reads the
+ * pre-update content, applies its block, and the second writer overwrites
+ * the first. Serializing via a per-path Promise chain prevents the lost
+ * update without paying for an OS-level lock.
+ */
+const writeLocks = new Map<string, Promise<void>>();
+
+export function withNotebookLock<T>(filePath: string, work: () => Promise<T>): Promise<T> {
+  const prev = writeLocks.get(filePath) ?? Promise.resolve();
+  const next = prev.then(work, work);
+  // Always clear so completed locks don't pin memory; the chain is preserved
+  // through the Promise we just created.
+  writeLocks.set(filePath, next.then(() => undefined, () => undefined));
+  return next;
+}
+
+/**
+ * Atomic notebook write: render to `<file>.tmp` then rename. The rename
+ * is atomic on POSIX, so the destination either has the old or the new
+ * content — never partial. The file watcher in state.ts may still fire
+ * on the rename, but it can no longer observe a half-written file.
  */
 export async function writeNotebook(
   filePath: string,
-  content: string
+  content: string,
 ): Promise<void> {
-  await fs.writeFile(filePath, content, "utf-8");
+  const tmp = `${filePath}.tmp`;
+  // O_TRUNC | O_WRONLY | O_CREAT via fs.writeFile — but write to tmp first.
+  await fs.writeFile(tmp, content, "utf-8");
+  await fs.rename(tmp, filePath);
 }
 
 /**
