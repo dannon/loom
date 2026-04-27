@@ -697,8 +697,7 @@ function resetUiForFreshContext(): void {
   streaming = false;
   sendBtn.classList.remove("hidden");
   abortBtn.classList.add("hidden");
-  statusBadge.textContent = "Ready";
-  statusBadge.className = "footer-control status-badge";
+  setStatusBadge("");
   setArtifactCollapsed(false);
 }
 
@@ -810,8 +809,7 @@ function submit(): void {
 
   chat.addUserMessage(text);
   chat.showThinking();
-  statusBadge.textContent = "thinking...";
-  statusBadge.className = "footer-control status-badge thinking";
+  setStatusBadge("thinking", "thinking...");
   window.orbit.prompt(text);
   inputEl.value = "";
   inputEl.style.height = "auto";
@@ -846,8 +844,7 @@ function flushPendingMessage(): void {
   requestAnimationFrame(() => {
     chat.addUserMessage(text);
     chat.showThinking();
-    statusBadge.textContent = "thinking...";
-    statusBadge.className = "footer-control status-badge thinking";
+    setStatusBadge("thinking", "thinking...");
     window.orbit.prompt(text);
   });
 }
@@ -1036,8 +1033,7 @@ function handleSummarize(raw: string, argStr: string): void {
     `<i>Asking the agent to append a summary of ${label} to <code>notebook.md</code>…</i>`,
   );
   chat.showThinking();
-  statusBadge.textContent = "thinking...";
-  statusBadge.className = "footer-control status-badge thinking";
+  setStatusBadge("thinking", "thinking...");
   window.orbit.prompt(prompt);
 }
 
@@ -1104,8 +1100,7 @@ function handleCost(raw: string): void {
     `<code>notebook.md</code>…</i>`,
   );
   chat.showThinking();
-  statusBadge.textContent = "thinking...";
-  statusBadge.className = "footer-control status-badge thinking";
+  setStatusBadge("thinking", "thinking...");
   window.orbit.prompt(prompt);
 }
 
@@ -1580,8 +1575,7 @@ window.orbit.onAgentEvent((event) => {
 
       if (ameType === "text_start") {
         chat.hideThinking();
-        statusBadge.textContent = "responding...";
-        statusBadge.className = "footer-control status-badge running";
+        setStatusBadge("running", "responding...");
         if (!streaming) {
           streaming = true;
           sendBtn.classList.add("hidden");
@@ -1620,8 +1614,7 @@ window.orbit.onAgentEvent((event) => {
         if (msg.stopReason === "error" && msg.errorMessage) {
           chat.hideThinking();
           chat.addErrorMessage(msg.errorMessage);
-          statusBadge.textContent = "error";
-          statusBadge.className = "footer-control status-badge error";
+          setStatusBadge("error");
         }
       }
       break;
@@ -1641,8 +1634,7 @@ window.orbit.onAgentEvent((event) => {
       if (name === "team_dispatch") {
         chat.addToolCard(id, name);
       }
-      statusBadge.textContent = `running: ${name}`;
-      statusBadge.className = "footer-control status-badge running";
+      setStatusBadge("running", `running: ${name}`);
       break;
     }
 
@@ -1671,8 +1663,7 @@ window.orbit.onAgentEvent((event) => {
     case "agent_end":
       chat.hideThinking();
       streaming = false;
-      statusBadge.textContent = "Ready";
-      statusBadge.className = "footer-control status-badge";
+      setStatusBadge("");
       sendBtn.classList.remove("hidden");
       abortBtn.classList.add("hidden");
       chat.finishAssistantMessage();
@@ -1687,8 +1678,7 @@ window.orbit.onAgentEvent((event) => {
       chat.hideThinking();
       chat.addErrorMessage(msg);
       streaming = false;
-      statusBadge.textContent = "error";
-      statusBadge.className = "footer-control status-badge error";
+      setStatusBadge("error");
       sendBtn.classList.remove("hidden");
       abortBtn.classList.add("hidden");
       // Clear any queued message on error so the indicator doesn't get stuck
@@ -1905,13 +1895,28 @@ statusBadge.addEventListener("click", () => {
   if (statusBadgeIsStuck) void openPreferences();
 });
 
-window.orbit.onAgentStatus((status, msg) => {
-  statusBadge.textContent = msg || status;
-  statusBadge.className = "footer-control status-badge " + status;
-
+/**
+ * Single source of truth for status-badge updates. Sets className,
+ * textContent, and the stuck-click affordance (cursor + title) in one
+ * place. The 9+ in-stream sites that previously did
+ * `statusBadge.className = "..."` directly skipped the stuck-click
+ * sync — after a stream-driven error the badge looked red but click
+ * didn't open Preferences.
+ *
+ * `status` is the bare status word ("running", "thinking", "error",
+ * "connecting", or "" for the default ready state). `msg` overrides
+ * the badge label when present; otherwise the status word is shown.
+ */
+function setStatusBadge(status: string, msg?: string): void {
+  statusBadge.textContent = msg || status || "Ready";
+  statusBadge.className = ("footer-control status-badge " + (status || "")).trim();
   statusBadgeIsStuck = STUCK_STATUS.has(status);
   statusBadge.style.cursor = statusBadgeIsStuck ? "pointer" : "default";
   statusBadge.title = statusBadgeIsStuck ? "Click to open Preferences" : "";
+}
+
+window.orbit.onAgentStatus((status, msg) => {
+  setStatusBadge(status, msg);
 
   // Show cwd welcome once, after the first successful agent start.
   if (status === "running" && !hasShownStartupWelcome) {
