@@ -123,7 +123,10 @@ export function syncMcpConfig(url: string, apiKey: string): void {
         GALAXY_URL: url,
         GALAXY_API_KEY: apiKey,
       };
-      fs.writeFileSync(mcpPath, JSON.stringify(config, null, 2));
+      // 0600 first so a concurrent reader can't catch the file with a
+      // wider mode between writeFile and chmod.
+      fs.writeFileSync(mcpPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+      try { fs.chmodSync(mcpPath, 0o600); } catch { /* perm-tightening best-effort */ }
     }
   } catch {
     // Non-fatal

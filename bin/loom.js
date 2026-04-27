@@ -3,7 +3,7 @@
 import { main } from "@mariozechner/pi-coding-agent";
 import { resolve, dirname, join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "fs";
 import { homedir } from "os";
 import { loadConfig as loadLoomConfig } from "../shared/loom-config.js";
 
@@ -175,7 +175,12 @@ if (!isInformationalCommand) {
   }
 
   mkdirSync(dirname(mcpConfigPath), { recursive: true });
-  writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
+  // mcp.json carries Galaxy credentials in its env block — keep file mode
+  // 0600 so other users on a shared machine can't read the API key. The
+  // mode option on writeFileSync sets perms only when the file is *created*;
+  // a follow-up chmod ensures we tighten existing files too.
+  writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2), { mode: 0o600 });
+  try { chmodSync(mcpConfigPath, 0o600); } catch { /* best-effort */ }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
