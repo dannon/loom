@@ -1926,6 +1926,19 @@ window.orbit.onAgentStatus((status, msg) => {
   }
 });
 
+// Race fix: did-finish-load → main spawns brain → agent:status fires before
+// this module's listener is attached, so the badge stays stuck on its initial
+// "connecting..." HTML. Pull the current snapshot now to catch up.
+void window.orbit.getAgentStatus().then(({ status, message }) => {
+  if (status === "stopped") return;
+  setStatusBadge(status, message);
+  if (status === "running" && !hasShownStartupWelcome) {
+    hasShownStartupWelcome = true;
+    setArtifactCollapsed(false);
+    void showCwdWelcome();
+  }
+});
+
 // ── Draggable Divider ─────────────────────────────────────────────────────────
 
 const divider = document.getElementById("divider")!;

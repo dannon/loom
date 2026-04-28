@@ -91,6 +91,7 @@ export class AgentManager {
   private process: ChildProcess | null = null;
   private window: BrowserWindow;
   private status: AgentStatus = "stopped";
+  private statusMessage: string | undefined;
   private stderr = "";
   private pendingResponses = new Map<string, PendingResponse>();
   private idCounter = 0;
@@ -351,12 +352,17 @@ export class AgentManager {
     return this.status;
   }
 
+  getStatusSnapshot(): { status: AgentStatus; message?: string } {
+    return { status: this.status, message: this.statusMessage };
+  }
+
   getStderr(): string {
     return this.stderr;
   }
 
   private setStatus(status: AgentStatus, message?: string): void {
     this.status = status;
+    this.statusMessage = message;
     log("status:", status, message || "");
     // During a silent restart we suppress the transient stopped→running flicker;
     // the renderer keeps showing "running" the whole time.

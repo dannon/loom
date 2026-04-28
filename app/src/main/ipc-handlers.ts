@@ -50,6 +50,10 @@ export function registerIpcHandlers(agent: AgentManager): void {
     return agent.sendCommand({ type: "get_state" });
   });
 
+  ipcMain.handle("agent:get-status", () => {
+    return agent.getStatusSnapshot();
+  });
+
   ipcMain.on("agent:ui-response", (_e, response: Record<string, unknown>) => {
     log("ui-response:", JSON.stringify(response).slice(0, 120));
     agent.send(response);

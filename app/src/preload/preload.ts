@@ -75,6 +75,7 @@ export interface OrbitAPI {
   onAgentStatus(
     callback: (status: "running" | "stopped" | "error", msg?: string) => void
   ): () => void;
+  getAgentStatus(): Promise<{ status: "running" | "stopped" | "error"; message?: string }>;
   onCwdChanged(callback: (dir: string) => void): () => void;
   onOpenPreferences(callback: () => void): () => void;
   onShowSlashCommands(callback: () => void): () => void;
@@ -138,6 +139,8 @@ const api: OrbitAPI = {
     ipcRenderer.on("agent:status", handler);
     return () => ipcRenderer.removeListener("agent:status", handler);
   },
+
+  getAgentStatus: () => ipcRenderer.invoke("agent:get-status"),
 
   onCwdChanged: (callback) => {
     const handler = (_e: unknown, dir: string) => callback(dir);
