@@ -2051,6 +2051,7 @@ prefsProvider.addEventListener("change", () => {
 wireApiKeyValidation(prefsProvider, prefsApiKey, prefsApiKeyStatus);
 const prefsGalaxyUrl = document.getElementById("prefs-galaxy-url") as HTMLInputElement;
 const prefsGalaxyKey = document.getElementById("prefs-galaxy-key") as HTMLInputElement;
+const prefsGalaxyError = document.getElementById("prefs-galaxy-error")!;
 const prefsDefaultCwd = document.getElementById("prefs-default-cwd") as HTMLInputElement;
 const prefsCondaBin = document.getElementById("prefs-conda-bin") as HTMLSelectElement;
 const prefsSkillsRows = document.getElementById("prefs-skills-rows")!;
@@ -2144,6 +2145,21 @@ const UNCHANGED_SECRET = "__loom_unchanged_secret__";
 let prefsLlmHadKey = false;
 let prefsGalaxyHadKey = false;
 
+// Both-or-neither: a half-filled Galaxy profile gets rejected by the brain
+// silently, so disable Save and surface why inline rather than letting the
+// user click and discover via an alert.
+function updatePrefsGalaxyValidity(): void {
+  const hasUrl = Boolean(prefsGalaxyUrl.value.trim());
+  const hasKey = Boolean(prefsGalaxyKey.value.trim() || prefsGalaxyHadKey);
+  const halfFilled = hasUrl !== hasKey;
+  prefsGalaxyError.textContent = halfFilled
+    ? "Provide both URL and API key, or leave both blank."
+    : "";
+  (prefsSave as HTMLButtonElement).disabled = halfFilled;
+}
+prefsGalaxyUrl.addEventListener("input", updatePrefsGalaxyValidity);
+prefsGalaxyKey.addEventListener("input", updatePrefsGalaxyValidity);
+
 async function openPreferences(): Promise<void> {
   const config = await window.orbit.getConfig() as {
     llm?: { provider?: string; model?: string; hasApiKey?: boolean };
@@ -2169,6 +2185,7 @@ async function openPreferences(): Promise<void> {
   prefsGalaxyHadKey = Boolean(activeProfile?.hasApiKey);
   prefsGalaxyKey.value = "";
   prefsGalaxyKey.placeholder = prefsGalaxyHadKey ? "•••••••• (unchanged)" : "";
+  updatePrefsGalaxyValidity();
 
   prefsDefaultCwd.value = config.defaultCwd || "";
   prefsCondaBin.value = config.condaBin || "auto";
@@ -2214,7 +2231,8 @@ async function savePreferences(): Promise<void> {
   const hasGalaxyUrl = Boolean(galaxyUrl);
   const hasGalaxyKey = Boolean(typedGalaxyKey || prefsGalaxyHadKey);
   if (hasGalaxyUrl !== hasGalaxyKey) {
-    alert("Galaxy: provide both URL and API key, or leave both blank.");
+    // Save button should already be disabled by updatePrefsGalaxyValidity.
+    // Belt-and-suspenders: bail silently if it somehow fires anyway.
     return;
   }
 

@@ -1389,6 +1389,11 @@ body:not(.artifact-collapsed) #artifact-toggle {
   color: var(--error);
   font-size: 12px;
 }
+.prefs-galaxy-error {
+  color: var(--error);
+  font-size: 12px;
+  min-height: 14px;
+}
 .required {
   color: var(--error);
   font-size: 11px;
