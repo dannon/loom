@@ -5,6 +5,7 @@ export const LoomWidgetKey = {
   Parameters: "parameters",
   Notebook: "notebook",
   PlanView: "plan-view",
+  Activity: "activity",
 };
 
 export function encodeMarkdownWidget(markdown) {

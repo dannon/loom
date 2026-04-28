@@ -3,36 +3,58 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!--
+    CSP: defense-in-depth alongside DOMPurify on every markdown sink.
+    `default-src 'self'` blocks inline scripts; `'unsafe-inline'` on style is
+    accepted because Vite injects styles inline during dev and we sanitize all
+    HTML before it reaches innerHTML. Image sources include orbit-artifact:
+    (notebook figures) and data:/blob: (rendered images, PDFs). Connect-src
+    lets the renderer reach the Vite dev server (ws:) when running `npm start`.
+    object-src + frame-src allow blob: for the file-viewer PDF preview —
+    Chromium's built-in PDF viewer creates an inner frame at the blob URL.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' orbit-artifact: data: blob:; connect-src 'self' http://localhost:* ws://localhost:*; font-src 'self' data:; object-src blob:; frame-src blob:; base-uri 'self'; form-action 'none';" />
   <title>orbit</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
   <div id="app">
+    <div id="app-main">
+    <!-- Left pane: File tree sidebar -->
+    <div id="files-pane" class="pane">
+      <div class="pane-title" id="files-title">
+        <span class="files-title-label">Files</span>
+        <div class="files-title-actions">
+          <button id="files-refresh" class="files-header-btn" title="Refresh file tree">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"/>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+          </button>
+          <button id="files-show-hidden" class="files-header-btn" title="Show hidden files" aria-pressed="false">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div id="files-tree"></div>
+    </div>
+
+    <!-- Draggable divider between files pane and chat -->
+    <div id="files-divider"></div>
+
     <!-- Left pane: Chat -->
     <div id="chat-pane" class="pane">
-      <div id="chat-header">
-        <img src="./assets/galaxy-logo.svg" alt="Galaxy" class="masthead-logo" />
-        <span class="logo">orbit</span>
-        <span id="agent-status" class="status-badge">connecting...</span>
-        <button id="model-indicator" title="Click to change model" class="hidden">
-          <span id="model-indicator-name">—</span>
+      <div class="pane-title pane-title-with-controls" id="chat-title">
+        <button id="files-toggle" class="pane-title-btn" title="Toggle files sidebar (Ctrl+B)" aria-label="Toggle files sidebar">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
         </button>
-        <div id="exec-mode-toggle" class="seg-control" title="Execution mode">
-          <button data-mode="local" class="active">Local</button>
-          <button data-mode="remote">Remote</button>
-        </div>
-        <div id="usage-bar" title="Session token usage">
-          <span id="usage-tokens">0 tok</span>
-          <span id="usage-cost"></span>
-        </div>
-        <div id="cwd-bar">
-          <span id="cwd-path" title="Analysis directory">~</span>
-          <button id="cwd-change" title="Change directory">change</button>
-        </div>
-        <button id="artifact-toggle" title="Toggle artifact pane (Ctrl+\)">
+        <span class="pane-title-label">Chat</span>
+        <button id="artifact-toggle" class="pane-title-btn" title="Toggle notebook pane (Ctrl+\)" aria-label="Toggle notebook pane">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="3" y="3" width="18" height="18" rx="2"/>
             <line x1="15" y1="3" x2="15" y2="21"/>
@@ -41,109 +63,115 @@
       </div>
       <div id="messages"></div>
 
-      <!-- Process monitor — collapsible strip showing live stats for local subprocesses -->
-      <div id="proc-monitor" class="hidden">
-        <div id="proc-monitor-header">
-          <span>Running processes <span id="proc-monitor-count">0</span></span>
-          <button id="proc-monitor-close" title="Hide">×</button>
-        </div>
-        <div id="proc-monitor-body">
-          <table id="proc-monitor-table">
-            <thead>
-              <tr>
-                <th>PID</th>
-                <th>CPU%</th>
-                <th>MEM%</th>
-                <th>RSS</th>
-                <th>Time</th>
-                <th>Command</th>
-              </tr>
-            </thead>
-            <tbody id="proc-monitor-rows"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Agent shell — collapsible activity log at the bottom of the chat pane -->
-      <div id="agent-shell" class="hidden">
-        <div id="agent-shell-header">
-          <span>Agent shell</span>
-          <button id="agent-shell-clear" title="Clear">clear</button>
-          <button id="agent-shell-close" title="Hide">×</button>
-        </div>
-        <div id="agent-shell-body"></div>
-      </div>
-
       <div id="input-area">
-        <span id="queued-indicator" class="hidden" title="Queued — will send when agent is ready">queued ↓</span>
+        <div id="slash-popup" class="hidden" role="listbox" aria-label="Slash commands"></div>
+        <span id="queued-indicator" class="hidden" title="Queued — will send when agent is ready">queued <span aria-hidden="true">↓</span></span>
         <textarea
           id="input"
-          placeholder="Describe your analysis..."
+          placeholder="Ask for a plan, drop a file path, or type / for commands"
           rows="1"
+          aria-label="Chat input"
+          aria-haspopup="listbox"
+          aria-controls="slash-popup"
+          aria-autocomplete="list"
+          aria-expanded="false"
         ></textarea>
-        <button id="send-btn" title="Send">
+        <button id="send-btn" title="Send" aria-label="Send message">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13"/>
           </svg>
         </button>
-        <button id="abort-btn" title="Stop" class="hidden">
+        <button id="abort-btn" title="Stop" class="hidden" aria-label="Stop streaming response">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <rect x="6" y="6" width="12" height="12" rx="2"/>
           </svg>
         </button>
       </div>
       <div id="input-hint">
-        <span>Tip: <code>/help</code> for commands · <code>/model sonnet</code> to switch LLM · <code>/new</code> for a fresh session</span>
-        <button id="proc-monitor-toggle" title="Toggle process monitor">▸ procs</button>
-        <button id="agent-shell-toggle" title="Toggle agent shell">▸ shell</button>
+        <span>Type <code>/</code> to see available commands</span>
       </div>
     </div>
 
     <!-- Draggable divider -->
     <div id="divider"></div>
 
-    <!-- Right pane: Artifacts -->
+    <!-- Right pane: Notebook / Activity -->
     <div id="artifact-pane" class="pane">
-      <div id="artifact-tabs">
-        <button class="tab active" data-tab="plan">Plan</button>
-        <button class="tab" data-tab="steps">Steps</button>
-        <button class="tab" data-tab="results">Notebook</button>
+      <div class="pane-title pane-tabs" id="artifact-tabs">
+        <button class="pane-tab active" data-tab="notebook">Notebook</button>
+        <button class="pane-tab" data-tab="activity">Activity</button>
+        <button class="pane-tab pane-tab-closeable" data-tab="file" hidden>
+          <span class="pane-tab-label">File</span>
+          <span class="pane-tab-close" id="file-tab-close" title="Close file">×</span>
+        </button>
       </div>
       <div id="artifact-content">
-        <div id="tab-plan" class="tab-panel active">
-          <div class="empty-state">No analysis plan yet. To create a plan begin your conversation with 'Create a plan for analysis of ...'. For examples, use '/help'.</div>
-          <div id="plan-toolbar" class="plan-toolbar hidden">
-            <div class="plan-mode-toggle">
-              <button class="mode-btn active" data-mode="rendered">Rendered</button>
-              <button class="mode-btn" data-mode="raw">Raw</button>
-            </div>
-          </div>
-          <div id="plan-rendered" class="plan-rendered hidden"></div>
-          <textarea id="plan-raw" class="plan-editor hidden" spellcheck="false"></textarea>
-          <div id="plan-actions" class="plan-actions hidden">
-            <div class="plan-hint">
-              Use slash commands: <code>/review</code>, <code>/test</code>, <code>/execute</code>
-            </div>
-          </div>
-
-          <!-- Parameter configuration form (replaces plan view when active) -->
-          <div id="plan-params-view" class="plan-params-view hidden">
-            <div class="plan-params-back-row">
-              <button id="params-back-btn" class="plan-params-back" title="Discard changes">&larr; Back to plan</button>
-              <button id="params-save-btn" class="plan-btn primary" title="Save parameters and return to plan">Save parameters</button>
-            </div>
-            <div id="plan-params-form" class="param-form"></div>
-          </div>
-        </div>
-        <div id="tab-steps" class="tab-panel">
-          <div class="empty-state">Pipeline steps will appear here once a plan is created.</div>
-        </div>
-        <div id="tab-results" class="tab-panel">
+        <div id="notebook-view" class="pane-body">
           <div class="empty-state">
             <p>The notebook is the running log of your analysis — plan, steps, decisions, and Galaxy references — persisted to a markdown file in your working directory and committed to git on every change.</p>
-            <p>It'll appear here once you start a plan. Type <code>/notebook</code> anytime to refresh.</p>
+            <p>It'll appear here once the agent writes to <code>notebook.md</code>, or you can ask it to summarize the conversation so far.</p>
           </div>
         </div>
+        <div id="activity-view" class="pane-body hidden">
+          <div id="activity-shell-section">
+            <div class="activity-section-header">
+              <span>Shell</span>
+              <button id="agent-shell-clear" title="Clear shell">clear</button>
+            </div>
+            <div id="agent-shell-body"></div>
+          </div>
+          <div id="activity-proc-section">
+            <div class="activity-section-header">
+              <span>Processes <span id="proc-monitor-count" class="zero">0</span></span>
+            </div>
+            <div id="proc-monitor-body">
+              <table id="proc-monitor-table">
+                <thead>
+                  <tr>
+                    <th>PID</th>
+                    <th>CPU%</th>
+                    <th>MEM%</th>
+                    <th>RSS</th>
+                    <th>Time</th>
+                    <th>Command</th>
+                  </tr>
+                </thead>
+                <tbody id="proc-monitor-rows">
+                  <tr><td colspan="6" class="empty-procs">No subprocesses running</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div id="file-view" class="pane-body hidden"></div>
+      </div>
+    </div>
+    </div>
+
+    <!-- Footer bar — status indicators (pane toggles live in chat-title) -->
+    <div id="app-footer">
+      <span id="agent-status" class="footer-control status-badge">connecting...</span>
+      <button id="galaxy-status" class="footer-control is-interactive status-dot status-dot-disconnected" title="Galaxy: not configured" aria-label="Galaxy connection: not configured. Click to open Preferences.">
+        <span class="status-dot-label">Galaxy</span>
+      </button>
+      <div id="exec-mode-toggle" class="footer-control footer-control-segmented" role="radiogroup" aria-label="Execution mode" title="Execution mode: Local = everything runs locally; Cloud = agent decides per plan whether each step runs locally or on Galaxy.">
+        <button id="exec-mode-local" class="exec-mode-btn" data-mode="local" role="radio" aria-checked="false">Local</button>
+        <button id="exec-mode-cloud" class="exec-mode-btn active" data-mode="cloud" role="radio" aria-checked="true">Cloud</button>
+      </div>
+      <button id="model-indicator" class="footer-control is-interactive hidden" title="Click to change model">
+        <span id="model-indicator-name">—</span>
+      </button>
+      <div id="usage-bar" class="footer-control" title="Session token usage">
+        <span id="usage-tokens">0 tok</span>
+        <span id="usage-cost"></span>
+      </div>
+      <div id="cwd-bar" class="footer-control">
+        <span id="cwd-path" title="Analysis directory">~</span>
+        <button id="cwd-change" class="cwd-change-btn" title="Change directory" aria-label="Change analysis directory">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+        </button>
       </div>
     </div>
   </div>
@@ -186,6 +214,10 @@
             <label for="prefs-api-key">API Key</label>
             <input id="prefs-api-key" type="password" placeholder="sk-..." />
           </div>
+          <div class="prefs-row prefs-hint">
+            <span></span>
+            <span id="prefs-api-key-status" class="api-key-status"></span>
+          </div>
         </section>
 
         <section class="prefs-section">
@@ -216,6 +248,37 @@
               <option value="mamba">mamba</option>
               <option value="conda">conda</option>
             </select>
+          </div>
+        </section>
+
+        <section class="prefs-section">
+          <h3>Skills</h3>
+          <p class="prefs-help">
+            GitHub repos with Claude-Code-style skills (top-level
+            <code>AGENTS.md</code> + nested <code>SKILL.md</code> files). The
+            agent fetches them on demand via the <code>skills_fetch</code>
+            tool. <strong>Alpha restriction:</strong> only repos under
+            <code>github.com/galaxyproject/*</code> are accepted (the agent
+            treats fetched skills as authoritative instructions, so the
+            allowlist limits prompt-injection surface).
+            <code>galaxy-skills</code> is the default and ships with Loom;
+            you can disable or remove it, but a default is re-seeded if
+            all repos are removed.
+          </p>
+          <table id="prefs-skills-table" class="prefs-table">
+            <thead>
+              <tr>
+                <th class="prefs-skills-name">Name</th>
+                <th class="prefs-skills-url">GitHub URL</th>
+                <th class="prefs-skills-branch">Branch</th>
+                <th class="prefs-skills-enabled">Enabled</th>
+                <th class="prefs-skills-actions"></th>
+              </tr>
+            </thead>
+            <tbody id="prefs-skills-rows"></tbody>
+          </table>
+          <div class="prefs-row">
+            <button id="prefs-skills-add" class="plan-btn">+ Add repo</button>
           </div>
         </section>
       </div>
@@ -263,6 +326,10 @@
             <label for="welcome-api-key">API Key</label>
             <input id="welcome-api-key" type="password" placeholder="sk-..." />
           </div>
+          <div class="prefs-row prefs-hint">
+            <span></span>
+            <span id="welcome-api-key-status" class="api-key-status"></span>
+          </div>
         </section>
 
         <details class="welcome-details">
@@ -295,7 +362,37 @@
       <div class="modal-footer">
         <span id="welcome-error" class="welcome-error"></span>
         <div class="modal-actions">
+          <button id="welcome-skip" class="plan-btn">Skip — set up later</button>
           <button id="welcome-save" class="plan-btn execute">Save and continue</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- /new confirm modal: shown when user starts a fresh session in a dir with an existing notebook -->
+  <div id="new-session-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Start a new session?</h2>
+      </div>
+      <div class="modal-body">
+        <p>This directory already contains an analysis notebook.</p>
+        <p>
+          <strong>Keep notebook</strong> — start a fresh chat, but keep the existing
+          <code>notebook.md</code> and activity log so you can continue adding to them.
+        </p>
+        <p>
+          <strong>Start fresh</strong> — delete <code>notebook.md</code>, <code>activity.jsonl</code>,
+          and the session log, then begin a new analysis. The deletion is committed to git,
+          so the old notebook remains recoverable via <code>git log</code> / <code>git show</code>,
+          but from the UI the old analysis is gone.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <div class="modal-actions">
+          <button id="new-session-cancel" class="plan-btn">Cancel</button>
+          <button id="new-session-keep" class="plan-btn primary">Keep notebook</button>
+          <button id="new-session-fresh" class="plan-btn danger">Start fresh</button>
         </div>
       </div>
     </div>

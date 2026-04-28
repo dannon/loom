@@ -2,6 +2,9 @@ node_modules/
 
 # Test-generated notebook files
 *-notebook.md
+activity.jsonl
+session.jsonl
 
 # Agent worktrees
 .worktrees/
+.claude/

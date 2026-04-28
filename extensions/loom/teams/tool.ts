@@ -39,8 +39,8 @@ export function registerTeamTools(pi: ExtensionAPI): void {
       "Use when the user asks for a 'team' to handle a bounded sub-task such as " +
       "literature review or cross-checking findings. Each role is a pure-reasoning " +
       "LLM call (no tools); gather any external data with your own tools first and " +
-      "include it in the `description`. Returns the converged result; persist anything " +
-      "useful via existing tools (e.g. interpretation_add_finding).",
+      "include it in the `description`. Returns the converged result; persist useful " +
+      "output by editing notebook.md when the researcher wants it retained.",
     parameters: TeamSpecSchema,
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const spec = params as TeamSpec;

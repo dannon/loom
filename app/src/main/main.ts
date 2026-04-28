@@ -1,15 +1,33 @@
-import { app, BrowserWindow, Menu, dialog, powerMonitor, nativeImage } from "electron";
+import { app, BrowserWindow, Menu, dialog, powerMonitor, nativeImage, protocol, net, shell } from "electron";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { pathToFileURL } from "node:url";
 import { registerIpcHandlers, confirmCwdChange } from "./ipc-handlers.js";
 import { AgentManager } from "./agent.js";
+import { registerFilesIpc, startFilesWatcher, stopFilesWatcher } from "./files-handler.js";
 import { ProcMonitor } from "./proc-monitor.js";
 import { migratePlaintextSecrets, isAvailable as safeStorageAvailable } from "./secure-config.js";
 
 // Workaround for systems where chrome-sandbox isn't suid root
 app.commandLine.appendSwitch("no-sandbox");
+// Pair with --no-zygote so child renderers fork directly from the main
+// process instead of through Chromium's namespace-sandboxed zygote, which
+// fails with ESRCH on /dev/shm under restrictive AppArmor profiles
+// (Ubuntu 24.04+) and breaks DevTools and the PDF viewer.
+app.commandLine.appendSwitch("no-zygote");
+
+// Custom scheme for serving files out of the current analysis cwd. The renderer
+// rewrites relative <img src> in notebook.md to orbit-artifact://cwd/<path>, and
+// the handler below resolves that against agentManager.getCwd() at request time.
+// Registered BEFORE app is ready so the privilege flags take effect.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "orbit-artifact",
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+  },
+]);
 
 // Orbit-specific shell state lives in ~/.orbit/ so multiple Loom shells can
 // coexist without stepping on each other. Brain config remains at ~/.loom/.
@@ -72,25 +90,62 @@ function getDefaultCwd(): string {
 }
 
 /**
- * Open an external URL in a new BrowserWindow. Used for things like IGV.js
- * viewers served on localhost, HTML reports, external docs — anything that
- * would otherwise navigate the main window away from the Orbit renderer.
+ * Decide what to do with a URL the renderer asked to open.
+ *
+ * - http(s) on localhost / 127.* / ::1 → open in our own BrowserWindow
+ *   (this is how IGV.js viewers, local report servers, etc. work).
+ * - https:// elsewhere → hand off to the OS browser via shell.openExternal
+ *   so the user's normal trust UI (cert warnings, password manager) applies.
+ * - http:// elsewhere, mailto:, tel:, file:, javascript:, anything else →
+ *   hand off to shell.openExternal, which will refuse javascript:/file:
+ *   on every platform.
+ *
+ * Previously this opened ANY URL in a privileged BrowserWindow with
+ * `sandbox: false`, meaning a notebook link to javascript:foo() or a
+ * malicious http page could run code in a renderer that shares the
+ * orbit-artifact protocol privileges.
  */
 function openExternalUrlWindow(url: string): void {
-  const win = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    title: url,
-    webPreferences: {
-      sandbox: false,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-  win.setMenuBarVisibility(true);
-  win.loadURL(url).catch((err) => {
-    log("failed to load external url:", url, err);
-  });
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    log("openExternalUrlWindow rejected — not a valid URL:", url);
+    return;
+  }
+  const proto = parsed.protocol.toLowerCase();
+  const host = parsed.hostname.toLowerCase();
+  const isLoopback = host === "localhost" || host.startsWith("127.") || host === "::1";
+
+  if ((proto === "http:" || proto === "https:") && isLoopback) {
+    const win = new BrowserWindow({
+      width: 1400,
+      height: 900,
+      title: parsed.host,
+      webPreferences: {
+        // Match the main window's sandbox stance — flip to true once
+        // chrome-sandbox SUID is set up (C2b).
+        sandbox: false,
+        contextIsolation: true,
+        nodeIntegration: false,
+        webSecurity: true,
+      },
+    });
+    win.setMenuBarVisibility(true);
+    win.loadURL(url).catch((err) => log("failed to load loopback url:", url, err));
+    return;
+  }
+
+  if (proto === "https:") {
+    shell.openExternal(url).catch((err) => log("openExternal failed:", url, err));
+    return;
+  }
+
+  // http://non-loopback, mailto:, tel:, file:, javascript:, etc. — defer to
+  // the OS so its own policies kick in (mailto opens the mail client, etc.).
+  // shell.openExternal refuses javascript: and file: as a hard rule.
+  log("openExternalUrlWindow → shell.openExternal:", url);
+  shell.openExternal(url).catch((err) => log("openExternal refused:", url, err));
 }
 
 function createWindow(cwd: string): void {
@@ -126,13 +181,18 @@ function createWindow(cwd: string): void {
     mainWindow?.focus();
   });
 
-  // Keep the main window on the renderer; external URLs open in new windows.
+  // Keep the main window on the renderer; external URLs (including file://
+  // links from the notebook — IGV viewers, reports, etc.) open in new
+  // Orbit-managed windows so the main app never navigates away.
   mainWindow.webContents.on("will-navigate", (event, url) => {
     const devUrl = MAIN_WINDOW_VITE_DEV_SERVER_URL;
+    // In dev, allow the Vite server URL (hot-reload / in-app routes).
     if (devUrl && url.startsWith(devUrl)) return;
-    if (url.startsWith("file://")) return;
+    // In prod, allow self-refresh of the loaded bundle index.
+    const currentUrl = mainWindow?.webContents.getURL() || "";
+    if (currentUrl && url === currentUrl) return;
     event.preventDefault();
-    log("intercepted external navigation → new window:", url);
+    log("intercepted navigation → new window:", url);
     openExternalUrlWindow(url);
   });
 
@@ -152,6 +212,8 @@ function createWindow(cwd: string): void {
 
   agentManager = new AgentManager(mainWindow, cwd);
   registerIpcHandlers(agentManager);
+  registerFilesIpc(() => agentManager?.getCwd() ?? cwd);
+  startFilesWatcher(mainWindow, cwd);
 
   procMonitor = new ProcMonitor(mainWindow, () => agentManager?.getPid() ?? null);
 
@@ -163,8 +225,23 @@ function createWindow(cwd: string): void {
 
   // Diagnostic listeners (macOS display-sleep UI-wipe bug tracking)
   const wc = mainWindow.webContents;
-  wc.on("render-process-gone", (_e, details) =>
-    log("[diag] render-process-gone:", details.reason, "exitCode:", details.exitCode));
+  let renderReloadDone = false;
+  wc.on("render-process-gone", (_e, details) => {
+    log("[diag] render-process-gone:", details.reason, "exitCode:", details.exitCode);
+    // Recover from a one-off renderer crash by reloading once. Multiple
+    // crashes leave the blank window so the user notices something is
+    // wrong rather than seeing infinite reload churn.
+    if (renderReloadDone) {
+      log("renderer already reloaded once this session; not retrying");
+      return;
+    }
+    renderReloadDone = true;
+    if (details.reason === "killed" || details.reason === "clean-exit") return;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      log("auto-reloading renderer after crash");
+      mainWindow.reload();
+    }
+  });
   wc.on("unresponsive", () => log("[diag] webContents unresponsive"));
   wc.on("responsive", () => log("[diag] webContents responsive"));
 
@@ -174,6 +251,16 @@ function createWindow(cwd: string): void {
 
   mainWindow.on("closed", () => {
     log("window closed");
+    // Tear down everything tied to this window. Without these, on macOS
+    // (where windows can close without quitting the app), a follow-up
+    // `activate` would create a new AgentManager while the previous brain
+    // subprocess kept running — leaking processes and keeping stale FS
+    // watchers / proc-monitor timers alive.
+    try { agentManager?.stop(); } catch (err) { log("agentManager.stop on close failed:", err); }
+    agentManager = null;
+    try { procMonitor?.stop(); } catch (err) { log("procMonitor.stop on close failed:", err); }
+    procMonitor = null;
+    try { stopFilesWatcher(); } catch (err) { log("stopFilesWatcher on close failed:", err); }
     mainWindow = null;
   });
 }
@@ -217,6 +304,7 @@ function buildMenu(): void {
             if (agentManager.switchCwd(dir)) {
               log("switched cwd to:", dir);
               mainWindow.webContents.send("agent:cwd-changed", dir);
+              startFilesWatcher(mainWindow, dir);
             }
           },
         },
@@ -249,6 +337,13 @@ function buildMenu(): void {
       label: "Help",
       submenu: [
         {
+          label: "Slash Commands",
+          click: () => {
+            if (mainWindow) mainWindow.webContents.send("menu:show-slash-commands");
+          },
+        },
+        { type: "separator" },
+        {
           label: "Orbit Documentation",
           click: () => {
             import("electron").then(({ shell }) => {
@@ -267,6 +362,36 @@ app.setName("Orbit");
 
 app.whenReady().then(() => {
   log("app ready");
+
+  // Serve files from the current analysis cwd over orbit-artifact://. Relative
+  // image srcs in notebook.md (e.g. 10_figures/foo.png) are rewritten by the
+  // renderer to orbit-artifact://cwd/10_figures/foo.png and land here.
+  protocol.handle("orbit-artifact", async (req) => {
+    try {
+      const cwd = agentManager?.getCwd();
+      if (!cwd) return new Response(null, { status: 404 });
+      const url = new URL(req.url);
+      const rel = decodeURIComponent(url.pathname.replace(/^\//, ""));
+      if (!rel) return new Response(null, { status: 400 });
+      const abs = path.resolve(cwd, rel);
+      let cwdReal: string;
+      let absReal: string;
+      try {
+        cwdReal = fs.realpathSync(cwd);
+        absReal = fs.realpathSync(abs);
+      } catch {
+        return new Response(null, { status: 404 });
+      }
+      // Refuse anything that escapes the cwd via .. or symlinks.
+      if (absReal !== cwdReal && !absReal.startsWith(cwdReal + path.sep)) {
+        return new Response(null, { status: 403 });
+      }
+      return net.fetch(pathToFileURL(absReal).toString());
+    } catch {
+      return new Response(null, { status: 500 });
+    }
+  });
+
   buildMenu();
 
   // Migrate any plaintext API keys in ~/.loom/config.json to ciphertext. Must

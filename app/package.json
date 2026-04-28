@@ -1,16 +1,20 @@
 {
   "name": "orbit",
+  "productName": "Orbit",
   "version": "0.1.0",
   "description": "Electron desktop shell for the Loom agent runtime (Galaxy bioinformatics)",
   "main": ".vite/build/main.js",
   "scripts": {
+    "prestart": "./scripts/rename-electron-dev.sh",
     "start": "electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
+    "@types/dompurify": "^3.0.5",
     "@xyflow/react": "^12.10.2",
+    "dompurify": "^3.4.1",
     "marked": "^18.0.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
@@ -22,9 +26,9 @@
     "@electron-forge/plugin-vite": "^7.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.1",
+    "@vitejs/plugin-react": "^4.7.0",
     "electron": "^41.2.1",
     "typescript": "^6.0.2",
-    "vite": "^8.0.8"
+    "vite": "^6.4.2"
   }
 }

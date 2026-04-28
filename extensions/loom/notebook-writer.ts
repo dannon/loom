@@ -1,33 +1,17 @@
 /**
- * Writer for Galaxy analysis notebooks
+ * Notebook file I/O.
  *
- * Handles creating and updating notebook files with proper formatting.
- * Uses append-only strategy for execution log, in-place updates for frontmatter and steps.
+ * The notebook is plain user/agent-curated markdown. This module provides
+ * file-system helpers and string-level utilities for the one structured
+ * thing inside a notebook: `loom-invocation` fenced YAML blocks that the
+ * Galaxy invocation polling tools read and write.
  */
 
 import * as fs from "fs/promises";
 import * as path from "path";
-import type {
-  AnalysisPlan,
-  AnalysisStep,
-  BRCContext,
-  DecisionEntry,
-  QCCheckpoint,
-  DatasetReference,
-  StepResult,
-  LifecyclePhase,
-  ResearchQuestion,
-  DataProvenance,
-  PublicationMaterials,
-  InterpretationFindings,
-  BiologicalFinding,
-  WorkflowStructure,
-  Assertion,
-  ReportedResult,
-} from "./types";
 
 /**
- * Generate slug from title for default filename
+ * Generate slug from title for default filename.
  */
 export function slugify(title: string): string {
   return title
@@ -38,971 +22,49 @@ export function slugify(title: string): string {
 }
 
 /**
- * Phase label mapping
+ * Per-path mutex chain. Two parallel `upsertInvocationBlock` calls (e.g.
+ * `galaxy_invocation_check_all` polling several invocations concurrently)
+ * would race read-modify-write on the same notebook file: each reads the
+ * pre-update content, applies its block, and the second writer overwrites
+ * the first. Serializing via a per-path Promise chain prevents the lost
+ * update without paying for an OS-level lock.
  */
-const phaseLabels: Record<LifecyclePhase, string> = {
-  'problem_definition': 'Problem Definition',
-  'data_acquisition': 'Data Acquisition',
-  'analysis': 'Analysis',
-  'interpretation': 'Interpretation',
-  'publication': 'Publication',
-};
+const writeLocks = new Map<string, Promise<void>>();
 
-/**
- * Generate complete notebook content from an AnalysisPlan
- */
-export function generateNotebook(plan: AnalysisPlan): string {
-  const lines: string[] = [];
-
-  // Frontmatter
-  lines.push("---");
-  lines.push(`plan_id: "${plan.id}"`);
-  lines.push(`title: "${plan.title}"`);
-  lines.push(`status: ${plan.status}`);
-  lines.push(`phase: ${plan.phase}`);
-  lines.push(`created: "${plan.created}"`);
-  lines.push(`updated: "${plan.updated}"`);
-  lines.push("");
-  lines.push("galaxy:");
-  lines.push(`  server_url: "${plan.galaxy.serverUrl || ""}"`);
-  lines.push(`  history_id: "${plan.galaxy.historyId || ""}"`);
-  lines.push(`  history_name: "${plan.galaxy.historyName || ""}"`);
-  if (plan.galaxy.serverUrl && plan.galaxy.historyId) {
-    lines.push(
-      `  history_url: "${plan.galaxy.serverUrl}/histories/view?id=${plan.galaxy.historyId}"`
-    );
-  } else {
-    lines.push(`  history_url: ""`);
-  }
-  lines.push("---");
-  lines.push("");
-
-  // Title
-  lines.push(`# ${plan.title}`);
-  lines.push("");
-
-  // Phase indicator
-  lines.push(`**Current Phase**: ${phaseLabels[plan.phase]}`);
-  lines.push("");
-
-  // Research Context
-  lines.push("## Research Context");
-  lines.push("");
-
-  // Authoritative structured block for the parser (invisible extra fields).
-  // The markdown below is for humans and the existing *contains* tests.
-  if (plan.researchQuestion && hasResearchQuestionDetails(plan.researchQuestion)) {
-    lines.push("```yaml");
-    lines.push(`research_question_json: '${escapeJsonInYaml(plan.researchQuestion)}'`);
-    lines.push("```");
-    lines.push("");
-  }
-
-  lines.push(`**Research Question**: ${plan.context.researchQuestion}`);
-
-  // Hypothesis if refined (Phase 1)
-  if (plan.researchQuestion?.hypothesis) {
-    lines.push(`**Hypothesis**: ${plan.researchQuestion.hypothesis}`);
-    if (plan.researchQuestion.pico) {
-      const pico = plan.researchQuestion.pico;
-      lines.push("");
-      lines.push("**PICO Framework**:");
-      lines.push(`- Population: ${pico.population}`);
-      lines.push(`- Intervention: ${pico.intervention}`);
-      if (pico.comparison) lines.push(`- Comparison: ${pico.comparison}`);
-      lines.push(`- Outcome: ${pico.outcome}`);
-    }
-  }
-
-  lines.push(`**Data Description**: ${plan.context.dataDescription}`);
-  lines.push(
-    `**Expected Outcomes**: ${plan.context.expectedOutcomes.join(", ")}`
-  );
-  if (plan.context.constraints.length > 0) {
-    lines.push(`**Constraints**: ${plan.context.constraints.join(", ")}`);
-  }
-  lines.push("");
-
-  // Literature references (Phase 1)
-  if (plan.researchQuestion?.literatureRefs && plan.researchQuestion.literatureRefs.length > 0) {
-    lines.push("### Literature Background");
-    lines.push("");
-    for (const ref of plan.researchQuestion.literatureRefs) {
-      const citation = ref.pmid ? `PMID: ${ref.pmid}` : ref.doi ? `DOI: ${ref.doi}` : '';
-      lines.push(`- **${ref.title}**${ref.year ? ` (${ref.year})` : ''}`);
-      if (citation) lines.push(`  ${citation}`);
-      lines.push(`  *Relevance*: ${ref.relevance}`);
-      lines.push("");
-    }
-  }
-
-  // BRC Catalog Context
-  if (plan.brcContext) {
-    lines.push(renderBRCContextSection(plan.brcContext));
-    lines.push("");
-  }
-
-  lines.push("---");
-  lines.push("");
-
-  // Data Provenance (Phase 2)
-  if (plan.dataProvenance) {
-    lines.push("## Data Provenance");
-    lines.push("");
-    renderDataProvenanceYaml(lines, plan.dataProvenance);
-
-    const dp = plan.dataProvenance;
-    lines.push(`**Source**: ${dp.source.toUpperCase()}`);
-    if (dp.accession) lines.push(`**Accession**: ${dp.accession}`);
-    if (dp.downloadDate) lines.push(`**Download Date**: ${dp.downloadDate}`);
-    lines.push("");
-
-    if (dp.samples.length > 0) {
-      lines.push("### Samples");
-      lines.push("");
-      lines.push("| ID | Name | Condition | Replicate | Files |");
-      lines.push("|-----|------|-----------|-----------|-------|");
-      for (const s of dp.samples) {
-        lines.push(`| ${s.id} | ${s.name} | ${s.condition || '-'} | ${s.replicate ?? '-'} | ${s.files.length} |`);
-      }
-      lines.push("");
-    }
-
-    if (dp.originalFiles.length > 0) {
-      lines.push("### Files");
-      lines.push("");
-      lines.push("| ID | Name | Type | Galaxy ID |");
-      lines.push("|-----|------|------|-----------|");
-      for (const f of dp.originalFiles) {
-        lines.push(`| ${f.id} | ${f.name} | ${f.type} | ${f.galaxyDatasetId || '-'} |`);
-      }
-      lines.push("");
-    }
-
-    if (dp.samplesheet) {
-      lines.push("### Samplesheet");
-      lines.push("");
-      lines.push(`Generated: ${dp.samplesheet.generatedAt}`);
-      lines.push(`Format: ${dp.samplesheet.format}`);
-      lines.push(`Columns: ${dp.samplesheet.columns.join(', ')}`);
-      lines.push("");
-    }
-
-    lines.push("---");
-    lines.push("");
-  }
-
-  // Analysis Plan section
-  lines.push("## Analysis Plan");
-  lines.push("");
-
-  // Steps
-  for (const step of plan.steps) {
-    lines.push(`### Step ${step.id}: ${step.name}`);
-    lines.push("");
-    lines.push("```yaml");
-    lines.push("step:");
-    lines.push(`  id: "${step.id}"`);
-    lines.push(`  name: "${step.name}"`);
-    lines.push(`  status: ${step.status}`);
-    if (step.description) {
-      lines.push(`  description: "${escapeYamlString(step.description)}"`);
-    }
-    lines.push("  execution:");
-    lines.push(`    type: ${step.execution.type}`);
-    if (step.execution.toolId) {
-      lines.push(`    tool_id: "${step.execution.toolId}"`);
-    }
-    if (step.execution.workflowId) {
-      lines.push(`    workflow_id: "${step.execution.workflowId}"`);
-    }
-    if (step.execution.trsId) {
-      lines.push(`    trs_id: "${step.execution.trsId}"`);
-    }
-    if (step.execution.parameters && Object.keys(step.execution.parameters).length > 0) {
-      lines.push(`    parameters: '${escapeJsonInYaml(step.execution.parameters)}'`);
-    }
-
-    if (step.workflowStructure) {
-      renderWorkflowStructureYaml(lines, step.workflowStructure);
-    }
-
-    if (step.inputs.length > 0) {
-      lines.push("  inputs:");
-      for (const input of step.inputs) {
-        lines.push(`    - name: "${input.name}"`);
-        if (input.datasetId) {
-          lines.push(`      dataset_ids: ["${input.datasetId}"]`);
-        }
-      }
-    }
-
-    if (step.actualOutputs.length > 0) {
-      lines.push("  outputs:");
-      for (const output of step.actualOutputs) {
-        lines.push(`    - dataset_id: "${output.datasetId}"`);
-        lines.push(`      name: "${output.name}"`);
-      }
-    }
-
-    if (step.result?.jobId) {
-      lines.push(`  job_id: "${step.result.jobId}"`);
-    }
-    if (step.result?.invocationId) {
-      lines.push(`  invocation_id: "${step.result.invocationId}"`);
-    }
-    if (step.result?.completedAt) {
-      lines.push(`  completed_at: "${step.result.completedAt}"`);
-    }
-    if (step.result?.summary) {
-      lines.push(`  summary: "${escapeYamlString(step.result.summary)}"`);
-    }
-    if (step.result && step.result.qcPassed !== null && step.result.qcPassed !== undefined) {
-      lines.push(`  qc_passed: ${step.result.qcPassed}`);
-    }
-    if (step.parameterOverrides && Object.keys(step.parameterOverrides).length > 0) {
-      lines.push(`  parameter_overrides: '${escapeJsonInYaml(step.parameterOverrides)}'`);
-    }
-
-    lines.push("```");
-    lines.push("");
-    lines.push(`**Purpose**: ${step.description}`);
-    if (step.workflowStructure) {
-      lines.push("");
-      lines.push(`**Workflow pipeline**: ${step.workflowStructure.toolNames.join(' -> ')}`);
-    }
-    if (step.parameterOverrides && Object.keys(step.parameterOverrides).length > 0) {
-      lines.push("");
-      lines.push("**Parameter overrides (deviations from workflow defaults):**");
-      lines.push("");
-      lines.push("| Key | Override value |");
-      lines.push("|-----|----------------|");
-      for (const [k, v] of Object.entries(step.parameterOverrides)) {
-        lines.push(`| ${mdTableEscape(k)} | ${mdTableEscape(stringify(v))} |`);
-      }
-    }
-    lines.push("");
-
-    // Result blocks attached to this step (by id or name)
-    const stepResults = (plan.results || []).filter(
-      (r) => r.stepId === step.id || (r.stepName && r.stepName === step.name)
-    );
-    if (stepResults.length > 0) {
-      lines.push("#### Results");
-      lines.push("");
-      for (const r of stepResults) {
-        renderReportedResult(lines, r);
-      }
-    }
-  }
-
-  // Plan-level Results section for results not tied to any step.
-  const attachedIds = new Set(
-    plan.steps.flatMap((s) => [s.id, s.name].filter(Boolean))
-  );
-  const orphanResults = (plan.results || []).filter(
-    (r) => !((r.stepId && attachedIds.has(r.stepId)) || (r.stepName && attachedIds.has(r.stepName)))
-  );
-  if (orphanResults.length > 0) {
-    lines.push("## Results");
-    lines.push("");
-    for (const r of orphanResults) {
-      renderReportedResult(lines, r);
-    }
-  }
-
-  // Authoritative results block for the parser.
-  if (plan.results && plan.results.length > 0) {
-    lines.push("```yaml");
-    lines.push(`results_json: '${escapeJsonInYaml(plan.results)}'`);
-    lines.push("```");
-    lines.push("");
-  }
-
-  lines.push("---");
-  lines.push("");
-
-  // Verification (structured assertions)
-  if (plan.assertions && plan.assertions.length > 0) {
-    lines.push("## Verification");
-    lines.push("");
-    lines.push("```yaml");
-    lines.push(`assertions_json: '${escapeJsonInYaml(plan.assertions)}'`);
-    lines.push("```");
-    lines.push("");
-    lines.push("| Step | Kind | Claim | Expected | Observed | Verdict |");
-    lines.push("|------|------|-------|----------|----------|---------|");
-    for (const a of plan.assertions) {
-      lines.push(
-        `| ${a.stepId || '-'} | ${a.kind} | ${mdTableEscape(a.claim)} | ${mdTableEscape(stringify(a.expected))} | ${mdTableEscape(stringify(a.observed))} | \`${a.verdict}\` |`
-      );
-    }
-    lines.push("");
-    lines.push("---");
-    lines.push("");
-  }
-
-  // Interpretation (Phase 4)
-  if (plan.interpretation && (plan.interpretation.findings.length > 0 || plan.interpretation.summary)) {
-    lines.push("## Interpretation");
-    lines.push("");
-
-    if (plan.interpretation.summary) {
-      lines.push(`**Summary**: ${plan.interpretation.summary}`);
-      lines.push("");
-    }
-
-    if (plan.interpretation.findings.length > 0) {
-      lines.push("### Findings");
-      lines.push("");
-
-      for (const finding of plan.interpretation.findings) {
-        const badge = `\`${finding.category}\``;
-        const conf = `\`${finding.confidence}\``;
-        lines.push(`#### ${finding.id}: ${finding.title}`);
-        lines.push("");
-        lines.push(`${badge} ${conf}`);
-        lines.push("");
-        lines.push(finding.description);
-        lines.push("");
-        lines.push(`**Evidence**: ${finding.evidence}`);
-        if (finding.relatedSteps.length > 0) {
-          lines.push(`**Related steps**: ${finding.relatedSteps.join(', ')}`);
-        }
-        lines.push(`*Added: ${finding.addedAt}*`);
-        lines.push("");
-      }
-    }
-
-    lines.push("---");
-    lines.push("");
-  }
-
-  // Execution Log section
-  lines.push("## Execution Log");
-  lines.push("");
-  lines.push("<!-- Append-only: new entries added at bottom -->");
-  lines.push("");
-
-  // Add existing decisions as events
-  for (const decision of plan.decisions) {
-    const date = new Date(decision.timestamp).toISOString().split("T")[0];
-    const time = new Date(decision.timestamp).toISOString().split("T")[1].slice(0, 5);
-    lines.push(`### ${date} ${time} - Decision: ${decision.type}`);
-    lines.push("");
-    lines.push("```yaml");
-    lines.push("decision:");
-    lines.push(`  timestamp: "${decision.timestamp}"`);
-    if (decision.stepId) {
-      lines.push(`  step_id: "${decision.stepId}"`);
-    }
-    lines.push(`  type: ${decision.type}`);
-    lines.push(`  description: "${escapeYamlString(decision.description)}"`);
-    lines.push(`  rationale: "${escapeYamlString(decision.rationale)}"`);
-    lines.push(`  researcher_approved: ${decision.researcherApproved}`);
-    lines.push("```");
-    lines.push("");
-  }
-
-  // Add existing checkpoints
-  for (const checkpoint of plan.checkpoints) {
-    const timestamp = checkpoint.reviewedAt || new Date().toISOString();
-    const date = timestamp.split("T")[0];
-    const time = timestamp.split("T")[1].slice(0, 5);
-    lines.push(`### ${date} ${time} - QC Checkpoint: ${checkpoint.name}`);
-    lines.push("");
-    lines.push("```yaml");
-    lines.push("checkpoint:");
-    lines.push(`  id: "${checkpoint.id}"`);
-    lines.push(`  step_id: "${checkpoint.stepId}"`);
-    lines.push(`  name: "${checkpoint.name}"`);
-    lines.push(`  status: ${checkpoint.status}`);
-    if (checkpoint.criteria.length > 0) {
-      lines.push("  criteria:");
-      for (const c of checkpoint.criteria) {
-        lines.push(`    - "${escapeYamlString(c)}"`);
-      }
-    }
-    if (checkpoint.observations.length > 0) {
-      lines.push("  observations:");
-      for (const o of checkpoint.observations) {
-        lines.push(`    - "${escapeYamlString(o)}"`);
-      }
-    }
-    lines.push("```");
-    lines.push("");
-  }
-
-  lines.push("---");
-  lines.push("");
-
-  // Galaxy References table
-  lines.push("## Galaxy References");
-  lines.push("");
-  lines.push("| Resource | ID | URL |");
-  lines.push("|----------|-----|-----|");
-
-  if (plan.galaxy.historyId && plan.galaxy.serverUrl) {
-    const historyUrl = `${plan.galaxy.serverUrl}/histories/view?id=${plan.galaxy.historyId}`;
-    lines.push(
-      `| History | ${plan.galaxy.historyId} | [View](${historyUrl}) |`
-    );
-  }
-
-  // Add dataset references from step outputs
-  for (const step of plan.steps) {
-    for (const output of step.actualOutputs) {
-      if (output.datasetId && plan.galaxy.serverUrl) {
-        const datasetUrl = `${plan.galaxy.serverUrl}/datasets/${output.datasetId}`;
-        lines.push(
-          `| ${output.name} | ${output.datasetId} | [View](${datasetUrl}) |`
-        );
-      }
-    }
-  }
-
-  lines.push("");
-
-  // Publication Materials (Phase 5)
-  if (plan.publication) {
-    lines.push("---");
-    lines.push("");
-    lines.push("## Publication Materials");
-    lines.push("");
-
-    // Authoritative structured block for the parser.
-    lines.push("```yaml");
-    lines.push(`publication_json: '${escapeJsonInYaml(plan.publication)}'`);
-    lines.push("```");
-    lines.push("");
-
-    const pub = plan.publication;
-    lines.push(`**Status**: ${pub.status.replace('_', ' ')}`);
-    if (pub.targetJournal) {
-      lines.push(`**Target Journal**: ${pub.targetJournal}`);
-    }
-    lines.push("");
-
-    // Methods section
-    if (pub.methodsDraft) {
-      lines.push("### Methods Draft");
-      lines.push("");
-      lines.push(`*Generated: ${pub.methodsDraft.generatedAt}*`);
-      lines.push("");
-      lines.push(pub.methodsDraft.text);
-      lines.push("");
-
-      if (pub.methodsDraft.toolVersions.length > 0) {
-        lines.push("#### Tool Versions");
-        lines.push("");
-        lines.push("| Tool | Version | Step |");
-        lines.push("|------|---------|------|");
-        for (const t of pub.methodsDraft.toolVersions) {
-          lines.push(`| ${t.toolName} | ${t.version} | ${t.stepId || '-'} |`);
-        }
-        lines.push("");
-      }
-    }
-
-    // Figures
-    if (pub.figures.length > 0) {
-      lines.push("### Figures");
-      lines.push("");
-      lines.push("| ID | Name | Type | Status | Dataset ID |");
-      lines.push("|-----|------|------|--------|------------|");
-      for (const f of pub.figures) {
-        lines.push(`| ${f.id} | ${f.name} | ${f.type} | ${f.status} | ${f.galaxyDatasetId || '-'} |`);
-      }
-      lines.push("");
-
-      // Figure details
-      for (const f of pub.figures) {
-        if (f.description) {
-          lines.push(`**${f.id}: ${f.name}**`);
-          lines.push(f.description);
-          if (f.suggestedTool) {
-            lines.push(`*Suggested tool: ${f.suggestedTool}*`);
-          }
-          lines.push("");
-        }
-      }
-    }
-
-    // Supplementary data
-    if (pub.supplementaryData.length > 0) {
-      lines.push("### Supplementary Data");
-      lines.push("");
-      lines.push("| ID | Name | Type | Description |");
-      lines.push("|-----|------|------|-------------|");
-      for (const s of pub.supplementaryData) {
-        lines.push(`| ${s.id} | ${s.name} | ${s.type} | ${s.description} |`);
-      }
-      lines.push("");
-    }
-
-    // Data sharing
-    if (pub.dataSharing) {
-      const ds = pub.dataSharing;
-      lines.push("### Data Sharing");
-      lines.push("");
-      lines.push(`**Repository**: ${ds.repository || 'Not selected'}`);
-      lines.push(`**Status**: ${ds.status.replace('_', ' ')}`);
-      if (ds.accession) {
-        lines.push(`**Accession**: ${ds.accession}`);
-      }
-      lines.push("");
-    }
-  }
-
-  return lines.join("\n");
+export function withNotebookLock<T>(filePath: string, work: () => Promise<T>): Promise<T> {
+  const prev = writeLocks.get(filePath) ?? Promise.resolve();
+  const next = prev.then(work, work);
+  // Always clear so completed locks don't pin memory; the chain is preserved
+  // through the Promise we just created.
+  writeLocks.set(filePath, next.then(() => undefined, () => undefined));
+  return next;
 }
 
 /**
- * Render BRC Catalog Context section
- */
-export function renderBRCContextSection(brc: BRCContext): string {
-  const lines: string[] = [];
-  lines.push("### BRC Catalog Context");
-  lines.push("");
-
-  if (brc.organism) {
-    const common = brc.organism.commonName ? `, ${brc.organism.commonName}` : '';
-    lines.push(`- **Organism**: ${brc.organism.species} (taxonomy: ${brc.organism.taxonomyId}${common})`);
-  }
-  if (brc.assembly) {
-    const flags: string[] = [];
-    if (brc.assembly.isReference) flags.push("reference");
-    if (brc.assembly.hasGeneAnnotation) flags.push("has gene annotation");
-    const flagStr = flags.length > 0 ? ` (${flags.join(", ")})` : '';
-    lines.push(`- **Assembly**: ${brc.assembly.accession}${flagStr}`);
-  }
-  if (brc.analysisCategory) {
-    lines.push(`- **Analysis category**: ${brc.analysisCategory}`);
-  }
-  if (brc.workflowName && brc.workflowIwcId) {
-    lines.push(`- **Workflow**: ${brc.workflowName} (${brc.workflowIwcId})`);
-  }
-
-  return lines.join("\n");
-}
-
-/**
- * True if a ResearchQuestion has any field worth persisting beyond
- * context.researchQuestion (which is already rendered above).
- */
-function hasResearchQuestionDetails(rq: ResearchQuestion): boolean {
-  return Boolean(
-    rq.hypothesis ||
-      rq.pico ||
-      (rq.literatureRefs && rq.literatureRefs.length > 0) ||
-      rq.refinedAt
-  );
-}
-
-/**
- * Render a provenance YAML block. Authoritative for the parser;
- * the markdown tables below it are display-only.
- *
- * The block uses a single JSON string value rather than native YAML
- * nesting because our YAML parser can't handle multi-line array items.
- * Treat it as structured data on disk; humans read the tables below.
- */
-function renderDataProvenanceYaml(lines: string[], dp: DataProvenance): void {
-  lines.push("```yaml");
-  lines.push(`provenance_json: '${escapeJsonInYaml(dp)}'`);
-  lines.push("```");
-  lines.push("");
-}
-
-/**
- * Render workflow_structure block inside a step YAML block
- */
-function renderWorkflowStructureYaml(lines: string[], ws: WorkflowStructure): void {
-  lines.push("  workflow_structure:");
-  lines.push(`    step_count: ${ws.stepCount}`);
-  if (ws.toolNames.length > 0) {
-    lines.push("    tools:");
-    for (const name of ws.toolNames) {
-      lines.push(`      - "${name}"`);
-    }
-  }
-  if (ws.inputLabels.length > 0) {
-    lines.push("    inputs:");
-    for (const label of ws.inputLabels) {
-      lines.push(`      - "${label}"`);
-    }
-  }
-  if (ws.outputLabels.length > 0) {
-    lines.push("    outputs:");
-    for (const label of ws.outputLabels) {
-      lines.push(`      - "${label}"`);
-    }
-  }
-}
-
-/**
- * Escape special characters for YAML string
- */
-function escapeYamlString(str: string): string {
-  return str.replace(/"/g, '\\"').replace(/\n/g, "\\n");
-}
-
-/**
- * Serialize an object to a JSON string safe to embed inside single-quoted YAML.
- * Single quotes are escaped by doubling them (YAML convention).
- */
-function escapeJsonInYaml(obj: unknown): string {
-  return JSON.stringify(obj).replace(/'/g, "''");
-}
-
-function mdTableEscape(value: string): string {
-  return value.replace(/\|/g, '\\|').replace(/\n/g, ' ');
-}
-
-function stringify(value: unknown): string {
-  if (value === null || value === undefined) return '-';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  return JSON.stringify(value);
-}
-
-/**
- * Render a ReportedResult as human-readable markdown for display below its step.
- * The authoritative round-trip data lives in the results_json block emitted
- * elsewhere, so this can be simple and reader-friendly.
- */
-function renderReportedResult(lines: string[], r: ReportedResult): void {
-  const heading = r.caption ? `**${r.caption}**` : `**${r.id}**`;
-  lines.push(heading);
-  lines.push("");
-
-  if (r.type === "markdown" && r.content) {
-    lines.push(r.content);
-  } else if (r.type === "table" && r.headers && r.rows) {
-    lines.push(`| ${r.headers.join(" | ")} |`);
-    lines.push(`|${r.headers.map(() => "---").join("|")}|`);
-    for (const row of r.rows) {
-      lines.push(`| ${row.join(" | ")} |`);
-    }
-  } else if (r.type === "image" && r.path) {
-    lines.push(`![${r.caption || r.id}](${r.path})`);
-  } else if (r.type === "file" && r.path) {
-    lines.push(`[${r.caption || r.id}](${r.path})`);
-  }
-
-  lines.push("");
-  lines.push(`*Reported: ${r.reportedAt}*`);
-  lines.push("");
-}
-
-/**
- * Update frontmatter field in notebook content
- */
-export function updateFrontmatter(
-  content: string,
-  field: string,
-  value: string
-): string {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!frontmatterMatch) return content;
-
-  let frontmatter = frontmatterMatch[1];
-
-  // Handle nested galaxy fields
-  if (field.startsWith("galaxy.")) {
-    const subfield = field.replace("galaxy.", "");
-    const regex = new RegExp(`(^\\s{2}${subfield}:\\s*).*$`, "m");
-    if (frontmatter.match(regex)) {
-      frontmatter = frontmatter.replace(regex, `$1"${value}"`);
-    }
-  } else {
-    const regex = new RegExp(`(^${field}:\\s*).*$`, "m");
-    if (frontmatter.match(regex)) {
-      frontmatter = frontmatter.replace(regex, `$1"${value}"`);
-    }
-  }
-
-  // Always update the updated timestamp
-  if (field !== "updated") {
-    const now = new Date().toISOString();
-    frontmatter = frontmatter.replace(
-      /^(updated:\s*).*$/m,
-      `$1"${now}"`
-    );
-  }
-
-  return content.replace(/^---\n[\s\S]*?\n---/, `---\n${frontmatter}\n---`);
-}
-
-/**
- * Update a step block in notebook content
- */
-export function updateStepBlock(
-  content: string,
-  stepId: string,
-  updates: {
-    status?: string;
-    jobId?: string;
-    invocationId?: string;
-    outputs?: DatasetReference[];
-  }
-): string {
-  // Find the step block
-  const stepRegex = new RegExp(
-    `(\`\`\`yaml\\nstep:\\n\\s+id: "${stepId}"[\\s\\S]*?)(\`\`\`)`,
-    "m"
-  );
-  const match = content.match(stepRegex);
-  if (!match) return content;
-
-  let block = match[1];
-
-  // Update status
-  if (updates.status) {
-    block = block.replace(/(\n\s+status:\s*)\S+/, `$1${updates.status}`);
-  }
-
-  // Add or update job_id
-  if (updates.jobId) {
-    if (block.includes("job_id:")) {
-      block = block.replace(/(\n\s+job_id:\s*)"[^"]*"/, `$1"${updates.jobId}"`);
-    } else {
-      block = block.replace(/(\`\`\`)$/, `  job_id: "${updates.jobId}"\n$1`);
-    }
-  }
-
-  // Add or update invocation_id
-  if (updates.invocationId) {
-    if (block.includes("invocation_id:")) {
-      block = block.replace(
-        /(\n\s+invocation_id:\s*)"[^"]*"/,
-        `$1"${updates.invocationId}"`
-      );
-    } else {
-      block = block.replace(
-        /(\`\`\`)$/,
-        `  invocation_id: "${updates.invocationId}"\n$1`
-      );
-    }
-  }
-
-  // Add outputs
-  if (updates.outputs && updates.outputs.length > 0) {
-    // Check if outputs section exists
-    if (block.includes("outputs:")) {
-      // Find outputs section and append
-      const outputsRegex = /(\n\s+outputs:\n)([\s\S]*?)(\n\s+\w+:|$)/;
-      const outputsMatch = block.match(outputsRegex);
-      if (outputsMatch) {
-        let outputsSection = outputsMatch[2];
-        for (const output of updates.outputs) {
-          outputsSection += `    - dataset_id: "${output.datasetId}"\n`;
-          outputsSection += `      name: "${output.name}"\n`;
-        }
-        block = block.replace(outputsRegex, `$1${outputsSection}$3`);
-      }
-    } else {
-      // Add new outputs section before closing
-      let outputsYaml = "  outputs:\n";
-      for (const output of updates.outputs) {
-        outputsYaml += `    - dataset_id: "${output.datasetId}"\n`;
-        outputsYaml += `      name: "${output.name}"\n`;
-      }
-      block = block + outputsYaml;
-    }
-  }
-
-  // Update timestamp
-  const now = new Date().toISOString();
-  content = updateFrontmatter(content, "updated", now);
-
-  return content.replace(stepRegex, block + match[2]);
-}
-
-/**
- * Append an event to the Execution Log section
- */
-export function appendEvent(
-  content: string,
-  event: {
-    type: "event" | "decision" | "checkpoint";
-    timestamp: string;
-    data: Record<string, unknown>;
-  }
-): string {
-  const { type, timestamp, data } = event;
-  const date = timestamp.split("T")[0];
-  const time = timestamp.split("T")[1].slice(0, 5);
-
-  let title = "";
-  if (type === "decision") {
-    title = `Decision: ${data.type || "observation"}`;
-  } else if (type === "checkpoint") {
-    title = `QC Checkpoint: ${data.name || "checkpoint"}`;
-  } else {
-    title = `Event: ${data.description || "event"}`;
-  }
-
-  const lines: string[] = [];
-  lines.push(`### ${date} ${time} - ${title}`);
-  lines.push("");
-  lines.push("```yaml");
-  lines.push(`${type}:`);
-  lines.push(`  timestamp: "${timestamp}"`);
-
-  for (const [key, value] of Object.entries(data)) {
-    if (key === "timestamp") continue;
-    if (Array.isArray(value)) {
-      lines.push(`  ${key}:`);
-      for (const item of value) {
-        lines.push(`    - "${escapeYamlString(String(item))}"`);
-      }
-    } else if (typeof value === "boolean") {
-      lines.push(`  ${key}: ${value}`);
-    } else if (typeof value === "number") {
-      lines.push(`  ${key}: ${value}`);
-    } else if (value !== null && value !== undefined) {
-      lines.push(`  ${key}: "${escapeYamlString(String(value))}"`);
-    }
-  }
-
-  lines.push("```");
-  lines.push("");
-
-  const eventBlock = lines.join("\n");
-
-  // Find the Execution Log section and append before the ---
-  const logSectionRegex = /(## Execution Log\n[\s\S]*?)(---\n\n## Galaxy References)/;
-  const match = content.match(logSectionRegex);
-
-  if (match) {
-    return content.replace(logSectionRegex, `$1${eventBlock}$2`);
-  }
-
-  // Fallback: append before Galaxy References
-  const galaxyRefRegex = /(---\n\n## Galaxy References)/;
-  if (content.match(galaxyRefRegex)) {
-    return content.replace(galaxyRefRegex, `${eventBlock}$1`);
-  }
-
-  // Last fallback: append at end
-  return content + "\n" + eventBlock;
-}
-
-/**
- * Append a Galaxy reference to the references table
- */
-export function appendGalaxyReference(
-  content: string,
-  ref: { resource: string; id: string; url: string }
-): string {
-  const tableRow = `| ${ref.resource} | ${ref.id} | [View](${ref.url}) |`;
-
-  // Find the Galaxy References table
-  const tableRegex = /(## Galaxy References\n\n\| Resource[\s\S]*?)(\n\n|$)/;
-  const match = content.match(tableRegex);
-
-  if (match) {
-    // Check if this reference already exists
-    if (content.includes(`| ${ref.id} |`)) {
-      return content;
-    }
-    return content.replace(tableRegex, `$1\n${tableRow}$2`);
-  }
-
-  return content;
-}
-
-/**
- * Add a new step section to the notebook
- */
-export function addStepSection(content: string, step: AnalysisStep): string {
-  const lines: string[] = [];
-
-  lines.push(`### Step ${step.id}: ${step.name}`);
-  lines.push("");
-  lines.push("```yaml");
-  lines.push("step:");
-  lines.push(`  id: "${step.id}"`);
-  lines.push(`  name: "${step.name}"`);
-  lines.push(`  status: ${step.status}`);
-  if (step.description) {
-    lines.push(`  description: "${escapeYamlString(step.description)}"`);
-  }
-  lines.push("  execution:");
-  lines.push(`    type: ${step.execution.type}`);
-  if (step.execution.toolId) {
-    lines.push(`    tool_id: "${step.execution.toolId}"`);
-  }
-  if (step.execution.workflowId) {
-    lines.push(`    workflow_id: "${step.execution.workflowId}"`);
-  }
-  if (step.execution.trsId) {
-    lines.push(`    trs_id: "${step.execution.trsId}"`);
-  }
-  if (step.execution.parameters && Object.keys(step.execution.parameters).length > 0) {
-    lines.push(`    parameters: '${escapeJsonInYaml(step.execution.parameters)}'`);
-  }
-
-  if (step.workflowStructure) {
-    renderWorkflowStructureYaml(lines, step.workflowStructure);
-  }
-
-  if (step.inputs.length > 0) {
-    lines.push("  inputs:");
-    for (const input of step.inputs) {
-      lines.push(`    - name: "${input.name}"`);
-    }
-  }
-
-  lines.push("```");
-  lines.push("");
-  lines.push(`**Purpose**: ${step.description}`);
-  if (step.workflowStructure) {
-    lines.push("");
-    lines.push(`**Workflow pipeline**: ${step.workflowStructure.toolNames.join(' -> ')}`);
-  }
-  lines.push("");
-
-  const stepSection = lines.join("\n");
-
-  // Insert before "---" that precedes "## Execution Log"
-  const executionLogRegex = /(---\n\n## Execution Log)/;
-  const match = content.match(executionLogRegex);
-
-  if (match) {
-    return content.replace(executionLogRegex, `${stepSection}$1`);
-  }
-
-  // Fallback: insert before Execution Log heading
-  const logHeadingRegex = /(## Execution Log)/;
-  if (content.match(logHeadingRegex)) {
-    return content.replace(logHeadingRegex, `${stepSection}---\n\n$1`);
-  }
-
-  // Last fallback: append before end
-  return content + "\n" + stepSection;
-}
-
-/**
- * Write notebook to file
+ * Atomic notebook write: render to `<file>.tmp` then rename. The rename
+ * is atomic on POSIX, so the destination either has the old or the new
+ * content — never partial. The file watcher in state.ts may still fire
+ * on the rename, but it can no longer observe a half-written file.
  */
 export async function writeNotebook(
   filePath: string,
-  content: string
+  content: string,
 ): Promise<void> {
-  await fs.writeFile(filePath, content, "utf-8");
+  const tmp = `${filePath}.tmp`;
+  // O_TRUNC | O_WRONLY | O_CREAT via fs.writeFile — but write to tmp first.
+  await fs.writeFile(tmp, content, "utf-8");
+  await fs.rename(tmp, filePath);
 }
 
 /**
- * Read notebook from file
+ * Read notebook from file.
  */
 export async function readNotebook(filePath: string): Promise<string> {
   return await fs.readFile(filePath, "utf-8");
 }
 
 /**
- * Check if a file exists
+ * Check if a file exists.
  */
 export async function fileExists(filePath: string): Promise<boolean> {
   try {
@@ -1014,23 +76,204 @@ export async function fileExists(filePath: string): Promise<boolean> {
 }
 
 /**
- * List notebook files in a directory
+ * List notebook files in a directory. Each session dir has exactly one
+ * fixed-name file, `notebook.md`. We still return an array so callers
+ * that iterate stay working.
  */
 export async function listNotebooks(directory: string): Promise<string[]> {
+  const fixed = path.join(directory, "notebook.md");
   try {
-    const files = await fs.readdir(directory);
-    return files
-      .filter((f) => f.endsWith("-notebook.md"))
-      .map((f) => path.join(directory, f));
+    await fs.access(fixed);
+    return [fixed];
   } catch {
     return [];
   }
 }
 
 /**
- * Generate default notebook path from plan title
+ * Default notebook path for a session directory. `title` is kept in the
+ * signature for API stability but is no longer used — every session dir
+ * stores its notebook as `notebook.md`.
  */
-export function getDefaultNotebookPath(title: string, directory: string): string {
-  const slug = slugify(title);
-  return path.join(directory, `${slug}-notebook.md`);
+export function getDefaultNotebookPath(_title: string, directory: string): string {
+  return path.join(directory, "notebook.md");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Invocation YAML blocks
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Structured Galaxy invocation record embedded in the notebook as a
+ * `loom-invocation` fenced YAML block. The block format is intentionally
+ * line-oriented and grep-friendly:
+ *
+ * ```loom-invocation
+ * invocation_id: abc123
+ * galaxy_server_url: https://usegalaxy.org
+ * notebook_anchor: plan-1-step-3
+ * label: BWA alignment
+ * submitted_at: 2026-04-25T15:30:00Z
+ * status: in_progress
+ * summary: ""
+ * ```
+ *
+ * Status transitions (`in_progress` → `completed`/`failed`) are written by
+ * the invocation polling tools (see tools.ts). The block is the source of
+ * truth — there's no in-memory cache.
+ */
+export interface InvocationYaml {
+  invocationId: string;
+  galaxyServerUrl: string;
+  notebookAnchor: string;
+  label: string;
+  submittedAt: string;
+  status: "in_progress" | "completed" | "failed";
+  summary?: string;
+}
+
+const INVOCATION_FENCE_OPEN = "```loom-invocation";
+const INVOCATION_FENCE_CLOSE = "```";
+
+/**
+ * Render an invocation as a `loom-invocation` fenced block. The trailing
+ * newline is intentional so blocks can be appended cleanly.
+ */
+export function renderInvocationYaml(inv: InvocationYaml): string {
+  const lines: string[] = [
+    INVOCATION_FENCE_OPEN,
+    `invocation_id: ${inv.invocationId}`,
+    `galaxy_server_url: ${inv.galaxyServerUrl}`,
+    `notebook_anchor: ${inv.notebookAnchor}`,
+    `label: ${escapeYaml(inv.label)}`,
+    `submitted_at: ${inv.submittedAt}`,
+    `status: ${inv.status}`,
+    `summary: ${escapeYaml(inv.summary ?? "")}`,
+    INVOCATION_FENCE_CLOSE,
+  ];
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * Find every `loom-invocation` block in the notebook content and parse
+ * each into an InvocationYaml. Skips blocks that fail validation.
+ */
+export function findInvocationBlocks(content: string): InvocationYaml[] {
+  const result: InvocationYaml[] = [];
+  const lines = content.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].trim() === INVOCATION_FENCE_OPEN) {
+      const start = i + 1;
+      let end = start;
+      while (end < lines.length && lines[end].trim() !== INVOCATION_FENCE_CLOSE) {
+        end++;
+      }
+      const blockLines = lines.slice(start, end);
+      const parsed = parseInvocationBlock(blockLines);
+      if (parsed) result.push(parsed);
+      i = end + 1;
+    } else {
+      i++;
+    }
+  }
+  return result;
+}
+
+/**
+ * Upsert a `loom-invocation` block in the notebook content keyed by
+ * `invocation_id`. If a block with the same id exists, replace it in
+ * place (preserving surrounding whitespace). Otherwise append at the
+ * end of the file with a leading blank line for readability.
+ */
+export function upsertInvocationBlock(content: string, inv: InvocationYaml): string {
+  const blocks = findInvocationBlockRanges(content);
+  const lines = content.split("\n");
+  const newBlock = renderInvocationYaml(inv).trimEnd().split("\n");
+
+  const existing = blocks.find((b) => b.invocationId === inv.invocationId);
+  if (existing) {
+    const before = lines.slice(0, existing.start);
+    const after = lines.slice(existing.end + 1);
+    return [...before, ...newBlock, ...after].join("\n");
+  }
+
+  // Append at end with separator
+  const trimmed = content.replace(/\s+$/, "");
+  const sep = trimmed.length > 0 ? "\n\n" : "";
+  return trimmed + sep + newBlock.join("\n") + "\n";
+}
+
+interface InvocationBlockRange {
+  invocationId: string;
+  start: number;
+  end: number;
+}
+
+function findInvocationBlockRanges(content: string): InvocationBlockRange[] {
+  const result: InvocationBlockRange[] = [];
+  const lines = content.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].trim() === INVOCATION_FENCE_OPEN) {
+      const start = i;
+      let end = start + 1;
+      let invocationId: string | null = null;
+      while (end < lines.length && lines[end].trim() !== INVOCATION_FENCE_CLOSE) {
+        const m = lines[end].match(/^invocation_id:\s*(.+)$/);
+        if (m) invocationId = m[1].trim();
+        end++;
+      }
+      if (invocationId) {
+        result.push({ invocationId, start, end });
+      }
+      i = end + 1;
+    } else {
+      i++;
+    }
+  }
+  return result;
+}
+
+function parseInvocationBlock(blockLines: string[]): InvocationYaml | null {
+  const fields: Record<string, string> = {};
+  for (const line of blockLines) {
+    const m = line.match(/^([a-z_]+):\s*(.*)$/);
+    if (m) fields[m[1]] = unescapeYaml(m[2].trim());
+  }
+  const status = fields.status as InvocationYaml["status"];
+  if (
+    !fields.invocation_id ||
+    !fields.galaxy_server_url ||
+    !fields.notebook_anchor ||
+    !fields.label ||
+    !fields.submitted_at ||
+    (status !== "in_progress" && status !== "completed" && status !== "failed")
+  ) {
+    return null;
+  }
+  return {
+    invocationId: fields.invocation_id,
+    galaxyServerUrl: fields.galaxy_server_url,
+    notebookAnchor: fields.notebook_anchor,
+    label: fields.label,
+    submittedAt: fields.submitted_at,
+    status,
+    summary: fields.summary || undefined,
+  };
+}
+
+function escapeYaml(value: string): string {
+  // Quote if contains characters that would confuse the line parser.
+  if (/[:#\n]/.test(value)) {
+    return `"${value.replace(/"/g, '\\"')}"`;
+  }
+  return value;
+}
+
+function unescapeYaml(value: string): string {
+  if (value.startsWith('"') && value.endsWith('"')) {
+    return value.slice(1, -1).replace(/\\"/g, '"');
+  }
+  return value;
 }

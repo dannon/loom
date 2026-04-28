@@ -1,16 +1,15 @@
 # Live Validation Checklist
 
-This checklist is the current manual validation path for `loom`. It is ordered from lowest-risk runtime checks to a minimal real Galaxy workflow.
+This checklist matches the notebook-only Loom runtime: `notebook.md` is the durable project record, Galaxy invocations are tracked with `loom-invocation` fenced blocks, and the old `analysis_*`, `data_*`, `research_*`, `publication_*`, and `workflow_*` plan-state tools are not present.
 
 ## Preconditions
 
 - Node.js and npm available
 - `uv` or `uvx` available for `galaxy-mcp`
 - A working `pi` CLI installed
-- Prefer a `pi` CLI version aligned with the SDK used by this repo
-- Galaxy API key ready for the target server
+- Galaxy API key ready for the target server if testing Galaxy
 
-## 1. Verify local repo state
+## 1. Verify repo checks
 
 From the repo root:
 
@@ -24,151 +23,92 @@ pi --version
 Expected:
 
 - `tsc --noEmit` passes
-- test suite passes
-- `npm run validate:provenance` passes
-- note the `pi` CLI version and compare it to the SDK version in `package.json`
+- Vitest passes
+- `pi --version` reports the runtime being used for the live check
 
 ## 2. Load the extension in a clean Pi runtime
 
 ```bash
-pi --no-extensions -e ./extensions/loom
+mkdir -p /tmp/loom-validation
+cd /tmp/loom-validation
+pi --no-extensions -e /Users/dannon/work/loom/extensions/loom
 ```
 
 Check:
 
 - startup completes without extension load errors
-- `/status` works
-- `/plan` works
-- `/connect` works
-- `/notebook` works
-- `/profiles` works
+- `notebook.md` exists in the working directory
+- `/status` shows Galaxy connection state and the notebook path
+- `/notebook` opens the current notebook content
+- `/connect` and `/profiles` are available
 
-If the runtime exposes a tool listing view, verify the current extension tool set, including:
+If the runtime exposes a tool listing, the Loom-owned tool surface should be small: GTN fetch/search, skills fetch, Galaxy invocation record/check tools, and any explicitly enabled experimental tools such as `team_dispatch` or session-index recall.
 
-- interpretation tools
-- workflow integration tools
-- `brc_set_context`
-- `gtn_search` and `gtn_fetch`
-
-These were added after earlier notes that reported only 26 visible tools.
-
-## 3. Validate connection state bridging first
-
-Inside Pi:
-
-1. Run `/connect`
-2. Enter a Galaxy URL and API key
-3. Ask the agent: `Create a new Galaxy history called "loom validation test"`
-4. Run `/status`
-
-Expected:
-
-- Galaxy connects successfully
-- the history is created on the server
-- `/status` shows both Galaxy connection and current history ID
-- no extension errors appear during the `galaxy_connect` or `galaxy_create_history` tool flow
-
-This verifies the extension's event-based state tracking before testing notebook-heavy analysis flows.
-
-Current known-good result:
-
-- extension loads in the real runtime
-- `galaxy_connect` succeeds
-- `galaxy_create_history` succeeds and `/status` reflects the real history ID
-
-## 4. Create and resume a notebook-backed plan
-
-In an empty test directory:
-
-```bash
-mkdir -p /tmp/loom-validation
-cd /tmp/loom-validation
-pi --no-extensions -e /Users/dannon/work/pi-galaxy-analyst/extensions/loom
-```
+## 3. Validate notebook-first plan drafting
 
 Prompt:
 
 ```text
-I want to assess the quality of a small RNA-seq dataset in Galaxy. Create a structured analysis plan.
+Draft a plan for a small RNA-seq quality-control analysis in Galaxy.
 ```
 
 Expected:
 
-- `analysis_plan_create` is called
-- a notebook file is created in the working directory
-- `/status` shows an active plan
-- `/notebook` shows the notebook path
+- the first plan appears in chat as a markdown draft, not immediately in `notebook.md`
+- approving the draft asks for a parameter table before writing the notebook
+- after parameter approval, the agent edits `notebook.md` directly with the approved plan section
+- the notebook section uses checklist steps, routing tags, and stable anchors such as `{#plan-a-step-1}`
 
-Then exit and restart in the same directory:
+This approval flow is prompt-level discipline, not a runtime lock. If the agent writes too early, record it as a behavioral bug.
+
+## 4. Validate Galaxy connection and invocation tracking
+
+Inside the same session:
+
+1. Run `/connect` or configure Galaxy credentials in Orbit Preferences.
+2. Ask the agent to create or select a small test Galaxy history.
+3. Ask it to run the smallest practical Galaxy action.
+4. After the invocation returns, confirm the agent calls `galaxy_invocation_record`.
+5. Poll with `galaxy_invocation_check_one` or `galaxy_invocation_check_all`.
+
+Expected:
+
+- `notebook.md` contains a fenced `loom-invocation` block with `invocation_id`, `galaxy_server_url`, `notebook_anchor`, `label`, `submitted_at`, `status`, and `summary`
+- polling transitions the block from `in_progress` to `completed` or `failed`
+- the related markdown checklist item is updated after the status transition
+
+## 5. Validate restart and sidecars
+
+Exit and restart in the same directory:
 
 ```bash
 cd /tmp/loom-validation
-pi --no-extensions -e /Users/dannon/work/pi-galaxy-analyst/extensions/loom
+pi --no-extensions -e /Users/dannon/work/loom/extensions/loom
 ```
 
 Expected:
 
-- the notebook auto-loads
-- the session recap references the existing plan
-- `/status` shows the same plan rather than a fresh empty session
+- the agent reads the existing `notebook.md`
+- `/notebook` shows the prior content
+- recent activity is available from `activity.jsonl`
+- `session.jsonl` is a symlink only when Loom can create it without replacing a user-owned file
 
-Current known-good result:
+## 6. Inspect the analysis directory
 
-- in the live wrapper path, `analysis_plan_create` and `data_set_source` now rewrite the notebook correctly
-- the `## Data Provenance` section is present on disk after `data_set_source`
-- sample/file live retesting still depends on a more reliable tool-calling model than the currently working `litellm/gpt-oss-120b`
+Check:
 
-## 5. Run the smallest real Galaxy workflow
-
-Use a small public dataset and keep the scope to phases 1-3.
-
-Prompt sequence:
-
-1. `Refine the research question for a simple RNA-seq QC analysis.`
-2. `Move to data acquisition and record the dataset source and samples.`
-3. `Import the files into Galaxy.`
-4. `Add a FastQC step to the plan and run it.`
-5. `Log the tool choice and create a QC checkpoint from the results.`
-
-Expected:
-
-- `research_question_refine` is used
-- `analysis_set_phase` moves into `data_acquisition`, then `analysis`
-- provenance tools record source, samples, and file links
-- a plan step is added for FastQC
-- Galaxy job output is linked back into notebook state
-- a decision entry and QC checkpoint are recorded
-
-Note:
-
-- do not use `litellm/gpt-oss-120b` for this final pass if a stronger tool-calling model is available
-- that model is currently the main blocker for completing live provenance/sample/file validation, not the extension code
-
-## 6. Inspect the notebook artifact
-
-Open the generated notebook and verify:
-
-- frontmatter contains plan metadata
-- Galaxy history information is present
-- analysis steps are present as YAML blocks
-- execution log entries exist for decisions and checkpoints
-- real Galaxy IDs appear where applicable
+- `notebook.md` is readable markdown
+- `activity.jsonl` and `session.jsonl` are not committed by Loom-generated `.gitignore`
+- in a directory where Loom initialized git, notebook edits are committed
+- in an existing user repo, Loom does not auto-commit `notebook.md` onto the current branch
 
 ## 7. Record the validation result
 
-After the run, update the project status docs with:
+Capture:
 
-- `pi` CLI version used
+- Pi CLI version
 - Galaxy server used
-- whether connection/history tracking worked
-- whether notebook auto-resume worked
-- whether real dataset/job IDs were captured
-- whether the live model was reliable enough to complete tool sequences without manual retrying
-- any runtime/API mismatches found
-
-## Known Risk Areas
-
-- SDK/runtime skew between the globally installed `pi` CLI and the SDK version in this repo
-- Galaxy MCP configuration differences across Pi versions
-- Real Galaxy tool names and IDs varying across servers
-- Session resumption only being partially validated unless the restart test is actually run
+- whether notebook drafting and approval behaved correctly
+- whether Galaxy credentials connected successfully
+- whether invocation blocks were recorded and polled correctly
+- whether restart resumed from the notebook and session sidecars safely

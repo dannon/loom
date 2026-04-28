@@ -1,2466 +1,112 @@
 /**
- * Custom tool registrations for Galaxy analysis plan management
+ * Loom-extension-specific tool registrations.
  *
- * These tools are registered with Pi and available for the LLM to call.
- * They manage the analysis plan state and provide orchestration capabilities.
+ * Plans, steps, and decisions live as markdown sections inside the project
+ * notebook (`notebook.md`) — the agent maintains them via the generic
+ * Edit/Write tools. The only tools registered here are:
+ *   - GTN tutorial discovery / fetch
+ *   - Galaxy invocation tracking (record + poll status from the notebook)
+ *   - Galaxy skills fetch (operational know-how from galaxyproject/galaxy-skills)
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { getNotebookPath } from "./state";
 import {
-  createPlan,
-  addStep,
-  updateStepStatus,
-  addStepOutputs,
-  logDecision,
-  setCheckpoint,
-  getCurrentPlan,
-  setPlanStatus,
-  formatPlanSummary,
-  loadNotebook,
-  createNotebook,
-  findNotebooks,
-  getNotebookPath,
-  getDefaultPath,
-  syncToNotebook,
-  // Phase management
-  setPhase,
-  getPhase,
-  // Phase 1: Research question
-  setResearchQuestion,
-  addLiteratureRef,
-  // Phase 2: Data provenance
-  setDataProvenance,
-  addSample,
-  addDataFile,
-  updateDataFile,
-  // Phase 4: Interpretation
-  addFinding,
-  setInterpretationSummary,
-  getFindings,
-  // Phase 5: Publication
-  initPublication,
-  generateMethods,
-  addFigure,
-  updateFigure,
-  // Workflow integration
-  addWorkflowStep,
-  linkInvocation,
-  getWorkflowSteps,
-  // BRC catalog context
-  setBRCOrganism,
-  setBRCAssembly,
-  setBRCWorkflow,
-  getBRCContext,
-  // Tool version resolution
-  resolveToolVersions,
-  // Assertions
-  recordAssertion,
-  resolveExpectedFromPlan,
-  // Reported results
-  addReportedResult,
-  // Parameter overrides
-  setStepParameterOverrides,
-  // Sketch-seeded assertion drafts
-  seedAssertionsFromSketchCorpus,
-} from "./state";
-import { loadConfig } from "./config";
-import type {
-  StepStatus,
-  StepResult,
-  DecisionType,
-  CheckpointStatus,
-  DatasetReference,
-  LifecyclePhase,
-  DataSource,
-  DataFileType,
-  FigureType,
-  FindingCategory,
-} from "./types";
-import * as path from "path";
-import { ensureGitRepo } from "./git";
+  readNotebook,
+  writeNotebook,
+  withNotebookLock,
+  findInvocationBlocks,
+  upsertInvocationBlock,
+  type InvocationYaml,
+} from "./notebook-writer";
 import {
   getGalaxyConfig,
   galaxyGet,
-  galaxyGetJobDetails,
-  extractWorkflowStructure,
-  type GalaxyWorkflowResponse,
   type GalaxyInvocationResponse,
 } from "./galaxy-api";
 import {
-  LoomWidgetKey,
-  encodeJsonWidget,
-  type ResultBlock,
-  type ParameterFormPayload,
-} from "../../shared/loom-shell-contract.js";
+  type ConfiguredSkillRepo,
+  listEnabledSkillRepos,
+  findSkillRepo,
+} from "./skills";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+import * as crypto from "crypto";
+import { parse as parseHtml } from "node-html-parser";
+
+/**
+ * Short stable tag derived from `${url}@${branch}` for the skills-cache
+ * directory. 8 hex chars is comfortably more than the namespace needs to
+ * distinguish a handful of repos, and short enough to keep paths tidy.
+ */
+function createSkillsCacheTag(url: string, branch: string): string {
+  return crypto.createHash("sha256").update(`${url}@${branch}`).digest("hex").slice(0, 8);
+}
+
+/**
+ * Strip a GTN tutorial HTML document down to readable plain text.
+ *
+ * Replaces the prior regex-based stripper, which could be defeated by
+ * malformed HTML (e.g. an unterminated `<script` tag would leak its
+ * contents through the `<script>...</script>` regex). Using a real
+ * parser closes that gap and is more robust to GTN page-layout drift.
+ */
+function stripGtnHtml(html: string): string {
+  const root = parseHtml(html, {
+    blockTextElements: { script: false, style: false, noscript: false, code: true, pre: true },
+  });
+  // Drop chrome we don't want in the agent's context.
+  for (const sel of ["script", "style", "nav", "header", "footer", "aside", "noscript"]) {
+    for (const el of root.querySelectorAll(sel)) el.remove();
+  }
+  // Pick the most-specific body region available.
+  const body =
+    root.querySelector("main") ||
+    root.querySelector("article") ||
+    root.querySelector(".tutorial-content") ||
+    root.querySelector("body") ||
+    root;
+  let text = body.textContent || "";
+  text = text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&#(\d+);/g, (_m, code) => String.fromCharCode(Number(code)));
+  text = text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  return text;
+}
+
+/**
+ * Resolve a GitHub repo URL like
+ * \`https://github.com/galaxyproject/galaxy-skills\`
+ * into the matching raw.githubusercontent.com base URL plus a branch.
+ * Returns null if the URL doesn't match the expected GitHub shape — callers
+ * surface the error to the agent instead of attempting an arbitrary fetch.
+ */
+function githubRawBase(repoUrl: string, branch: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(repoUrl);
+  } catch {
+    return null;
+  }
+  if (parsed.hostname !== "github.com") return null;
+  const segs = parsed.pathname.replace(/^\/+|\/+$/g, "").split("/");
+  if (segs.length < 2) return null;
+  const [owner, repo] = segs;
+  if (!owner || !repo) return null;
+  const cleanRepo = repo.replace(/\.git$/i, "");
+  const cleanBranch = (branch || "main").replace(/^\/+|\/+$/g, "");
+  return `https://raw.githubusercontent.com/${owner}/${cleanRepo}/${cleanBranch}`;
+}
 
 export function registerPlanTools(pi: ExtensionAPI): void {
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Create a new analysis plan
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "analysis_plan_create",
-    label: "Create Analysis Plan",
-    description: `Create a new structured analysis plan. Use this at the start of any analysis
-to establish the research question, data context, and expected outcomes. The plan will track
-all steps, decisions, and results throughout the analysis.`,
-    parameters: Type.Object({
-      title: Type.String({
-        description: "Brief descriptive title for the analysis"
-      }),
-      researchQuestion: Type.String({
-        description: "The primary research question being investigated"
-      }),
-      dataDescription: Type.String({
-        description: "Description of the input data (type, source, characteristics)"
-      }),
-      expectedOutcomes: Type.Array(Type.String(), {
-        description: "List of expected results or deliverables"
-      }),
-      constraints: Type.Array(Type.String(), {
-        description: "Any constraints (time, resources, methodology requirements)",
-        default: []
-      }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const plan = createPlan({
-        title: params.title,
-        researchQuestion: params.researchQuestion,
-        dataDescription: params.dataDescription,
-        expectedOutcomes: params.expectedOutcomes,
-        constraints: params.constraints || [],
-      });
-
-      // Auto-create notebook for the plan
-      let notebookPath: string | null = null;
-      try {
-        const cwd = process.cwd();
-        ensureGitRepo(cwd);
-        const defaultPath = getDefaultPath(plan.title, cwd);
-        await createNotebook(defaultPath, plan);
-        notebookPath = defaultPath;
-      } catch {
-        // Notebook creation is optional, continue without it
-      }
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            message: `Analysis plan "${plan.title}" created`,
-            planId: plan.id,
-            status: plan.status,
-            notebook: notebookPath,
-          }, null, 2),
-        }],
-        details: { planId: plan.id, notebookPath },
-      };
-    },
-    renderResult: (result) => {
-      const d = result.details as { planId?: string; notebookPath?: string } | undefined;
-      const lines = [`✅ Analysis plan created`, `   ID: ${d?.planId || 'unknown'}`];
-      if (d?.notebookPath) {
-        lines.push(`   📓 Notebook: ${d.notebookPath}`);
-      }
-      return new Text(lines.join('\n'));
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Add a step to the plan
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "analysis_plan_add_step",
-    label: "Add Analysis Step",
-    description: `Add a new step to the current analysis plan. Each step should represent
-a discrete analytical operation (tool execution, workflow invocation, or manual review).`,
-    parameters: Type.Object({
-      name: Type.String({
-        description: "Short name for the step (e.g., 'Quality Assessment')"
-      }),
-      description: Type.String({
-        description: "What this step will accomplish"
-      }),
-      executionType: Type.Union([
-        Type.Literal("tool"),
-        Type.Literal("workflow"),
-        Type.Literal("manual"),
-      ], { description: "How the step will be executed" }),
-      toolId: Type.Optional(Type.String({
-        description: "Galaxy tool ID if executionType is 'tool'"
-      })),
-      workflowId: Type.Optional(Type.String({
-        description: "Galaxy workflow ID if executionType is 'workflow'"
-      })),
-      trsId: Type.Optional(Type.String({
-        description: "IWC TRS ID if using an IWC workflow"
-      })),
-      inputs: Type.Array(
-        Type.Object({
-          name: Type.String(),
-          description: Type.String(),
-          fromStep: Type.Optional(Type.String()),
-        }),
-        { description: "Required inputs for this step" }
-      ),
-      expectedOutputs: Type.Array(Type.String(), {
-        description: "Types of outputs expected (e.g., 'FastQC report', 'BAM file')"
-      }),
-      dependsOn: Type.Array(Type.String(), {
-        description: "Step IDs this step depends on",
-        default: []
-      }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const step = addStep({
-          name: params.name,
-          description: params.description,
-          executionType: params.executionType,
-          toolId: params.toolId,
-          workflowId: params.workflowId,
-          trsId: params.trsId,
-          inputs: params.inputs,
-          expectedOutputs: params.expectedOutputs,
-          dependsOn: params.dependsOn || [],
-        });
-
-        const plan = getCurrentPlan();
-
-        // Sync to notebook
-        await syncToNotebook('step_added', { step });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: `Step "${step.name}" added as step ${step.id}`,
-              stepId: step.id,
-              totalSteps: plan?.steps.length || 0,
-            }, null, 2),
-          }],
-          details: { stepId: step.id },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Update step status
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "analysis_plan_update_step",
-    label: "Update Step Status",
-    description: `Update the status of an analysis step. Use this to mark steps as
-in_progress when starting, completed when done, or failed if issues occur.`,
-    parameters: Type.Object({
-      stepId: Type.String({ description: "Step ID to update" }),
-      status: Type.Union([
-        Type.Literal("pending"),
-        Type.Literal("in_progress"),
-        Type.Literal("completed"),
-        Type.Literal("skipped"),
-        Type.Literal("failed"),
-      ], { description: "New status for the step" }),
-      summary: Type.Optional(Type.String({
-        description: "Summary of results or reason for status change"
-      })),
-      jobId: Type.Optional(Type.String({
-        description: "Galaxy job ID if applicable"
-      })),
-      invocationId: Type.Optional(Type.String({
-        description: "Galaxy workflow invocation ID if applicable"
-      })),
-      qcPassed: Type.Optional(Type.Boolean({
-        description: "Whether QC checks passed (if applicable)"
-      })),
-      outputs: Type.Optional(Type.Array(
-        Type.Object({
-          datasetId: Type.String(),
-          name: Type.String(),
-          datatype: Type.String(),
-          size: Type.Optional(Type.Number()),
-        }),
-        { description: "Output datasets produced" }
-      )),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const result: StepResult | undefined = params.summary ? {
-          completedAt: new Date().toISOString(),
-          jobId: params.jobId,
-          invocationId: params.invocationId,
-          summary: params.summary,
-          qcPassed: params.qcPassed ?? null,
-        } : undefined;
-
-        // Attach outputs FIRST so they're included in the snapshot
-        // that updateStepStatus's notifyPlanChange will emit.
-        if (params.outputs && params.outputs.length > 0) {
-          addStepOutputs(params.stepId, params.outputs as DatasetReference[]);
-        }
-
-        const step = updateStepStatus(
-          params.stepId,
-          params.status as StepStatus,
-          result
-        );
-
-        // Opportunistically resolve tool version for tool steps that just
-        // completed with a jobId. Best-effort; failures are non-fatal.
-        if (
-          params.status === 'completed' &&
-          params.jobId &&
-          step?.execution.type === 'tool' &&
-          step.execution.toolId
-        ) {
-          try {
-            await resolveToolVersions(galaxyGetJobDetails, { stepId: params.stepId });
-          } catch (err) {
-            console.warn('Tool version resolution failed (non-fatal):', err);
-          }
-        }
-
-        // Sync to notebook
-        await syncToNotebook('step_updated', {
-          stepId: params.stepId,
-          status: params.status,
-          jobId: params.jobId,
-          invocationId: params.invocationId,
-          outputs: params.outputs,
-        });
-
-        // Add Galaxy references for outputs
-        const plan = getCurrentPlan();
-        if (params.outputs && plan?.galaxy.serverUrl) {
-          for (const output of params.outputs) {
-            await syncToNotebook('galaxy_ref', {
-              resource: output.name,
-              id: output.datasetId,
-              url: `${plan.galaxy.serverUrl}/datasets/${output.datasetId}`,
-            });
-          }
-        }
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: `Step ${params.stepId} updated to '${params.status}'`,
-              step: {
-                id: step.id,
-                name: step.name,
-                status: step.status,
-              },
-            }, null, 2),
-          }],
-          details: { stepId: step.id, status: step.status },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Get current plan
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "analysis_plan_get",
-    label: "Get Analysis Plan",
-    description: `Retrieve the current analysis plan state. Use this to review the
-full plan, check step statuses, or get details for a specific step.`,
-    parameters: Type.Object({
-      stepId: Type.Optional(Type.String({
-        description: "If provided, return details for just this step"
-      })),
-      includeDecisions: Type.Boolean({
-        description: "Include the decision log in the response",
-        default: false
-      }),
-      includeCheckpoints: Type.Boolean({
-        description: "Include QC checkpoints in the response",
-        default: false
-      }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const plan = getCurrentPlan();
-
-      if (!plan) {
-        return {
-          content: [{ type: "text", text: "No active analysis plan. Use analysis_plan_create to start one." }],
-          details: { hasPlan: false },
-        };
-      }
-
-      let response: Record<string, unknown>;
-
-      if (params.stepId) {
-        const step = plan.steps.find(s => s.id === params.stepId);
-        if (!step) {
-          return {
-            content: [{ type: "text", text: `Step ${params.stepId} not found` }],
-            details: { error: true },
-          };
-        }
-        response = { step };
-      } else {
-        response = {
-          id: plan.id,
-          title: plan.title,
-          status: plan.status,
-          created: plan.created,
-          updated: plan.updated,
-          context: plan.context,
-          galaxy: plan.galaxy,
-          steps: plan.steps.map(s => ({
-            id: s.id,
-            name: s.name,
-            status: s.status,
-            executionType: s.execution.type,
-            dependsOn: s.dependsOn,
-            hasResult: !!s.result,
-          })),
-          stepCount: plan.steps.length,
-          completedCount: plan.steps.filter(s => s.status === 'completed').length,
-        };
-
-        if (params.includeDecisions) {
-          response.decisions = plan.decisions;
-        }
-
-        if (params.includeCheckpoints) {
-          response.checkpoints = plan.checkpoints;
-        }
-      }
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(response, null, 2),
-        }],
-        details: { planId: plan.id },
-      };
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Log a decision
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "analysis_step_log",
-    label: "Log Decision/Observation",
-    description: `Log a decision, parameter choice, or observation in the analysis plan.
-This maintains a complete audit trail of the analysis process.`,
-    parameters: Type.Object({
-      stepId: Type.Optional(Type.String({
-        description: "Associated step ID, or omit for plan-level decisions"
-      })),
-      type: Type.Union([
-        Type.Literal("parameter_choice"),
-        Type.Literal("tool_selection"),
-        Type.Literal("plan_modification"),
-        Type.Literal("qc_decision"),
-        Type.Literal("observation"),
-      ], { description: "Type of decision/observation" }),
-      description: Type.String({
-        description: "What was decided or observed"
-      }),
-      rationale: Type.String({
-        description: "Reasoning behind the decision"
-      }),
-      researcherApproved: Type.Boolean({
-        description: "Whether the researcher approved this decision",
-        default: true
-      }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const entry = logDecision({
-          stepId: params.stepId || null,
-          type: params.type as DecisionType,
-          description: params.description,
-          rationale: params.rationale,
-          researcherApproved: params.researcherApproved ?? true,
-        });
-
-        // Sync to notebook
-        await syncToNotebook('decision', {
-          timestamp: entry.timestamp,
-          stepId: entry.stepId,
-          type: entry.type,
-          description: entry.description,
-          rationale: entry.rationale,
-          researcherApproved: entry.researcherApproved,
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: "Decision logged",
-              entry: {
-                timestamp: entry.timestamp,
-                type: entry.type,
-                stepId: entry.stepId,
-              },
-            }, null, 2),
-          }],
-          details: { logged: true },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: QC checkpoint
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "analysis_checkpoint",
-    label: "QC Checkpoint",
-    description: `Create or update a quality control checkpoint. Use this at key points
-in the analysis to validate results before proceeding.`,
-    parameters: Type.Object({
-      stepId: Type.String({
-        description: "Step ID this checkpoint is associated with"
-      }),
-      name: Type.String({
-        description: "Checkpoint name (e.g., 'Post-alignment QC')"
-      }),
-      criteria: Type.Array(Type.String(), {
-        description: "QC criteria to check"
-      }),
-      status: Type.Union([
-        Type.Literal("pending"),
-        Type.Literal("passed"),
-        Type.Literal("failed"),
-        Type.Literal("needs_review"),
-      ], { description: "Checkpoint status" }),
-      observations: Type.Array(Type.String(), {
-        description: "Observations from the QC check",
-        default: []
-      }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const checkpoint = setCheckpoint({
-          stepId: params.stepId,
-          name: params.name,
-          criteria: params.criteria,
-          status: params.status as CheckpointStatus,
-          observations: params.observations || [],
-        });
-
-        // Sync to notebook
-        await syncToNotebook('checkpoint', {
-          id: checkpoint.id,
-          stepId: checkpoint.stepId,
-          name: checkpoint.name,
-          status: checkpoint.status,
-          criteria: checkpoint.criteria,
-          observations: checkpoint.observations,
-          reviewedAt: checkpoint.reviewedAt,
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: `QC checkpoint "${params.name}" ${params.status}`,
-              checkpoint: {
-                id: checkpoint.id,
-                status: checkpoint.status,
-                observations: checkpoint.observations,
-              },
-            }, null, 2),
-          }],
-          details: { checkpointId: checkpoint.id, status: checkpoint.status },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-    renderResult: (result) => {
-      const d = result.details as { status?: string } | undefined;
-      const icon = d?.status === 'passed' ? '✅' : d?.status === 'failed' ? '❌' : '⏸️';
-      return new Text(`${icon} QC Checkpoint: ${d?.status}`);
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Activate plan
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "analysis_plan_activate",
-    label: "Activate Analysis Plan",
-    description: `Change the plan status from 'draft' to 'active' when ready to begin execution.
-Use this after the plan has been reviewed and approved by the researcher.`,
-    parameters: Type.Object({}),
-    async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
-      try {
-        setPlanStatus('active');
-        const plan = getCurrentPlan();
-
-        // Sync status change to notebook
-        await syncToNotebook('frontmatter', { status: 'active' });
-
-        // Log the activation event
-        await syncToNotebook('decision', {
-          timestamp: new Date().toISOString(),
-          type: 'plan_modification',
-          description: 'Plan activated - ready for execution',
-          rationale: 'Plan reviewed and approved by researcher',
-          researcherApproved: true,
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: `Plan "${plan?.title}" is now active`,
-              status: 'active',
-            }, null, 2),
-          }],
-          details: { status: 'active' },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Get plan summary (for quick reference)
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "analysis_plan_summary",
-    label: "Get Plan Summary",
-    description: `Get a compact summary of the current plan suitable for quick reference.
-Shows title, status, steps overview, current step, and recent decisions.`,
-    parameters: Type.Object({}),
-    async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
-      const plan = getCurrentPlan();
-
-      if (!plan) {
-        return {
-          content: [{ type: "text", text: "No active analysis plan." }],
-          details: { hasPlan: false },
-        };
-      }
-
-      const summary = formatPlanSummary(plan);
-
-      return {
-        content: [{ type: "text", text: summary }],
-        details: { planId: plan.id },
-      };
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Create analysis notebook
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "analysis_notebook_create",
-    label: "Create Analysis Notebook",
-    description: `Create a persistent notebook file for the current analysis plan.
-The notebook is a markdown file that persists the plan, steps, decisions, and results
-to disk. This enables resuming analysis across sessions and sharing with collaborators.
-Must have an active plan to create a notebook.`,
-    parameters: Type.Object({
-      path: Type.Optional(Type.String({
-        description: "Custom path for the notebook. If not provided, defaults to ./{slug}-notebook.md in current directory"
-      })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const plan = getCurrentPlan();
-
-      if (!plan) {
-        return {
-          content: [{ type: "text", text: "Error: No active plan. Create a plan first with analysis_plan_create." }],
-          details: { error: true },
-        };
-      }
-
-      // Check if notebook already exists
-      const existingPath = getNotebookPath();
-      if (existingPath) {
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: false,
-              message: `Notebook already exists at ${existingPath}`,
-              path: existingPath,
-            }, null, 2),
-          }],
-          details: { path: existingPath, alreadyExists: true },
-        };
-      }
-
-      try {
-        const cwd = process.cwd();
-        const notebookPath = params.path || getDefaultPath(plan.title, cwd);
-        const absolutePath = path.isAbsolute(notebookPath)
-          ? notebookPath
-          : path.join(cwd, notebookPath);
-
-        ensureGitRepo(path.dirname(absolutePath));
-        await createNotebook(absolutePath, plan);
-
-        // Log the notebook creation event
-        await syncToNotebook('decision', {
-          timestamp: new Date().toISOString(),
-          type: 'observation',
-          description: 'Analysis notebook created',
-          rationale: 'Persistent storage for analysis state',
-          researcherApproved: true,
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: `Notebook created: ${absolutePath}`,
-              path: absolutePath,
-              planId: plan.id,
-            }, null, 2),
-          }],
-          details: { path: absolutePath },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error creating notebook: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-    renderResult: (result) => {
-      const d = result.details as { path?: string } | undefined;
-      if (d?.path) {
-        return new Text(`📓 Notebook: ${d.path}`);
-      }
-      return new Text("❌ Notebook creation failed");
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Open existing notebook
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "analysis_notebook_open",
-    label: "Open Analysis Notebook",
-    description: `Open an existing analysis notebook file and restore its state.
-This loads the plan, steps, decisions, and checkpoints from the notebook file,
-allowing you to resume a previous analysis session.`,
-    parameters: Type.Object({
-      path: Type.String({
-        description: "Path to the notebook file to open"
-      }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const cwd = process.cwd();
-        const notebookPath = path.isAbsolute(params.path)
-          ? params.path
-          : path.join(cwd, params.path);
-
-        const plan = await loadNotebook(notebookPath);
-
-        if (!plan) {
-          return {
-            content: [{ type: "text", text: `Error: Could not parse notebook at ${notebookPath}` }],
-            details: { error: true },
-          };
-        }
-
-        ensureGitRepo(path.dirname(notebookPath));
-
-        const completed = plan.steps.filter(s => s.status === 'completed').length;
-        const inProgress = plan.steps.find(s => s.status === 'in_progress');
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: `Notebook loaded: ${plan.title}`,
-              path: notebookPath,
-              planId: plan.id,
-              status: plan.status,
-              progress: `${completed}/${plan.steps.length} steps completed`,
-              currentStep: inProgress?.name || null,
-            }, null, 2),
-          }],
-          details: { path: notebookPath, planId: plan.id },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error opening notebook: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-    renderResult: (result) => {
-      const d = result.details as { planId?: string; path?: string } | undefined;
-      if (d?.planId) {
-        return new Text(`📓 Loaded notebook: ${d.path}`);
-      }
-      return new Text("❌ Failed to open notebook");
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: List notebooks in directory
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "analysis_notebook_list",
-    label: "List Analysis Notebooks",
-    description: `List all analysis notebook files in a directory.
-Returns title, status, progress, and last updated time for each notebook found.`,
-    parameters: Type.Object({
-      directory: Type.Optional(Type.String({
-        description: "Directory to search for notebooks. Defaults to current working directory."
-      })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const directory = params.directory || process.cwd();
-        const notebooks = await findNotebooks(directory);
-
-        if (notebooks.length === 0) {
-          return {
-            content: [{ type: "text", text: `No analysis notebooks found in ${directory}` }],
-            details: { count: 0 },
-          };
-        }
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              count: notebooks.length,
-              directory,
-              notebooks: notebooks.map(n => ({
-                path: n.path,
-                title: n.title,
-                status: n.status,
-                progress: `${n.completedSteps}/${n.stepCount} steps`,
-                lastUpdated: n.lastUpdated,
-              })),
-            }, null, 2),
-          }],
-          details: { count: notebooks.length },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error listing notebooks: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // PHASE MANAGEMENT TOOLS
-  // ═══════════════════════════════════════════════════════════════════════════════
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Set lifecycle phase
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "analysis_set_phase",
-    label: "Set Lifecycle Phase",
-    description: `Move the analysis to a different lifecycle phase. The 5 phases are:
-- problem_definition: Refining research question, literature review
-- data_acquisition: Finding/importing data, creating samplesheets
-- analysis: Executing analysis steps (core workflow)
-- interpretation: Reviewing results, biological context
-- publication: Preparing methods, figures, data sharing`,
-    parameters: Type.Object({
-      phase: Type.Union([
-        Type.Literal("problem_definition"),
-        Type.Literal("data_acquisition"),
-        Type.Literal("analysis"),
-        Type.Literal("interpretation"),
-        Type.Literal("publication"),
-      ], { description: "Target lifecycle phase" }),
-      reason: Type.Optional(Type.String({
-        description: "Reason for phase transition"
-      })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const previousPhase = getPhase();
-        setPhase(params.phase as LifecyclePhase);
-
-        await syncToNotebook('phase_change', {
-          phase: params.phase,
-          previousPhase,
-          reason: params.reason,
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: `Phase changed to ${params.phase}`,
-              previousPhase,
-              currentPhase: params.phase,
-            }, null, 2),
-          }],
-          details: { phase: params.phase },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // PHASE 1: PROBLEM DEFINITION TOOLS
-  // ═══════════════════════════════════════════════════════════════════════════════
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Refine research question
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "research_question_refine",
-    label: "Refine Research Question",
-    description: `Refine the research question into a testable hypothesis using the PICO framework.
-PICO helps structure the question: Population, Intervention, Comparison, Outcome.`,
-    parameters: Type.Object({
-      hypothesis: Type.String({
-        description: "The refined, testable hypothesis"
-      }),
-      population: Type.Optional(Type.String({
-        description: "PICO: What/who is being studied (e.g., 'breast cancer cell lines')"
-      })),
-      intervention: Type.Optional(Type.String({
-        description: "PICO: Treatment/exposure being tested (e.g., 'drug X treatment')"
-      })),
-      comparison: Type.Optional(Type.String({
-        description: "PICO: Control/alternative (e.g., 'untreated control')"
-      })),
-      outcome: Type.Optional(Type.String({
-        description: "PICO: What we're measuring (e.g., 'gene expression changes')"
-      })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const pico = (params.population || params.intervention || params.outcome) ? {
-          population: params.population || '',
-          intervention: params.intervention || '',
-          comparison: params.comparison,
-          outcome: params.outcome || '',
-        } : undefined;
-
-        const question = setResearchQuestion({
-          hypothesis: params.hypothesis,
-          pico,
-        });
-
-        await syncToNotebook('frontmatter', {
-          hypothesis: params.hypothesis,
-        });
-
-        logDecision({
-          stepId: null,
-          type: 'literature_review',
-          description: `Research question refined: ${params.hypothesis}`,
-          rationale: pico ? `PICO: ${pico.population} | ${pico.intervention} | ${pico.comparison || 'N/A'} | ${pico.outcome}` : 'Hypothesis refined without PICO structure',
-          researcherApproved: true,
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: "Research question refined",
-              hypothesis: question.hypothesis,
-              pico: question.pico,
-            }, null, 2),
-          }],
-          details: { refined: true },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Add literature reference
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "research_add_literature",
-    label: "Add Literature Reference",
-    description: `Add a literature reference to support the research question or hypothesis.
-Use this when finding relevant papers during literature review.`,
-    parameters: Type.Object({
-      title: Type.String({
-        description: "Paper title"
-      }),
-      relevance: Type.String({
-        description: "Why this paper is relevant to the research"
-      }),
-      pmid: Type.Optional(Type.String({
-        description: "PubMed ID"
-      })),
-      doi: Type.Optional(Type.String({
-        description: "Digital Object Identifier"
-      })),
-      authors: Type.Optional(Type.Array(Type.String(), {
-        description: "Author names"
-      })),
-      year: Type.Optional(Type.Number({
-        description: "Publication year"
-      })),
-      journal: Type.Optional(Type.String({
-        description: "Journal name"
-      })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const ref = addLiteratureRef({
-          title: params.title,
-          relevance: params.relevance,
-          pmid: params.pmid,
-          doi: params.doi,
-          authors: params.authors,
-          year: params.year,
-          journal: params.journal,
-        });
-
-        await syncToNotebook('literature_ref', {
-          title: params.title,
-          pmid: params.pmid,
-          doi: params.doi,
-          relevance: params.relevance,
-          addedAt: ref.addedAt,
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: `Literature reference added: ${params.title}`,
-              reference: ref,
-            }, null, 2),
-          }],
-          details: { added: true },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // PHASE 2: DATA ACQUISITION TOOLS
-  // ═══════════════════════════════════════════════════════════════════════════════
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Set data source
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "data_set_source",
-    label: "Set Data Source",
-    description: `Initialize or update data provenance information. Call this when you know
-the source of the data (GEO, SRA, local upload, etc.).`,
-    parameters: Type.Object({
-      source: Type.Union([
-        Type.Literal("geo"),
-        Type.Literal("sra"),
-        Type.Literal("ena"),
-        Type.Literal("arrayexpress"),
-        Type.Literal("local"),
-        Type.Literal("galaxy_shared"),
-        Type.Literal("other"),
-      ], { description: "Data source type" }),
-      accession: Type.Optional(Type.String({
-        description: "Accession number (e.g., GSE12345, SRP123456)"
-      })),
-      downloadDate: Type.Optional(Type.String({
-        description: "When data was downloaded (ISO date)"
-      })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const provenance = setDataProvenance({
-          source: params.source as DataSource,
-          accession: params.accession,
-          downloadDate: params.downloadDate || new Date().toISOString().split('T')[0],
-        });
-
-        await syncToNotebook('data_provenance', {
-          source: params.source,
-          accession: params.accession,
-          sampleCount: provenance.samples.length,
-          fileCount: provenance.originalFiles.length,
-        });
-
-        logDecision({
-          stepId: null,
-          type: 'data_source_selection',
-          description: `Data source set: ${params.source}${params.accession ? ` (${params.accession})` : ''}`,
-          rationale: 'Data provenance tracking initialized',
-          researcherApproved: true,
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: `Data source set to ${params.source}`,
-              provenance,
-            }, null, 2),
-          }],
-          details: { source: params.source },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Add sample
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "data_add_sample",
-    label: "Add Sample",
-    description: `Add a sample to the data provenance. Use this to track individual samples
-with their metadata and associated files.`,
-    parameters: Type.Object({
-      id: Type.String({
-        description: "Sample identifier"
-      }),
-      name: Type.String({
-        description: "Sample name"
-      }),
-      condition: Type.Optional(Type.String({
-        description: "Experimental condition (e.g., 'treated', 'control')"
-      })),
-      replicate: Type.Optional(Type.Number({
-        description: "Replicate number"
-      })),
-      metadata: Type.Optional(Type.Record(Type.String(), Type.String(), {
-        description: "Additional metadata key-value pairs"
-      })),
-      files: Type.Optional(Type.Array(Type.String(), {
-        description: "File IDs associated with this sample"
-      })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        addSample({
-          id: params.id,
-          name: params.name,
-          condition: params.condition,
-          replicate: params.replicate,
-          metadata: params.metadata || {},
-          files: params.files || [],
-        });
-
-        const plan = getCurrentPlan();
-        const provenance = plan?.dataProvenance;
-
-        await syncToNotebook('data_provenance', {
-          source: provenance?.source,
-          accession: provenance?.accession,
-          sampleCount: provenance?.samples.length || 0,
-          fileCount: provenance?.originalFiles.length || 0,
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: `Sample "${params.name}" added`,
-              sampleCount: plan?.dataProvenance?.samples.length || 0,
-            }, null, 2),
-          }],
-          details: { sampleId: params.id },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Add data file
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "data_add_file",
-    label: "Add Data File",
-    description: `Add a data file to the provenance. Use this to track original files
-with their types and pairing information.`,
-    parameters: Type.Object({
-      id: Type.String({
-        description: "File identifier"
-      }),
-      name: Type.String({
-        description: "File name"
-      }),
-      type: Type.Union([
-        Type.Literal("fastq"),
-        Type.Literal("bam"),
-        Type.Literal("vcf"),
-        Type.Literal("counts"),
-        Type.Literal("annotation"),
-        Type.Literal("reference"),
-        Type.Literal("other"),
-      ], { description: "File type" }),
-      format: Type.Optional(Type.String({
-        description: "File format (e.g., fastq.gz, bam)"
-      })),
-      size: Type.Optional(Type.Number({
-        description: "File size in bytes"
-      })),
-      readType: Type.Optional(Type.Union([
-        Type.Literal("single"),
-        Type.Literal("paired"),
-      ], { description: "Read type for sequencing data" })),
-      pairedWith: Type.Optional(Type.String({
-        description: "ID of mate file for paired reads (R1 <-> R2)"
-      })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        addDataFile({
-          id: params.id,
-          name: params.name,
-          type: params.type as DataFileType,
-          format: params.format,
-          size: params.size,
-          readType: params.readType,
-          pairedWith: params.pairedWith,
-        });
-
-        const plan = getCurrentPlan();
-        const provenance = plan?.dataProvenance;
-
-        await syncToNotebook('data_provenance', {
-          source: provenance?.source,
-          accession: provenance?.accession,
-          sampleCount: provenance?.samples.length || 0,
-          fileCount: provenance?.originalFiles.length || 0,
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: `File "${params.name}" added`,
-              fileCount: plan?.dataProvenance?.originalFiles.length || 0,
-            }, null, 2),
-          }],
-          details: { fileId: params.id },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Link file to Galaxy dataset
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "data_link_galaxy",
-    label: "Link File to Galaxy",
-    description: `Link a tracked data file to its Galaxy dataset ID after import.
-Use this after importing data into Galaxy to maintain the provenance chain.`,
-    parameters: Type.Object({
-      fileId: Type.String({
-        description: "The file ID in our provenance tracking"
-      }),
-      galaxyDatasetId: Type.String({
-        description: "The Galaxy dataset ID"
-      }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const file = updateDataFile(params.fileId, {
-          galaxyDatasetId: params.galaxyDatasetId,
-        });
-
-        if (!file) {
-          return {
-            content: [{ type: "text", text: `File ${params.fileId} not found` }],
-            details: { error: true },
-          };
-        }
-
-        // Add Galaxy reference to notebook
-        const plan = getCurrentPlan();
-        if (plan?.galaxy.serverUrl) {
-          await syncToNotebook('galaxy_ref', {
-            resource: file.name,
-            id: params.galaxyDatasetId,
-            url: `${plan.galaxy.serverUrl}/datasets/${params.galaxyDatasetId}`,
-          });
-        }
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: `File "${file.name}" linked to Galaxy dataset ${params.galaxyDatasetId}`,
-            }, null, 2),
-          }],
-          details: { linked: true },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Generate samplesheet
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "data_generate_samplesheet",
-    label: "Generate Samplesheet",
-    description: `Generate a samplesheet from tracked samples and files. The samplesheet
-can be used for nf-core pipelines or Galaxy workflows that need structured input.`,
-    parameters: Type.Object({
-      format: Type.Union([
-        Type.Literal("csv"),
-        Type.Literal("tsv"),
-      ], { description: "Output format", default: "csv" }),
-      columns: Type.Array(Type.String(), {
-        description: "Column names to include (e.g., ['sample', 'fastq_1', 'fastq_2', 'condition'])"
-      }),
-      includeMetadata: Type.Boolean({
-        description: "Include sample metadata columns",
-        default: true
-      }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const plan = getCurrentPlan();
-        if (!plan?.dataProvenance) {
-          return {
-            content: [{ type: "text", text: "No data provenance set. Use data_set_source first." }],
-            details: { error: true },
-          };
-        }
-
-        const dp = plan.dataProvenance;
-        const rows: Record<string, string>[] = [];
-
-        // Build rows from samples
-        for (const sample of dp.samples) {
-          const row: Record<string, string> = {
-            sample: sample.id,
-          };
-
-          // Find associated files
-          const sampleFiles = dp.originalFiles.filter(f => sample.files.includes(f.id));
-          const r1 = sampleFiles.find(f => f.name.includes('_R1') || f.name.includes('_1.'));
-          const r2 = sampleFiles.find(f => f.name.includes('_R2') || f.name.includes('_2.'));
-
-          if (r1) row['fastq_1'] = r1.galaxyDatasetId || r1.name;
-          if (r2) row['fastq_2'] = r2.galaxyDatasetId || r2.name;
-
-          if (sample.condition) row['condition'] = sample.condition;
-          if (sample.replicate !== undefined) row['replicate'] = String(sample.replicate);
-
-          // Include metadata if requested
-          if (params.includeMetadata) {
-            Object.assign(row, sample.metadata);
-          }
-
-          rows.push(row);
-        }
-
-        // Store samplesheet
-        const samplesheet = {
-          format: params.format as 'csv' | 'tsv',
-          columns: params.columns,
-          rows,
-          generatedAt: new Date().toISOString(),
-        };
-        plan.dataProvenance.samplesheet = samplesheet;
-        plan.updated = new Date().toISOString();
-
-        // Generate text representation
-        const delimiter = params.format === 'csv' ? ',' : '\t';
-        const header = params.columns.join(delimiter);
-        const dataRows = rows.map(row =>
-          params.columns.map(col => row[col] || '').join(delimiter)
-        );
-        const content = [header, ...dataRows].join('\n');
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: `Samplesheet generated with ${rows.length} samples`,
-              format: params.format,
-              columns: params.columns,
-              sampleCount: rows.length,
-              content,
-            }, null, 2),
-          }],
-          details: { generated: true, sampleCount: rows.length },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Get data provenance summary
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "data_get_provenance",
-    label: "Get Data Provenance",
-    description: `Get the current data provenance information including source, samples, files, and samplesheet.`,
-    parameters: Type.Object({}),
-    async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
-      const plan = getCurrentPlan();
-
-      if (!plan?.dataProvenance) {
-        return {
-          content: [{ type: "text", text: "No data provenance set. Use data_set_source to initialize." }],
-          details: { hasProvenance: false },
-        };
-      }
-
-      const dp = plan.dataProvenance;
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            source: dp.source,
-            accession: dp.accession,
-            downloadDate: dp.downloadDate,
-            sampleCount: dp.samples.length,
-            fileCount: dp.originalFiles.length,
-            samples: dp.samples.map(s => ({
-              id: s.id,
-              name: s.name,
-              condition: s.condition,
-              fileCount: s.files.length,
-            })),
-            files: dp.originalFiles.map(f => ({
-              id: f.id,
-              name: f.name,
-              type: f.type,
-              galaxyLinked: !!f.galaxyDatasetId,
-            })),
-            hasSamplesheet: !!dp.samplesheet,
-          }, null, 2),
-        }],
-        details: { hasProvenance: true },
-      };
-    },
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // PHASE 4: INTERPRETATION TOOLS
-  // ═══════════════════════════════════════════════════════════════════════════════
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Add a biological finding
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "interpretation_add_finding",
-    label: "Add Biological Finding",
-    description: `Log a biological finding from the analysis. Use this during the interpretation
-phase to record discoveries, observations, and conclusions drawn from the analysis results.
-Each finding captures what was found, the supporting evidence, and confidence level.`,
-    parameters: Type.Object({
-      title: Type.String({
-        description: "Brief title for the finding (e.g., 'TP53 pathway upregulated in treated samples')"
-      }),
-      description: Type.String({
-        description: "Detailed description of the finding"
-      }),
-      evidence: Type.String({
-        description: "What data or results support this finding"
-      }),
-      category: Type.Union([
-        Type.Literal("differential_expression"),
-        Type.Literal("pathway"),
-        Type.Literal("variant"),
-        Type.Literal("structural"),
-        Type.Literal("functional"),
-        Type.Literal("unexpected"),
-        Type.Literal("negative"),
-        Type.Literal("other"),
-      ], { description: "Category of finding" }),
-      relatedSteps: Type.Array(Type.String(), {
-        description: "Step IDs that produced the evidence for this finding",
-        default: []
-      }),
-      confidence: Type.Union([
-        Type.Literal("high"),
-        Type.Literal("medium"),
-        Type.Literal("low"),
-        Type.Literal("uncertain"),
-      ], { description: "Confidence level in this finding" }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const finding = addFinding({
-          title: params.title,
-          description: params.description,
-          evidence: params.evidence,
-          category: params.category as FindingCategory,
-          relatedSteps: params.relatedSteps || [],
-          confidence: params.confidence as 'high' | 'medium' | 'low' | 'uncertain',
-        });
-
-        // Sync to notebook
-        await syncToNotebook('interpretation_finding', {
-          finding,
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: `Finding "${finding.title}" recorded`,
-              findingId: finding.id,
-              totalFindings: getFindings().length,
-            }, null, 2),
-          }],
-          details: { findingId: finding.id },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-    renderResult: (result) => {
-      const d = result.details as { findingId?: string } | undefined;
-      return new Text(`🔬 Finding recorded: ${d?.findingId || 'unknown'}`);
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Summarize interpretation
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "interpretation_summarize",
-    label: "Summarize Interpretation",
-    description: `Set an overall interpretation summary for the analysis. This captures the
-high-level conclusions from all findings. Returns the full list of findings for review.`,
-    parameters: Type.Object({
-      summary: Type.String({
-        description: "Overall interpretation summary covering key conclusions from the analysis"
-      }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        setInterpretationSummary(params.summary);
-        const findings = getFindings();
-
-        // Sync to notebook
-        await syncToNotebook('interpretation_summary', {
-          summary: params.summary,
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: "Interpretation summary set",
-              summary: params.summary,
-              findings: findings.map(f => ({
-                id: f.id,
-                title: f.title,
-                category: f.category,
-                confidence: f.confidence,
-              })),
-              totalFindings: findings.length,
-            }, null, 2),
-          }],
-          details: { findingCount: findings.length },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // PHASE 5: PUBLICATION TOOLS
-  // ═══════════════════════════════════════════════════════════════════════════════
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Initialize publication prep
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "publication_init",
-    label: "Initialize Publication",
-    description: `Initialize publication preparation. Call this when starting to prepare
-materials for publication.`,
-    parameters: Type.Object({
-      targetJournal: Type.Optional(Type.String({
-        description: "Target journal for submission"
-      })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const pub = initPublication(params.targetJournal);
-
-        await syncToNotebook('publication_update', {
-          updateType: 'initialized',
-          status: pub.status,
-          description: params.targetJournal ? `Target: ${params.targetJournal}` : 'Publication prep started',
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: "Publication preparation initialized",
-              targetJournal: params.targetJournal,
-              status: pub.status,
-            }, null, 2),
-          }],
-          details: { initialized: true },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Generate methods section
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "publication_generate_methods",
-    label: "Generate Methods",
-    description: `Generate a methods section from the completed analysis steps.
-Extracts tool IDs, parameters, and creates structured methods text.`,
-    parameters: Type.Object({
-      includeVersions: Type.Boolean({
-        description: "Attempt to include tool versions",
-        default: true
-      }),
-      style: Type.Optional(Type.Union([
-        Type.Literal("narrative"),
-        Type.Literal("structured"),
-      ], { description: "Methods style: narrative prose or structured sections" })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const methods = generateMethods();
-        const plan = getCurrentPlan();
-
-        await syncToNotebook('publication_update', {
-          updateType: 'methods_generated',
-          status: plan?.publication?.status,
-          description: `${methods.toolVersions.length} tools documented`,
-        });
-
-        logDecision({
-          stepId: null,
-          type: 'publication_choice',
-          description: 'Methods section generated from analysis steps',
-          rationale: `Extracted ${methods.toolVersions.length} tool references`,
-          researcherApproved: true,
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: "Methods section generated",
-              generatedAt: methods.generatedAt,
-              toolCount: methods.toolVersions.length,
-              text: methods.text,
-              tools: methods.toolVersions.map(t => ({
-                toolId: t.toolId,
-                toolName: t.toolName,
-                stepId: t.stepId,
-              })),
-            }, null, 2),
-          }],
-          details: { generated: true },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Add figure specification
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "publication_add_figure",
-    label: "Add Figure",
-    description: `Add a figure specification for publication. Use this to track planned
-and generated figures.`,
-    parameters: Type.Object({
-      name: Type.String({
-        description: "Figure name (e.g., 'Figure 1: PCA plot')"
-      }),
-      type: Type.Union([
-        Type.Literal("qc_plot"),
-        Type.Literal("pca"),
-        Type.Literal("heatmap"),
-        Type.Literal("volcano"),
-        Type.Literal("ma_plot"),
-        Type.Literal("pathway"),
-        Type.Literal("coverage"),
-        Type.Literal("alignment"),
-        Type.Literal("custom"),
-      ], { description: "Figure type" }),
-      dataSource: Type.String({
-        description: "Step ID or dataset ID that this figure is based on"
-      }),
-      description: Type.Optional(Type.String({
-        description: "Figure description/caption"
-      })),
-      suggestedTool: Type.Optional(Type.String({
-        description: "Galaxy tool ID for generating this figure"
-      })),
-      status: Type.Optional(Type.Union([
-        Type.Literal("planned"),
-        Type.Literal("generated"),
-        Type.Literal("finalized"),
-      ], { description: "Current figure status" })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const figure = addFigure({
-          name: params.name,
-          type: params.type as FigureType,
-          dataSource: params.dataSource,
-          description: params.description,
-          suggestedTool: params.suggestedTool,
-          status: params.status || 'planned',
-        });
-
-        await syncToNotebook('publication_update', {
-          updateType: 'figure_added',
-          figureId: figure.id,
-          description: params.name,
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: `Figure "${params.name}" added`,
-              figure,
-            }, null, 2),
-          }],
-          details: { figureId: figure.id },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Update figure status
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "publication_update_figure",
-    label: "Update Figure",
-    description: `Update a figure's status or link it to a Galaxy dataset.`,
-    parameters: Type.Object({
-      figureId: Type.String({
-        description: "Figure ID to update"
-      }),
-      status: Type.Optional(Type.Union([
-        Type.Literal("planned"),
-        Type.Literal("generated"),
-        Type.Literal("finalized"),
-      ], { description: "New status" })),
-      galaxyDatasetId: Type.Optional(Type.String({
-        description: "Galaxy dataset ID of the generated figure"
-      })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const figure = updateFigure(params.figureId, {
-          status: params.status,
-          galaxyDatasetId: params.galaxyDatasetId,
-        });
-
-        if (!figure) {
-          return {
-            content: [{ type: "text", text: `Figure ${params.figureId} not found` }],
-            details: { error: true },
-          };
-        }
-
-        await syncToNotebook('publication_update', {
-          updateType: 'figure_updated',
-          figureId: params.figureId,
-          status: params.status,
-        });
-
-        // Add Galaxy reference if dataset provided
-        if (params.galaxyDatasetId) {
-          const plan = getCurrentPlan();
-          if (plan?.galaxy.serverUrl) {
-            await syncToNotebook('galaxy_ref', {
-              resource: figure.name,
-              id: params.galaxyDatasetId,
-              url: `${plan.galaxy.serverUrl}/datasets/${params.galaxyDatasetId}`,
-            });
-          }
-        }
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: `Figure "${figure.name}" updated`,
-              figure,
-            }, null, 2),
-          }],
-          details: { updated: true },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true },
-        };
-      }
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Recommend figures
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "publication_recommend_figures",
-    label: "Recommend Figures",
-    description: `Get figure recommendations based on the analysis type and completed steps.
-Returns suggested figures with Galaxy tools that can generate them.`,
-    parameters: Type.Object({
-      analysisType: Type.Optional(Type.Union([
-        Type.Literal("rnaseq"),
-        Type.Literal("variant_calling"),
-        Type.Literal("chipseq"),
-        Type.Literal("atacseq"),
-        Type.Literal("singlecell"),
-        Type.Literal("general"),
-      ], { description: "Type of analysis for targeted recommendations" })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const plan = getCurrentPlan();
-      const analysisType = params.analysisType || 'general';
-
-      // Figure recommendations by analysis type
-      const recommendations: Record<string, Array<{name: string; type: FigureType; description: string; tool?: string}>> = {
-        rnaseq: [
-          { name: 'QC Summary', type: 'qc_plot', description: 'MultiQC report summarizing sample quality', tool: 'multiqc' },
-          { name: 'PCA Plot', type: 'pca', description: 'Principal component analysis of samples', tool: 'deseq2' },
-          { name: 'Sample Heatmap', type: 'heatmap', description: 'Hierarchical clustering of samples', tool: 'deseq2' },
-          { name: 'Volcano Plot', type: 'volcano', description: 'Log fold change vs significance', tool: 'volcanoplot' },
-          { name: 'MA Plot', type: 'ma_plot', description: 'Log ratio vs average expression', tool: 'deseq2' },
-          { name: 'Gene Expression Heatmap', type: 'heatmap', description: 'Top DE genes across samples', tool: 'heatmap2' },
-        ],
-        variant_calling: [
-          { name: 'QC Summary', type: 'qc_plot', description: 'MultiQC report for alignment and variant QC', tool: 'multiqc' },
-          { name: 'Coverage Plot', type: 'coverage', description: 'Read depth across regions of interest' },
-          { name: 'Variant Quality Distribution', type: 'qc_plot', description: 'Distribution of variant quality scores' },
-          { name: 'Alignment Statistics', type: 'alignment', description: 'Mapping rate, duplication, insert size' },
-        ],
-        singlecell: [
-          { name: 'QC Violin Plots', type: 'qc_plot', description: 'nGenes, nCounts, percent mito per cell' },
-          { name: 'UMAP/t-SNE', type: 'pca', description: 'Dimensionality reduction of cells' },
-          { name: 'Cluster Markers Heatmap', type: 'heatmap', description: 'Top markers per cluster' },
-          { name: 'Cell Type Composition', type: 'custom', description: 'Bar plot of cell type proportions' },
-        ],
-        general: [
-          { name: 'QC Summary', type: 'qc_plot', description: 'MultiQC report', tool: 'multiqc' },
-          { name: 'PCA Plot', type: 'pca', description: 'Principal component analysis' },
-          { name: 'Heatmap', type: 'heatmap', description: 'Hierarchical clustering visualization' },
-        ],
-      };
-
-      const figures = recommendations[analysisType] || recommendations.general;
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            analysisType,
-            completedSteps: plan?.steps.filter(s => s.status === 'completed').length || 0,
-            recommendations: figures,
-            note: "Use publication_add_figure to add these to your publication plan",
-          }, null, 2),
-        }],
-        details: { recommendationCount: figures.length },
-      };
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Get publication status
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "publication_get_status",
-    label: "Get Publication Status",
-    description: `Get the current publication preparation status including methods, figures, and data sharing info.`,
-    parameters: Type.Object({}),
-    async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
-      const plan = getCurrentPlan();
-
-      if (!plan?.publication) {
-        return {
-          content: [{ type: "text", text: "Publication preparation not started. Use publication_init first." }],
-          details: { hasPublication: false },
-        };
-      }
-
-      const pub = plan.publication;
-      const figureStats = {
-        total: pub.figures.length,
-        planned: pub.figures.filter(f => f.status === 'planned').length,
-        generated: pub.figures.filter(f => f.status === 'generated').length,
-        finalized: pub.figures.filter(f => f.status === 'finalized').length,
-      };
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            status: pub.status,
-            targetJournal: pub.targetJournal,
-            hasMethods: !!pub.methodsDraft,
-            methodsToolCount: pub.methodsDraft?.toolVersions.length || 0,
-            figures: figureStats,
-            figureList: pub.figures.map(f => ({
-              id: f.id,
-              name: f.name,
-              type: f.type,
-              status: f.status,
-            })),
-            supplementaryCount: pub.supplementaryData.length,
-            dataSharing: pub.dataSharing,
-          }, null, 2),
-        }],
-        details: { hasPublication: true },
-      };
-    },
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // WORKFLOW INTEGRATION
-  // ═══════════════════════════════════════════════════════════════════════════════
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Import workflow structure into the plan
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "workflow_to_plan",
-    label: "Add Workflow to Plan",
-    description: `Fetch a Galaxy workflow's structure and add it as a plan step. This queries the
-Galaxy API for the workflow's tools, inputs, and outputs, then creates a workflow-type step
-in the current analysis plan. Use this after discovering a workflow via Galaxy MCP tools
-(search_workflows, recommend_iwc_workflows) to integrate it into your plan before invoking it.`,
-    parameters: Type.Object({
-      workflowId: Type.String({
-        description: "Galaxy workflow ID to fetch structure for"
-      }),
-      trsId: Type.Optional(Type.String({
-        description: "IWC TRS ID if this workflow was imported from IWC"
-      })),
-      name: Type.Optional(Type.String({
-        description: "Override the workflow name in the plan step"
-      })),
-      description: Type.Optional(Type.String({
-        description: "Override the step description"
-      })),
-      dependsOn: Type.Optional(Type.Array(Type.String(), {
-        description: "Step IDs this workflow step depends on"
-      })),
-    }),
-    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
-      const plan = getCurrentPlan();
-      if (!plan) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "No active plan. Create one with analysis_plan_create first." }) }],
-          details: { error: true } as Record<string, unknown>,
-        };
-      }
-
-      if (!getGalaxyConfig()) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "Galaxy credentials not configured (GALAXY_URL, GALAXY_API_KEY)." }) }],
-          details: { error: true } as Record<string, unknown>,
-        };
-      }
-
-      try {
-        const wfResponse = await galaxyGet<GalaxyWorkflowResponse>(
-          `/workflows/${params.workflowId}`,
-          signal,
-        );
-
-        const structure = extractWorkflowStructure(wfResponse);
-
-        const step = addWorkflowStep({
-          name: params.name,
-          description: params.description,
-          workflowId: params.workflowId,
-          trsId: params.trsId,
-          workflowStructure: structure,
-          dependsOn: params.dependsOn,
-        });
-
-        await syncToNotebook('step_added', { step });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              stepId: step.id,
-              workflowName: structure.name,
-              version: structure.version,
-              stepCount: structure.stepCount,
-              tools: structure.toolNames,
-              inputs: structure.inputLabels,
-              outputs: structure.outputLabels,
-              message: `Workflow "${structure.name}" added as step ${step.id} with ${structure.toolNames.length} tools, ${structure.inputLabels.length} inputs, ${structure.outputLabels.length} labeled outputs.`,
-            }, null, 2),
-          }],
-          details: { stepId: step.id, workflowName: structure.name } as Record<string, unknown>,
-        };
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: msg }) }],
-          details: { error: true } as Record<string, unknown>,
-        };
-      }
-    },
-    renderResult: (result) => {
-      const d = result.details as { stepId?: string; workflowName?: string; error?: boolean } | undefined;
-      if (d?.error) return new Text("❌ Failed to add workflow to plan");
-      return new Text(`🔗 Workflow "${d?.workflowName}" → step ${d?.stepId}`);
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Link a Galaxy invocation to a workflow step
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "workflow_invocation_link",
-    label: "Link Workflow Invocation",
-    description: `Link a Galaxy workflow invocation to a plan step. Call this right after invoking
-a workflow via Galaxy MCP (galaxy_invoke_workflow). It marks the step as in_progress and
-records the invocation ID for status tracking.`,
-    parameters: Type.Object({
-      stepId: Type.String({
-        description: "Plan step ID to link the invocation to"
-      }),
-      invocationId: Type.String({
-        description: "Galaxy invocation ID returned from galaxy_invoke_workflow"
-      }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const plan = getCurrentPlan();
-      if (!plan) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "No active plan." }) }],
-          details: { error: true } as Record<string, unknown>,
-        };
-      }
-
-      try {
-        const step = linkInvocation(params.stepId, params.invocationId);
-
-        await syncToNotebook('step_updated', {
-          stepId: params.stepId,
-          status: 'in_progress',
-          invocationId: params.invocationId,
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              stepId: step.id,
-              stepName: step.name,
-              invocationId: params.invocationId,
-              status: step.status,
-              message: `Invocation ${params.invocationId} linked to step ${step.id} ("${step.name}"). Step is now in_progress.`,
-            }, null, 2),
-          }],
-          details: { stepId: step.id, invocationId: params.invocationId } as Record<string, unknown>,
-        };
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: msg }) }],
-          details: { error: true } as Record<string, unknown>,
-        };
-      }
-    },
-    renderResult: (result) => {
-      const d = result.details as { stepId?: string; invocationId?: string; error?: boolean } | undefined;
-      if (d?.error) return new Text("❌ Failed to link invocation");
-      return new Text(`🔗 Invocation ${d?.invocationId} → step ${d?.stepId}`);
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Check workflow invocation status
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "workflow_invocation_check",
-    label: "Check Workflow Invocation",
-    description: `Check the status of workflow invocations linked to plan steps. Queries the Galaxy
-API for each invocation's job states and summarizes progress. Automatically completes steps
-when all jobs succeed, or fails steps when jobs error. Call with no arguments to check all
-in-progress workflow steps, or specify a stepId to check one.`,
-    parameters: Type.Object({
-      stepId: Type.Optional(Type.String({
-        description: "Check a specific step (omit to check all in-progress workflow steps)"
-      })),
-    }),
-    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
-      const plan = getCurrentPlan();
-      if (!plan) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "No active plan." }) }],
-          details: { error: true } as Record<string, unknown>,
-        };
-      }
-
-      if (!getGalaxyConfig()) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "Galaxy credentials not configured." }) }],
-          details: { error: true } as Record<string, unknown>,
-        };
-      }
-
-      let stepsToCheck = getWorkflowSteps();
-
-      if (params.stepId) {
-        const specific = stepsToCheck.find(s => s.id === params.stepId);
-        if (!specific) {
-          const anyStep = plan.steps.find(s => s.id === params.stepId);
-          if (!anyStep) {
-            return {
-              content: [{ type: "text", text: JSON.stringify({ success: false, error: `Step ${params.stepId} not found.` }) }],
-              details: { error: true } as Record<string, unknown>,
-            };
-          }
-          if (anyStep.execution.type !== 'workflow') {
-            return {
-              content: [{ type: "text", text: JSON.stringify({ success: false, error: `Step ${params.stepId} is not a workflow step.` }) }],
-              details: { error: true } as Record<string, unknown>,
-            };
-          }
-          if (!anyStep.result?.invocationId) {
-            return {
-              content: [{ type: "text", text: JSON.stringify({ success: false, error: `Step ${params.stepId} has no linked invocation. Use workflow_invocation_link first.` }) }],
-              details: { error: true } as Record<string, unknown>,
-            };
-          }
-          stepsToCheck = [anyStep];
-        } else {
-          stepsToCheck = [specific];
-        }
-      }
-
-      if (stepsToCheck.length === 0) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: true, results: [], message: "No in-progress workflow steps with linked invocations." }) }],
-          details: { checked: 0 } as Record<string, unknown>,
-        };
-      }
-
-      const results: Array<{
-        stepId: string;
-        stepName: string;
-        invocationId: string;
-        invocationState: string;
-        jobSummary: { ok: number; running: number; queued: number; error: number; other: number };
-        autoAction?: string;
-      }> = [];
-
-      for (const step of stepsToCheck) {
-        const invocationId = step.result!.invocationId!;
-        try {
-          const inv = await galaxyGet<GalaxyInvocationResponse>(
-            `/invocations/${invocationId}`,
-            signal,
-          );
-
-          // Tally job states across all invocation steps
-          const summary = { ok: 0, running: 0, queued: 0, error: 0, other: 0 };
-          for (const invStep of inv.steps) {
-            for (const job of invStep.jobs) {
-              if (job.state === 'ok') summary.ok++;
-              else if (job.state === 'running') summary.running++;
-              else if (job.state === 'queued' || job.state === 'new' || job.state === 'waiting') summary.queued++;
-              else if (job.state === 'error' || job.state === 'deleted') summary.error++;
-              else summary.other++;
-            }
-          }
-
-          let autoAction: string | undefined;
-
-          // Auto-complete if all jobs are ok and invocation is scheduled/ready
-          if (summary.error === 0 && summary.running === 0 && summary.queued === 0 && summary.ok > 0) {
-            updateStepStatus(step.id, 'completed', {
-              completedAt: new Date().toISOString(),
-              invocationId,
-              summary: `Workflow completed: ${summary.ok} jobs succeeded`,
-              qcPassed: null,
-            });
-            await syncToNotebook('step_updated', {
-              stepId: step.id,
-              status: 'completed',
-              invocationId,
-            });
-            autoAction = 'completed';
-          }
-          // Auto-fail if any jobs errored
-          else if (summary.error > 0) {
-            updateStepStatus(step.id, 'failed', {
-              completedAt: new Date().toISOString(),
-              invocationId,
-              summary: `Workflow failed: ${summary.error} job(s) errored, ${summary.ok} succeeded`,
-              qcPassed: false,
-            });
-            await syncToNotebook('step_updated', {
-              stepId: step.id,
-              status: 'failed',
-              invocationId,
-            });
-            autoAction = 'failed';
-          }
-
-          results.push({
-            stepId: step.id,
-            stepName: step.name,
-            invocationId,
-            invocationState: inv.state,
-            jobSummary: summary,
-            autoAction,
-          });
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          results.push({
-            stepId: step.id,
-            stepName: step.name,
-            invocationId,
-            invocationState: 'error_checking',
-            jobSummary: { ok: 0, running: 0, queued: 0, error: 0, other: 0 },
-            autoAction: `check_error: ${msg}`,
-          });
-        }
-      }
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            checked: results.length,
-            results,
-          }, null, 2),
-        }],
-        details: { checked: results.length } as Record<string, unknown>,
-      };
-    },
-    renderResult: (result) => {
-      const d = result.details as { checked?: number; error?: boolean } | undefined;
-      if (d?.error) return new Text("❌ Invocation check failed");
-      return new Text(`🔍 Checked ${d?.checked || 0} workflow invocation(s)`);
-    },
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // BRC CATALOG CONTEXT
-  // ═══════════════════════════════════════════════════════════════════════════════
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Record BRC catalog selections on the plan
-  // ─────────────────────────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "brc_set_context",
-    label: "Set BRC Context",
-    description: `Record organism, assembly, and/or workflow selections from the BRC Analytics catalog
-on the active analysis plan. Call this after using BRC MCP tools (search_organisms,
-get_assemblies, get_compatible_workflows, etc.) to persist the researcher's choices.
-All fields are optional — call incrementally as selections are made.`,
-    parameters: Type.Object({
-      organism: Type.Optional(Type.Object({
-        species: Type.String({ description: "Species name (e.g., 'Saccharomyces cerevisiae')" }),
-        taxonomyId: Type.String({ description: "NCBI taxonomy ID" }),
-        commonName: Type.Optional(Type.String({ description: "Common name (e.g., 'Baker\\'s yeast')" })),
-      }, { description: "Organism selection from BRC catalog" })),
-      assembly: Type.Optional(Type.Object({
-        accession: Type.String({ description: "Assembly accession (e.g., 'GCF_000146045.2')" }),
-        species: Type.String({ description: "Species this assembly belongs to" }),
-        isReference: Type.Boolean({ description: "Whether this is the reference assembly" }),
-        hasGeneAnnotation: Type.Boolean({ description: "Whether gene annotation is available" }),
-        geneModelUrl: Type.Optional(Type.String({ description: "URL to gene model file" })),
-      }, { description: "Assembly selection from BRC catalog" })),
-      workflow: Type.Optional(Type.Object({
-        category: Type.String({ description: "Analysis category (e.g., 'TRANSCRIPTOMICS')" }),
-        iwcId: Type.String({ description: "IWC workflow identifier" }),
-        name: Type.String({ description: "Human-readable workflow name" }),
-      }, { description: "Workflow selection from BRC catalog" })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      try {
-        const plan = getCurrentPlan();
-        if (!plan) {
-          return {
-            content: [{ type: "text", text: JSON.stringify({ success: false, error: "No active plan. Create one first with analysis_plan_create." }) }],
-            details: { error: true } as Record<string, unknown>,
-          };
-        }
-
-        if (!params.organism && !params.assembly && !params.workflow) {
-          return {
-            content: [{ type: "text", text: JSON.stringify({ success: false, error: "At least one of organism, assembly, or workflow must be provided." }) }],
-            details: { error: true } as Record<string, unknown>,
-          };
-        }
-
-        if (params.organism) {
-          setBRCOrganism(params.organism);
-        }
-        if (params.assembly) {
-          setBRCAssembly(params.assembly);
-        }
-        if (params.workflow) {
-          setBRCWorkflow(params.workflow);
-        }
-
-        await syncToNotebook('brc_context_updated', {
-          organism: params.organism?.species,
-          assembly: params.assembly?.accession,
-          workflow: params.workflow?.name,
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: "BRC context updated on plan",
-              brcContext: getBRCContext(),
-            }, null, 2),
-          }],
-          details: { updated: true } as Record<string, unknown>,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${(error as Error).message}` }],
-          details: { error: true } as Record<string, unknown>,
-        };
-      }
-    },
-    renderResult: (result) => {
-      const d = result.details as { error?: boolean; updated?: boolean } | undefined;
-      if (d?.error) return new Text("❌ BRC context update failed");
-      return new Text("🧬 BRC context updated on plan");
-    },
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // GTN TUTORIAL DISCOVERY & FETCH
-  // ═══════════════════════════════════════════════════════════════════════════════
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Tool: Search/browse GTN topics and tutorials
@@ -2484,7 +130,6 @@ in their title or objectives. Use this to find tutorial URLs before fetching wit
 
       try {
         if (!params.topic) {
-          // List all topics
           const resp = await fetch(`${GTN_API}/topics.json`, { signal });
           if (!resp.ok) {
             return {
@@ -2513,7 +158,6 @@ in their title or objectives. Use this to find tutorial URLs before fetching wit
           };
         }
 
-        // List tutorials in a topic
         const resp = await fetch(`${GTN_API}/topics/${params.topic}.json`, { signal });
         if (!resp.ok) {
           return {
@@ -2644,39 +288,7 @@ analyses in Galaxy.`,
         }
 
         const html = await response.text();
-
-        // Strip blocks that contribute nothing but noise
-        const stripped = html
-          .replace(/<script[\s\S]*?<\/script>/gi, '')
-          .replace(/<style[\s\S]*?<\/style>/gi, '')
-          .replace(/<nav[\s\S]*?<\/nav>/gi, '')
-          .replace(/<header[\s\S]*?<\/header>/gi, '')
-          .replace(/<footer[\s\S]*?<\/footer>/gi, '');
-
-        // Try to extract the main tutorial content area
-        let body = stripped;
-        const mainMatch = stripped.match(/<main[\s\S]*?>([\s\S]*?)<\/main>/i)
-          || stripped.match(/<article[\s\S]*?>([\s\S]*?)<\/article>/i)
-          || stripped.match(/<div[^>]+class="[^"]*tutorial-content[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/i);
-        if (mainMatch) {
-          body = mainMatch[1];
-        }
-
-        // Remove remaining HTML tags
-        let text = body.replace(/<[^>]+>/g, ' ');
-
-        // Decode common HTML entities
-        text = text
-          .replace(/&amp;/g, '&')
-          .replace(/&lt;/g, '<')
-          .replace(/&gt;/g, '>')
-          .replace(/&quot;/g, '"')
-          .replace(/&#39;/g, "'")
-          .replace(/&nbsp;/g, ' ')
-          .replace(/&#(\d+);/g, (_m, code) => String.fromCharCode(Number(code)));
-
-        // Normalize whitespace
-        text = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+        const text = stripGtnHtml(html);
 
         return {
           content: [{
@@ -2703,381 +315,391 @@ analyses in Galaxy.`,
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Tool version resolution
+  // Tool: Fetch a SKILL.md or reference doc from a configured skills repo
   // ─────────────────────────────────────────────────────────────────────────────
-
   pi.registerTool({
-    name: "analysis_resolve_versions",
-    label: "Resolve tool versions",
-    description:
-      "Fetch tool versions from Galaxy for completed tool steps that have a jobId but " +
-      "no resolved version yet. Versions come from the actual job records, not agent " +
-      "memory, and land on AnalysisStep.execution.toolVersion -- which feeds the " +
-      "publication methods section.",
+    name: "skills_fetch",
+    label: "Fetch Skill",
+    description: `Fetch operational know-how from a configured skills repo. The
+system prompt's "Skills repositories" section lists the available repos and the
+canonical paths inside each. Results are cached locally for 24h. If \`repo\` is
+omitted, the first enabled repo is used (typically \`galaxy-skills\`).`,
     parameters: Type.Object({
-      stepId: Type.Optional(Type.String({
-        description: "Resolve a single step's version. Omit to resolve all eligible steps.",
-      })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      if (!getCurrentPlan()) {
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: "No active plan" }) }],
-          details: { updated: 0, error: "no_active_plan" },
-        };
-      }
-
-      try {
-        const updated = await resolveToolVersions(galaxyGetJobDetails, { stepId: params.stepId });
-        if (updated > 0) {
-          await syncToNotebook('frontmatter', { updated: new Date().toISOString() });
-        }
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify({ success: true, updated }) }],
-          details: { updated },
-        };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: msg }) }],
-          details: { updated: 0, error: msg },
-        };
-      }
-    },
-    renderResult: (result) => {
-      const d = result.details as { updated?: number } | undefined;
-      return new Text(`🔖 Resolved versions for ${d?.updated ?? 0} step(s)`);
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Structured assertions (verification table)
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  pi.registerTool({
-    name: "analysis_assert",
-    label: "Record assertion",
-    description:
-      "Record a structured claim check against observed analysis output. Use when " +
-      "comparing a numerical value, top variant, rank, set membership, coordinate, or " +
-      "count against an expected value from a paper, prior run, or spec. Verdict is " +
-      "computed automatically from the expected/observed/tolerance triple.",
-    parameters: Type.Object({
-      stepId: Type.Optional(Type.String({ description: "Step this assertion tests" })),
-      claim: Type.String({ description: "Human-readable claim, e.g. 'top ISM position CHIP_TF score is 4.17'" }),
-      kind: Type.Union([
-        Type.Literal("scalar"),
-        Type.Literal("categorical"),
-        Type.Literal("rank"),
-        Type.Literal("set_member"),
-        Type.Literal("coord_range"),
-        Type.Literal("count"),
-      ], { description: "Assertion kind; drives the verdict logic" }),
-      expected: Type.Unknown({
+      repo: Type.Optional(Type.String({
         description:
-          "Expected value. Scalar/rank/count: number. Categorical: string. " +
-          "set_member: array. coord_range: [min, max] number pair.",
+          "Name of the skills repo to fetch from (e.g. 'galaxy-skills'). " +
+          "Omit to use the default (first enabled repo).",
+      })),
+      path: Type.String({
+        description:
+          "Relative path inside the repo, e.g. 'collection-manipulation/SKILL.md', " +
+          "'galaxy-integration/mcp-reference/gotchas.md'.",
       }),
-      observed: Type.Unknown({ description: "Value actually observed in this run" }),
-      tolerance: Type.Optional(Type.Number({
-        description:
-          "Scalar: fractional (0.05 = 5% of expected). Rank/count: integer absolute.",
-      })),
-      datasetId: Type.Optional(Type.String({ description: "Galaxy dataset id the observed value came from" })),
-      source: Type.Optional(Type.String({ description: "Source of the expected value: paper DOI, prior plan id, spec" })),
-      expectedFromPlan: Type.Optional(Type.Object({
-        planId: Type.String(),
-        stepId: Type.String(),
-        field: Type.String({ description: "Dotted path on AnalysisStep (e.g. 'result.summary')" }),
-      }, { description: "Resolve expected value from another plan's notebook at assertion time" })),
     }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      if (!getCurrentPlan()) {
+    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+      const repo = findSkillRepo(params.repo);
+      if (!repo) {
+        const enabled = listEnabledSkillRepos().map((r) => r.name).join(", ") || "(none)";
         return {
-          content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: "No active plan" }) }],
-          details: { verdict: "pending" },
+          content: [{
+            type: "text",
+            text: params.repo
+              ? `Error: Skills repo "${params.repo}" is not configured or is disabled. Enabled: ${enabled}.`
+              : `Error: No skills repos are enabled. Configure one in Preferences → Skills.`,
+          }],
+          details: { error: true },
         };
       }
 
-      let expectedValue = params.expected;
-      if (params.expectedFromPlan) {
+      const cleanPath = params.path.replace(/^\/+/, "").replace(/\\/g, "/");
+      if (cleanPath.includes("..") || cleanPath === "") {
+        return {
+          content: [{ type: "text", text: `Error: Invalid skill path "${params.path}"` }],
+          details: { error: true },
+        };
+      }
+
+      const rawBase = githubRawBase(repo.url, repo.branch);
+      if (!rawBase) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Repo URL "${repo.url}" must be a GitHub repo (https://github.com/<owner>/<repo>).`,
+          }],
+          details: { error: true },
+        };
+      }
+
+      // Cache key includes a hash of url@branch so changing either invalidates
+      // the cache implicitly. Without this, a repo whose URL was edited (or
+      // whose branch was switched) keeps serving 24h of stale content from
+      // the old upstream because cache lookup keyed only on repo.name.
+      const cacheTag = createSkillsCacheTag(repo.url, repo.branch);
+      const cacheDir = path.join(os.homedir(), ".loom", "cache", "skills", `${repo.name}@${cacheTag}`);
+      const cachePath = path.join(cacheDir, cleanPath);
+      const ttlMs = 24 * 60 * 60 * 1000;
+      try {
+        const stat = fs.statSync(cachePath);
+        if (Date.now() - stat.mtimeMs < ttlMs) {
+          const cached = fs.readFileSync(cachePath, "utf-8");
+          return {
+            content: [{ type: "text", text: cached }],
+            details: { repo: repo.name, path: cleanPath, length: cached.length, cached: true },
+          };
+        }
+      } catch {
+        // No cache hit — fall through to fetch.
+      }
+
+      const url = `${rawBase}/${cleanPath}`;
+      try {
+        const response = await fetch(url, { signal });
+        if (!response.ok) {
+          return {
+            content: [{
+              type: "text",
+              text: `Error: Failed to fetch "${cleanPath}" from ${repo.name} (HTTP ${response.status}). ` +
+                `Check the path against the skills router in the system prompt.`,
+            }],
+            details: { error: true, repo: repo.name, path: cleanPath },
+          };
+        }
+        const text = await response.text();
+
         try {
-          const resolved = await resolveExpectedFromPlan(params.expectedFromPlan);
-          if (resolved !== undefined) {
-            expectedValue = resolved;
-          }
+          fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+          fs.writeFileSync(cachePath, text, "utf-8");
         } catch (err) {
-          console.warn("expectedFromPlan resolution failed:", err);
+          console.error("[skills_fetch] cache write failed:", err);
         }
-      }
 
-      const stored = recordAssertion({
-        stepId: params.stepId,
-        claim: params.claim,
-        kind: params.kind,
-        expected: expectedValue,
-        observed: params.observed,
-        tolerance: params.tolerance,
-        datasetId: params.datasetId,
-        source: params.source,
-        expectedFromPlan: params.expectedFromPlan,
-      });
-
-      await syncToNotebook('assertion_added', {
-        claim: stored.claim,
-        verdict: stored.verdict,
-        kind: stored.kind,
-      });
-
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ success: true, assertion: stored }) }],
-        details: { verdict: stored.verdict, kind: stored.kind },
-      };
-    },
-    renderResult: (result) => {
-      const d = result.details as { verdict?: string; kind?: string } | undefined;
-      return new Text(`✅ assertion ${d?.kind} → ${d?.verdict}`);
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Seed draft assertions from a matching sketch's expected outputs
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  pi.registerTool({
-    name: "analysis_assertions_from_sketch",
-    label: "Seed assertions from sketch",
-    description:
-      "Pre-populate draft `analysis_assert` entries from every matching sketch's " +
-      "expected_output[].assertions[]. Drafts land at verdict='pending' with empty " +
-      "expected/observed fields so the analyst can fill them in as the run progresses. " +
-      "Safe to call multiple times -- existing claims are left alone.",
-    parameters: Type.Object({
-      stepId: Type.Optional(Type.String({
-        description: "Attach seeded drafts to this plan step. Omit for plan-level drafts.",
-      })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      if (!getCurrentPlan()) {
         return {
-          content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: "No active plan" }) }],
-          details: { added: 0, skipped: 0, error: "no_active_plan" },
+          content: [{ type: "text", text }],
+          details: { repo: repo.name, path: cleanPath, length: text.length, cached: false },
         };
-      }
-
-      const cfg = loadConfig();
-      if (!cfg.sketchCorpusPath) {
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
         return {
-          content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: "No sketch corpus configured" }) }],
-          details: { added: 0, skipped: 0, error: "no_corpus" },
-        };
-      }
-
-      try {
-        const result = seedAssertionsFromSketchCorpus({
-          corpusPath: cfg.sketchCorpusPath,
-          stepId: params.stepId,
-        });
-        if (result.added > 0) {
-          await syncToNotebook('assertion_added', {
-            claim: `seeded ${result.added} draft(s) from matching sketches`,
-            verdict: 'pending',
-          });
-        }
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify({ success: true, added: result.added, skipped: result.skipped }) }],
-          details: { added: result.added, skipped: result.skipped },
-        };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: msg }) }],
-          details: { added: 0, skipped: 0, error: msg },
+          content: [{ type: "text", text: `Error fetching skill: ${msg}` }],
+          details: { error: true, repo: repo.name, path: cleanPath },
         };
       }
     },
     renderResult: (result) => {
-      const d = result.details as { added?: number; skipped?: number } | undefined;
-      return new Text(`🌱 seeded ${d?.added ?? 0} draft assertion(s) (${d?.skipped ?? 0} skipped)`);
+      const d = result.details as { repo?: string; path?: string; length?: number; cached?: boolean; error?: boolean } | undefined;
+      if (d?.error) return new Text("❌ Skill fetch failed");
+      const tag = d?.cached ? "(cached)" : "(fetched)";
+      return new Text(`📘 ${d?.repo}/${d?.path} ${tag} (${d?.length || 0} chars)`);
     },
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Per-step workflow parameter overrides
+  // Tool: Record a Galaxy invocation in the notebook
   // ─────────────────────────────────────────────────────────────────────────────
-
   pi.registerTool({
-    name: "workflow_set_overrides",
-    label: "Set workflow parameter overrides",
-    description:
-      "Record per-invocation parameter deviations from the workflow defaults on a " +
-      "plan step. Use this when tuning an existing workflow for a specific locus, sample, " +
-      "or sensitivity setting. The overrides are stored on the step and passed to " +
-      "galaxy-mcp invoke_workflow as its `params` argument on subsequent runs.",
+    name: "galaxy_invocation_record",
+    label: "Record Galaxy Invocation",
+    description: `Record a Galaxy workflow invocation in the project notebook so its progress
+can be tracked. Call right after invoking a workflow via Galaxy MCP (galaxy_invoke_workflow).
+Writes a fenced \`loom-invocation\` YAML block at the end of the notebook. Polling later
+(galaxy_invocation_check_all / galaxy_invocation_check_one) updates the block in place.`,
     parameters: Type.Object({
-      stepId: Type.String({ description: "Plan step id to attach overrides to" }),
-      overrides: Type.Unknown({
-        description:
-          "Object mapping workflow step id or tool param name to the override value. " +
-          "Nested values are preserved verbatim.",
+      invocationId: Type.String({
+        description: "Galaxy invocation ID returned from galaxy_invoke_workflow",
+      }),
+      notebookAnchor: Type.String({
+        description: "Stable anchor where this invocation lives, e.g. 'plan-1-step-3'",
+      }),
+      label: Type.String({
+        description: "Human-readable description for status display, e.g. 'BWA alignment'",
       }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      if (!getCurrentPlan()) {
+      const notebookPath = getNotebookPath();
+      if (!notebookPath) {
         return {
-          content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: "No active plan" }) }],
-          details: { updated: 0 },
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: "No notebook open." }) }],
+          details: { error: true } as Record<string, unknown>,
         };
       }
+
+      const cfg = getGalaxyConfig();
+      const galaxyServerUrl = cfg?.url || "";
 
       try {
-        const overrides = params.overrides as Record<string, unknown>;
-        const merged = setStepParameterOverrides(params.stepId, overrides);
-        await syncToNotebook('frontmatter', { updated: new Date().toISOString() });
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify({ success: true, overrides: merged }) }],
-          details: { stepId: params.stepId, count: Object.keys(merged).length },
+        const inv: InvocationYaml = {
+          invocationId: params.invocationId,
+          galaxyServerUrl,
+          notebookAnchor: params.notebookAnchor,
+          label: params.label,
+          submittedAt: new Date().toISOString(),
+          status: "in_progress",
         };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: msg }) }],
-          details: { error: msg },
-        };
-      }
-    },
-    renderResult: (result) => {
-      const d = result.details as { stepId?: string; count?: number } | undefined;
-      return new Text(`⚙️ overrides set on step ${d?.stepId} (${d?.count} key(s))`);
-    },
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Shell-facing tools (emit structured widgets for Electron / shell consumers)
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  pi.registerTool({
-    name: "report_result",
-    label: "Report Result",
-    description:
-      "Display a typed result block in the Results tab. Use for analysis outputs: " +
-      "tables, markdown summaries, images, or file links.",
-    parameters: Type.Object({
-      type: Type.Union([
-        Type.Literal("markdown"),
-        Type.Literal("table"),
-        Type.Literal("image"),
-        Type.Literal("file"),
-      ], { description: "Result block type" }),
-      stepId: Type.Optional(Type.String({ description: "Step id this result belongs to (preferred over stepName)" })),
-      stepName: Type.Optional(Type.String({ description: "Name of the step that produced this result" })),
-      content: Type.Optional(Type.String({ description: "Markdown content (for type=markdown)" })),
-      headers: Type.Optional(Type.Array(Type.String(), { description: "Column headers (for type=table)" })),
-      rows: Type.Optional(Type.Array(Type.Array(Type.String()), { description: "Table rows (for type=table)" })),
-      path: Type.Optional(Type.String({ description: "Absolute file path (for type=image or type=file)" })),
-      caption: Type.Optional(Type.String({ description: "Caption for image or file link" })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const block: ResultBlock = {
-        stepName: params.stepName,
-        type: params.type,
-        content: params.content,
-        headers: params.headers,
-        rows: params.rows,
-        path: params.path,
-        caption: params.caption,
-      };
-      ctx.ui.setWidget(LoomWidgetKey.Results, encodeJsonWidget(block));
-
-      // Persist to plan + notebook so the notebook becomes the durable record
-      // of reported results (methods generation and later restores depend on this).
-      if (getCurrentPlan()) {
-        const stored = addReportedResult({
-          stepId: params.stepId,
-          stepName: params.stepName,
-          type: params.type,
-          content: params.content,
-          headers: params.headers,
-          rows: params.rows,
-          path: params.path,
-          caption: params.caption,
+        await withNotebookLock(notebookPath, async () => {
+          const content = await readNotebook(notebookPath);
+          const updated = upsertInvocationBlock(content, inv);
+          await writeNotebook(notebookPath, updated);
         });
-        await syncToNotebook('result_reported', { result: stored });
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              invocationId: inv.invocationId,
+              notebookAnchor: inv.notebookAnchor,
+              label: inv.label,
+              status: inv.status,
+              message: `Recorded invocation ${inv.invocationId} (${inv.label}) at ${inv.notebookAnchor}.`,
+            }, null, 2),
+          }],
+          details: { invocationId: inv.invocationId, notebookAnchor: inv.notebookAnchor } as Record<string, unknown>,
+        };
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: msg }) }],
+          details: { error: true } as Record<string, unknown>,
+        };
       }
-
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ success: true, message: "Result displayed." }) }],
-        details: { type: params.type },
-      };
     },
     renderResult: (result) => {
-      const d = result.details as { type?: string } | undefined;
-      return new Text(`📊 Result displayed (${d?.type || "unknown"})`);
+      const d = result.details as { invocationId?: string; notebookAnchor?: string; error?: boolean } | undefined;
+      if (d?.error) return new Text("❌ Failed to record invocation");
+      return new Text(`🔗 Invocation ${d?.invocationId} → ${d?.notebookAnchor}`);
     },
   });
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Tool: Poll all in-flight invocations and update notebook YAML
+  // ─────────────────────────────────────────────────────────────────────────────
   pi.registerTool({
-    name: "analyze_plan_parameters",
-    label: "Analyze Plan Parameters",
-    description:
-      "Show a parameter configuration form to the user. Classify parameters as " +
-      "CRITICAL (biology-meaningful: organism, reference, thresholds) or AUTOMATIC " +
-      "(implementation: threads, paths, flags). Group by biological concept, not by tool.",
-    parameters: Type.Object({
-      title: Type.String({ description: "Form title, e.g. 'Parameters for RNA-seq analysis'" }),
-      description: Type.String({ description: "1-2 sentence biologist-friendly summary" }),
-      groups: Type.Array(Type.Object({
-        title: Type.String({ description: "Group heading, e.g. 'Organism & Reference'" }),
-        description: Type.String({ description: "Plain-language explanation of this group" }),
-        params: Type.Array(Type.Object({
-          name: Type.String({ description: "Parameter name (machine-readable)" }),
-          type: Type.Union([
-            Type.Literal("text"),
-            Type.Literal("integer"),
-            Type.Literal("float"),
-            Type.Literal("boolean"),
-            Type.Literal("select"),
-            Type.Literal("file"),
-          ]),
-          label: Type.String({ description: "Display label" }),
-          help: Type.String({ description: "Biologist-centric help text" }),
-          value: Type.Union([Type.String(), Type.Number(), Type.Boolean()], { description: "Default value" }),
-          min: Type.Optional(Type.Number()),
-          max: Type.Optional(Type.Number()),
-          step: Type.Optional(Type.Number()),
-          options: Type.Optional(Type.Array(Type.Object({
-            label: Type.String(),
-            value: Type.String(),
-          }))),
-          fileFilter: Type.Optional(Type.String({ description: "File extension filter" })),
-          usedBy: Type.Optional(Type.Array(Type.String(), { description: "Tools using this parameter" })),
-        })),
-      })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const spec: ParameterFormPayload = {
-        planId: getCurrentPlan()?.id || "",
-        title: params.title,
-        description: params.description,
-        groups: params.groups,
-      };
-      ctx.ui.setWidget(LoomWidgetKey.Parameters, encodeJsonWidget(spec));
-      const paramNames = params.groups.flatMap(g => g.params.map(p => p.name));
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({
-            success: true,
-            message: `Parameter form displayed with ${params.groups.length} groups.`,
-            parameters: paramNames,
-          }),
-        }],
-        details: { groupCount: params.groups.length, paramCount: paramNames.length },
-      };
+    name: "galaxy_invocation_check_all",
+    label: "Check All Galaxy Invocations",
+    description: `Scan the notebook for in-flight loom-invocation blocks, poll Galaxy for each,
+and apply deterministic state transitions (all-jobs-ok → completed, any-error → failed,
+otherwise still in_progress). Updates the YAML blocks in place. Returns a summary list.`,
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params, signal, _onUpdate, _ctx) {
+      return await checkInvocations(undefined, signal);
     },
     renderResult: (result) => {
-      const d = result.details as { groupCount?: number; paramCount?: number } | undefined;
-      return new Text(`⚙️ Parameter form (${d?.paramCount || 0} params in ${d?.groupCount || 0} groups)`);
+      const d = result.details as { checked?: number; error?: boolean } | undefined;
+      if (d?.error) return new Text("❌ Invocation check failed");
+      return new Text(`🔍 Checked ${d?.checked || 0} invocation(s)`);
     },
   });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Tool: Poll one invocation by id
+  // ─────────────────────────────────────────────────────────────────────────────
+  pi.registerTool({
+    name: "galaxy_invocation_check_one",
+    label: "Check Galaxy Invocation",
+    description: `Poll a single Galaxy invocation by id. Same auto-transition rules as
+galaxy_invocation_check_all. Errors if the invocation isn't recorded in the notebook.`,
+    parameters: Type.Object({
+      invocationId: Type.String({ description: "Galaxy invocation ID to check" }),
+    }),
+    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+      return await checkInvocations(params.invocationId, signal);
+    },
+    renderResult: (result) => {
+      const d = result.details as { checked?: number; error?: boolean } | undefined;
+      if (d?.error) return new Text("❌ Invocation check failed");
+      return new Text(`🔍 Checked ${d?.checked || 0} invocation(s)`);
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Internal: shared poll loop for the two check tools
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface CheckResultEntry {
+  invocationId: string;
+  notebookAnchor: string;
+  label: string;
+  invocationState: string;
+  jobSummary: { ok: number; running: number; queued: number; error: number; other: number };
+  autoAction?: string;
+}
+
+interface CheckInvocationsResult {
+  content: { type: "text"; text: string }[];
+  details: Record<string, unknown>;
+}
+
+export async function checkInvocations(specificId: string | undefined, signal?: AbortSignal): Promise<CheckInvocationsResult> {
+  const notebookPath = getNotebookPath();
+  if (!notebookPath) {
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: "No notebook open." }) }],
+      details: { error: true } as Record<string, unknown>,
+    };
+  }
+
+  if (!getGalaxyConfig()) {
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: "Galaxy credentials not configured." }) }],
+      details: { error: true } as Record<string, unknown>,
+    };
+  }
+
+  // Wrap the entire read-poll-write cycle in a per-path lock so a parallel
+  // check_all or invocation_record can't overlap us and lose updates.
+  // Galaxy GETs run inside the lock — that's intentional: a concurrent
+  // writer must wait for our final upsert.
+  type LockOutcome =
+    | { kind: "early"; result: CheckInvocationsResult }
+    | { kind: "results"; results: CheckResultEntry[] };
+  const lockResult: LockOutcome = await withNotebookLock<LockOutcome>(notebookPath, async () => {
+    let content = await readNotebook(notebookPath);
+    const blocks = findInvocationBlocks(content);
+
+    let toCheck: InvocationYaml[];
+    if (specificId) {
+      const found = blocks.find((b) => b.invocationId === specificId);
+      if (!found) {
+        return {
+          kind: "early",
+          result: {
+            content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: `Invocation ${specificId} not found in notebook.` }) }],
+            details: { error: true } as Record<string, unknown>,
+          },
+        };
+      }
+      toCheck = [found];
+    } else {
+      toCheck = blocks.filter((b) => b.status === "in_progress");
+    }
+
+    if (toCheck.length === 0) {
+      return {
+        kind: "early",
+        result: {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({ success: true, results: [], message: "No in-progress invocations." }),
+          }],
+          details: { checked: 0 } as Record<string, unknown>,
+        },
+      };
+    }
+
+    const results: CheckResultEntry[] = [];
+
+    for (const block of toCheck) {
+      try {
+        const inv = await galaxyGet<GalaxyInvocationResponse>(
+          `/invocations/${block.invocationId}`,
+          signal,
+        );
+
+        const summary = { ok: 0, running: 0, queued: 0, error: 0, other: 0 };
+        for (const invStep of inv.steps) {
+          for (const job of invStep.jobs) {
+            if (job.state === "ok") summary.ok++;
+            else if (job.state === "running") summary.running++;
+            else if (job.state === "queued" || job.state === "new" || job.state === "waiting") summary.queued++;
+            else if (job.state === "error" || job.state === "deleted") summary.error++;
+            else summary.other++;
+          }
+        }
+
+        let autoAction: string | undefined;
+        let nextStatus: InvocationYaml["status"] = block.status;
+        let nextSummary = block.summary;
+
+        if (summary.error === 0 && summary.running === 0 && summary.queued === 0 && summary.ok > 0) {
+          nextStatus = "completed";
+          nextSummary = `Workflow completed: ${summary.ok} jobs succeeded`;
+          autoAction = "completed";
+        } else if (summary.error > 0) {
+          nextStatus = "failed";
+          nextSummary = `Workflow failed: ${summary.error} job(s) errored, ${summary.ok} succeeded`;
+          autoAction = "failed";
+        }
+
+        if (nextStatus !== block.status || nextSummary !== block.summary) {
+          const updated: InvocationYaml = { ...block, status: nextStatus, summary: nextSummary };
+          content = upsertInvocationBlock(content, updated);
+        }
+
+        results.push({
+          invocationId: block.invocationId,
+          notebookAnchor: block.notebookAnchor,
+          label: block.label,
+          invocationState: inv.state,
+          jobSummary: summary,
+          autoAction,
+        });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        results.push({
+          invocationId: block.invocationId,
+          notebookAnchor: block.notebookAnchor,
+          label: block.label,
+          invocationState: "error_checking",
+          jobSummary: { ok: 0, running: 0, queued: 0, error: 0, other: 0 },
+          autoAction: `check_error: ${msg}`,
+        });
+      }
+    }
+
+    // Persist any status updates back to the file in one write.
+    await writeNotebook(notebookPath, content);
+    return { kind: "results", results };
+  });
+
+  if (lockResult.kind === "early") return lockResult.result;
+  const results = lockResult.results;
+
+  return {
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify({ success: true, checked: results.length, results }, null, 2),
+    }],
+    details: { checked: results.length } as Record<string, unknown>,
+  };
 }

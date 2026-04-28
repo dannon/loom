@@ -67,9 +67,56 @@ export function profileNameFromUrl(url: string): string {
 }
 
 /**
+ * Validate a candidate Galaxy server URL. The API key is sent as
+ * `x-api-key` on every request; if the URL is `http://` (or otherwise
+ * malformed), the key would be exposed in cleartext or land at the
+ * wrong host. Reject bad URLs at save time so the user sees the
+ * mistake instead of silently exfiltrating credentials.
+ *
+ * Hosts outside `*.galaxyproject.org` and `localhost`/`127.*` are
+ * accepted but with a warning to the console — institutions run
+ * private Galaxy mirrors, so an allowlist would be too narrow.
+ */
+export function validateGalaxyUrl(url: string): { ok: true } | { ok: false; reason: string } {
+  let parsed: URL;
+  try { parsed = new URL(url.trim()); } catch {
+    return { ok: false, reason: "Not a valid URL." };
+  }
+  if (parsed.protocol === "http:") {
+    const host = parsed.hostname.toLowerCase();
+    if (host === "localhost" || host.startsWith("127.") || host === "::1") {
+      // Loopback HTTP is fine for local Galaxy installs.
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      reason: "Galaxy URL must use https:// (the API key is sent on every request).",
+    };
+  }
+  if (parsed.protocol !== "https:") {
+    return { ok: false, reason: `Unsupported URL scheme: ${parsed.protocol}` };
+  }
+  return { ok: true };
+}
+
+/**
  * Save a profile (insert or update), mark it active, and sync to mcp.json.
  */
 export function saveProfile(name: string, url: string, apiKey: string): void {
+  const v = validateGalaxyUrl(url);
+  if (!v.ok) throw new Error(v.reason);
+  const host = new URL(url).hostname.toLowerCase();
+  const trusted =
+    host === "localhost" ||
+    host.startsWith("127.") ||
+    host === "::1" ||
+    host === "galaxyproject.org" ||
+    host.endsWith(".galaxyproject.org");
+  if (!trusted) {
+    console.warn(
+      `[galaxy] Profile "${name}" points at ${host} (not a galaxyproject.org subdomain).`,
+    );
+  }
   const profiles = loadProfiles();
   profiles.profiles[name] = { url, apiKey };
   profiles.active = name;
@@ -132,7 +179,10 @@ export function syncMcpConfig(url: string, apiKey: string): void {
         GALAXY_URL: url,
         GALAXY_API_KEY: apiKey,
       };
-      fs.writeFileSync(mcpPath, JSON.stringify(config, null, 2));
+      // 0600 first so a concurrent reader can't catch the file with a
+      // wider mode between writeFile and chmod.
+      fs.writeFileSync(mcpPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+      try { fs.chmodSync(mcpPath, 0o600); } catch { /* perm-tightening best-effort */ }
     }
   } catch {
     // Non-fatal

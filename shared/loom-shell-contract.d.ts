@@ -5,7 +5,15 @@ export const LoomWidgetKey: {
   readonly Parameters: "parameters";
   readonly Notebook: "notebook";
   readonly PlanView: "plan-view";
+  readonly Activity: "activity";
 };
+
+export interface ShellActivityEvent {
+  timestamp: string;
+  kind: string;
+  source: string;
+  payload: Record<string, unknown>;
+}
 
 export interface ShellStep {
   id: string;

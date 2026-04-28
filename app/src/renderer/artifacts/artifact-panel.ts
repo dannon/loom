@@ -1,369 +1,150 @@
 /**
- * ArtifactPanel manages the right pane: Plan, Steps, Results tabs.
+ * ArtifactPanel renders the right-hand pane with three tabs:
+ *   Notebook, Activity, File.
  *
- * Plan has three modes:
- * - Rendered: markdown rendered as HTML (read-only, default)
- * - Raw: editable textarea for direct editing
- * - Parameters: form view (Phase 4) — replaces plan rendered/raw when active
+ * - Notebook tab: live notebook.md markdown emitted by the brain.
+ * - Activity tab: live shell stream + proc-monitor table. The DOM for both
+ *   sub-sections lives in index.html and is driven by app.ts (ShellPanel,
+ *   renderProcs); this class only owns tab visibility.
+ * - File tab: hidden until a file is opened from the files sidebar.
  */
 
-import { marked } from "marked";
-import { ParameterForm, type ParameterFormSpec } from "./parameter-form.js";
+import { Marked } from "marked";
+import { renderMarkdown } from "../chat/markdown.js";
 
-export interface PlanStep {
-  id: string;
-  name: string;
-  status: "pending" | "in_progress" | "completed" | "failed" | "skipped";
-  description?: string;
+// Dedicated Marked instance for the notebook pane. Relative image srcs (e.g.
+// `10_figures/foo.png`) are rewritten to the `orbit-artifact://` scheme served
+// by the main process out of the current analysis cwd. Chat messages keep the
+// default `marked` so agent-authored URLs aren't touched.
+const notebookMarked = new Marked({
+  renderer: {
+    image({ href, title, text }) {
+      const rewritten = rewriteArtifactHref(href);
+      const titleAttr = title ? ` title="${escapeAttr(title)}"` : "";
+      return `<img src="${escapeAttr(rewritten)}" alt="${escapeAttr(text)}"${titleAttr}>`;
+    },
+    link({ href, title, tokens }) {
+      const rewritten = rewriteArtifactHref(href);
+      const titleAttr = title ? ` title="${escapeAttr(title)}"` : "";
+      // Render inner text the same way marked does by default — parse the
+      // token stream recursively so nested emphasis / code survives.
+      const inner = this.parser.parseInline(tokens);
+      return `<a href="${escapeAttr(rewritten)}"${titleAttr}>${inner}</a>`;
+    },
+  },
+});
+
+function rewriteArtifactHref(href: string): string {
+  // Leave absolute URLs and protocol-relative URLs alone.
+  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(href)) return href;
+  return `orbit-artifact://cwd/${href.replace(/^\/+/, "")}`;
 }
 
-interface ResultBlock {
-  stepName?: string;
-  type: "markdown" | "table" | "image" | "file";
-  content?: string;
-  headers?: string[];
-  rows?: string[][];
-  path?: string;
-  caption?: string;
+function escapeAttr(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
+
+const NOTEBOOK_EMPTY_HTML = `
+  <div class="empty-state">
+    <p>The notebook is the running log of your analysis — plan, steps, decisions, and Galaxy references — persisted to a markdown file in your working directory and committed to git on every change.</p>
+    <p>It'll appear here once you start a plan. Type <code>/notebook</code> anytime to refresh.</p>
+  </div>
+`;
+
+type TabKey = "notebook" | "activity" | "file";
 
 export class ArtifactPanel {
-  private planEl: HTMLElement;
-  private stepsEl: HTMLElement;
-  private resultsEl: HTMLElement;
+  private notebookEl: HTMLElement;
+  private activityEl: HTMLElement;
+  private fileEl: HTMLElement;
+  private fileTabBtn: HTMLButtonElement;
+  private tabButtons: HTMLButtonElement[];
+  private activeTab: TabKey = "notebook";
 
-  private renderedEl: HTMLElement;
-  private rawEl: HTMLTextAreaElement;
-  private toolbarEl: HTMLElement;
-  private actionsEl: HTMLElement;
-
-  // Phase 4: parameter form view
-  private paramsViewEl: HTMLElement;
-  private paramsFormEl: HTMLElement;
-  private parameterForm: ParameterForm;
-
-  private planContent = "";
-  private mode: "rendered" | "raw" = "rendered";
-  private paramsActive = false;
-  private savedParams: Record<string, string | number | boolean> | null = null;
+  /** Optional callback fired when the user clicks the File-tab close (×). */
+  onFileTabClose: (() => void) | null = null;
 
   constructor() {
-    this.planEl = document.getElementById("tab-plan")!;
-    this.stepsEl = document.getElementById("tab-steps")!;
-    this.resultsEl = document.getElementById("tab-results")!;
+    this.notebookEl = document.getElementById("notebook-view")!;
+    this.activityEl = document.getElementById("activity-view")!;
+    this.fileEl = document.getElementById("file-view")!;
+    this.tabButtons = Array.from(
+      document.querySelectorAll<HTMLButtonElement>("#artifact-tabs .pane-tab"),
+    );
+    const fileBtn = this.tabButtons.find((b) => b.dataset.tab === "file");
+    if (!fileBtn) throw new Error("artifact pane: missing File tab button");
+    this.fileTabBtn = fileBtn;
 
-    this.renderedEl = document.getElementById("plan-rendered")!;
-    this.rawEl = document.getElementById("plan-raw") as HTMLTextAreaElement;
-    this.toolbarEl = document.getElementById("plan-toolbar")!;
-    this.actionsEl = document.getElementById("plan-actions")!;
-
-    this.paramsViewEl = document.getElementById("plan-params-view")!;
-    this.paramsFormEl = document.getElementById("plan-params-form")!;
-    this.parameterForm = new ParameterForm(this.paramsFormEl);
-
-    this.toolbarEl.querySelectorAll<HTMLButtonElement>(".mode-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const newMode = btn.dataset.mode as "rendered" | "raw";
-        this.setMode(newMode);
+    for (const btn of this.tabButtons) {
+      btn.addEventListener("click", (e) => {
+        // Don't switch to the file tab if the user clicked the close (×).
+        const target = e.target as HTMLElement | null;
+        if (target?.classList.contains("pane-tab-close")) return;
+        const tab = btn.dataset.tab as TabKey | undefined;
+        if (tab) this.selectTab(tab);
       });
+    }
+
+    const fileTabClose = document.getElementById("file-tab-close");
+    fileTabClose?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.hideFileTab();
+      this.onFileTabClose?.();
     });
-
-    this.rawEl.addEventListener("input", () => {
-      this.planContent = this.rawEl.value;
-    });
   }
 
-  setPlanText(text: string): void {
-    this.planContent = text;
-
-    const empty = this.planEl.querySelector(".empty-state");
-    if (empty) empty.remove();
-
-    this.toolbarEl.classList.remove("hidden");
-    this.actionsEl.classList.remove("hidden");
-
-    // Exit parameters view if it was showing — new plan supersedes old form
-    if (this.paramsActive) this.hideParameters();
-
-    this.render();
+  /** Returns the File tab container so the FileViewer can mount its DOM. */
+  getFileViewContainer(): HTMLElement {
+    return this.fileEl;
   }
 
-  getPlanText(): string {
-    return this.planContent;
+  /** Reveal the File tab (if hidden) and switch to it. */
+  showFileTab(): void {
+    this.fileTabBtn.hidden = false;
+    this.selectTab("file");
   }
 
-  // ── Parameter form (Phase 4) ────────────────────────────────────────────────
-
-  /** Show the parameter form, hiding the plan rendered/raw view. */
-  showParameters(spec: ParameterFormSpec): void {
-    this.parameterForm.render(spec);
-    this.paramsActive = true;
-
-    // Hide plan rendered/raw + toolbar + main action buttons
-    this.renderedEl.classList.add("hidden");
-    this.rawEl.classList.add("hidden");
-    this.toolbarEl.classList.add("hidden");
-    this.actionsEl.classList.add("hidden");
-
-    // Show parameter view
-    this.paramsViewEl.classList.remove("hidden");
-  }
-
-  /** Return to the plan view, preserving form values for next show. */
-  hideParameters(): void {
-    this.paramsActive = false;
-    this.paramsViewEl.classList.add("hidden");
-
-    // Restore plan view
-    this.toolbarEl.classList.remove("hidden");
-    this.actionsEl.classList.remove("hidden");
-    this.render();
-  }
-
-  getParameterValues(): Record<string, string | number | boolean> {
-    return this.parameterForm.getValues();
-  }
-
-  isParametersActive(): boolean {
-    return this.paramsActive;
-  }
-
-  hasParameterSpec(): boolean {
-    return this.parameterForm.hasSpec();
-  }
-
-  /** Snapshot current form values so they survive navigating away. */
-  saveParameters(): void {
-    this.savedParams = this.getParameterValues();
-  }
-
-  getSavedParameters(): Record<string, string | number | boolean> | null {
-    return this.savedParams;
-  }
-
-  hasSavedParameters(): boolean {
-    return this.savedParams !== null;
-  }
-
-  setParametersDisabled(disabled: boolean): void {
-    this.parameterForm.setDisabled(disabled);
-  }
-
-  private setMode(mode: "rendered" | "raw"): void {
-    if (this.mode === "raw") {
-      this.planContent = this.rawEl.value;
-    }
-
-    this.mode = mode;
-
-    this.toolbarEl.querySelectorAll<HTMLButtonElement>(".mode-btn").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.mode === mode);
-    });
-
-    this.render();
-  }
-
-  private render(): void {
-    if (this.mode === "rendered") {
-      this.renderedEl.innerHTML = marked.parse(this.planContent, { async: false }) as string;
-      this.renderedEl.classList.remove("hidden");
-      this.rawEl.classList.add("hidden");
-    } else {
-      this.rawEl.value = this.planContent;
-      this.rawEl.classList.remove("hidden");
-      this.renderedEl.classList.add("hidden");
+  /**
+   * Hide the File tab. If the File tab is currently active, switch back to
+   * the notebook tab.
+   */
+  hideFileTab(): void {
+    this.fileTabBtn.hidden = true;
+    if (this.activeTab === "file") {
+      this.selectTab("notebook");
     }
   }
 
-  setSteps(steps: PlanStep[]): void {
-    this.stepsEl.innerHTML = "";
-
-    if (steps.length === 0) {
-      this.stepsEl.innerHTML = '<div class="empty-state">No steps yet.</div>';
-      return;
-    }
-
-    const list = document.createElement("div");
-    list.style.display = "flex";
-    list.style.flexDirection = "column";
-    list.style.gap = "8px";
-
-    for (const step of steps) {
-      const node = document.createElement("div");
-      node.className = `step-node ${step.status}`;
-      node.innerHTML = `
-        <span class="step-icon ${step.status}"></span>
-        <span>${escapeHtml(step.name)}</span>
-      `;
-      if (step.description) {
-        node.title = step.description;
-      }
-      list.appendChild(node);
-
-      if (step !== steps[steps.length - 1]) {
-        const arrow = document.createElement("div");
-        arrow.style.textAlign = "center";
-        arrow.style.color = "var(--text-dim)";
-        arrow.style.fontSize = "16px";
-        arrow.textContent = "\u2193";
-        list.appendChild(arrow);
-      }
-    }
-
-    this.stepsEl.appendChild(list);
-  }
-
-  /** Add a typed result block to the Results tab. */
-  addResultBlock(block: ResultBlock): void {
-    const empty = this.resultsEl.querySelector(".empty-state");
-    if (empty) empty.remove();
-
-    const wrapper = document.createElement("div");
-    wrapper.className = "result-block";
-
-    // Step name header
-    if (block.stepName) {
-      const header = document.createElement("div");
-      header.className = "result-step-header";
-      header.textContent = block.stepName;
-      wrapper.appendChild(header);
-    }
-
-    switch (block.type) {
-      case "markdown": {
-        const content = document.createElement("div");
-        content.className = "result-markdown";
-        content.innerHTML = marked.parse(block.content || "", { async: false }) as string;
-        wrapper.appendChild(content);
-        break;
-      }
-
-      case "table": {
-        if (block.headers && block.rows) {
-          const table = document.createElement("table");
-          table.className = "result-table";
-
-          const thead = document.createElement("thead");
-          const headerRow = document.createElement("tr");
-          for (const h of block.headers) {
-            const th = document.createElement("th");
-            th.textContent = h;
-            headerRow.appendChild(th);
-          }
-          thead.appendChild(headerRow);
-          table.appendChild(thead);
-
-          const tbody = document.createElement("tbody");
-          for (const row of block.rows) {
-            const tr = document.createElement("tr");
-            for (const cell of row) {
-              const td = document.createElement("td");
-              td.textContent = cell;
-              tr.appendChild(td);
-            }
-            tbody.appendChild(tr);
-          }
-          table.appendChild(tbody);
-          wrapper.appendChild(table);
-        }
-        break;
-      }
-
-      case "image": {
-        if (block.path) {
-          const img = document.createElement("img");
-          img.className = "result-image";
-          img.src = `file://${block.path}`;
-          img.alt = block.caption || "";
-          wrapper.appendChild(img);
-
-          if (block.caption) {
-            const cap = document.createElement("div");
-            cap.className = "result-caption";
-            cap.textContent = block.caption;
-            wrapper.appendChild(cap);
-          }
-        }
-        break;
-      }
-
-      case "file": {
-        if (block.path) {
-          const link = document.createElement("a");
-          link.className = "result-file-link";
-          link.href = "#";
-          link.textContent = block.caption || block.path;
-          link.title = block.path;
-          link.addEventListener("click", (e) => {
-            e.preventDefault();
-            window.orbit.openFile(block.path!);
-          });
-          wrapper.appendChild(link);
-        }
-        break;
-      }
-    }
-
-    this.resultsEl.appendChild(wrapper);
-  }
-
-  addResult(html: string): void {
-    const empty = this.resultsEl.querySelector(".empty-state");
-    if (empty) empty.remove();
-
-    const el = document.createElement("div");
-    el.style.marginBottom = "16px";
-    el.innerHTML = html;
-    this.resultsEl.appendChild(el);
-  }
-
-  clearResults(): void {
-    this.resultsEl.innerHTML = '<div class="empty-state">Results will appear here as the analysis runs.</div>';
-  }
-
-  /** Replace the Notebook tab with rendered markdown (used by /notebook). */
+  /** Replace the notebook view with rendered markdown. */
   setNotebookMarkdown(markdown: string): void {
-    this.resultsEl.innerHTML = "";
+    this.notebookEl.innerHTML = "";
     const wrapper = document.createElement("div");
     wrapper.className = "result-block notebook-dump";
     const content = document.createElement("div");
     content.className = "result-markdown";
-    content.innerHTML = marked.parse(markdown || "", { async: false }) as string;
+    content.innerHTML = renderMarkdown(markdown || "", notebookMarked);
     wrapper.appendChild(content);
-    this.resultsEl.appendChild(wrapper);
+    this.notebookEl.appendChild(wrapper);
   }
 
-  /** Reset all tabs to their initial empty state. */
-  clear(): void {
-    // Plan tab
-    this.planContent = "";
-    this.mode = "rendered";
-    this.savedParams = null;
-    if (this.paramsActive) this.hideParameters();
-    this.renderedEl.innerHTML = "";
-    this.renderedEl.classList.add("hidden");
-    this.rawEl.value = "";
-    this.rawEl.classList.add("hidden");
-    this.toolbarEl.classList.add("hidden");
-    this.actionsEl.classList.add("hidden");
-    // Restore plan empty state if missing
-    if (!this.planEl.querySelector(".empty-state")) {
-      const empty = document.createElement("div");
-      empty.className = "empty-state";
-      empty.textContent = "No analysis plan yet. To create a plan begin your conversation with 'Create a plan for analysis of ...'. For examples, use '/help'.";
-      this.planEl.insertBefore(empty, this.planEl.firstChild);
+  /** Switch the visible tab without touching the stored content. */
+  selectTab(tab: TabKey): void {
+    this.activeTab = tab;
+    for (const btn of this.tabButtons) {
+      btn.classList.toggle("active", btn.dataset.tab === tab);
     }
-
-    // Steps tab
-    this.stepsEl.innerHTML = '<div class="empty-state">Pipeline steps will appear here once a plan is created.</div>';
-
-    // Results tab
-    this.clearResults();
+    this.notebookEl.classList.toggle("hidden", tab !== "notebook");
+    this.activityEl.classList.toggle("hidden", tab !== "activity");
+    this.fileEl.classList.toggle("hidden", tab !== "file");
   }
-}
 
-function escapeHtml(text: string): string {
-  const el = document.createElement("span");
-  el.textContent = text;
-  return el.innerHTML;
+  /** Reset notebook to its empty state and switch to the Notebook tab. */
+  clear(): void {
+    this.notebookEl.innerHTML = NOTEBOOK_EMPTY_HTML;
+    this.selectTab("notebook");
+  }
 }

@@ -6,6 +6,7 @@ import os from "node:os";
 import type { BrowserWindow } from "electron";
 import { loadConfig } from "./config.js";
 import { resolveLlmApiKey, resolveGalaxyApiKey } from "./secure-config.js";
+import { loadSessionHistory } from "./session-replay.js";
 
 const PROVIDER_ENV_MAP: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
@@ -50,10 +51,78 @@ function log(...args: unknown[]): void {
   console.log("[agent]", ...args);
 }
 
+/**
+ * Variables explicitly forwarded from Orbit's launch env to the brain
+ * subprocess. Forwarding `process.env` wholesale would leak unrelated
+ * secrets (AWS_*, GITHUB_TOKEN, GOOGLE_APPLICATION_CREDENTIALS, etc.)
+ * to every spawned MCP subprocess too; the brain only needs the small
+ * set below plus its own LOOM_ / GALAXY_ / PI_ prefix vars (forwarded
+ * by prefix in buildBrainEnv).
+ */
+const BRAIN_ENV_PASSTHROUGH = new Set<string>([
+  // Process basics
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "TERM",
+  "PWD",
+  // Locale
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "LC_MESSAGES",
+  // Display (rarely needed by the brain itself but tools spawned by
+  // the brain — e.g. matplotlib via the bash tool — sometimes need it)
+  "DISPLAY",
+  "WAYLAND_DISPLAY",
+  "XDG_RUNTIME_DIR",
+  // Node
+  "NODE_OPTIONS",
+  "NODE_TLS_REJECT_UNAUTHORIZED",
+  // Conda / mamba (per-analysis env activation in tools)
+  "CONDA_EXE",
+  "CONDA_PREFIX",
+  "CONDA_DEFAULT_ENV",
+  "MAMBA_EXE",
+  "MAMBA_ROOT_PREFIX",
+  // CA bundles (corporate proxies)
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "REQUESTS_CA_BUNDLE",
+  "NODE_EXTRA_CA_CERTS",
+]);
+
+function buildBrainEnv(fresh: boolean): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of BRAIN_ENV_PASSTHROUGH) {
+    const v = process.env[key];
+    if (v !== undefined) env[key] = v;
+  }
+  // Forward any LOOM_*/GALAXY_*/PI_* vars by prefix — these are the brain's
+  // own knobs (provider keys, MCP config dir, feature flags).
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v === undefined) continue;
+    if (k.startsWith("LOOM_") || k.startsWith("GALAXY_") || k.startsWith("PI_")) {
+      env[k] = v;
+    }
+  }
+  // Set the shell-kind marker the extension reads, plus the optional
+  // fresh-session sentinel for /new flows.
+  env.LOOM_SHELL_KIND = "orbit";
+  if (fresh) env.LOOM_FRESH_SESSION = "1";
+  return env;
+}
+
 export class AgentManager {
   private process: ChildProcess | null = null;
   private window: BrowserWindow;
   private status: AgentStatus = "stopped";
+  private statusMessage: string | undefined;
   private stderr = "";
   private pendingResponses = new Map<string, PendingResponse>();
   private idCounter = 0;
@@ -61,6 +130,18 @@ export class AgentManager {
   private hasStartedBefore = false;  // → use --continue on restart to preserve chat history
   private nextStartSkipContinue = false; // → restart in a new cwd without resuming old chat
   private nextStartIsFresh = false;  // → tells extension to skip notebook auto-load on next start
+  private mcpBootstrapRestartDone = false; // → guard: only auto-restart once per app lifetime
+  private silentRestarting = false;  // → suppresses status flicker during MCP bootstrap restart
+
+  /**
+   * Crash-restart bookkeeping. We allow up to MAX_RESTARTS_PER_WINDOW
+   * silent retries inside RESTART_WINDOW_MS — anything past that is a
+   * persistent failure and we surface it to the user via chat error +
+   * sticky status badge.
+   */
+  private crashRestartTimes: number[] = [];
+  private static readonly MAX_RESTARTS_PER_WINDOW = 3;
+  private static readonly RESTART_WINDOW_MS = 60_000;
 
   constructor(window: BrowserWindow, cwd: string) {
     this.window = window;
@@ -87,7 +168,11 @@ export class AgentManager {
     if (cwd === this.cwd) return false;
     this.cwd = cwd;
     this.hasStartedBefore = false;
-    this.nextStartSkipContinue = true;
+    // Don't force-skip --continue: let start()'s hasExistingSession() check
+    // decide. If the target cwd has a Pi session on disk, we want to resume
+    // it (history replay, prompt numbering preserved). Use /new afterwards
+    // to start fresh in an existing dir.
+    this.nextStartSkipContinue = false;
     this.nextStartIsFresh = false;
     log("switching cwd to", cwd);
     if (this.process) {
@@ -112,7 +197,9 @@ export class AgentManager {
    */
   private hasExistingSession(): boolean {
     try {
-      const encoded = `--${this.cwd.replace(/\//g, "-")}--`;
+      // Match pi-coding-agent's encoding (session-manager.js:213): strip leading
+      // slash, then replace remaining separators with `-`.
+      const encoded = `--${this.cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
       const sessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions", encoded);
       if (!fs.existsSync(sessionsDir)) return false;
       const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith(".jsonl"));
@@ -154,10 +241,8 @@ export class AgentManager {
         stdio: ["pipe", "pipe", "pipe"],
         cwd: this.cwd,
         env: {
-          ...process.env,
-          LOOM_SHELL_KIND: "orbit",
+          ...buildBrainEnv(fresh),
           ...buildSecretEnv(),
-          ...(fresh ? { LOOM_FRESH_SESSION: "1" } : {}),
         },
       });
     } catch (err) {
@@ -168,6 +253,20 @@ export class AgentManager {
 
     log("agent spawned, pid:", this.process.pid);
     this.setStatus("running");
+
+    // When resuming with --continue, the agent reloads its in-memory context
+    // from the on-disk session but the renderer has no way to see prior turns.
+    // Replay them into the chat pane so the UI reflects what the model remembers.
+    if (wantsContinue && !this.silentRestarting && !this.window.isDestroyed()) {
+      try {
+        const history = loadSessionHistory(this.cwd);
+        if (history.length > 0) {
+          this.window.webContents.send("agent:session-history", history);
+        }
+      } catch (err) {
+        log("session-history load failed:", err);
+      }
+    }
 
     const rl = createInterface({
       input: this.process.stdout!,
@@ -189,16 +288,30 @@ export class AgentManager {
 
     spawnedProcess.on("exit", (code, signal) => {
       log("agent exited, code:", code, "signal:", signal, "pid:", spawnedProcess.pid);
-      if (this.process === spawnedProcess) {
-        this.process = null;
-        if (code !== 0 && code !== null) {
-          this.setStatus("error", `Agent exited with code ${code}`);
-        } else {
-          this.setStatus("stopped");
-        }
-      } else {
+      if (this.process !== spawnedProcess) {
         log("(stale exit — newer agent already running, ignoring)");
+        return;
       }
+      this.process = null;
+
+      // Clean exit (intentional stop, or normal termination).
+      if (code === 0 || code === null) {
+        this.setStatus("stopped");
+        return;
+      }
+
+      // Crash. Try a bounded silent restart before surfacing to the user.
+      if (this.shouldAutoRestart()) {
+        const attempt = this.crashRestartTimes.length;
+        log(`agent crashed (code ${code}); silent restart ${attempt}/${AgentManager.MAX_RESTARTS_PER_WINDOW}`);
+        this.appendShellNote(`[orbit] brain exited with code ${code}; restarting (attempt ${attempt}/${AgentManager.MAX_RESTARTS_PER_WINDOW})`);
+        // Defer to next tick so listeners fully unwind before we spawn.
+        setTimeout(() => this.start(), 100);
+        return;
+      }
+      log(`agent crashed (code ${code}) and exhausted restart budget`);
+      this.appendShellNote(`[orbit] brain has crashed too many times in 60s; auto-restart disabled`);
+      this.setStatus("error", `Agent crashed repeatedly (code ${code}). Click status badge to open Preferences.`);
     });
 
     spawnedProcess.on("error", (err) => {
@@ -208,6 +321,32 @@ export class AgentManager {
         this.setStatus("error", err.message);
       }
     });
+  }
+
+  /**
+   * Returns true if we have budget to silently restart. Records the
+   * current timestamp into the rolling window before deciding.
+   */
+  private shouldAutoRestart(): boolean {
+    const now = Date.now();
+    this.crashRestartTimes = this.crashRestartTimes.filter(
+      (t) => now - t < AgentManager.RESTART_WINDOW_MS,
+    );
+    if (this.crashRestartTimes.length >= AgentManager.MAX_RESTARTS_PER_WINDOW) {
+      return false;
+    }
+    this.crashRestartTimes.push(now);
+    return true;
+  }
+
+  /**
+   * Push a one-line note into the activity-shell stream so power users
+   * can see what happened without seeing chat clutter for every retry.
+   * The renderer's onAgentShell handler already paints these.
+   */
+  private appendShellNote(text: string): void {
+    if (this.window.isDestroyed()) return;
+    this.window.webContents.send("agent:shell", { kind: "info", text });
   }
 
   stop(): void {
@@ -251,13 +390,21 @@ export class AgentManager {
     return this.status;
   }
 
+  getStatusSnapshot(): { status: AgentStatus; message?: string } {
+    return { status: this.status, message: this.statusMessage };
+  }
+
   getStderr(): string {
     return this.stderr;
   }
 
   private setStatus(status: AgentStatus, message?: string): void {
     this.status = status;
+    this.statusMessage = message;
     log("status:", status, message || "");
+    // During a silent restart we suppress the transient stopped→running flicker;
+    // the renderer keeps showing "running" the whole time.
+    if (this.silentRestarting && (status === "stopped" || status === "running")) return;
     if (!this.window.isDestroyed()) {
       this.window.webContents.send("agent:status", status, message);
     }
@@ -275,7 +422,8 @@ export class AgentManager {
     }
 
     const type = data.type as string;
-    log("← event:", type, type === "message_update" ? "" : JSON.stringify(data).slice(0, 150));
+    const noisy = type === "message_update" || type === "tool_execution_update";
+    log("← event:", type, noisy ? "" : JSON.stringify(data).slice(0, 150));
 
     if (type === "response" && data.id) {
       const pending = this.pendingResponses.get(data.id as string);
@@ -292,10 +440,41 @@ export class AgentManager {
 
     if (type === "extension_ui_request") {
       log("  ui request:", (data as { method?: string }).method, (data as { id?: string }).id);
+      // First-run MCP bootstrap emits a notify telling the user to restart so
+      // newly-cached tool metadata loads as direct tools. Swallow it and do the
+      // restart silently instead — users shouldn't have to care.
+      if (this.shouldSwallowMcpBootstrapNotify(data)) {
+        log("swallowing MCP bootstrap notify → scheduling silent restart");
+        this.mcpBootstrapRestartDone = true;
+        setTimeout(() => this.silentRestart(), 0);
+        return;
+      }
       this.window.webContents.send("agent:ui-request", data);
       return;
     }
 
     this.window.webContents.send("agent:event", data);
+  }
+
+  private shouldSwallowMcpBootstrapNotify(data: Record<string, unknown>): boolean {
+    if (this.mcpBootstrapRestartDone) return false;
+    if ((data as { method?: string }).method !== "notify") return false;
+    const message = (data as { message?: string }).message;
+    return typeof message === "string" && message.includes("will be available after restart");
+  }
+
+  private silentRestart(): void {
+    log("silent restart (MCP bootstrap)");
+    // Preserve chat continuity across the restart so the user sees no turn break.
+    this.hasStartedBefore = true;
+    this.nextStartSkipContinue = false;
+    this.nextStartIsFresh = false;
+    this.silentRestarting = true;
+    try {
+      this.stop();
+      this.start();
+    } finally {
+      this.silentRestarting = false;
+    }
   }
 }

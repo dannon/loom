@@ -1,15 +1,16 @@
 import { ChatPanel } from "./chat/chat-panel.js";
 import { ShellPanel } from "./chat/shell-panel.js";
 import { ArtifactPanel } from "./artifacts/artifact-panel.js";
-import { StepGraph } from "./artifacts/step-graph-react.js";
+import { FilesPanel } from "./files/files-panel.js";
+import { FileViewer } from "./files/file-viewer.js";
 import {
   LoomWidgetKey,
-  decodeJsonWidget,
   decodeMarkdownWidget,
-  type ResultBlock,
-  type ParameterFormPayload,
-  type ShellStep,
 } from "../../../shared/loom-shell-contract.js";
+import {
+  ALLOWED_SKILLS_PREFIX,
+  isAllowedSkillUrl,
+} from "../../../shared/loom-config.js";
 
 declare global {
   interface Window {
@@ -34,8 +35,35 @@ const modelIndicatorNameEl = document.getElementById("model-indicator-name")!;
 
 const chat = new ChatPanel(messagesEl);
 const artifacts = new ArtifactPanel();
-const stepGraph = new StepGraph(document.getElementById("tab-steps")!);
 const shell = new ShellPanel(document.getElementById("agent-shell-body")!);
+
+// File tree sidebar + file viewer (wired up further below).
+const filesPanel = new FilesPanel(
+  document.getElementById("files-tree")!,
+  (relPath: string) => void openFileFromTree(relPath),
+);
+const fileViewer = new FileViewer(artifacts.getFileViewContainer());
+
+// File tab × → tear down the viewer and forget the file.
+artifacts.onFileTabClose = () => {
+  fileViewer.close();
+  filesPanel.setSelected(null);
+};
+
+async function openFileFromTree(relPath: string): Promise<void> {
+  const res = await window.orbit.readFile(relPath);
+  if (!res.ok) {
+    const sizeHint = typeof res.size === "number" ? ` (${res.size} bytes)` : "";
+    chat.addErrorMessage(`Failed to open ${relPath}${sizeHint}: ${res.error}`);
+    return;
+  }
+  const proceed = fileViewer.open(relPath, res.bytes, res.size);
+  if (proceed) {
+    artifacts.showFileTab();
+    setArtifactCollapsed(false);
+    filesPanel.setSelected(relPath);
+  }
+}
 
 let streaming = false;
 
@@ -73,7 +101,18 @@ interface Usage {
 
 const sessionUsage: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const turnUsage: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+// Per-model cumulative usage so /cost can attribute tokens to the model that
+// produced them (the user can switch models mid-session).
+const perModelUsage = new Map<string, Usage>();
 let currentModel: string | null = null;
+
+// Pi's AssistantMessage.usage carries a `cost` object calculated upstream
+// from its authoritative rate table (`calculateCost` in pi-ai/models.js).
+// We accumulate that directly so the footer is immune to rate drift in the
+// local PRICING map. `null` until we've seen at least one Pi-reported cost;
+// after that, it's the source of truth for the footer cost string.
+let sessionCostFromPi: number | null = null;
+let turnCostFromPi: number = 0;
 
 /** Match a model ID against the pricing table (handles date suffixes). */
 function findPricing(model: string): { in: number; out: number; cacheRead?: number; cacheWrite?: number } | null {
@@ -118,9 +157,20 @@ function renderUsage(): void {
     `  cache write: ${sessionUsage.cacheWrite.toLocaleString()}` +
     (currentModel ? `\nmodel: ${currentModel}` : "");
 
-  const cost = computeCost(sessionUsage, currentModel);
+  // Prefer Pi's upstream-calculated cost over the renderer's local PRICING
+  // map — eliminates rate-drift as a failure mode. Fall back to local
+  // computation for models Pi doesn't price (e.g., local Ollama models).
+  const cost = sessionCostFromPi ?? computeCost(sessionUsage, currentModel);
   if (cost !== null) {
     usageCostEl.textContent = cost < 0.01 ? "<$0.01" : `$${cost.toFixed(2)}`;
+    const localCost = computeCost(sessionUsage, currentModel);
+    const source = sessionCostFromPi !== null ? "pi-ai" : "local PRICING";
+    usageCostEl.title =
+      `Session cost: $${cost.toFixed(4)}\n` +
+      `Source: ${source}\n` +
+      (sessionCostFromPi !== null && localCost !== null
+        ? `Local fallback would be $${localCost.toFixed(4)}`
+        : "");
     usageCostEl.classList.remove("hidden");
   } else {
     usageCostEl.textContent = "";
@@ -174,8 +224,13 @@ modelIndicatorEl.addEventListener("click", () => {
 const ARTIFACT_COLLAPSED_KEY = "orbit.artifactCollapsed";
 const artifactToggleBtn = document.getElementById("artifact-toggle")!;
 
-function setArtifactCollapsed(collapsed: boolean): void {
+// Apply visual state without persisting; used by responsive auto-collapse.
+function applyArtifactCollapsed(collapsed: boolean): void {
   document.body.classList.toggle("artifact-collapsed", collapsed);
+}
+// User-initiated toggle; persists to localStorage.
+function setArtifactCollapsed(collapsed: boolean): void {
+  applyArtifactCollapsed(collapsed);
   localStorage.setItem(ARTIFACT_COLLAPSED_KEY, collapsed ? "1" : "0");
 }
 
@@ -195,46 +250,209 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// ── Execution mode toggle (Local / Remote) ───────────────────────────────────
+// ── Files sidebar collapse/expand ────────────────────────────────────────────
 
-const execModeToggle = document.getElementById("exec-mode-toggle")!;
-const execModeButtons = execModeToggle.querySelectorAll<HTMLButtonElement>("button");
+const FILES_COLLAPSED_KEY = "orbit.filesCollapsed";
+const FILES_WIDTH_KEY = "orbit.filesPaneWidth";
+const filesToggleBtn = document.getElementById("files-toggle")!;
+const filesPaneEl = document.getElementById("files-pane")!;
+const filesDivider = document.getElementById("files-divider")!;
+const filesRefreshBtn = document.getElementById("files-refresh")!;
+const filesShowHiddenBtn = document.getElementById("files-show-hidden")!;
 
-function applyExecModeUI(mode: "local" | "remote", galaxyConfigured: boolean): void {
-  execModeButtons.forEach((b) => {
-    b.classList.toggle("active", b.dataset.mode === mode);
-    if (b.dataset.mode === "remote") {
-      b.disabled = !galaxyConfigured;
-      b.title = galaxyConfigured ? "Remote: agent can use Galaxy" : "Configure Galaxy in Preferences to enable Remote mode";
-    } else {
-      b.title = "Local: all jobs run locally";
-    }
-  });
+function applyFilesCollapsed(collapsed: boolean): void {
+  document.body.classList.toggle("files-collapsed", collapsed);
+}
+function setFilesCollapsed(collapsed: boolean): void {
+  applyFilesCollapsed(collapsed);
+  localStorage.setItem(FILES_COLLAPSED_KEY, collapsed ? "1" : "0");
 }
 
-async function loadExecModeFromConfig(): Promise<void> {
-  const cfg = (await window.orbit.getConfig()) as Record<string, unknown>;
-  const mode = (cfg.executionMode as "local" | "remote") || "remote";
-  const galaxy = cfg.galaxy as { active?: string; profiles?: Record<string, unknown> } | undefined;
-  const galaxyConfigured = !!(galaxy?.active && galaxy?.profiles?.[galaxy.active]);
-  applyExecModeUI(mode, galaxyConfigured);
+// Restore persisted pane width.
+const savedFilesWidth = parseInt(localStorage.getItem(FILES_WIDTH_KEY) ?? "", 10);
+if (Number.isFinite(savedFilesWidth) && savedFilesWidth >= 160 && savedFilesWidth <= 480) {
+  filesPaneEl.style.flex = `0 0 ${savedFilesWidth}px`;
 }
-void loadExecModeFromConfig();
 
-execModeButtons.forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    if (btn.disabled) return;
-    const mode = btn.dataset.mode as "local" | "remote";
-    if (btn.classList.contains("active")) return;
+// Default: visible (users came here to see files).
+const savedFilesCollapsed = localStorage.getItem(FILES_COLLAPSED_KEY);
+setFilesCollapsed(savedFilesCollapsed === "1");
 
-    // Save mode to config and restart agent
-    const cfg = (await window.orbit.getConfig()) as Record<string, unknown>;
-    cfg.executionMode = mode;
-    await window.orbit.saveConfig(cfg);
-    chat.addInfoMessage(`<i>Execution mode → <b>${mode}</b>. Agent restarting…</i>`);
-    await loadExecModeFromConfig();
-  });
+filesToggleBtn.addEventListener("click", () => {
+  setFilesCollapsed(!document.body.classList.contains("files-collapsed"));
 });
+
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && (e.key === "b" || e.key === "B")) {
+    // Allow native Ctrl+B (bold) inside any editable text field — only
+    // intercept when focus is outside inputs/textareas/contenteditable.
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+      return;
+    }
+    e.preventDefault();
+    setFilesCollapsed(!document.body.classList.contains("files-collapsed"));
+  }
+});
+
+// ── Responsive auto-collapse ────────────────────────────────────────────────
+//
+// Pane min-widths sum to ~748 px; below that the layout would force a
+// horizontal scrollbar. Auto-collapse on tier crossings (not every resize),
+// and use the apply* (non-persisting) helpers so the user's saved
+// preference is restored when the window widens again.
+const FILES_BREAKPOINT = 900;
+const ARTIFACT_BREAKPOINT = 700;
+let lastFilesNarrow = window.innerWidth < FILES_BREAKPOINT;
+let lastArtifactNarrow = window.innerWidth < ARTIFACT_BREAKPOINT;
+
+function applyResponsiveLayout(): void {
+  const w = window.innerWidth;
+  const filesNarrow = w < FILES_BREAKPOINT;
+  const artifactNarrow = w < ARTIFACT_BREAKPOINT;
+
+  if (filesNarrow !== lastFilesNarrow) {
+    if (filesNarrow) {
+      applyFilesCollapsed(true);
+    } else {
+      const saved = localStorage.getItem(FILES_COLLAPSED_KEY);
+      applyFilesCollapsed(saved === "1");
+    }
+    lastFilesNarrow = filesNarrow;
+  }
+
+  if (artifactNarrow !== lastArtifactNarrow) {
+    if (artifactNarrow) {
+      applyArtifactCollapsed(true);
+    } else {
+      const saved = localStorage.getItem(ARTIFACT_COLLAPSED_KEY);
+      applyArtifactCollapsed(saved === null ? true : saved === "1");
+    }
+    lastArtifactNarrow = artifactNarrow;
+  }
+}
+
+// Apply current viewport on first render (covers cold start in a small window).
+if (lastFilesNarrow) applyFilesCollapsed(true);
+if (lastArtifactNarrow) applyArtifactCollapsed(true);
+window.addEventListener("resize", applyResponsiveLayout);
+
+filesRefreshBtn.addEventListener("click", () => {
+  void filesPanel.refresh();
+});
+
+filesShowHiddenBtn.addEventListener("click", () => {
+  const next = !filesPanel.isShowingHidden();
+  filesPanel.setShowHidden(next);
+  filesShowHiddenBtn.classList.toggle("active", next);
+  filesShowHiddenBtn.setAttribute("aria-pressed", next ? "true" : "false");
+});
+
+// Files divider (resize) — mirrors the chat/artifact divider logic.
+let filesDragging = false;
+filesDivider.addEventListener("mousedown", (e) => {
+  e.preventDefault();
+  filesDragging = true;
+  filesDivider.classList.add("dragging");
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
+});
+document.addEventListener("mousemove", (e) => {
+  if (!filesDragging) return;
+  const rect = filesPaneEl.getBoundingClientRect();
+  const width = Math.max(160, Math.min(480, e.clientX - rect.left));
+  filesPaneEl.style.flex = `0 0 ${width}px`;
+});
+document.addEventListener("mouseup", () => {
+  if (!filesDragging) return;
+  filesDragging = false;
+  filesDivider.classList.remove("dragging");
+  document.body.style.cursor = "";
+  document.body.style.userSelect = "";
+  const basis = filesPaneEl.style.flex.match(/(\d+(?:\.\d+)?)px/);
+  if (basis) localStorage.setItem(FILES_WIDTH_KEY, String(Math.round(parseFloat(basis[1]))));
+});
+
+// Initial tree population + live updates from the main-process watcher.
+void filesPanel.refresh();
+window.orbit.onFilesChanged(() => {
+  void filesPanel.refresh();
+  void fileViewer.refreshFromDisk();
+});
+
+// ── Galaxy connection indicator ──────────────────────────────────────────────
+
+const galaxyStatus = document.getElementById("galaxy-status")!;
+
+async function refreshGalaxyStatus(): Promise<void> {
+  const cfg = (await window.orbit.getConfig()) as Record<string, unknown>;
+  const galaxy = cfg.galaxy as { active?: string; profiles?: Record<string, { url?: string; apiKey?: string }> } | undefined;
+  const active = galaxy?.active;
+  const profile = active ? galaxy?.profiles?.[active] : undefined;
+  const connected = !!(profile?.url && profile?.apiKey);
+
+  if (connected) {
+    galaxyStatus.classList.add("status-dot-connected");
+    galaxyStatus.classList.remove("status-dot-disconnected");
+    galaxyStatus.title = `Galaxy: ${profile.url}`;
+  } else {
+    galaxyStatus.classList.add("status-dot-disconnected");
+    galaxyStatus.classList.remove("status-dot-connected");
+    galaxyStatus.title = "Galaxy: not configured (open Preferences to add a profile)";
+  }
+}
+
+void refreshGalaxyStatus();
+
+galaxyStatus.addEventListener("click", () => {
+  void openPreferences();
+});
+
+// ── Execution mode toggle (Local | Cloud) ───────────────────────────────────
+//
+// Local sandboxes the project to local-only execution even if Galaxy is
+// configured. Cloud (default) lets the agent decide per-plan whether each
+// step routes locally or to Galaxy. The gate is prompt-level guidance from
+// the brain (see extensions/loom/context.ts), not enforced by
+// unregistering Galaxy MCP — flipping the toggle restarts the agent so the
+// new mode reaches the prompt.
+
+const execLocalBtn = document.getElementById("exec-mode-local") as HTMLButtonElement;
+const execCloudBtn = document.getElementById("exec-mode-cloud") as HTMLButtonElement;
+
+function applyExecModeUi(mode: "local" | "cloud"): void {
+  for (const [btn, btnMode] of [[execLocalBtn, "local"], [execCloudBtn, "cloud"]] as const) {
+    const active = btnMode === mode;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-checked", active ? "true" : "false");
+  }
+}
+
+async function loadExecMode(): Promise<void> {
+  const cfg = (await window.orbit.getConfig()) as { executionMode?: string };
+  const mode: "local" | "cloud" = cfg.executionMode === "local" ? "local" : "cloud";
+  applyExecModeUi(mode);
+}
+
+async function setExecMode(mode: "local" | "cloud"): Promise<void> {
+  applyExecModeUi(mode);
+  const cfg = (await window.orbit.getConfig()) as Record<string, unknown>;
+  cfg.executionMode = mode;
+  const result = await window.orbit.saveConfig(cfg);
+  if (!result.success) {
+    chat.addErrorMessage(`Failed to save execution mode: ${result.error}`);
+    return;
+  }
+  chat.addInfoMessage(
+    mode === "local"
+      ? "<i>Execution mode set to <strong>Local</strong> — Galaxy steps disabled this session. Agent restarted.</i>"
+      : "<i>Execution mode set to <strong>Cloud</strong> — agent may route steps to Galaxy. Agent restarted.</i>",
+  );
+}
+
+execLocalBtn.addEventListener("click", () => void setExecMode("local"));
+execCloudBtn.addEventListener("click", () => void setExecMode("cloud"));
+void loadExecMode();
 
 // ── First-run welcome screen ─────────────────────────────────────────────────
 
@@ -242,12 +460,51 @@ const welcomeOverlay = document.getElementById("welcome-overlay")!;
 const welcomeProvider = document.getElementById("welcome-provider") as HTMLSelectElement;
 const welcomeModel = document.getElementById("welcome-model") as HTMLSelectElement;
 const welcomeApiKey = document.getElementById("welcome-api-key") as HTMLInputElement;
+const welcomeApiKeyStatus = document.getElementById("welcome-api-key-status")!;
 const welcomeGalaxyUrl = document.getElementById("welcome-galaxy-url") as HTMLInputElement;
 const welcomeGalaxyKey = document.getElementById("welcome-galaxy-key") as HTMLInputElement;
 const welcomeCwd = document.getElementById("welcome-cwd") as HTMLInputElement;
 const welcomeBrowseCwd = document.getElementById("welcome-browse-cwd")!;
 const welcomeSave = document.getElementById("welcome-save")!;
 const welcomeError = document.getElementById("welcome-error")!;
+
+// Wire a provider-dropdown / API-key-input / status-label triple to do
+// debounced live validation (see main/ipc-handlers.ts validateApiKey).
+// Same helper used from both the Welcome screen and Preferences.
+function wireApiKeyValidation(
+  providerEl: HTMLSelectElement,
+  keyEl: HTMLInputElement,
+  statusEl: HTMLElement,
+): void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let seq = 0;
+  const setStatus = (cls: "" | "checking" | "valid" | "invalid", text: string) => {
+    statusEl.className = `api-key-status${cls ? " " + cls : ""}`;
+    statusEl.textContent = text;
+  };
+  const validateNow = async () => {
+    const provider = providerEl.value;
+    const key = keyEl.value.trim();
+    if (!key) { setStatus("", ""); return; }
+    const mySeq = ++seq;
+    setStatus("checking", "Checking…");
+    try {
+      const res = await window.orbit.validateApiKey(provider, key);
+      if (mySeq !== seq) return;  // a newer request superseded this one
+      if (res.valid) setStatus("valid", "\u2713 Valid");
+      else setStatus("invalid", `\u2717 ${res.error || "Invalid"}`);
+    } catch (err) {
+      if (mySeq !== seq) return;
+      setStatus("invalid", `\u2717 ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+  const schedule = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(validateNow, 600);
+  };
+  keyEl.addEventListener("input", schedule);
+  providerEl.addEventListener("change", schedule);
+}
 
 function populateWelcomeModels(provider: string): void {
   welcomeModel.innerHTML = "";
@@ -260,6 +517,7 @@ function populateWelcomeModels(provider: string): void {
   }
 }
 welcomeProvider.addEventListener("change", () => populateWelcomeModels(welcomeProvider.value));
+wireApiKeyValidation(welcomeProvider, welcomeApiKey, welcomeApiKeyStatus);
 
 welcomeBrowseCwd.addEventListener("click", async () => {
   const dir = await window.orbit.selectDirectory();
@@ -274,17 +532,26 @@ welcomeSave.addEventListener("click", async () => {
     return;
   }
 
+  // Galaxy: both-or-neither. The Preferences modal enforces the same
+  // rule (see savePreferences below). Refusing to ship a half-filled
+  // profile prevents a silent persistence trap where the renderer
+  // shows "connected" while the brain rejects the credentials.
+  const galaxyUrl = welcomeGalaxyUrl.value.trim();
+  const galaxyKey = welcomeGalaxyKey.value.trim();
+  if (Boolean(galaxyUrl) !== Boolean(galaxyKey)) {
+    welcomeError.textContent =
+      "Galaxy: provide both URL and API key, or leave both blank.";
+    return;
+  }
+
   const cfg: Record<string, unknown> = {
     llm: {
       provider: welcomeProvider.value,
       model: welcomeModel.value,
       apiKey,
     },
-    executionMode: "remote",
   };
 
-  const galaxyUrl = welcomeGalaxyUrl.value.trim();
-  const galaxyKey = welcomeGalaxyKey.value.trim();
   if (galaxyUrl && galaxyKey) {
     cfg.galaxy = {
       active: "default",
@@ -297,7 +564,26 @@ welcomeSave.addEventListener("click", async () => {
 
   await window.orbit.saveConfig(cfg);
   welcomeOverlay.classList.add("hidden");
-  await loadExecModeFromConfig();
+  await refreshGalaxyStatus();
+});
+
+// Skip the welcome screen — close the overlay without configuring a
+// provider so the user can browse the UI / read docs first. Tells them
+// in chat where to come back when they're ready.
+const welcomeSkip = document.getElementById("welcome-skip")!;
+welcomeSkip.addEventListener("click", () => {
+  welcomeOverlay.classList.add("hidden");
+  chat.addInfoMessage(
+    `<i>No LLM provider configured yet. Open <code>Preferences</code> ` +
+    `(Cmd/Ctrl+,) when you're ready to add an API key.</i>`,
+  );
+});
+
+// Esc dismisses the welcome overlay (same affordance as prefs Esc handler).
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !welcomeOverlay.classList.contains("hidden")) {
+    welcomeSkip.click();
+  }
 });
 
 async function checkFirstRun(): Promise<void> {
@@ -319,7 +605,7 @@ function captureUsage(event: Record<string, unknown>): void {
     renderModelIndicator();
   }
 
-  const u = msg.usage as Partial<Usage> | undefined;
+  const u = msg.usage as (Partial<Usage> & { cost?: { total?: number } }) | undefined;
   if (!u) return;
 
   // turnUsage tracks the in-progress turn's cumulative values
@@ -327,6 +613,10 @@ function captureUsage(event: Record<string, unknown>): void {
   turnUsage.output = u.output ?? turnUsage.output;
   turnUsage.cacheRead = u.cacheRead ?? turnUsage.cacheRead;
   turnUsage.cacheWrite = u.cacheWrite ?? turnUsage.cacheWrite;
+  // Pi's rolling cost for this message (authoritative, computed in pi-ai).
+  if (typeof u.cost?.total === "number") {
+    turnCostFromPi = u.cost.total;
+  }
 }
 
 function commitTurnUsage(): void {
@@ -334,10 +624,35 @@ function commitTurnUsage(): void {
   sessionUsage.output += turnUsage.output;
   sessionUsage.cacheRead += turnUsage.cacheRead;
   sessionUsage.cacheWrite += turnUsage.cacheWrite;
+  if (currentModel) {
+    const m = perModelUsage.get(currentModel) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    m.input += turnUsage.input;
+    m.output += turnUsage.output;
+    m.cacheRead += turnUsage.cacheRead;
+    m.cacheWrite += turnUsage.cacheWrite;
+    perModelUsage.set(currentModel, m);
+  }
+  if (turnCostFromPi > 0) {
+    sessionCostFromPi = (sessionCostFromPi ?? 0) + turnCostFromPi;
+  }
+  // Diagnostic: log per-message usage + both cost paths so the user can
+  // paper-trail against the provider console to verify accuracy.
+  const localCost = computeCost(turnUsage, currentModel);
+  const sessionLocalCost = computeCost(sessionUsage, currentModel);
+  console.log("[usage]", {
+    model: currentModel,
+    message: { ...turnUsage, cost_pi: turnCostFromPi, cost_local: localCost },
+    session: {
+      ...sessionUsage,
+      cost_pi: sessionCostFromPi,
+      cost_local: sessionLocalCost,
+    },
+  });
   turnUsage.input = 0;
   turnUsage.output = 0;
   turnUsage.cacheRead = 0;
   turnUsage.cacheWrite = 0;
+  turnCostFromPi = 0;
   renderUsage();
 }
 
@@ -361,6 +676,7 @@ async function refreshCwd(): Promise<void> {
     const cwd = await window.orbit.getCwd();
     cwdPathEl.textContent = cwd;
     cwdPathEl.title = cwd;
+    chat.setCwd(cwd);
   } catch { /* getCwd not available yet */ }
 }
 
@@ -376,23 +692,28 @@ function resetUiForFreshContext(): void {
   turnUsage.output = 0;
   turnUsage.cacheRead = 0;
   turnUsage.cacheWrite = 0;
+  perModelUsage.clear();
   renderUsage();
   streaming = false;
-  hasShownPlanOnce = false;
   sendBtn.classList.remove("hidden");
   abortBtn.classList.add("hidden");
-  statusBadge.textContent = "Ready";
-  statusBadge.className = "status-badge";
+  setStatusBadge("");
   setArtifactCollapsed(false);
-  switchTab("results");
 }
 
 function applyCwdChange(dir: string): void {
   resetUiForFreshContext();
+  chat.setCwd(dir);
   cwdPathEl.textContent = dir;
   cwdPathEl.title = dir;
   chat.addInfoMessage(`<i>Switched analysis directory to <code>${dir.replace(/</g, "&lt;")}</code>.</i>`);
   hasShownStartupWelcome = false;
+  // Re-root the file tree, close any open viewer, hide the File tab — the
+  // old relPath is meaningless in the new cwd.
+  fileViewer.close();
+  artifacts.hideFileTab();
+  filesPanel.reset();
+  void filesPanel.refresh();
 }
 
 cwdChangeBtn.addEventListener("click", async () => {
@@ -402,6 +723,35 @@ cwdChangeBtn.addEventListener("click", async () => {
 // File > Open Analysis Directory menu triggers this
 window.orbit.onCwdChanged((dir) => {
   applyCwdChange(dir);
+});
+
+// Main sends this after spawning the agent with --continue. The model's context
+// is restored, but the chat panel is empty because it's renderer-only state.
+// Replay prior turns only if the chat is currently blank — otherwise the user
+// is mid-flow (e.g. prefs-save restart) and replay would clobber live UI.
+window.orbit.onSessionHistory((history) => {
+  if (history.length === 0) return;
+  if (chat.hasContent()) return;
+  chat.addInfoMessage("<i>— Resumed previous session —</i>");
+  let replayNum = 0;
+  for (const seg of history) {
+    if (seg.role === "user") {
+      chat.addReplayUserMessage(seg.text, ++replayNum);
+      continue;
+    }
+    chat.startAssistantMessage();
+    if (seg.text) chat.appendDelta(seg.text);
+    if (seg.tools) {
+      // Mirror the live-streaming policy: skip per-tool chat cards on
+      // replay. Only team_dispatch keeps its rich collapsible card.
+      for (const t of seg.tools) {
+        if (t.name !== "team_dispatch") continue;
+        chat.addToolCard(t.id, t.name);
+        chat.updateToolCard(t.id, t.isError ? "error" : "done", t.resultText);
+      }
+    }
+    chat.finishAssistantMessage();
+  }
 });
 
 refreshCwd();
@@ -437,6 +787,8 @@ function submit(): void {
   const text = inputEl.value.trim();
   if (!text) return;
 
+  appendHistoryEntry(text);
+
   // Slash commands — handled locally, no LLM round-trip (allowed even while streaming)
   if (text.startsWith("/")) {
     if (handleSlashCommand(text)) {
@@ -457,12 +809,31 @@ function submit(): void {
 
   chat.addUserMessage(text);
   chat.showThinking();
-  statusBadge.textContent = "thinking...";
-  statusBadge.className = "status-badge thinking";
+  setStatusBadge("thinking", "thinking...");
   window.orbit.prompt(text);
   inputEl.value = "";
   inputEl.style.height = "auto";
 }
+
+// Plan draft actions from chat cards — forward approve/reject as user messages,
+// pre-fill the input for edit so the researcher can revise before re-sending.
+messagesEl.addEventListener("plan-draft-action", (e) => {
+  const { action, body } = (e as CustomEvent<{ action: string; body: string }>).detail;
+  if (action === "approve") {
+    inputEl.value =
+      "I approve the plan above. Show the full parameter table for review before writing anything to notebook.md.";
+    submit();
+  } else if (action === "reject") {
+    inputEl.value = "Reject the plan above — let's rethink it.";
+    submit();
+  } else if (action === "edit") {
+    inputEl.value =
+      "Here is the plan with my edits — please revise your draft accordingly:\n\n" +
+      "```plan\n" + body + "\n```";
+    inputEl.focus();
+    inputEl.dispatchEvent(new Event("input"));
+  }
+});
 
 /** Flush any queued message after the current turn ends. */
 function flushPendingMessage(): void {
@@ -474,8 +845,7 @@ function flushPendingMessage(): void {
   requestAnimationFrame(() => {
     chat.addUserMessage(text);
     chat.showThinking();
-    statusBadge.textContent = "thinking...";
-    statusBadge.className = "status-badge thinking";
+    setStatusBadge("thinking", "thinking...");
     window.orbit.prompt(text);
   });
 }
@@ -487,6 +857,52 @@ function flushPendingMessage(): void {
  *   /model <name>   — switch LLM model (e.g. /model sonnet, /model claude-opus-4-6)
  *   /help           — list slash commands
  */
+function formatArgsPreview(args: Record<string, unknown> | undefined): string | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  const cmd = (args as { command?: unknown }).command;
+  if (typeof cmd === "string" && cmd.length > 0) return `$ ${cmd}`;
+  const path = (args as { path?: unknown; file_path?: unknown }).path ?? (args as { file_path?: unknown }).file_path;
+  if (typeof path === "string") return path;
+  try {
+    return JSON.stringify(args);
+  } catch {
+    return undefined;
+  }
+}
+
+interface SlashCommand {
+  name: string;
+  usage?: string;
+  description: string;
+}
+
+const SLASH_COMMANDS: SlashCommand[] = [
+  { name: "model",     usage: "/model <name>",         description: "switch LLM model" },
+  { name: "new",       description: "start a fresh session" },
+  { name: "resume",    description: "restart agent and replay prior session" },
+  { name: "chat",      description: "restore the chat pane from the session transcript (no agent restart)" },
+  { name: "plan",      description: "show current plan summary" },
+  { name: "status",    description: "show Galaxy connection status" },
+  { name: "notebook",  description: "show notebook info" },
+  { name: "summarize", usage: "/summarize [N [M]]",    description: "summarize prompts N–M into the notebook" },
+  { name: "cost",      description: "append session token/cost breakdown to the notebook" },
+  { name: "decisions", description: "show decision log" },
+  { name: "connect",   description: "open Galaxy connection settings" },
+  { name: "help",      description: "show this help" },
+];
+
+function escapeHtmlBasic(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function slashCommandsHtml(): string {
+  const items = SLASH_COMMANDS.map((c) => {
+    const label = c.usage ?? `/${c.name}`;
+    return `<li><code>${escapeHtmlBasic(label)}</code> — ${escapeHtmlBasic(c.description)}</li>`;
+  }).join("");
+  return `<h3>Slash commands</h3><ul>${items}</ul>`;
+}
+
 function handleSlashCommand(text: string): boolean {
   const [cmd, ...rest] = text.slice(1).split(/\s+/);
 
@@ -509,10 +925,43 @@ function handleSlashCommand(text: string): boolean {
     return true;
   }
 
+  if (cmd === "resume" || cmd === "continue") {
+    chat.addUserMessage(text);
+    chat.addInfoMessage("<i>Restarting agent with prior session…</i>");
+    void window.orbit.restartAgent();
+    return true;
+  }
+
+  if (cmd === "chat") {
+    // Replay the current session's chat transcript from session.jsonl —
+    // recovers chat after a window blank-out without touching the agent.
+    // onSessionHistory bails out if the chat already has content, so we
+    // must not add any info/status message before the replay fires.
+    chat.clear();
+    void window.orbit.replayChat().then((res) => {
+      if (!res.ok) {
+        chat.addErrorMessage(`/chat: ${res.error}`);
+      } else if (res.segments === 0) {
+        chat.addInfoMessage("<i>No prior turns to replay in this session.</i>");
+      }
+    });
+    return true;
+  }
+
   // pi-galaxy-analyst commands — pass through to agent
   if (cmd === "plan" || cmd === "status" || cmd === "notebook" || cmd === "decisions" || cmd === "profiles") {
     chat.addUserMessage(text);
     window.orbit.prompt(`/${cmd}`);
+    return true;
+  }
+
+  if (cmd === "summarize" || cmd === "summary") {
+    handleSummarize(text, rest.join(" "));
+    return true;
+  }
+
+  if (cmd === "cost") {
+    handleCost(text);
     return true;
   }
 
@@ -521,83 +970,257 @@ function handleSlashCommand(text: string): boolean {
     return true;
   }
 
-  if (cmd === "review") {
-    runReviewParams();
-    return true;
-  }
-
-  if (cmd === "test") {
-    runTestExecution();
-    return true;
-  }
-
-  if (cmd === "execute" || cmd === "run") {
-    runRealExecution();
-    return true;
-  }
-
   if (cmd === "help") {
     chat.addUserMessage(text);
-    chat.addInfoMessage(
-      `<h3>Slash commands</h3>` +
-      `<ul>` +
-      `<li><code>/model &lt;name&gt;</code> — switch LLM model</li>` +
-      `<li><code>/new</code> — start a fresh session</li>` +
-      `<li><code>/review</code> — review plan parameters before execution</li>` +
-      `<li><code>/test</code> — run the plan on minimal/test data</li>` +
-      `<li><code>/execute</code> (alias <code>/run</code>) — execute the plan on real data</li>` +
-      `<li><code>/plan</code> — show current plan summary</li>` +
-      `<li><code>/status</code> — show Galaxy connection status</li>` +
-      `<li><code>/notebook</code> — show notebook info</li>` +
-      `<li><code>/decisions</code> — show decision log</li>` +
-      `<li><code>/connect</code> — open Galaxy connection settings</li>` +
-      `<li><code>/help</code> — show this help</li>` +
-      `</ul>`
-    );
+    chat.addInfoMessage(slashCommandsHtml());
     return true;
   }
 
   return false; // not a recognized slash command — let it through
 }
 
-/** Ask for confirmation, then wipe both panes + restart agent. */
+/**
+ * /summarize [N [M]] — summarize the chat between prompts N..M into the notebook.
+ *
+ * Accepted forms (numbers extracted in order):
+ *   /summarize              → all prompts so far
+ *   /summarize 3            → just prompt 3
+ *   /summarize 1 3          → prompts 1..3
+ *   /summarize 1-3, 1 to 3, between 1 and 3 → same
+ */
+function handleSummarize(raw: string, argStr: string): void {
+  const total = chat.getPromptCount();
+  if (total === 0) {
+    chat.addUserMessage(raw);
+    chat.addErrorMessage("No prompts yet to summarize.");
+    return;
+  }
+
+  const nums = (argStr.match(/\d+/g) ?? []).map(Number);
+  let from: number, to: number;
+  if (nums.length === 0) { from = 1; to = total; }
+  else if (nums.length === 1) { from = to = nums[0]; }
+  else { from = Math.min(nums[0], nums[1]); to = Math.max(nums[0], nums[1]); }
+
+  if (from < 1 || to > total) {
+    chat.addUserMessage(raw);
+    chat.addErrorMessage(`Out of range. Valid prompts: 1..${total}.`);
+    return;
+  }
+
+  const transcript = chat.getTranscript(from, to);
+  if (!transcript.trim()) {
+    chat.addUserMessage(raw);
+    chat.addErrorMessage(`No content found for prompts ${from}..${to}.`);
+    return;
+  }
+
+  const label = from === to ? `prompt ${from}` : `prompts ${from}–${to}`;
+  const heading = `## Summary — ${label}`;
+  const prompt =
+    `Append a concise summary of the conversation covering ${label} to the ` +
+    `notebook file (notebook.md) in the current working directory. Use Edit or Write ` +
+    `to append — do NOT regenerate or rewrite existing content.\n\n` +
+    `Use exactly this heading (H2, verbatim) on its own line, followed by a blank line, then the body:\n` +
+    `    ${heading}\n\n` +
+    `Body format: bullet points only, no prose paragraphs. Focus on decisions, findings, ` +
+    `Galaxy references, and open questions. Keep it tight — one line per bullet when possible.\n\n` +
+    `--- Chat transcript (${label}) ---\n` +
+    transcript +
+    `\n--- end transcript ---`;
+
+  chat.addUserMessage(raw);
+  chat.addInfoMessage(
+    `<i>Asking the agent to append a summary of ${label} to <code>notebook.md</code>…</i>`,
+  );
+  chat.showThinking();
+  setStatusBadge("thinking", "thinking...");
+  window.orbit.prompt(prompt);
+}
+
+/**
+ * /cost — snapshot session token usage per model, price it against the renderer's
+ * pricing table, and ask the agent to append the breakdown to notebook.md.
+ * The renderer is the authoritative source for usage numbers; the agent just
+ * writes them out.
+ */
+function handleCost(raw: string): void {
+  if (perModelUsage.size === 0) {
+    chat.addUserMessage(raw);
+    chat.addErrorMessage("No billable assistant turns recorded yet in this renderer session.");
+    return;
+  }
+
+  const rows: string[] = [];
+  let totalCostKnown = true;
+  let grandCost = 0;
+  const totals: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+  for (const [model, u] of perModelUsage) {
+    totals.input += u.input;
+    totals.output += u.output;
+    totals.cacheRead += u.cacheRead;
+    totals.cacheWrite += u.cacheWrite;
+    const cost = computeCost(u, model);
+    const costStr = cost === null ? "unknown (no pricing entry)" : `$${cost.toFixed(4)}`;
+    if (cost === null) totalCostKnown = false; else grandCost += cost;
+    rows.push(
+      `| \`${model}\` | ${u.input.toLocaleString()} | ${u.output.toLocaleString()} | ` +
+      `${u.cacheRead.toLocaleString()} | ${u.cacheWrite.toLocaleString()} | ${costStr} |`
+    );
+  }
+
+  const totalCostStr = totalCostKnown ? `$${grandCost.toFixed(4)}` : `≥$${grandCost.toFixed(4)} (some models unpriced)`;
+  rows.push(
+    `| **Total** | **${totals.input.toLocaleString()}** | **${totals.output.toLocaleString()}** | ` +
+    `**${totals.cacheRead.toLocaleString()}** | **${totals.cacheWrite.toLocaleString()}** | **${totalCostStr}** |`
+  );
+
+  const table =
+    `| Model | Input tokens | Output tokens | Cache read | Cache write | Cost (USD) |\n` +
+    `|-------|-------------:|--------------:|-----------:|------------:|-----------:|\n` +
+    rows.join("\n");
+
+  const heading = "## Session cost";
+  const prompt =
+    `Append the following session cost breakdown verbatim to the notebook file ` +
+    `(notebook.md) in the current working directory. Use Edit or Write to append — ` +
+    `do NOT regenerate, reformat, or wrap the table. The numbers below are authoritative ` +
+    `(captured from the renderer's usage counters, same source as the masthead), so ` +
+    `use them as-is.\n\n` +
+    `Use exactly this heading (H2, verbatim) on its own line, followed by a blank line, ` +
+    `then the table:\n` +
+    `    ${heading}\n\n` +
+    `--- Cost table ---\n` +
+    table +
+    `\n--- end table ---`;
+
+  chat.addUserMessage(raw);
+  chat.addInfoMessage(
+    `<i>Asking the agent to append the session cost breakdown to ` +
+    `<code>notebook.md</code>…</i>`,
+  );
+  chat.showThinking();
+  setStatusBadge("thinking", "thinking...");
+  window.orbit.prompt(prompt);
+}
+
+/**
+ * Ask for confirmation, then wipe both panes + restart agent.
+ *
+ * If the cwd already has a non-empty notebook.md, show a 3-way modal so the
+ * user can pick between keeping the existing notebook (continue adding) or
+ * wiping the slate (delete notebook.md + activity.jsonl, commit the deletion
+ * so it's recoverable from git). No-op notebook → plain confirm.
+ */
 async function confirmAndResetSession(): Promise<void> {
-  const ok = confirm("Start a fresh session? This will erase your current chat, plan, steps, and results.");
-  if (!ok) return;
+  let status: { exists: boolean; hasContent: boolean } = { exists: false, hasContent: false };
+  try {
+    status = await window.orbit.notebookStatus();
+  } catch {
+    // IPC unavailable -- fall through to plain confirm.
+  }
+
+  if (!status.hasContent) {
+    const ok = confirm("Start a fresh session? This will erase the current chat and notebook view.");
+    if (!ok) return;
+    await resetSession();
+    return;
+  }
+
+  const choice = await showNewSessionModal();
+  if (choice === "cancel") return;
+
+  if (choice === "fresh") {
+    try {
+      await window.orbit.clearNotebookArtifacts();
+    } catch (err) {
+      chat.addErrorMessage(`Failed to clear notebook artifacts: ${err}`);
+      return;
+    }
+  }
+
   await resetSession();
 }
 
-/** Wipe chat + artifacts + restart the agent without --continue (fresh Pi.dev session). */
-async function showCwdWelcome(): Promise<void> {
+type NewSessionChoice = "keep" | "fresh" | "cancel";
+
+function showNewSessionModal(): Promise<NewSessionChoice> {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("new-session-overlay");
+    const keepBtn = document.getElementById("new-session-keep") as HTMLButtonElement | null;
+    const freshBtn = document.getElementById("new-session-fresh") as HTMLButtonElement | null;
+    const cancelBtn = document.getElementById("new-session-cancel") as HTMLButtonElement | null;
+    if (!overlay || !keepBtn || !freshBtn || !cancelBtn) {
+      resolve("cancel");
+      return;
+    }
+
+    overlay.classList.remove("hidden");
+
+    const cleanup = (choice: NewSessionChoice) => {
+      overlay.classList.add("hidden");
+      keepBtn.removeEventListener("click", onKeep);
+      freshBtn.removeEventListener("click", onFresh);
+      cancelBtn.removeEventListener("click", onCancel);
+      document.removeEventListener("keydown", onKey);
+      resolve(choice);
+    };
+    const onKeep = () => cleanup("keep");
+    const onFresh = () => cleanup("fresh");
+    const onCancel = () => cleanup("cancel");
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") cleanup("cancel");
+    };
+
+    keepBtn.addEventListener("click", onKeep);
+    freshBtn.addEventListener("click", onFresh);
+    cancelBtn.addEventListener("click", onCancel);
+    document.addEventListener("keydown", onKey);
+  });
+}
+
+async function showCwdWelcome(prefix?: string): Promise<void> {
   let cwd = "~";
   try {
     cwd = await window.orbit.getCwd();
   } catch { /* getCwd unavailable */ }
+  // Optional prefix lets callers (e.g. resetSession) merge their own
+  // "Started fresh session" line into the same info card so the user
+  // doesn't see a stack of three near-identical messages on /new.
+  const prefixHtml = prefix ? `<i>${prefix}</i><br>` : "";
   chat.addInfoMessage(
+    prefixHtml +
     `<b>Current working directory:</b> <code>${cwd.replace(/</g, "&lt;")}</code><br>` +
-    `For a new project you may want to <a href="#" id="switch-dir-link">switch to a new directory</a> to keep everything clean.`
+    // Class instead of id so multiple cwd-welcome cards don't all share
+    // an id, and so the delegated listener wired once below works on
+    // every link regardless of how many welcomes have been shown.
+    `For a new project you may want to <a href="#" class="switch-dir-link">switch to a new directory</a> to keep everything clean.`
   );
-  // Wire the link to the existing cwd-change button handler
-  document.getElementById("switch-dir-link")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    (document.getElementById("cwd-change") as HTMLButtonElement | null)?.click();
-  });
 }
 
+// Single delegated listener for every "switch to a new directory" link
+// rendered by showCwdWelcome. Avoids per-call addEventListener stacking.
+messagesEl.addEventListener("click", (e) => {
+  const target = e.target as HTMLElement | null;
+  if (!target?.classList.contains("switch-dir-link")) return;
+  e.preventDefault();
+  (document.getElementById("cwd-change") as HTMLButtonElement | null)?.click();
+});
+
 async function resetSession(): Promise<void> {
+  chat.resetCounter();
   resetUiForFreshContext();
 
   await window.orbit.resetSession();
-
-  // Fresh session has no greeting turn, so agent_end never fires.
-  // Clear streaming state explicitly so the input is usable immediately.
-  chat.addInfoMessage("<i>Started fresh session.</i>");
 
   // Reset startup-welcome flag so the onAgentStatus handler re-runs
   // the cwd welcome when the new agent reports "running".
   hasShownStartupWelcome = false;
 
-  await showCwdWelcome();
+  // Merge the "fresh session started" line with the cwd welcome so the
+  // user sees one info card, not two.
+  await showCwdWelcome("Started fresh session.");
 }
 
 /** Resolve a model alias across ALL providers and switch + restart agent. */
@@ -662,6 +1285,9 @@ async function switchModelByAlias(originalText: string, alias: string): Promise<
     return;
   }
 
+  currentModel = chosen.model.id;
+  renderModelIndicator();
+
   if (switchingProvider) {
     chat.addErrorMessage(
       `Switched to ${chosen.provider} / ${chosen.model.id}. Agent restarting… ` +
@@ -672,9 +1298,224 @@ async function switchModelByAlias(originalText: string, alias: string): Promise<
   }
 }
 
+// ─── Prompt history (↑ / ↓ to recall previous submissions) ──────────────────
+
+const HISTORY_KEY = "loom.promptHistory";
+const HISTORY_MAX = 100;
+
+function loadPromptHistory(): string[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((s) => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePromptHistory(): void {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(promptHistory));
+  } catch { /* ignore quota errors */ }
+}
+
+const promptHistory: string[] = loadPromptHistory();
+let historyCursor: number = promptHistory.length;  // index of NEXT slot
+let historyDraft: string = "";  // user's pre-recall buffer
+
+function appendHistoryEntry(text: string): void {
+  if (!text.trim()) return;
+  // Skip exact-duplicate of last entry to keep navigation useful.
+  if (promptHistory[promptHistory.length - 1] === text) {
+    historyCursor = promptHistory.length;
+    return;
+  }
+  promptHistory.push(text);
+  if (promptHistory.length > HISTORY_MAX) {
+    promptHistory.splice(0, promptHistory.length - HISTORY_MAX);
+  }
+  historyCursor = promptHistory.length;
+  historyDraft = "";
+  savePromptHistory();
+}
+
+/** Should ↑/↓ recall instead of moving the caret? Yes when input is empty
+ *  or the caret is on the first/last visual line, mirroring shell semantics. */
+function shouldRecallOnArrow(direction: "up" | "down"): boolean {
+  if (inputEl.value === "") return true;
+  const pos = inputEl.selectionStart ?? 0;
+  if (direction === "up") {
+    // First line iff there's no \n before the caret.
+    return inputEl.value.lastIndexOf("\n", pos - 1) === -1;
+  }
+  // Last line iff there's no \n at or after the caret.
+  return inputEl.value.indexOf("\n", pos) === -1;
+}
+
+function recallHistory(direction: "up" | "down"): void {
+  if (direction === "up") {
+    if (historyCursor <= 0) return;
+    if (historyCursor === promptHistory.length) {
+      // Stash the in-progress draft so ↓ past the end restores it.
+      historyDraft = inputEl.value;
+    }
+    historyCursor -= 1;
+  } else {
+    if (historyCursor >= promptHistory.length) return;
+    historyCursor += 1;
+  }
+  inputEl.value =
+    historyCursor === promptHistory.length ? historyDraft : promptHistory[historyCursor];
+  inputEl.dispatchEvent(new Event("input"));
+  // Caret to end so the next ↑/↓ continues navigating cleanly.
+  const end = inputEl.value.length;
+  inputEl.setSelectionRange(end, end);
+}
+
+// ─── Slash-command autocomplete popup ────────────────────────────────────────
+
+const slashPopup = document.getElementById("slash-popup")!;
+let slashPopupItems: SlashCommand[] = [];
+let slashPopupActive = -1;
+
+function isSlashPopupOpen(): boolean {
+  return !slashPopup.classList.contains("hidden");
+}
+
+function closeSlashPopup(): void {
+  slashPopup.classList.add("hidden");
+  slashPopup.innerHTML = "";
+  slashPopupItems = [];
+  slashPopupActive = -1;
+  inputEl.removeAttribute("aria-activedescendant");
+  inputEl.setAttribute("aria-expanded", "false");
+}
+
+function slashRowId(i: number): string {
+  return `slash-popup-item-${i}`;
+}
+
+function maybeOpenSlashPopup(): void {
+  const v = inputEl.value;
+  // Only open when the input begins with `/` and has no space yet (i.e.
+  // the user is still typing the command name, not its arguments).
+  if (!v.startsWith("/") || v.includes(" ") || v.includes("\n")) {
+    closeSlashPopup();
+    return;
+  }
+  const query = v.slice(1).toLowerCase();
+  const matches = SLASH_COMMANDS.filter((c) => c.name.startsWith(query));
+  if (matches.length === 0) {
+    closeSlashPopup();
+    return;
+  }
+  slashPopupItems = matches;
+  slashPopupActive = 0;
+  renderSlashPopup();
+  slashPopup.classList.remove("hidden");
+  inputEl.setAttribute("aria-expanded", "true");
+}
+
+function renderSlashPopup(): void {
+  slashPopup.innerHTML = "";
+  slashPopupItems.forEach((cmd, i) => {
+    const row = document.createElement("div");
+    row.className = "slash-popup-item" + (i === slashPopupActive ? " active" : "");
+    row.id = slashRowId(i);
+    row.setAttribute("role", "option");
+    row.setAttribute("aria-selected", String(i === slashPopupActive));
+    row.dataset.index = String(i);
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "slash-popup-name";
+    nameEl.textContent = `/${cmd.name}`;
+    row.appendChild(nameEl);
+
+    if (cmd.usage && cmd.usage !== `/${cmd.name}`) {
+      const usageEl = document.createElement("span");
+      usageEl.className = "slash-popup-usage";
+      usageEl.textContent = cmd.usage.slice(`/${cmd.name}`.length).trim();
+      row.appendChild(usageEl);
+    }
+
+    const descEl = document.createElement("span");
+    descEl.className = "slash-popup-desc";
+    descEl.textContent = cmd.description;
+    row.appendChild(descEl);
+
+    row.addEventListener("mousedown", (ev) => {
+      // mousedown (not click) so the textarea doesn't lose focus first.
+      ev.preventDefault();
+      acceptSlashPopup(i);
+    });
+    slashPopup.appendChild(row);
+  });
+
+  // ARIA wiring: the listbox owns the items, but focus stays on the
+  // textarea — aria-activedescendant points screen readers at the
+  // currently-highlighted row so they announce it on ↑/↓.
+  if (slashPopupActive >= 0 && slashPopupItems[slashPopupActive]) {
+    inputEl.setAttribute("aria-activedescendant", slashRowId(slashPopupActive));
+  } else {
+    inputEl.removeAttribute("aria-activedescendant");
+  }
+}
+
+function moveSlashPopup(direction: "up" | "down"): void {
+  if (slashPopupItems.length === 0) return;
+  if (direction === "up") {
+    slashPopupActive = (slashPopupActive - 1 + slashPopupItems.length) % slashPopupItems.length;
+  } else {
+    slashPopupActive = (slashPopupActive + 1) % slashPopupItems.length;
+  }
+  renderSlashPopup();
+  const activeRow = slashPopup.querySelector(".slash-popup-item.active") as HTMLElement | null;
+  activeRow?.scrollIntoView({ block: "nearest" });
+}
+
+function acceptSlashPopup(index: number): void {
+  const cmd = slashPopupItems[index];
+  if (!cmd) return;
+  // Drop user back at the cursor position right after the command name. If
+  // there's a usage hint with args, leave a trailing space; otherwise the
+  // bare command (Enter submits it).
+  const needsArg = cmd.usage && cmd.usage.length > `/${cmd.name}`.length;
+  inputEl.value = `/${cmd.name}${needsArg ? " " : ""}`;
+  closeSlashPopup();
+  inputEl.dispatchEvent(new Event("input"));
+  inputEl.focus();
+  const end = inputEl.value.length;
+  inputEl.setSelectionRange(end, end);
+}
+
 inputEl.addEventListener("keydown", (e) => {
+  // Slash popup is a hint, not a modal: Tab completes, ↑/↓ navigate
+  // within it, Esc dismisses. Enter still submits whatever the user
+  // typed — the popup auto-closes as a side effect of submit.
+  if (isSlashPopupOpen()) {
+    if (e.key === "ArrowUp")    { e.preventDefault(); moveSlashPopup("up"); return; }
+    if (e.key === "ArrowDown")  { e.preventDefault(); moveSlashPopup("down"); return; }
+    if (e.key === "Tab")        { e.preventDefault(); acceptSlashPopup(slashPopupActive); return; }
+    if (e.key === "Escape")     { e.preventDefault(); closeSlashPopup(); return; }
+    // Enter falls through to the regular submit path below.
+  }
+
+  if (e.key === "ArrowUp" && shouldRecallOnArrow("up")) {
+    if (promptHistory.length === 0) return;
+    e.preventDefault();
+    recallHistory("up");
+    return;
+  }
+  if (e.key === "ArrowDown" && shouldRecallOnArrow("down") && historyCursor < promptHistory.length) {
+    e.preventDefault();
+    recallHistory("down");
+    return;
+  }
+
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
+    closeSlashPopup();
     submit();
   }
 });
@@ -682,6 +1523,12 @@ inputEl.addEventListener("keydown", (e) => {
 inputEl.addEventListener("input", () => {
   inputEl.style.height = "auto";
   inputEl.style.height = Math.min(inputEl.scrollHeight, 150) + "px";
+  maybeOpenSlashPopup();
+});
+
+inputEl.addEventListener("blur", () => {
+  // Defer so a click inside the popup can still fire.
+  setTimeout(() => closeSlashPopup(), 100);
 });
 
 sendBtn.addEventListener("click", submit);
@@ -729,8 +1576,7 @@ window.orbit.onAgentEvent((event) => {
 
       if (ameType === "text_start") {
         chat.hideThinking();
-        statusBadge.textContent = "responding...";
-        statusBadge.className = "status-badge running";
+        setStatusBadge("running", "responding...");
         if (!streaming) {
           streaming = true;
           sendBtn.classList.add("hidden");
@@ -761,9 +1607,16 @@ window.orbit.onAgentEvent((event) => {
     case "message_end": {
       // Commit per-assistant-message usage to the session total
       // Each assistant message = one LLM call billed separately
-      const msg = (event as { message?: { role?: string } }).message;
+      const msg = (event as { message?: { role?: string; stopReason?: string; errorMessage?: string } }).message;
       if (msg?.role === "assistant") {
         commitTurnUsage();
+        // Surface assistant-side errors (e.g. 401 invalid API key) so the user
+        // isn't staring at a silent UI after a failed call.
+        if (msg.stopReason === "error" && msg.errorMessage) {
+          chat.hideThinking();
+          chat.addErrorMessage(msg.errorMessage);
+          setStatusBadge("error");
+        }
       }
       break;
     }
@@ -776,9 +1629,13 @@ window.orbit.onAgentEvent((event) => {
       chat.hideThinking();
       const name = (event as { toolName?: string }).toolName || "tool";
       const id = (event as { toolCallId?: string }).toolCallId || name;
-      chat.addToolCard(id, name);
-      statusBadge.textContent = `running: ${name}`;
-      statusBadge.className = "status-badge running";
+      // Per-tool chat cards are noisy and duplicate what the Activity tab
+      // shows (shell stream + activity.jsonl). Only team_dispatch keeps a
+      // chat card because its collapsible per-turn body is genuinely useful.
+      if (name === "team_dispatch") {
+        chat.addToolCard(id, name);
+      }
+      setStatusBadge("running", `running: ${name}`);
       break;
     }
 
@@ -786,7 +1643,11 @@ window.orbit.onAgentEvent((event) => {
       const id = (event as { toolCallId?: string }).toolCallId || "";
       const partial = (event as { partialResult?: { details?: unknown } }).partialResult;
       const details = (partial as { details?: { kind?: string } } | undefined)?.details;
-      chat.updateToolCard(id, "running", undefined, details);
+      const args = (event as { args?: Record<string, unknown> }).args;
+      const preview = formatArgsPreview(args);
+      // updateToolCard no-ops for tools that never got a card (everything
+      // except team_dispatch).
+      chat.updateToolCard(id, "running", preview, details);
       break;
     }
 
@@ -803,14 +1664,14 @@ window.orbit.onAgentEvent((event) => {
     case "agent_end":
       chat.hideThinking();
       streaming = false;
-      statusBadge.textContent = "Ready";
-      statusBadge.className = "status-badge";
+      setStatusBadge("");
       sendBtn.classList.remove("hidden");
       abortBtn.classList.add("hidden");
       chat.finishAssistantMessage();
       // Safety: clear any stuck button busy states if the turn ends without the
       // expected completion event arriving
       flushPendingMessage();
+      hasRevealedActivityThisTurn = false;
       break;
 
     case "error": {
@@ -818,8 +1679,7 @@ window.orbit.onAgentEvent((event) => {
       chat.hideThinking();
       chat.addErrorMessage(msg);
       streaming = false;
-      statusBadge.textContent = "error";
-      statusBadge.className = "status-badge error";
+      setStatusBadge("error");
       sendBtn.classList.remove("hidden");
       abortBtn.classList.add("hidden");
       // Clear any queued message on error so the indicator doesn't get stuck
@@ -973,13 +1833,36 @@ window.orbit.onUiRequest((request) => {
     const message = (request as Record<string, unknown>).message as string | undefined;
     const notifyType = (request as Record<string, unknown>).notifyType as string | undefined;
     if (message) {
-      const prefix = notifyType === "warning" ? "⚠️ " : notifyType === "error" ? "❌ " : "";
-      const escaped = (prefix + message).replace(/</g, "&lt;");
+      const escaped = message.replace(/</g, "&lt;");
       // Preserve newlines + indentation for multi-line status/profile dumps.
-      const html = escaped.includes("\n")
+      const body = escaped.includes("\n")
         ? `<div class="notify-preformatted">${escaped}</div>`
         : escaped;
-      chat.addInfoMessage(html);
+      // Type marker: emoji for the bulk of users (Mac, Windows) plus an
+      // inline SVG for Linux/older platforms where the emoji glyph
+      // renders as a tofu box. CSS \`.notify-marker\` hides the emoji
+      // when the SVG is rendering and vice-versa via a fonts-loaded
+      // detector — see notify-marker rules in styles.css.
+      let marker = "";
+      if (notifyType === "warning") {
+        marker =
+          `<span class="notify-marker notify-marker-warning" aria-hidden="true">` +
+          `<span class="notify-marker-emoji">⚠️</span>` +
+          `<svg class="notify-marker-svg" viewBox="0 0 16 16" width="14" height="14">` +
+          `<path d="M8 1.5 L15 14.5 H1 Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>` +
+          `<path d="M8 6.5 V10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>` +
+          `<circle cx="8" cy="12" r="0.8" fill="currentColor"/>` +
+          `</svg></span> `;
+      } else if (notifyType === "error") {
+        marker =
+          `<span class="notify-marker notify-marker-error" aria-hidden="true">` +
+          `<span class="notify-marker-emoji">❌</span>` +
+          `<svg class="notify-marker-svg" viewBox="0 0 16 16" width="14" height="14">` +
+          `<circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/>` +
+          `<path d="M5 5 L11 11 M11 5 L5 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>` +
+          `</svg></span> `;
+      }
+      chat.addInfoMessage(marker + body);
     }
     return;
   }
@@ -988,89 +1871,71 @@ window.orbit.onUiRequest((request) => {
     const key = request.widgetKey as string;
     const lines = request.widgetLines as string[] | undefined;
 
-    if (key === LoomWidgetKey.Plan && lines) {
-      console.log("[orbit] plan widget received, lines:", lines.length);
-      artifacts.setPlanText(decodeMarkdownWidget(lines));
-      // First plan: auto-reveal artifact pane and switch to Plan tab.
-      if (!hasShownPlanOnce) {
-        setArtifactCollapsed(false);
-        switchTab("plan");
-        hasShownPlanOnce = true;
-      } else {
-        markTabNew("plan");
-      }
-    }
-
-    if (key === LoomWidgetKey.Steps && lines) {
-      console.log("[orbit] steps widget received, count:", lines[0]?.length);
-      try {
-        const steps = decodeJsonWidget<ShellStep[]>(lines);
-        console.log("[orbit] parsed steps:", steps.length);
-        stepGraph.render(steps);
-        markTabNew("steps");
-      } catch (e) { console.error("[orbit] steps parse error:", e); }
-    }
-
-    if (key === LoomWidgetKey.Results && lines) {
-      try {
-        const block = decodeJsonWidget<ResultBlock>(lines);
-        artifacts.addResultBlock(block);
-        markTabNew("results");
-      } catch { /* ignore parse errors */ }
-    }
-
-    // Legacy alias: /plan slash command emits "plan-view" — route to Plan tab.
-    if (key === LoomWidgetKey.PlanView && lines) {
-      artifacts.setPlanText(decodeMarkdownWidget(lines));
-      if (!hasShownPlanOnce) { switchTab("plan"); hasShownPlanOnce = true; }
-      else { markTabNew("plan"); }
-    }
-
-    // /notebook dumps the live notebook.md content — route to Notebook tab.
+    // Notebook is the only widget the right pane consumes. The Activity
+    // tab now mirrors the live shell + proc-monitor streams (see below);
+    // the brain-side activity.jsonl is still written for debug but no
+    // longer pushed as a widget.
     if (key === LoomWidgetKey.Notebook && lines) {
       artifacts.setNotebookMarkdown(decodeMarkdownWidget(lines));
       setArtifactCollapsed(false);
-      switchTab("results");
-    }
-
-    // Phase 4: parameter form — replaces plan view
-    if (key === LoomWidgetKey.Parameters && lines) {
-      console.log("[orbit] parameters widget received, lines[0] length:", lines[0]?.length);
-      try {
-        const spec = decodeJsonWidget<ParameterFormPayload>(lines);
-        console.log("[orbit] parsed spec:", spec.title, spec.groups?.length, "groups");
-        artifacts.showParameters(spec);
-        switchTab("plan");
-          shell.append(`  ✓ Parameter form ready (${spec.groups?.length ?? 0} groups)`, "tool-end");
-        console.log("[orbit] showParameters complete");
-      } catch (err) {
-        console.error("[orbit] parameters parse/render error:", err);
-        }
     }
   }
 });
 
-function switchTab(name: string): void {
-  tabs.forEach((t) => t.classList.remove("active"));
-  panels.forEach((p) => p.classList.remove("active"));
-  document.querySelector(`[data-tab="${name}"]`)?.classList.add("active");
-  document.getElementById(`tab-${name}`)?.classList.add("active");
-  clearTabNew(name);
-}
-
 // ── Agent Status ──────────────────────────────────────────────────────────────
 
 let hasShownStartupWelcome = false;
+// When the badge is in a stuck state (error or persistent connecting…)
+// make it clickable: open Preferences so the user can fix credentials /
+// model / etc. without leaving Orbit.
+const STUCK_STATUS = new Set(["error", "connecting"]);
+let statusBadgeIsStuck = false;
+statusBadge.style.cursor = "default";
+statusBadge.title = "";
+statusBadge.addEventListener("click", () => {
+  if (statusBadgeIsStuck) void openPreferences();
+});
+
+/**
+ * Single source of truth for status-badge updates. Sets className,
+ * textContent, and the stuck-click affordance (cursor + title) in one
+ * place. The 9+ in-stream sites that previously did
+ * `statusBadge.className = "..."` directly skipped the stuck-click
+ * sync — after a stream-driven error the badge looked red but click
+ * didn't open Preferences.
+ *
+ * `status` is the bare status word ("running", "thinking", "error",
+ * "connecting", or "" for the default ready state). `msg` overrides
+ * the badge label when present; otherwise the status word is shown.
+ */
+function setStatusBadge(status: string, msg?: string): void {
+  statusBadge.textContent = msg || status || "Ready";
+  statusBadge.className = ("footer-control status-badge " + (status || "")).trim();
+  statusBadgeIsStuck = STUCK_STATUS.has(status);
+  statusBadge.style.cursor = statusBadgeIsStuck ? "pointer" : "default";
+  statusBadge.title = statusBadgeIsStuck ? "Click to open Preferences" : "";
+}
+
 window.orbit.onAgentStatus((status, msg) => {
-  statusBadge.textContent = msg || status;
-  statusBadge.className = "status-badge " + status;
+  setStatusBadge(status, msg);
 
   // Show cwd welcome once, after the first successful agent start.
-  // Also open the artifact pane on the Notebook tab so the user sees it.
   if (status === "running" && !hasShownStartupWelcome) {
     hasShownStartupWelcome = true;
     setArtifactCollapsed(false);
-    switchTab("results");
+    void showCwdWelcome();
+  }
+});
+
+// Race fix: did-finish-load → main spawns brain → agent:status fires before
+// this module's listener is attached, so the badge stays stuck on its initial
+// "connecting..." HTML. Pull the current snapshot now to catch up.
+void window.orbit.getAgentStatus().then(({ status, message }) => {
+  if (status === "stopped") return;
+  setStatusBadge(status, message);
+  if (status === "running" && !hasShownStartupWelcome) {
+    hasShownStartupWelcome = true;
+    setArtifactCollapsed(false);
     void showCwdWelcome();
   }
 });
@@ -1106,91 +1971,6 @@ document.addEventListener("mouseup", () => {
   document.body.style.userSelect = "";
 });
 
-// ── Artifact Tabs ─────────────────────────────────────────────────────────────
-
-const tabs = document.querySelectorAll<HTMLButtonElement>("#artifact-tabs .tab");
-const panels = document.querySelectorAll<HTMLElement>(".tab-panel");
-
-let hasShownPlanOnce = false;
-
-/** Add a "new content" indicator to a tab if it's not currently active. */
-function markTabNew(name: string): void {
-  const tab = document.querySelector<HTMLElement>(`[data-tab="${name}"]`);
-  if (!tab || tab.classList.contains("active")) return;
-  tab.classList.add("has-new");
-}
-
-/** Clear the new-content indicator on a tab (called when user clicks it). */
-function clearTabNew(name: string): void {
-  const tab = document.querySelector<HTMLElement>(`[data-tab="${name}"]`);
-  tab?.classList.remove("has-new");
-}
-
-tabs.forEach((tab) => {
-  tab.addEventListener("click", () => {
-    const target = tab.dataset.tab;
-    tabs.forEach((t) => t.classList.remove("active"));
-    panels.forEach((p) => p.classList.remove("active"));
-    tab.classList.add("active");
-    document.getElementById(`tab-${target}`)?.classList.add("active");
-    if (target) clearTabNew(target);
-  });
-});
-
-// ── Plan Actions (slash commands) ────────────────────────────────────────────
-
-/** No-op helpers kept so existing call sites for clearButtonBusy don't break. */
-function clearButtonBusy(_btn: HTMLButtonElement): void { /* no-op */ }
-
-const paramsBackBtn = document.getElementById("params-back-btn")!;
-paramsBackBtn.addEventListener("click", () => {
-  artifacts.hideParameters();
-});
-
-const paramsSaveBtn = document.getElementById("params-save-btn")!;
-paramsSaveBtn.addEventListener("click", () => {
-  artifacts.saveParameters();
-  artifacts.hideParameters();
-  chat.addInfoMessage("Parameters saved.");
-});
-
-function runReviewParams(): void {
-  if (!artifacts.getPlanText()) {
-    chat.addErrorMessage("No plan to review yet.");
-    return;
-  }
-  chat.addUserMessage("/review");
-  chat.showThinking();
-  statusBadge.textContent = "analyzing parameters…";
-  statusBadge.className = "status-badge thinking";
-  shell.append("▸ Analyzing plan for critical parameters…", "info");
-  window.orbit.prompt("/review");
-}
-
-function runTestExecution(): void {
-  if (!artifacts.getPlanText()) {
-    chat.addErrorMessage("No plan to test yet.");
-    return;
-  }
-  const saved = artifacts.getSavedParameters() || {};
-  artifacts.clearResults();
-  chat.addUserMessage("/test");
-  artifacts.setParametersDisabled(true);
-  window.orbit.prompt(`/test ${JSON.stringify({ savedParameters: saved })}`);
-}
-
-function runRealExecution(): void {
-  if (!artifacts.getPlanText()) {
-    chat.addErrorMessage("No plan to execute yet.");
-    return;
-  }
-  const saved = artifacts.getSavedParameters() || {};
-  artifacts.clearResults();
-  chat.addUserMessage("/execute");
-  artifacts.setParametersDisabled(true);
-  window.orbit.prompt(`/execute ${JSON.stringify({ savedParameters: saved })}`);
-}
-
 // ── Preferences ──────────────────────────────────────────────────────────────
 
 const prefsOverlay = document.getElementById("prefs-overlay")!;
@@ -1202,6 +1982,7 @@ const prefsBrowseCwd = document.getElementById("prefs-browse-cwd")!;
 const prefsProvider = document.getElementById("prefs-provider") as HTMLSelectElement;
 const prefsModel = document.getElementById("prefs-model") as HTMLSelectElement;
 const prefsApiKey = document.getElementById("prefs-api-key") as HTMLInputElement;
+const prefsApiKeyStatus = document.getElementById("prefs-api-key-status")!;
 
 // Model catalog by provider — labels include cost guidance
 // (in/out price per 1M tokens). Update when providers add/change models.
@@ -1267,10 +2048,95 @@ function populateModels(provider: string, selected?: string): void {
 prefsProvider.addEventListener("change", () => {
   populateModels(prefsProvider.value);
 });
+wireApiKeyValidation(prefsProvider, prefsApiKey, prefsApiKeyStatus);
 const prefsGalaxyUrl = document.getElementById("prefs-galaxy-url") as HTMLInputElement;
 const prefsGalaxyKey = document.getElementById("prefs-galaxy-key") as HTMLInputElement;
 const prefsDefaultCwd = document.getElementById("prefs-default-cwd") as HTMLInputElement;
 const prefsCondaBin = document.getElementById("prefs-conda-bin") as HTMLSelectElement;
+const prefsSkillsRows = document.getElementById("prefs-skills-rows")!;
+const prefsSkillsAddBtn = document.getElementById("prefs-skills-add")!;
+
+interface PrefsSkillRepo {
+  name: string;
+  url: string;
+  branch: string;
+  enabled: boolean;
+}
+
+let prefsSkillsState: PrefsSkillRepo[] = [];
+
+function renderSkillsRows(): void {
+  prefsSkillsRows.innerHTML = "";
+  if (prefsSkillsState.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.className = "prefs-skills-empty";
+    td.textContent = "No skill repos. Removing all entries re-seeds galaxy-skills on save.";
+    tr.appendChild(td);
+    prefsSkillsRows.appendChild(tr);
+    return;
+  }
+  prefsSkillsState.forEach((repo, idx) => {
+    const tr = document.createElement("tr");
+    tr.appendChild(makeSkillCell(repo, idx, "name", "text"));
+    tr.appendChild(makeSkillCell(repo, idx, "url", "text"));
+    tr.appendChild(makeSkillCell(repo, idx, "branch", "text"));
+
+    const enabledTd = document.createElement("td");
+    enabledTd.className = "prefs-skills-enabled";
+    const enabledBox = document.createElement("input");
+    enabledBox.type = "checkbox";
+    enabledBox.checked = repo.enabled;
+    enabledBox.addEventListener("change", () => {
+      prefsSkillsState[idx].enabled = enabledBox.checked;
+    });
+    enabledTd.appendChild(enabledBox);
+    tr.appendChild(enabledTd);
+
+    const actionsTd = document.createElement("td");
+    actionsTd.className = "prefs-skills-actions";
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "plan-btn";
+    removeBtn.textContent = "Remove";
+    removeBtn.title = "Remove this skill repo";
+    removeBtn.addEventListener("click", () => {
+      const label = prefsSkillsState[idx]?.name || prefsSkillsState[idx]?.url || "this skill repo";
+      if (!confirm(`Remove ${label}?`)) return;
+      prefsSkillsState.splice(idx, 1);
+      renderSkillsRows();
+    });
+    actionsTd.appendChild(removeBtn);
+    tr.appendChild(actionsTd);
+
+    prefsSkillsRows.appendChild(tr);
+  });
+}
+
+function makeSkillCell(
+  repo: PrefsSkillRepo,
+  idx: number,
+  field: "name" | "url" | "branch",
+  inputType: "text",
+): HTMLTableCellElement {
+  const td = document.createElement("td");
+  td.className = `prefs-skills-${field}`;
+  const input = document.createElement("input");
+  input.type = inputType;
+  input.value = repo[field];
+  if (field === "url") input.placeholder = `${ALLOWED_SKILLS_PREFIX}<repo>`;
+  if (field === "branch") input.placeholder = "main";
+  input.addEventListener("input", () => {
+    prefsSkillsState[idx][field] = input.value.trim();
+  });
+  td.appendChild(input);
+  return td;
+}
+
+prefsSkillsAddBtn.addEventListener("click", () => {
+  prefsSkillsState.push({ name: "", url: "", branch: "main", enabled: true });
+  renderSkillsRows();
+});
 
 /** Sentinel mirrors UNCHANGED_SECRET in main/ipc-handlers.ts. */
 const UNCHANGED_SECRET = "__loom_unchanged_secret__";
@@ -1284,6 +2150,7 @@ async function openPreferences(): Promise<void> {
     galaxy?: { active: string | null; profiles: Record<string, { url: string; hasApiKey?: boolean }> };
     defaultCwd?: string;
     condaBin?: string;
+    skills?: { repos?: Array<{ name?: string; url?: string; branch?: string; enabled?: boolean }> };
   };
 
   prefsProvider.value = config.llm?.provider || "anthropic";
@@ -1291,6 +2158,8 @@ async function openPreferences(): Promise<void> {
   prefsLlmHadKey = Boolean(config.llm?.hasApiKey);
   prefsApiKey.value = "";
   prefsApiKey.placeholder = prefsLlmHadKey ? "•••••••• (unchanged)" : "";
+  prefsApiKeyStatus.className = "api-key-status";
+  prefsApiKeyStatus.textContent = "";
 
   // Galaxy: use active profile
   const activeProfile = config.galaxy?.active
@@ -1303,6 +2172,18 @@ async function openPreferences(): Promise<void> {
 
   prefsDefaultCwd.value = config.defaultCwd || "";
   prefsCondaBin.value = config.condaBin || "auto";
+
+  // Skills: hydrate the editable table from config. The brain seeds
+  // galaxy-skills if absent, but we hydrate from whatever's in config so
+  // an admin who explicitly removed it doesn't see it re-appear here
+  // until they hit Save (which triggers re-seed if the list ends up empty).
+  prefsSkillsState = (config.skills?.repos ?? []).map((r) => ({
+    name: typeof r?.name === "string" ? r.name : "",
+    url: typeof r?.url === "string" ? r.url : "",
+    branch: typeof r?.branch === "string" && r.branch ? r.branch : "main",
+    enabled: r?.enabled !== false,
+  }));
+  renderSkillsRows();
 
   prefsOverlay.classList.remove("hidden");
 }
@@ -1330,10 +2211,18 @@ async function savePreferences(): Promise<void> {
     ? UNCHANGED_SECRET
     : "";
 
+  const hasGalaxyUrl = Boolean(galaxyUrl);
+  const hasGalaxyKey = Boolean(typedGalaxyKey || prefsGalaxyHadKey);
+  if (hasGalaxyUrl !== hasGalaxyKey) {
+    alert("Galaxy: provide both URL and API key, or leave both blank.");
+    return;
+  }
+
+  const selectedModel = prefsModel.value || undefined;
   const config: Record<string, unknown> = {
     llm: {
       provider: prefsProvider.value,
-      model: prefsModel.value || undefined,
+      model: selectedModel,
       apiKey: llmApiKey,
     },
   };
@@ -1353,10 +2242,45 @@ async function savePreferences(): Promise<void> {
   config.defaultCwd = prefsDefaultCwd.value.trim() || undefined;
   config.condaBin = (prefsCondaBin.value as "auto" | "mamba" | "conda") || undefined;
 
-  const result = await window.orbit.saveConfig(config);
+  // Skills: persist whatever's in the table, dropping incomplete rows. If the
+  // user emptied the list entirely, the brain's loadConfig will lazy-seed
+  // galaxy-skills on next read — we don't re-seed here so a deliberate
+  // "none" state survives at least until next session start.
+  const cleaned = prefsSkillsState
+    .filter((r) => r.name.trim() && r.url.trim())
+    .map((r) => ({
+      name: r.name.trim(),
+      url: r.url.trim(),
+      branch: r.branch.trim() || "main",
+      enabled: r.enabled,
+    }));
+
+  // Allowlist: alpha release accepts only github.com/galaxyproject/* repos.
+  // The brain enforces the same predicate as defense-in-depth, but we block
+  // at save time so the user sees the reason instead of a silent drop.
+  const disallowed = cleaned.filter((r) => !isAllowedSkillUrl(r.url));
+  if (disallowed.length > 0) {
+    const list = disallowed.map((r) => `  • ${r.name}: ${r.url}`).join("\n");
+    alert(
+      `Skills repos must live under ${ALLOWED_SKILLS_PREFIX}* (alpha ` +
+      `restriction). Disallowed entries:\n\n${list}\n\n` +
+      `Fix or remove them before saving.`,
+    );
+    return;
+  }
+
+  config.skills = { repos: cleaned };
+
+  const result = await window.orbit.saveConfig(config as Record<string, unknown>);
   if (result.success) {
     closePreferences();
-    chat.addUserMessage("[system] Preferences saved. Agent restarted.");
+    if (selectedModel) {
+      currentModel = selectedModel;
+      renderModelIndicator();
+    }
+    // Info card, not a fake user prompt — was getting numbered as a real
+    // user submission and inflating the prompt counter.
+    chat.addInfoMessage("<i>Preferences saved. Agent restarted.</i>");
   } else {
     alert(`Failed to save preferences: ${result.error}`);
   }
@@ -1384,6 +2308,10 @@ window.orbit.onOpenPreferences(() => {
   openPreferences();
 });
 
+window.orbit.onShowSlashCommands(() => {
+  chat.addInfoMessage(slashCommandsHtml());
+});
+
 // ── Agent shell event feed ────────────────────────────────────────────────────
 
 /** Extract a short, useful summary from an agent event and append to the shell. */
@@ -1393,6 +2321,7 @@ function feedShell(event: Record<string, unknown>): void {
   switch (type) {
     case "agent_start": {
       shell.append("─── agent turn start ───", "info");
+      revealActivityForTurn();
       break;
     }
     case "turn_start": {
@@ -1508,23 +2437,30 @@ function truncate(s: string, n: number): string {
   return s.slice(0, n - 1) + "…";
 }
 
-// ── Agent shell toggle ────────────────────────────────────────────────────────
+// ── Agent shell ──────────────────────────────────────────────────────────────
 
-const shellEl = document.getElementById("agent-shell")!;
-const shellToggleBtn = document.getElementById("agent-shell-toggle")!;
-const shellCloseBtn = document.getElementById("agent-shell-close")!;
 const shellClearBtn = document.getElementById("agent-shell-clear")!;
-
-function toggleShell(show?: boolean): void {
-  const willShow = show ?? shellEl.classList.contains("hidden");
-  shellEl.classList.toggle("hidden", !willShow);
-  shellToggleBtn.classList.toggle("active", willShow);
-  shellToggleBtn.textContent = willShow ? "▾ shell" : "▸ shell";
-}
-
-shellToggleBtn.addEventListener("click", () => toggleShell());
-shellCloseBtn.addEventListener("click", () => toggleShell(false));
 shellClearBtn.addEventListener("click", () => shell.clear());
+
+let hasRevealedActivityThisTurn = false;
+/**
+ * Once per turn, surface the agent shell so the user can watch.
+ * If the artifact pane is **collapsed**, expand it AND switch to
+ * Activity. If it's already **expanded** with a non-default tab
+ * active (Notebook / File), don't yank the user away — they're
+ * reading something and the live shell would clobber that. The
+ * agent_start case where this matters most is mid-read on the
+ * Notebook tab.
+ */
+function revealActivityForTurn(): void {
+  if (hasRevealedActivityThisTurn) return;
+  hasRevealedActivityThisTurn = true;
+  const wasCollapsed = document.body.classList.contains("artifact-collapsed");
+  setArtifactCollapsed(false);
+  if (wasCollapsed) {
+    artifacts.selectTab("activity");
+  }
+}
 
 // ── Process monitor ──────────────────────────────────────────────────────────
 
@@ -1535,25 +2471,11 @@ interface ProcInfo {
   pmem: number;
   rss: number;
   etime: string;
-  nlwp: number;
   command: string;
 }
 
-const procMonitorEl = document.getElementById("proc-monitor")!;
-const procMonitorToggleBtn = document.getElementById("proc-monitor-toggle")!;
-const procMonitorCloseBtn = document.getElementById("proc-monitor-close")!;
 const procMonitorCountEl = document.getElementById("proc-monitor-count")!;
 const procMonitorRowsEl = document.getElementById("proc-monitor-rows")!;
-
-function toggleProcMonitor(show?: boolean): void {
-  const willShow = show ?? procMonitorEl.classList.contains("hidden");
-  procMonitorEl.classList.toggle("hidden", !willShow);
-  procMonitorToggleBtn.classList.toggle("active", willShow);
-  procMonitorToggleBtn.textContent = willShow ? "▾ procs" : "▸ procs";
-}
-
-procMonitorToggleBtn.addEventListener("click", () => toggleProcMonitor());
-procMonitorCloseBtn.addEventListener("click", () => toggleProcMonitor(false));
 
 function formatRss(kb: number): string {
   if (kb < 1024) return `${kb}K`;
@@ -1563,18 +2485,13 @@ function formatRss(kb: number): string {
 
 function renderProcs(procs: ProcInfo[]): void {
   procMonitorCountEl.textContent = String(procs.length);
-
-  // Auto-show the panel when a process appears, if it was hidden at zero
-  if (procs.length > 0 && procMonitorEl.classList.contains("hidden") && !procMonitorUserHidden) {
-    toggleProcMonitor(true);
-  }
+  procMonitorCountEl.classList.toggle("zero", procs.length === 0);
 
   if (procs.length === 0) {
     procMonitorRowsEl.innerHTML = '<tr><td colspan="6" class="empty-procs">No subprocesses running</td></tr>';
     return;
   }
 
-  // Sort by CPU descending
   const sorted = [...procs].sort((a, b) => b.pcpu - a.pcpu);
   procMonitorRowsEl.innerHTML = sorted.map((p) => `
     <tr>
@@ -1594,12 +2511,6 @@ function escapeHtml(s: string): string {
 function escapeAttr(s: string): string {
   return escapeHtml(s).replace(/"/g, "&quot;");
 }
-
-// Remember if user explicitly closed the panel so we don't keep re-opening it
-let procMonitorUserHidden = false;
-procMonitorCloseBtn.addEventListener("click", () => { procMonitorUserHidden = true; });
-procMonitorToggleBtn.addEventListener("click", () => { procMonitorUserHidden = procMonitorEl.classList.contains("hidden"); });
-
 window.orbit.onProcUpdate((procs) => {
   renderProcs(procs as ProcInfo[]);
 });

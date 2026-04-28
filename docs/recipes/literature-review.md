@@ -1,6 +1,6 @@
 # Recipe: Literature Review
 
-A prompt scaffold for the main agent to produce a durable, citeable literature review for the current plan and persist the approved references via `research_add_literature`.
+A prompt scaffold for the main agent to produce a durable, citeable literature review and persist the approved references in `notebook.md`.
 
 This recipe is **single-agent** on purpose. `team_dispatch` roles do not yet have tool access (see `docs/superpowers/specs/2026-04-17-multi-agent-dispatch-design.md`), so a Finder role cannot actually search -- it collapses into a second validator. Until roles gain tools, the main agent runs this loop itself.
 
@@ -8,7 +8,7 @@ The target quality bar is `alphagenome-malaria-loci/notes/literature-review.md` 
 
 ## Preconditions
 
-- Current plan has a `researchQuestion` set via `research_question_refine` (hypothesis at minimum, PICO preferred).
+- The notebook has a clear research question or plan section (hypothesis at minimum, PICO preferred).
 - The main agent has web search available. A PubMed / EuropePMC MCP is optional; see "When to reach for an MCP" at the bottom.
 - You have a rough sense of the domain -- enough to judge whether a title is primary research, review, commentary, or off-topic.
 
@@ -52,20 +52,17 @@ Before persisting, run each candidate through this pass:
 5. **Duplicate IDs.** Two hits with the same PMID or DOI collapse to one.
 6. **Novelty-table check.** For the core loci / targets / methods in the research question, does existing literature already answer our question? If yes, the hypothesis needs sharpening before we keep writing the review.
 
-A candidate that fails any of 1-4 either gets rewritten or dropped. Do not persist weak entries -- `research_add_literature` is the durable record, not a scratchpad.
+A candidate that fails any of 1-4 either gets rewritten or dropped. Do not persist weak entries -- the notebook's literature section is the durable record, not a scratchpad.
 
 ## Phase 4 -- Persist
 
-For each validated reference, call `research_add_literature` with:
+For each validated reference, edit `notebook.md` under a `## Literature` section using this shape:
 
-```
-title       (required)
-relevance   (required) -- the 1-2 sentence note from Phase 2, not a generic description
-pmid        (when available)
-doi         (when available)
-authors     (array; first 3-5 is fine)
-year
-journal
+```markdown
+- **<First author> et al. <year>. <Title>. <Journal>.**
+  - Role: precedent | comparator | limitation | replication | novel-connection
+  - Relevance: <the 1-2 sentence note from Phase 2, not a generic description>
+  - IDs: PMID <pmid if available>; DOI <doi if available>
 ```
 
 Persist in the order they should appear in the manuscript, grouped by role -- precedents first, then comparators, then limitations, then section-specific entries. The notebook preserves insertion order.
@@ -85,5 +82,5 @@ Until one of those bites, the MCP is a build-and-maintain cost that duplicates w
 ## When not to use this recipe
 
 - **The researcher has a curated list already.** Skip to Phase 4 and persist.
-- **Single paper drop-in.** `research_add_literature` directly is fine; a full review scaffold is overkill.
+- **Single paper drop-in.** Edit the `## Literature` section directly; a full review scaffold is overkill.
 - **Team dispatch becomes viable.** Once `team_dispatch` roles can call tools, revisit -- parallel Finder agents querying PubMed / bioRxiv / EuropePMC independently may earn the orchestration overhead.
