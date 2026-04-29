@@ -73,6 +73,7 @@ let streaming = false;
 // Update as providers change pricing or add models.
 const PRICING: Record<string, { in: number; out: number; cacheRead?: number; cacheWrite?: number }> = {
   // Anthropic
+  "claude-opus-4-7":      { in: 15, out: 75, cacheRead: 1.5, cacheWrite: 18.75 },
   "claude-opus-4-6":      { in: 15, out: 75, cacheRead: 1.5, cacheWrite: 18.75 },
   "claude-opus-4-5":      { in: 15, out: 75, cacheRead: 1.5, cacheWrite: 18.75 },
   "claude-sonnet-4-6":    { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
@@ -1989,9 +1990,10 @@ const prefsApiKeyStatus = document.getElementById("prefs-api-key-status")!;
 interface ModelChoice { id: string; label: string; }
 const MODELS_BY_PROVIDER: Record<string, ModelChoice[]> = {
   anthropic: [
+    { id: "claude-opus-4-7",   label: "Opus 4.7 — $15/$75 (most capable)" },
     { id: "claude-sonnet-4-6", label: "Sonnet 4.6 — $3/$15 (recommended)" },
     { id: "claude-haiku-4-5",  label: "Haiku 4.5 — $1/$5 (cheapest)" },
-    { id: "claude-opus-4-6",   label: "Opus 4.6 — $15/$75 (most capable, expensive)" },
+    { id: "claude-opus-4-6",   label: "Opus 4.6 — $15/$75" },
     { id: "claude-sonnet-4-5", label: "Sonnet 4.5 — $3/$15" },
     { id: "claude-opus-4-5",   label: "Opus 4.5 — $15/$75" },
   ],

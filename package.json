@@ -24,7 +24,7 @@
     ]
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.67.3",
+    "@mariozechner/pi-coding-agent": "^0.70.0",
     "@sinclair/typebox": "^0.34.49",
     "better-sqlite3": "^12.9.0",
     "chokidar": "^4.0.3",
@@ -41,7 +41,7 @@
     "validate:provenance": "vitest run tests/extension-integration.test.ts -t \"provenance notebook sync\""
   },
   "devDependencies": {
-    "@mariozechner/pi-ai": "^0.67.3",
+    "@mariozechner/pi-ai": "^0.70.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/uuid": "^11.0.0",
     "typescript": "^6.0.2",
