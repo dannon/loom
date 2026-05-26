@@ -98,12 +98,15 @@ frequencies across tissues.
 - [ ] 1. **QC FASTQ** {#plan-a-step-1} — fastp adapter trim + per-base QC
   - Routing: local
   - Tool: fastp
+  - Verification: confirm fastp HTML/JSON report exists and includes per-base quality metrics
 - [x] 2. **Reference index** {#plan-a-step-2} — bwa index of chrM
   - Routing: local
   - Tool: bwa index, samtools faidx
+  - Verification: confirm BWA index sidecar files and `.fai` exist
 - [ ] 3. **Read alignment** {#plan-a-step-3} — BWA-MEM, paired collection
   - Routing: Galaxy
   - Tool: bwa-mem2/2.2.1
+  - Verification: poll Galaxy invocation to `ok` and inspect BAM outputs
 - ...
 
 ### Parameters
@@ -116,9 +119,13 @@ frequencies across tissues.
 Conventions:
 
 - Routing tag in the section header: `[local]`, `[hybrid]`, or `[remote]`. Literal so future tooling can grep.
-- Step status by the checkbox: `- [ ]` pending, `- [x]` completed, `- [!]` failed.
+- Step status by the checkbox: `- [ ]` pending, `- [x]` verified completed, `- [!]` failed.
+- If verification is blocked or inconclusive but the step itself has not failed, leave the step pending and record the blocker.
 - Anchors `{#plan-X-step-N}` so Galaxy invocation YAML can reference individual steps.
 - Multiple plans coexist; new plan sections append at the bottom. Old plans aren't deleted.
+
+See [docs/agent/notebook-schema.md](docs/agent/notebook-schema.md) for
+verification evidence requirements.
 
 ### Four-stage approval before notebook write
 
@@ -218,7 +225,7 @@ Three paths, depending on what you want.
 
 ### Desktop app (Orbit)
 
-Orbit ships as a native installer (signed DMG on macOS, AppImage/deb on Linux, installer on Windows) and bundles its own Node runtime, `uv`, and Loom -- so there are no separate prerequisites. Once a build is signed and published, install it from the [Releases page](https://github.com/galaxyproject/loom/releases). Until then, use the developer install below.
+Orbit ships as a native installer that bundles its own Node runtime, `uv`, and Loom -- no separate prerequisites. macOS DMGs (arm64 + x64) are built and attached to a draft Release on every `v*` tag push; Linux and Windows installers are next. See [INSTALL.md](INSTALL.md) for the macOS install steps and the Gatekeeper workaround (alpha builds are unsigned). See [RELEASING.md](RELEASING.md) for how a release is cut. If your platform isn't packaged yet, use the developer install below.
 
 ### Loom CLI from npm
 
@@ -529,7 +536,7 @@ Galaxy MCP (registered separately when credentials are present) provides `galaxy
 
 | Component  | Technology                                            |
 | ---------- | ----------------------------------------------------- |
-| Agent      | Pi.dev (`@mariozechner/pi-coding-agent`)              |
+| Agent      | Pi.dev (`@earendil-works/pi-coding-agent`)            |
 | MCP bridge | `pi-mcp-adapter`, `uvx galaxy-mcp`                    |
 | Language   | TypeScript (strict)                                   |
 | Tests      | Vitest                                                |

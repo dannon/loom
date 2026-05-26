@@ -7,7 +7,7 @@
  * `loom-invocation` YAML blocks.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPlanTools } from "./tools";
 import { registerNotebookSyncTools } from "./tools-sync";
 import { registerSyncCommand } from "./sync-command";

@@ -7,7 +7,7 @@
  * guidance for the new markdown-and-invocation-block model.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import * as fs from "fs";
 import { getState, getNotebookPath } from "./state";
 import { isTeamDispatchEnabled } from "./teams/is-enabled";
@@ -230,8 +230,10 @@ After invoking via Galaxy MCP and getting an \`invocationId\` back:
 2. Periodically call \`galaxy_invocation_check_all\` to advance in-flight
    invocations. The tool auto-transitions YAML status (all-jobs-ok →
    completed, any-error → failed) and writes results back to the
-   notebook. After a transition, edit the markdown checkbox for the step
-   from \`- [ ]\` to \`- [x]\` (or \`- [!]\` for failures).
+   notebook. After a successful transition, inspect the output datasets,
+   record verification evidence in the notebook, then edit the markdown
+   checkbox for the step from \`- [ ]\` to \`- [x]\`. On failure, record
+   the error evidence and use \`- [!]\`.
 `;
 }
 
@@ -381,6 +383,88 @@ should rotate it.
 `;
 }
 
+/**
+ * Verification discipline. This is deliberately brain-side policy:
+ * shells render progress, but Loom decides when evidence is sufficient to
+ * call a research artifact complete.
+ */
+export function buildVerificationDisciplineBlock(): string {
+  return `## Verification before completion
+
+Evidence comes before assertion. For every checkable result, you must
+run an actual verification step before marking a notebook step complete
+or telling the user the work is done.
+
+### What counts as verification
+
+Match the verification check to the artifact or action being completed:
+
+- **Galaxy workflow or tool run** — poll the invocation/job to a terminal
+  state with \`galaxy_invocation_check_all\` or the relevant Galaxy MCP
+  inspection call, then inspect resulting datasets/collections enough to
+  confirm they exist and look plausible for the request.
+- **Authored Galaxy workflow** (\`.ga\` or workflow JSON) —
+  upload/import it to Galaxy, invoke it on a small
+  appropriate test input, poll to completion, and inspect outputs.
+- **Galaxy dataset or collection output** — inspect state, datatype,
+  metadata, size, preview/peek, expected element count, and failed or
+  hidden elements when collections are involved.
+- **Local data file** — read or parse the file with an appropriate tool
+  for its format, such as BAM/CRAM, VCF/BCF, FASTQ/FASTA, CSV/TSV,
+  JSON, YAML, or similar project artifacts.
+- **Config, script, or report** — read it back and parse, lint, render,
+  smoke test, or otherwise confirm the state matches the user request.
+- **Plan execution** — each completed step needs notebook evidence:
+  command or Galaxy action, observed status/output, and the verification
+  result.
+
+### Verification examples
+
+Use a targeted check that proves the artifact is usable for the request.
+Prefer the smallest representative verification that establishes the
+claim, but do not skip required validation just to save time:
+
+- **Workflow \`.ga\` / workflow JSON**: import it into Galaxy, invoke it on
+  a tiny representative input, poll jobs to \`ok\`, then inspect expected
+  outputs for datatype, non-empty content when expected, and plausible
+  metadata.
+- **Galaxy dataset output**: inspect dataset state, datatype, name,
+  size/metadata, and a small preview/peek. If the output is a collection,
+  confirm expected element count and failed/hidden elements.
+- **BAM/CRAM**: check file exists and is non-empty; use Galaxy metadata or
+  a Galaxy/local tool such as \`samtools quickcheck\` and, when useful,
+  \`samtools flagstat\` or \`idxstats\` on a small output.
+- **VCF/BCF**: confirm headers parse, record count is plausible for the
+  request, sample names match expectations, and compression/index status
+  is correct when downstream tools need it.
+- **FASTQ/FASTA**: confirm gzip/container integrity if compressed, count
+  reads/sequences, and check a small preview for expected identifiers.
+- **CSV/TSV/JSON/YAML/config**: parse it with the appropriate parser,
+  confirm required keys/columns are present, and check row/object counts
+  against the request.
+- **Markdown/HTML/PDF report**: open or render enough of the artifact to
+  confirm requested sections, figures/tables, and links/references are
+  present.
+
+If verification is blocked by missing credentials, missing test data,
+tool unavailability, or user scope, stop and say exactly what is
+unverified. Do **not** mark the step \`- [x]\` and do **not** say "done"
+or "complete" for that artifact. Say "created but not verified" and ask
+for the missing input or approval to change scope.
+
+### Notebook requirement
+
+Every new plan step should include a concrete \`Verification:\` sub-bullet
+so the expected evidence is clear before work starts. Existing or ad-hoc
+steps may lack that line; in those cases, infer the appropriate check
+from the artifact and execute it after the work runs. Before flipping
+\`- [ ]\` to \`- [x]\`, write the verification evidence under that step
+or in the relevant results section of \`notebook.md\`. For failed or
+inconclusive checks, mark \`- [!]\` only when the step itself failed;
+otherwise leave it pending and record the blocker.
+`;
+}
+
 function buildPlanConventionBlock(): string {
   return `## Project model and plan sections
 
@@ -440,9 +524,11 @@ text into the parent line; sub-bullets render as a real nested list.
 - [ ] 1. **<Step name>** {#plan-a-step-1} — <one-line purpose>
   - Routing: local
   - Tool: <tool-name-or-galaxy-id>
+  - Verification: <concrete check before this step can be marked complete>
 - [ ] 2. **<Step name>** {#plan-a-step-2} — <one-line purpose>
   - Routing: Galaxy
   - Tool: <galaxy-tool-id>
+  - Verification: <Galaxy status/output inspection that proves it worked>
 
 ### Parameters
 
@@ -460,8 +546,12 @@ Conventions:
 - Step routing/tool details go on **sub-bullets**, not on the same line
   as the step heading. Markdown will collapse same-line continuation
   text and the rendered notebook becomes unreadable.
+- Each step needs a **Verification** sub-bullet. It must name a concrete
+  check (poll invocation + inspect dataset, run smoke test, parse file,
+  compare expected rows, etc.), not a vague "looks good".
 - Mark step status by editing the checkbox: \`- [ ]\` (pending),
-  \`- [x]\` (completed), \`- [!]\` (failed).
+  \`- [x]\` (verified completed), \`- [!]\` (failed). Never mark
+  \`- [x]\` until the verification evidence is written to the notebook.
 - Multiple plans coexist; append new plan sections at the bottom of the
   notebook. Don't delete old plans.
 `;
@@ -489,7 +579,7 @@ literal \`**asterisks**\` instead of bold. Two rules:
   Galaxy invocation status updates land in the YAML blocks. Keep chat
   for **dialogue + final status** — open questions, requested
   decisions, and a single end-of-turn summary like
-  *"All 8 steps done. Variant call results in plan-a-step-7. Ready
+  *"All 8 steps verified. Variant call results in plan-a-step-7. Ready
   for interpretation?"*
 
 When you do post a multi-line update, prefer a markdown list or a
@@ -738,6 +828,7 @@ export function setupContextInjection(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (_event, ctx) => {
     const systemPrompt = [
       buildOperatingDisciplineBlock(),
+      buildVerificationDisciplineBlock(),
       buildPlanConventionBlock(),
       buildParameterReviewBlock(),
       buildChatFormattingBlock(),

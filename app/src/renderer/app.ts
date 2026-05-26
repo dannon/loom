@@ -1,4 +1,5 @@
 import { ChatPanel } from "./chat/chat-panel.js";
+import { humanizeAgentError } from "./chat/error-humanizer.js";
 import { ShellPanel } from "./chat/shell-panel.js";
 import { ArtifactPanel } from "./artifacts/artifact-panel.js";
 import { FilesPanel } from "./files/files-panel.js";
@@ -12,6 +13,16 @@ declare global {
     orbit: import("../preload/preload.js").OrbitAPI;
   }
 }
+
+// macOS uses titleBarStyle: 'hiddenInset', which insets the traffic lights
+// over the top-left of the content. Toggle a body class so we can pad the
+// leftmost masthead away from them and skip the padding on other platforms.
+// navigator.platform is deprecated; prefer userAgentData and fall back for
+// older Chromium / non-Chromium runtimes that may host the renderer.
+const platformString =
+  (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ??
+  navigator.platform;
+if (/mac/i.test(platformString)) document.body.classList.add("platform-darwin");
 
 // ── Components ────────────────────────────────────────────────────────────────
 
@@ -1789,7 +1800,7 @@ window.orbit.onAgentEvent((event) => {
         // isn't staring at a silent UI after a failed call.
         if (msg.stopReason === "error" && msg.errorMessage) {
           chat.hideThinking();
-          chat.addErrorMessage(msg.errorMessage);
+          chat.addErrorMessage(humanizeAgentError(msg.errorMessage).text);
           setStatusBadge("error");
         }
       }
@@ -1853,9 +1864,9 @@ window.orbit.onAgentEvent((event) => {
       break;
 
     case "error": {
-      const msg = (event as { message?: string }).message || "Unknown error";
+      const rawMsg = (event as { message?: string }).message || "Unknown error";
       chat.hideThinking();
-      chat.addErrorMessage(msg);
+      chat.addErrorMessage(humanizeAgentError(rawMsg).text);
       streaming = false;
       stopTurnTimer();
       setStatusBadge("error");
@@ -2227,8 +2238,13 @@ divider.addEventListener("mousedown", (e) => {
 
 document.addEventListener("mousemove", (e) => {
   if (!dragging) return;
-  const appWidth = document.getElementById("app")!.clientWidth;
-  const pct = (e.clientX / appWidth) * 100;
+  // chatPane is a flex child of #app-main, so its flex-basis percentage
+  // resolves against #app-main's width (not #app's). These are equal today
+  // because #app-main is the only row in #app, but using #app-main keeps the
+  // math correct if the column-flex parent ever grows a sibling.
+  const containerWidth = document.getElementById("app-main")!.getBoundingClientRect().width;
+  const chatLeft = chatPane.getBoundingClientRect().left;
+  const pct = ((e.clientX - chatLeft) / containerWidth) * 100;
   const clamped = Math.max(25, Math.min(75, pct));
   chatPane.style.flex = `0 0 ${clamped}%`;
 });
@@ -2586,6 +2602,7 @@ async function savePreferences(): Promise<void> {
   const result = await window.orbit.saveConfig(config as Record<string, unknown>);
   if (result.success) {
     closePreferences();
+    void refreshGalaxyStatus();
     if (selectedModel) {
       currentModel = selectedModel;
       renderModelIndicator();
@@ -3020,6 +3037,53 @@ function escapeAttr(s: string): string {
 window.orbit.onProcUpdate((procs) => {
   renderProcs(procs as ProcInfo[]);
 });
+
+// ── Update-available banner ──────────────────────────────────────────────────
+//
+// One non-blocking check per session against the GitHub Releases API; main
+// caches the response for 24h. No auto-install (unsigned macOS DMGs can't
+// be updated by Squirrel.Mac), so the link just opens the Releases page in
+// the user's default browser.
+{
+  const updateBanner = document.getElementById("update-banner");
+  const updateVersionEl = document.getElementById("update-banner-version");
+  const updateLinkBtn = document.getElementById("update-banner-link");
+  const updateDismissBtn = document.getElementById("update-banner-dismiss");
+
+  const DISMISSED_KEY = "orbit:update-dismissed-version";
+  let currentReleaseUrl: string | null = null;
+
+  if (updateBanner && updateVersionEl && updateLinkBtn && updateDismissBtn) {
+    updateLinkBtn.addEventListener("click", () => {
+      if (currentReleaseUrl) void window.orbit.openReleasePage(currentReleaseUrl);
+    });
+    updateDismissBtn.addEventListener("click", () => {
+      updateBanner.classList.add("hidden");
+      if (updateVersionEl.textContent) {
+        try {
+          localStorage.setItem(DISMISSED_KEY, updateVersionEl.textContent);
+        } catch {}
+      }
+    });
+
+    void (async () => {
+      try {
+        const info = await window.orbit.checkVersion();
+        if (!info || !info.hasUpdate) return;
+        let dismissed: string | null = null;
+        try {
+          dismissed = localStorage.getItem(DISMISSED_KEY);
+        } catch {}
+        // Dismissal is per-version: once a newer release lands, the banner
+        // reappears.
+        if (dismissed === info.latest) return;
+        updateVersionEl.textContent = info.latest;
+        currentReleaseUrl = info.releaseUrl;
+        updateBanner.classList.remove("hidden");
+      } catch {}
+    })();
+  }
+}
 
 // ── Focus input on load ───────────────────────────────────────────────────────
 inputEl.focus();

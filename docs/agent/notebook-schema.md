@@ -31,11 +31,14 @@ Question: how do mtDNA variants distribute across tissues in this dataset?
 ### Steps
 
 - [ ] 1. **QC FASTQ** {#plan-a-step-1} — fastp adapter trim + per-base QC
-     Routing: local
+  - Routing: local
+  - Verification: confirm fastp HTML/JSON report exists and includes per-base quality metrics
 - [ ] 2. **Reference index** {#plan-a-step-2} — bwa index of chrM
-     Routing: local
+  - Routing: local
+  - Verification: confirm BWA index sidecar files and `.fai` exist
 - [ ] 3. **Read alignment** {#plan-a-step-3} — bwa mem PE 4 samples
-     Routing: Galaxy (bwa-mem2/2.2.1)
+  - Routing: Galaxy (bwa-mem2/2.2.1)
+  - Verification: poll Galaxy jobs to `ok` and inspect BAM outputs
 - ...
 
 ### Parameters
@@ -50,10 +53,21 @@ Conventions:
 - `## Plan X: <Title> [routing]` — routing tag is `[local]`, `[hybrid]`,
   or `[remote]`. Future tooling greps for these literals.
 - `{#plan-x-step-N}` anchors so invocation YAML can reference steps.
+- Every step needs a concrete `Verification:` sub-bullet describing the
+  evidence required before completion.
 - Mark step status by editing the checkbox: `- [ ]` pending, `- [x]`
-  completed, `- [!]` failed.
+  verified completed, `- [!]` failed. Do not mark `- [x]` until the
+  verification evidence is written into the notebook.
+- If a verification check is blocked or inconclusive but the step itself
+  has not failed, leave the checkbox pending and record the blocker.
 - Multiple plans coexist; append new plan sections at the bottom of the
   notebook. Don't delete old plans.
+
+Verification examples should be specific to the artifact: `samtools
+quickcheck` / `flagstat` for BAM, header + record/sample checks for VCF,
+read/sequence counts for FASTQ/FASTA, parser + required keys/columns for
+JSON/YAML/CSV/TSV, and Galaxy state/datatype/metadata/peek checks for
+remote datasets.
 
 **Don't propose a plan unless asked.** Most user requests are questions,
 explorations, summaries, ad-hoc edits — answer those directly. A plan
