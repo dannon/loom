@@ -80,6 +80,11 @@ describe("pushNotebookToGalaxy", () => {
       "",
       "Body content.",
       "",
+      "```loom-invocation",
+      "invocation_id: inv-42",
+      "notebook_anchor: plan-1-step-1",
+      "```",
+      "",
       "```loom-galaxy-page",
       "page_id: p1",
       "page_slug: analysis",
@@ -111,6 +116,11 @@ describe("pushNotebookToGalaxy", () => {
         edit_source: "agent",
       }),
     );
+    // loom-invocation is analysis content; it stays in the body sent
+    // to Galaxy so the page reads naturally for human viewers.
+    const updateArg = vi.mocked(pagesApi.updatePage).mock.calls[0][1];
+    expect(updateArg.content).toContain("loom-invocation");
+    expect(updateArg.content).toContain("invocation_id: inv-42");
     expect(result).toEqual({
       pageId: "p1",
       pageSlug: "analysis",
