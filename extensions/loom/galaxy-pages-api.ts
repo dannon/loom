@@ -72,7 +72,8 @@ export interface GalaxyPageRevisionDetails extends GalaxyPageRevisionSummary {
 }
 
 export interface CreatePageParams {
-  title: string;
+  /** Optional -- Galaxy auto-generates from the history name when omitted. */
+  title?: string;
   content: string;
   history_id: string;
   slug?: string;

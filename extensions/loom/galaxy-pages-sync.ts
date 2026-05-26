@@ -237,7 +237,7 @@ export async function pushNotebookToGalaxy(opts: PushOptions = {}): Promise<Push
     }
     const created = await createPage({
       history_id: opts.historyId,
-      title: opts.title ?? "Untitled notebook",
+      title: opts.title,
       slug: opts.slug,
       annotation: opts.annotation,
       content: stripped,
