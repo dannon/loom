@@ -47,7 +47,8 @@ any concurrent Galaxy-UI edits since the last sync are overwritten.`,
       ),
       title: Type.Optional(
         Type.String({
-          description: "Page title for create. Defaults to 'Untitled notebook' if omitted.",
+          description:
+            "Page title for create. Galaxy auto-generates from the history name if omitted.",
         }),
       ),
       slug: Type.Optional(
