@@ -162,7 +162,7 @@ flip the toggle to Cloud if they want Galaxy back.
  * Galaxy connection status block — replaces the old Local|Remote toggle
  * with agent-side per-plan routing decisions.
  */
-function buildGalaxyContextBlock(): string {
+export function buildGalaxyContextBlock(): string {
   const cfg = loadConfig();
   // Local mode short-circuits — no Galaxy guidance, even if connected.
   if (cfg.executionMode === "local") {
@@ -248,6 +248,30 @@ After invoking via Galaxy MCP and getting an \`invocationId\` back:
    record verification evidence in the notebook, then edit the markdown
    checkbox for the step from \`- [ ]\` to \`- [x]\`. On failure, record
    the error evidence and use \`- [!]\`.
+
+### Running a tool over a collection (map-over)
+
+A tool whose input is a **single-dataset** parameter (e.g. FastQC
+\`input_file\`, featureCounts \`alignment\`) rejects a dataset collection —
+the normal output of STAR, a paired-trimming step, etc. — with:
+
+> Parameter '…': dataset collection supplied to single input dataset parameter;
+> to run the tool over multiple inputs use map/reduce
+
+That is **not** a malformed-inputs error — it means "run this tool once
+per element of the collection" (map-over). **Don't retry the same
+collection-as-single-input call.** Re-issue \`galaxy_run_tool\` with that
+input wrapped as a batch value:
+
+\`\`\`json
+{ "<input_name>": { "batch": true, "values": [{ "src": "hdca", "id": "<collection_id>" }] } }
+\`\`\`
+
+Galaxy then maps the tool across the collection and produces an output
+collection (one job per element). This is the standard per-sample RNA-seq
+pattern. For linked vs. unlinked map-over across several collections, or
+mapping over the inner level of a nested collection, fetch
+\`collection-manipulation/SKILL.md\` before constructing the call.
 `;
 }
 
