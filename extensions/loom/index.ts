@@ -25,6 +25,7 @@ import { registerConfusablesHint } from "./confusables-hint";
 import { registerExecGuard } from "./exec-guard";
 import { registerSandbox } from "./sandbox";
 import { registerSecretRedaction } from "./secret-redaction";
+import { GALAXY_RECONNECT_NUDGE, transportNudgeDecision } from "./galaxy-transport-error";
 import * as fs from "fs";
 import { getState, getNotebookPath, getNotebookWidgetMode, setNotebookWidgetMode } from "./state";
 import {
@@ -322,6 +323,11 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // ─────────────────────────────────────────────────────────────────────────────
   const toolStartTimes = new Map<string, number>();
 
+  // Armed = a reconnect nudge is allowed to fire. We fire once when the MCP
+  // transport drops, then disarm so a galaxy retry loop doesn't spam the user,
+  // and re-arm after any healthy galaxy result.
+  let transportNudgeArmed = true;
+
   pi.on("tool_execution_start", async (event, ctx) => {
     if (event.toolName?.startsWith("galaxy_")) {
       const label = event.toolName.replace(/^galaxy_/, "").replace(/_/g, " ");
@@ -372,7 +378,22 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("tool_result", async (event, _ctx) => {
+  pi.on("tool_result", async (event, ctx) => {
+    // Surface an actionable hint when a galaxy_* call fails because the MCP
+    // transport died mid-session (bare "Not connected" / -32000 / -32001) --
+    // the user can recover with /mcp reconnect galaxy, no restart needed.
+    try {
+      const firstContent = event.content?.[0];
+      const resultText = firstContent && "text" in firstContent ? firstContent.text : undefined;
+      const decision = transportNudgeDecision(transportNudgeArmed, event.toolName, resultText);
+      transportNudgeArmed = decision.armed;
+      if (decision.showNudge) {
+        ctx.ui.notify(GALAXY_RECONNECT_NUDGE, "warning");
+      }
+    } catch {
+      /* ignore */
+    }
+
     if (event.toolName === "galaxy_connect") {
       try {
         const firstContent = event.content?.[0];
