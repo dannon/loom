@@ -381,8 +381,21 @@ export class ChatPanel {
     btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy`;
     document.body.appendChild(btn);
 
-    // Prevent the click from clearing the selection before we read it
-    btn.addEventListener("mousedown", (e) => e.preventDefault());
+    // selectionchange fires while a mousedown is still in progress and the old
+    // selection is still live, which would immediately re-show the button we
+    // just hid. Track mousedown state so selectionchange can't re-show it.
+    let mouseIsDown = false;
+
+    btn.addEventListener("mousedown", (e) => e.preventDefault()); // keep selection alive on button click
+
+    document.addEventListener("mousedown", (e) => {
+      if (e.target !== btn) { btn.hidden = true; mouseIsDown = true; }
+    });
+    document.addEventListener("mouseup", () => {
+      mouseIsDown = false;
+      updateBtn();
+    });
+    window.addEventListener("blur", () => { btn.hidden = true; });
 
     btn.addEventListener("click", () => {
       const sel = window.getSelection();
@@ -401,7 +414,14 @@ export class ChatPanel {
       });
     });
 
+    // Keyboard selection (Shift+arrow, Ctrl+A, etc.) — selectionchange is safe
+    // here because there's no mousedown race.
     document.addEventListener("selectionchange", () => {
+      if (mouseIsDown) return;
+      updateBtn();
+    });
+
+    const updateBtn = () => {
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || sel.rangeCount === 0) { btn.hidden = true; return; }
       const range = sel.getRangeAt(0);
@@ -414,7 +434,7 @@ export class ChatPanel {
       const left = Math.max(4, Math.min(rect.right - bw, window.innerWidth - bw - 4));
       btn.style.top = `${top}px`;
       btn.style.left = `${left}px`;
-    });
+    };
 
     return btn;
   }
