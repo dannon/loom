@@ -32,6 +32,17 @@ export class ChatPanel {
     this.container = container;
     this.copyBtn = this.initCopyButton();
 
+    this.container.addEventListener("copy", (e) => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const frag = sel.getRangeAt(0).cloneContents();
+      const tmp = document.createElement("div");
+      tmp.appendChild(frag);
+      const md = fragmentToMarkdown(tmp);
+      e.preventDefault();
+      e.clipboardData!.setData("text/plain", md);
+    });
+
     this.container.addEventListener("scroll", () => {
       const { scrollTop, scrollHeight, clientHeight } = this.container;
       this.scrollLocked = scrollHeight - scrollTop - clientHeight < 40;
