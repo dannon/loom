@@ -677,8 +677,13 @@ export async function checkInvocations(
 
   for (const block of toCheck) {
     try {
+      // `step_details=true` is required for the per-step `jobs` arrays to be
+      // populated. Without it Galaxy still returns a `jobs` key on every step,
+      // but always empty -- so every counter below lands on zero, neither the
+      // completed nor the failed branch can fire, and the block sits at
+      // in_progress forever with no toast and no transition.
       const inv = await galaxyGet<GalaxyInvocationResponse>(
-        `/invocations/${block.invocationId}`,
+        `/invocations/${block.invocationId}?step_details=true`,
         signal,
       );
 
