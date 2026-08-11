@@ -129,7 +129,10 @@ export function registerExecGuard(pi: ExtensionAPI): void {
     const modelName = ctx.model?.id ?? "the model";
     // Heading and the thing being approved are separated by a blank line so a
     // shell can render the command as a readable body instead of a headline.
-    const isBash = event.toolName === "bash";
+    // Lowercased to match the policy engine, which gates on the normalized
+    // name -- otherwise a "Bash" call would be gated as a command but prompted
+    // as a path, showing the user nothing of what they're approving.
+    const isBash = event.toolName.toLowerCase() === "bash";
     const heading = isBash
       ? `Allow ${modelName} to run this command?`
       : `Allow ${modelName} to ${event.toolName} this path?`;

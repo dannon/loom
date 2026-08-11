@@ -20,20 +20,32 @@ describe("truncateApprovalDetail", () => {
   it("marks a truncated command with how much is hidden", () => {
     const cmd = "y".repeat(APPROVAL_DETAIL_LIMIT + 310);
     const out = truncateApprovalDetail(cmd);
-    expect(out.startsWith("y".repeat(APPROVAL_DETAIL_LIMIT))).toBe(true);
     expect(out).toContain("truncated");
     // The user needs the real numbers to judge what they can't see.
     expect(out).toContain("310");
     expect(out).toContain(String(APPROVAL_DETAIL_LIMIT + 310));
   });
 
-  it("honors an explicit limit", () => {
-    expect(truncateApprovalDetail("abcdef", 3).startsWith("abc")).toBe(true);
-    expect(truncateApprovalDetail("abcdef", 3)).toContain("truncated");
+  it("cuts the middle, not the tail, so a suffix cannot hide behind padding", () => {
+    const cmd = `head-marker ${"pad ".repeat(2000)}tail-marker`;
+    const out = truncateApprovalDetail(cmd);
+    expect(out).toContain("head-marker");
+    expect(out).toContain("tail-marker");
+    expect(out).toContain("truncated");
+    // Still bounded -- the marker is the only thing added past the limit.
+    expect(out.length).toBeLessThan(APPROVAL_DETAIL_LIMIT + 100);
   });
 
-  it("trims surrounding whitespace but preserves interior layout", () => {
-    expect(truncateApprovalDetail("\n  ls -la\n\n")).toBe("ls -la");
+  it("honors an explicit limit, degrading to head-only when it is tiny", () => {
+    const out = truncateApprovalDetail("abcdef", 3);
+    expect(out.startsWith("abc")).toBe(true);
+    expect(out).toContain("truncated");
+  });
+
+  it("preserves the detail byte-for-byte -- shown must equal approved", () => {
+    // Trailing whitespace is part of the path the tool will actually use.
+    expect(truncateApprovalDetail("/tmp/report ")).toBe("/tmp/report ");
+    expect(truncateApprovalDetail("\n  ls -la\n")).toBe("\n  ls -la\n");
     expect(truncateApprovalDetail("for f in *; do\n  echo $f\ndone")).toBe(
       "for f in *; do\n  echo $f\ndone",
     );
@@ -52,12 +64,13 @@ describe("buildApprovalPrompt", () => {
     );
   });
 
-  it("emits the heading alone when there is no detail", () => {
+  it("emits the heading alone only when there is genuinely no detail", () => {
     expect(buildApprovalPrompt("Allow x to run this command?", "")).toBe(
       "Allow x to run this command?",
     );
+    // Whitespace is still a detail -- dropping it would hide the real target.
     expect(buildApprovalPrompt("Allow x to run this command?", "   \n ")).toBe(
-      "Allow x to run this command?",
+      "Allow x to run this command?\n\n   \n ",
     );
   });
 
@@ -76,6 +89,12 @@ describe("splitApprovalPrompt", () => {
     const split = splitApprovalPrompt(buildApprovalPrompt(heading, detail));
     expect(split.heading).toBe(heading);
     expect(split.detail).toBe(detail);
+  });
+
+  it("round-trips a detail with leading and trailing whitespace", () => {
+    for (const detail of ["  indented", "/tmp/report ", "\n\nls -la", "a\n\nb"]) {
+      expect(splitApprovalPrompt(buildApprovalPrompt("Heading?", detail)).detail).toBe(detail);
+    }
   });
 
   it("splits on the first blank line only, so the detail keeps its own", () => {
