@@ -72,28 +72,41 @@ export function captureProviderState(
   };
 }
 
+export interface OnboardingSaveOptions {
+  /** Providers that authenticate via OAuth, so never get a plaintext apiKey. */
+  isOAuthProvider: (provider: string) => boolean;
+  /** Providers that are unusable without a base URL (the custom endpoint). */
+  requiresBaseUrl?: (provider: string) => boolean;
+}
+
 /**
  * Build the `llm.providers` payload for a first-run save: every provider the
  * user actually typed a key for, plus the active one (so `llm.active` always
  * names a provider that's present in the map).
  *
- * Two things it deliberately never emits:
+ * Three things it deliberately never emits:
  *   - a plaintext `apiKey` for an OAuth provider -- that credential lives in
  *     ~/.pi/agent/auth.json, and a config.json key would shadow it;
  *   - an empty `apiKey`, which main reads as "clear the stored key". Onboarding
- *     has no business deleting a credential that's already on disk.
+ *     has no business deleting a credential that's already on disk;
+ *   - a stashed provider that can't be reached with what was typed (a custom
+ *     endpoint with no base URL). The form enforces that for the provider on
+ *     screen; the ones left behind in the state map have to be checked here.
  */
 export function buildOnboardingProviders(
   states: Readonly<Record<string, ProviderState>>,
   activeProvider: string,
-  isOAuthProvider: (provider: string) => boolean,
+  { isOAuthProvider, requiresBaseUrl }: OnboardingSaveOptions,
 ): Record<string, ProviderConfigEntry> {
   const providers: Record<string, ProviderConfigEntry> = {};
   const names = new Set([...Object.keys(states), activeProvider]);
   for (const name of names) {
     const state = states[name] ?? emptyProviderState();
     const key = isOAuthProvider(name) ? "" : state.typedKey.trim();
-    if (!key && name !== activeProvider) continue;
+    if (name !== activeProvider) {
+      if (!key) continue;
+      if (requiresBaseUrl?.(name) && !state.baseUrl) continue;
+    }
     const entry: ProviderConfigEntry = {};
     if (key) entry.apiKey = key;
     if (state.model) entry.model = state.model;
@@ -139,8 +152,8 @@ export class ProviderFieldStore {
   }
 
   /** The `llm.providers` payload for a save; snapshot the form first. */
-  saveEntries(isOAuthProvider: (provider: string) => boolean): Record<string, ProviderConfigEntry> {
-    return buildOnboardingProviders(this.states, this.active, isOAuthProvider);
+  saveEntries(options: OnboardingSaveOptions): Record<string, ProviderConfigEntry> {
+    return buildOnboardingProviders(this.states, this.active, options);
   }
 
   /** Drop every typed key once they've been handed off to main. */

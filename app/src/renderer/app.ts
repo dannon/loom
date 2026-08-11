@@ -1063,7 +1063,13 @@ welcomeSave.addEventListener("click", async () => {
   const cfg: Record<string, unknown> = {
     llm: {
       active: welcomeProvider.value,
-      providers: welcomeProviders.saveEntries(isOAuthProvider),
+      providers: welcomeProviders.saveEntries({
+        isOAuthProvider,
+        // Only the provider on screen gets the base-URL check above, so a
+        // custom endpoint the user stashed half-configured is dropped rather
+        // than written as an unreachable key.
+        requiresBaseUrl: (provider) => provider === "openai-compatible",
+      }),
     },
   };
 
@@ -1077,7 +1083,14 @@ welcomeSave.addEventListener("click", async () => {
   const cwd = welcomeCwd.value.trim();
   if (cwd) cfg.defaultCwd = cwd;
 
-  await window.orbit.saveConfig(cfg);
+  // Keep the overlay (and the typed keys) if main rejected the config -- e.g.
+  // a Galaxy URL that fails validation. Dismissing here would drop every key
+  // the user entered without any of them having been persisted.
+  const result = await window.orbit.saveConfig(cfg);
+  if (!result.success) {
+    welcomeError.textContent = result.error || "Could not save your settings";
+    return;
+  }
   forgetWelcomeKeys();
   welcomeOverlay.classList.add("hidden");
   await refreshGalaxyStatus();

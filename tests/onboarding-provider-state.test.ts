@@ -19,6 +19,10 @@ import {
  */
 
 const isOAuth = (p: string): boolean => p === "openai-codex";
+const saveOptions = {
+  isOAuthProvider: isOAuth,
+  requiresBaseUrl: (p: string): boolean => p === "openai-compatible",
+};
 
 describe("providerStateFor", () => {
   it("returns blank fields for a provider that has never been visited", () => {
@@ -116,7 +120,7 @@ describe("buildOnboardingProviders", () => {
       baseUrl: "",
     });
 
-    const providers = buildOnboardingProviders(states, "deepseek", isOAuth);
+    const providers = buildOnboardingProviders(states, "deepseek", saveOptions);
 
     expect(providers).toEqual({
       openai: { apiKey: "sk-openai", model: "gpt-5.4" },
@@ -141,7 +145,7 @@ describe("buildOnboardingProviders", () => {
       baseUrl: "",
     });
 
-    const providers = buildOnboardingProviders(states, "deepseek", isOAuth);
+    const providers = buildOnboardingProviders(states, "deepseek", saveOptions);
 
     expect(providers.deepseek.apiKey).toBeUndefined();
     expect(providers.openai.apiKey).toBe("sk-openai");
@@ -159,9 +163,42 @@ describe("buildOnboardingProviders", () => {
       baseUrl: "",
     });
 
-    expect(Object.keys(buildOnboardingProviders(states, "anthropic", isOAuth))).toEqual([
+    expect(Object.keys(buildOnboardingProviders(states, "anthropic", saveOptions))).toEqual([
       "anthropic",
     ]);
+  });
+
+  it("drops a stashed custom endpoint that never got a base URL", () => {
+    // Unreachable as saved: openai-compatible is nothing without its URL, and
+    // only the provider on screen gets the form's base-URL check.
+    let states = captureProviderState({}, "openai-compatible", {
+      typedKey: "sk-custom",
+      model: "",
+      baseUrl: "",
+    });
+    states = captureProviderState(states, "anthropic", {
+      typedKey: "sk-anthropic",
+      model: "claude-opus-5",
+      baseUrl: "",
+    });
+
+    expect(Object.keys(buildOnboardingProviders(states, "anthropic", saveOptions))).toEqual([
+      "anthropic",
+    ]);
+  });
+
+  it("keeps the active provider even when it looks incomplete", () => {
+    // The form blocks this one before save; the payload builder isn't the
+    // place to second-guess which provider the user is actively configuring.
+    const states = captureProviderState({}, "openai-compatible", {
+      typedKey: "sk-custom",
+      model: "",
+      baseUrl: "",
+    });
+
+    expect(buildOnboardingProviders(states, "openai-compatible", saveOptions)).toEqual({
+      "openai-compatible": { apiKey: "sk-custom" },
+    });
   });
 
   it("keeps a base URL on the provider it belongs to", () => {
@@ -176,7 +213,7 @@ describe("buildOnboardingProviders", () => {
       baseUrl: "",
     });
 
-    const providers = buildOnboardingProviders(states, "anthropic", isOAuth);
+    const providers = buildOnboardingProviders(states, "anthropic", saveOptions);
 
     expect(providers["openai-compatible"].baseUrl).toBe("https://llm.jetstream-cloud.org/api");
     expect(providers.anthropic.baseUrl).toBeUndefined();
@@ -188,7 +225,7 @@ describe("buildOnboardingProviders", () => {
       model: "claude-opus-5",
       baseUrl: "",
     });
-    expect(buildOnboardingProviders(states, "anthropic", isOAuth).anthropic.apiKey).toBe(
+    expect(buildOnboardingProviders(states, "anthropic", saveOptions).anthropic.apiKey).toBe(
       "sk-anthropic",
     );
   });
@@ -202,7 +239,7 @@ describe("buildOnboardingProviders", () => {
       baseUrl: "",
     });
 
-    const providers = buildOnboardingProviders(states, "openai-codex", isOAuth);
+    const providers = buildOnboardingProviders(states, "openai-codex", saveOptions);
 
     expect(providers["openai-codex"]).toEqual({ model: "gpt-5.3-codex" });
     expect(JSON.stringify(providers)).not.toContain("leaked-from-another-provider");
@@ -211,7 +248,7 @@ describe("buildOnboardingProviders", () => {
   it("keeps the active provider in the payload even with nothing typed", () => {
     // OAuth sign-in path: no key, no model picked yet -- the entry still has to
     // exist so llm.active points at a provider that's present in the map.
-    const providers = buildOnboardingProviders({}, "openai-codex", isOAuth);
+    const providers = buildOnboardingProviders({}, "openai-codex", saveOptions);
     expect(providers).toEqual({ "openai-codex": {} });
   });
 
@@ -221,7 +258,7 @@ describe("buildOnboardingProviders", () => {
       model: "",
       baseUrl: "",
     });
-    expect(buildOnboardingProviders(states, "anthropic", isOAuth).anthropic).toEqual({
+    expect(buildOnboardingProviders(states, "anthropic", saveOptions).anthropic).toEqual({
       apiKey: "sk-anthropic",
     });
   });
@@ -259,7 +296,7 @@ describe("ProviderFieldStore", () => {
     store.select("deepseek", openaiFields);
     store.snapshot({ typedKey: "sk-deepseek", model: "deepseek-v4-pro", baseUrl: "" });
 
-    expect(store.saveEntries(isOAuth)).toEqual({
+    expect(store.saveEntries(saveOptions)).toEqual({
       openai: { apiKey: "sk-openai", model: "gpt-5.4" },
       deepseek: { apiKey: "sk-deepseek", model: "deepseek-v4-pro" },
     });
@@ -272,7 +309,7 @@ describe("ProviderFieldStore", () => {
     const store = new ProviderFieldStore("openai");
     store.select("openai-codex", openaiFields);
 
-    const providers = store.saveEntries(isOAuth);
+    const providers = store.saveEntries(saveOptions);
 
     expect(providers["openai-codex"].apiKey).toBeUndefined();
     expect(providers.openai.apiKey).toBe("sk-openai");
@@ -286,6 +323,6 @@ describe("ProviderFieldStore", () => {
     expect(store.select("openai", { typedKey: "", model: "", baseUrl: "" })).toEqual(
       emptyProviderState(),
     );
-    expect(store.saveEntries(isOAuth)).toEqual({ openai: {} });
+    expect(store.saveEntries(saveOptions)).toEqual({ openai: {} });
   });
 });
