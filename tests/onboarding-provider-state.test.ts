@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ProviderFieldStore,
   buildOnboardingProviders,
   captureProviderState,
   emptyProviderState,
@@ -125,7 +126,10 @@ describe("buildOnboardingProviders", () => {
 
   it("never writes the previous provider's key under the active one", () => {
     // Same flow, but the user switched away from OpenAI without typing a
-    // DeepSeek key -- the leftover key must not follow the dropdown.
+    // DeepSeek key. Save blocks this one before it gets here (an active
+    // API-key provider with no key is a validation error), so it pins the
+    // invariant rather than a reachable path -- the reachable version is the
+    // OAuth case below, where no key is required to save.
     let states = captureProviderState({}, "openai", {
       typedKey: "sk-openai",
       model: "gpt-5.4",
@@ -220,5 +224,68 @@ describe("buildOnboardingProviders", () => {
     expect(buildOnboardingProviders(states, "anthropic", isOAuth).anthropic).toEqual({
       apiKey: "sk-anthropic",
     });
+  });
+});
+
+/**
+ * The store is what the welcome overlay actually drives: it owns which provider
+ * the visible fields belong to, so the capture-then-restore ordering that #401
+ * got wrong is pinned here instead of only in the change handler.
+ */
+describe("ProviderFieldStore", () => {
+  const openaiFields = { typedKey: "sk-openai", model: "gpt-5.4", baseUrl: "" };
+
+  it("clears the field when switching to a provider you haven't visited", () => {
+    const store = new ProviderFieldStore("openai");
+    expect(store.select("deepseek", openaiFields)).toEqual(emptyProviderState());
+    expect(store.activeProvider).toBe("deepseek");
+  });
+
+  it("restores the stashed key when you switch back", () => {
+    const store = new ProviderFieldStore("openai");
+    store.select("deepseek", openaiFields);
+    expect(store.select("openai", { typedKey: "", model: "deepseek-v4-pro", baseUrl: "" })).toEqual(
+      { hadKey: false, ...openaiFields },
+    );
+  });
+
+  it("keeps what's on screen when the selection doesn't actually change", () => {
+    const store = new ProviderFieldStore("openai");
+    expect(store.select("openai", openaiFields)).toEqual({ hadKey: false, ...openaiFields });
+  });
+
+  it("saves each key under its own provider, with the selected one active", () => {
+    const store = new ProviderFieldStore("openai");
+    store.select("deepseek", openaiFields);
+    store.snapshot({ typedKey: "sk-deepseek", model: "deepseek-v4-pro", baseUrl: "" });
+
+    expect(store.saveEntries(isOAuth)).toEqual({
+      openai: { apiKey: "sk-openai", model: "gpt-5.4" },
+      deepseek: { apiKey: "sk-deepseek", model: "deepseek-v4-pro" },
+    });
+  });
+
+  it("leaves an OAuth provider keyless when the form still holds someone else's key", () => {
+    // Reachable through the UI: type an OpenAI key, switch to the OAuth
+    // provider, sign in, save. The OAuth entry must carry no apiKey, and the
+    // OpenAI key must stay on OpenAI.
+    const store = new ProviderFieldStore("openai");
+    store.select("openai-codex", openaiFields);
+
+    const providers = store.saveEntries(isOAuth);
+
+    expect(providers["openai-codex"].apiKey).toBeUndefined();
+    expect(providers.openai.apiKey).toBe("sk-openai");
+  });
+
+  it("drops every typed key on clear", () => {
+    const store = new ProviderFieldStore("openai");
+    store.select("deepseek", openaiFields);
+    store.clear();
+
+    expect(store.select("openai", { typedKey: "", model: "", baseUrl: "" })).toEqual(
+      emptyProviderState(),
+    );
+    expect(store.saveEntries(isOAuth)).toEqual({ openai: {} });
   });
 });

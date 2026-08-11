@@ -16,9 +16,10 @@ import { formatGalaxyTooltip } from "./galaxy-tooltip.js";
 import { PromptQueue, queuedPreview } from "./prompt-queue.js";
 import { FeedbackDraftStore } from "./feedback-draft.js";
 import {
-  buildOnboardingProviders,
+  ProviderFieldStore,
   captureProviderState,
   providerStateFor,
+  type ProviderFields,
   type ProviderState,
 } from "./provider-state.js";
 import { applyOrbitTheme } from "./theme.js";
@@ -900,21 +901,17 @@ function populateWelcomeModels(provider: string, selected?: string): void {
 // of inputs, so switching the dropdown has to stash the old provider's fields
 // and restore the new one's. Without it the key typed for provider A stayed in
 // the input and got saved as provider B's credential (#401).
-let welcomeProviderStates: Record<string, ProviderState> = {};
-let welcomeActiveProvider = welcomeProvider.value;
+const welcomeProviders = new ProviderFieldStore(welcomeProvider.value);
 
-function snapshotWelcomeProvider(): void {
-  welcomeProviderStates = captureProviderState(welcomeProviderStates, welcomeActiveProvider, {
+function readWelcomeFields(): ProviderFields {
+  return {
     typedKey: welcomeApiKey.value,
     model: welcomeModel.value,
     baseUrl: welcomeBaseUrl.value,
-  });
+  };
 }
 
-/** Point the visible fields at `provider`, and keep the selection in sync. */
-function loadWelcomeProviderFields(provider: string): void {
-  const state = providerStateFor(welcomeProviderStates, provider);
-  welcomeActiveProvider = provider;
+function showWelcomeFields(provider: string, state: ProviderState): void {
   populateWelcomeModels(provider, state.model || undefined);
   welcomeApiKey.value = state.typedKey;
   welcomeBaseUrl.value = state.baseUrl;
@@ -923,9 +920,20 @@ function loadWelcomeProviderFields(provider: string): void {
   welcomeApiKeyStatus.textContent = "";
 }
 
+/** Point the overlay at `provider`, stashing whatever is on screen first. */
+function selectWelcomeProvider(provider: string): void {
+  showWelcomeFields(provider, welcomeProviders.select(provider, readWelcomeFields()));
+}
+
+/** Wipe the typed keys once they've been handed off (or abandoned). */
+function forgetWelcomeKeys(): void {
+  welcomeProviders.clear();
+  welcomeApiKey.value = "";
+  welcomeBaseUrl.value = "";
+}
+
 welcomeProvider.addEventListener("change", () => {
-  snapshotWelcomeProvider();
-  loadWelcomeProviderFields(welcomeProvider.value);
+  selectWelcomeProvider(welcomeProvider.value);
   void updateWelcomeAuthUi();
 });
 wireApiKeyValidation(
@@ -1011,6 +1019,7 @@ welcomeSave.addEventListener("click", async () => {
       welcomeError.textContent = res.error || "Could not start the agent with that key";
       return;
     }
+    forgetWelcomeKeys();
     welcomeOverlay.classList.add("hidden");
     await refreshGalaxyStatus();
     return;
@@ -1050,15 +1059,11 @@ welcomeSave.addEventListener("click", async () => {
   // lost (or, worse, saved as the wrong provider's). OAuth providers persist
   // their credential in ~/.pi/agent/auth.json (written by the sign-in flow
   // above), not in config.json, so no apiKey is written for those.
-  snapshotWelcomeProvider();
+  welcomeProviders.snapshot(readWelcomeFields());
   const cfg: Record<string, unknown> = {
     llm: {
       active: welcomeProvider.value,
-      providers: buildOnboardingProviders(
-        welcomeProviderStates,
-        welcomeProvider.value,
-        isOAuthProvider,
-      ),
+      providers: welcomeProviders.saveEntries(isOAuthProvider),
     },
   };
 
@@ -1073,6 +1078,7 @@ welcomeSave.addEventListener("click", async () => {
   if (cwd) cfg.defaultCwd = cwd;
 
   await window.orbit.saveConfig(cfg);
+  forgetWelcomeKeys();
   welcomeOverlay.classList.add("hidden");
   await refreshGalaxyStatus();
 });
@@ -1082,6 +1088,7 @@ welcomeSave.addEventListener("click", async () => {
 // in chat where to come back when they're ready.
 const welcomeSkip = document.getElementById("welcome-skip")!;
 welcomeSkip.addEventListener("click", () => {
+  forgetWelcomeKeys();
   welcomeOverlay.classList.add("hidden");
   chat.addInfoMessage(
     `<i>No LLM provider configured yet. Open <code>Preferences</code> ` +
@@ -1111,7 +1118,7 @@ async function checkFirstRun(): Promise<void> {
     if (!hasKey) {
       remoteKeyEntry = true;
       if (active) welcomeProvider.value = active;
-      loadWelcomeProviderFields(welcomeProvider.value);
+      selectWelcomeProvider(welcomeProvider.value);
       void updateWelcomeAuthUi();
       // Remote: cwd is fixed (/tmp/loom-session) and Galaxy creds are injected,
       // so hide both optional <details> sections; "Skip" would leave no agent.
@@ -1131,7 +1138,7 @@ async function checkFirstRun(): Promise<void> {
   }
   const hasKey = active ? Boolean(cfg.llm?.providers?.[active]?.hasApiKey) : false;
   if (!hasKey) {
-    loadWelcomeProviderFields(welcomeProvider.value);
+    selectWelcomeProvider(welcomeProvider.value);
     void updateWelcomeAuthUi();
     welcomeOverlay.classList.remove("hidden");
   }

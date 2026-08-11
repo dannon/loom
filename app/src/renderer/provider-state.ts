@@ -102,3 +102,49 @@ export function buildOnboardingProviders(
   }
   return providers;
 }
+
+/**
+ * The welcome overlay's per-provider state, kept together with the provider the
+ * form is currently showing so the "stash the old, restore the new" ordering
+ * lives here rather than in the click handler -- the wiring in app.ts is then
+ * just reading and writing input elements.
+ */
+export class ProviderFieldStore {
+  private states: Record<string, ProviderState> = {};
+  private active: string;
+
+  constructor(active: string) {
+    this.active = active;
+  }
+
+  /** The provider the visible fields currently belong to. */
+  get activeProvider(): string {
+    return this.active;
+  }
+
+  /** Stash the visible fields under the provider they were typed for. */
+  snapshot(fields: ProviderFields): void {
+    this.states = captureProviderState(this.states, this.active, fields);
+  }
+
+  /**
+   * Switch to `provider`, stashing the fields on screen first. Returns what the
+   * form should show next -- blank for a provider that hasn't been visited,
+   * which is what gets the previous provider's key out of the input.
+   */
+  select(provider: string, visible: ProviderFields): ProviderState {
+    this.snapshot(visible);
+    this.active = provider;
+    return providerStateFor(this.states, provider);
+  }
+
+  /** The `llm.providers` payload for a save; snapshot the form first. */
+  saveEntries(isOAuthProvider: (provider: string) => boolean): Record<string, ProviderConfigEntry> {
+    return buildOnboardingProviders(this.states, this.active, isOAuthProvider);
+  }
+
+  /** Drop every typed key once they've been handed off to main. */
+  clear(): void {
+    this.states = {};
+  }
+}
