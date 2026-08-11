@@ -15,6 +15,12 @@ import { refreshGalaxyHistory } from "./galaxy-history.js";
 import { formatGalaxyTooltip } from "./galaxy-tooltip.js";
 import { PromptQueue, queuedPreview } from "./prompt-queue.js";
 import { FeedbackDraftStore } from "./feedback-draft.js";
+import {
+  buildOnboardingProviders,
+  captureProviderState,
+  providerStateFor,
+  type ProviderState,
+} from "./provider-state.js";
 import { applyOrbitTheme } from "./theme.js";
 import { caretVisualLineFlags, shouldRecallOnArrow } from "./input-history-nav.js";
 import { shouldAcceptSlashCommandOnEnter } from "./slash-popup-nav.js";
@@ -857,6 +863,10 @@ function wireApiKeyValidation(
     }
   };
   const schedule = () => {
+    // Retire any in-flight check: its verdict belongs to the key/provider that
+    // was in the form when it started, and painting it now would label the
+    // newly-selected provider with the previous one's result.
+    seq++;
     if (timer) clearTimeout(timer);
     timer = setTimeout(validateNow, 600);
   };
@@ -865,18 +875,57 @@ function wireApiKeyValidation(
   baseUrlEl?.addEventListener("input", schedule);
 }
 
-function populateWelcomeModels(provider: string): void {
+function populateWelcomeModels(provider: string, selected?: string): void {
   welcomeModel.innerHTML = "";
   const models = MODELS_BY_PROVIDER[provider] || [];
   for (const m of models) {
     const opt = document.createElement("option");
     opt.value = m.id;
     opt.textContent = m.label;
+    if (selected && m.id === selected) opt.selected = true;
+    welcomeModel.appendChild(opt);
+  }
+  // A model the catalog doesn't carry (custom endpoint, Jetstream preset) still
+  // has to survive a trip through another provider and back.
+  if (selected && !models.some((m) => m.id === selected)) {
+    const opt = document.createElement("option");
+    opt.value = selected;
+    opt.textContent = `${selected} (custom)`;
+    opt.selected = true;
     welcomeModel.appendChild(opt);
   }
 }
+
+// Per-provider field state, same idea as Preferences: the overlay shows one set
+// of inputs, so switching the dropdown has to stash the old provider's fields
+// and restore the new one's. Without it the key typed for provider A stayed in
+// the input and got saved as provider B's credential (#401).
+let welcomeProviderStates: Record<string, ProviderState> = {};
+let welcomeActiveProvider = welcomeProvider.value;
+
+function snapshotWelcomeProvider(): void {
+  welcomeProviderStates = captureProviderState(welcomeProviderStates, welcomeActiveProvider, {
+    typedKey: welcomeApiKey.value,
+    model: welcomeModel.value,
+    baseUrl: welcomeBaseUrl.value,
+  });
+}
+
+/** Point the visible fields at `provider`, and keep the selection in sync. */
+function loadWelcomeProviderFields(provider: string): void {
+  const state = providerStateFor(welcomeProviderStates, provider);
+  welcomeActiveProvider = provider;
+  populateWelcomeModels(provider, state.model || undefined);
+  welcomeApiKey.value = state.typedKey;
+  welcomeBaseUrl.value = state.baseUrl;
+  // The validation verdict belongs to the key that just left the field.
+  welcomeApiKeyStatus.className = "api-key-status";
+  welcomeApiKeyStatus.textContent = "";
+}
+
 welcomeProvider.addEventListener("change", () => {
-  populateWelcomeModels(welcomeProvider.value);
+  snapshotWelcomeProvider();
+  loadWelcomeProviderFields(welcomeProvider.value);
   void updateWelcomeAuthUi();
 });
 wireApiKeyValidation(
@@ -996,18 +1045,20 @@ welcomeSave.addEventListener("click", async () => {
     return;
   }
 
-  // OAuth providers persist their credential in ~/.pi/agent/auth.json (written
-  // by the sign-in flow above), not in config.json. Skip writing apiKey for
-  // those so a leftover plaintext field doesn't shadow the real auth path.
-  const providerEntry: Record<string, unknown> = { model: welcomeModel.value || undefined };
-  if (!oauth) providerEntry.apiKey = apiKey;
-  if (welcomeBaseUrl.value.trim()) providerEntry.baseUrl = welcomeBaseUrl.value.trim();
+  // Persist every provider that got a key, each under its own name, with the
+  // selected one active -- so a key typed before switching the dropdown isn't
+  // lost (or, worse, saved as the wrong provider's). OAuth providers persist
+  // their credential in ~/.pi/agent/auth.json (written by the sign-in flow
+  // above), not in config.json, so no apiKey is written for those.
+  snapshotWelcomeProvider();
   const cfg: Record<string, unknown> = {
     llm: {
       active: welcomeProvider.value,
-      providers: {
-        [welcomeProvider.value]: providerEntry,
-      },
+      providers: buildOnboardingProviders(
+        welcomeProviderStates,
+        welcomeProvider.value,
+        isOAuthProvider,
+      ),
     },
   };
 
@@ -1060,7 +1111,7 @@ async function checkFirstRun(): Promise<void> {
     if (!hasKey) {
       remoteKeyEntry = true;
       if (active) welcomeProvider.value = active;
-      populateWelcomeModels(welcomeProvider.value);
+      loadWelcomeProviderFields(welcomeProvider.value);
       void updateWelcomeAuthUi();
       // Remote: cwd is fixed (/tmp/loom-session) and Galaxy creds are injected,
       // so hide both optional <details> sections; "Skip" would leave no agent.
@@ -1080,7 +1131,7 @@ async function checkFirstRun(): Promise<void> {
   }
   const hasKey = active ? Boolean(cfg.llm?.providers?.[active]?.hasApiKey) : false;
   if (!hasKey) {
-    populateWelcomeModels(welcomeProvider.value);
+    loadWelcomeProviderFields(welcomeProvider.value);
     void updateWelcomeAuthUi();
     welcomeOverlay.classList.remove("hidden");
   }
@@ -3295,13 +3346,6 @@ prefsSkillsRefreshBtn.addEventListener("click", async () => {
 
 /** Sentinel mirrors UNCHANGED_SECRET in main/ipc-handlers.ts. */
 const UNCHANGED_SECRET = "__loom_unchanged_secret__";
-/** Per-provider in-memory state while Preferences is open. */
-interface ProviderState {
-  hadKey: boolean;
-  typedKey: string;
-  model: string;
-  baseUrl: string;
-}
 let prefsProviderStates: Record<string, ProviderState> = {};
 let prefsActiveProvider = "anthropic";
 let prefsGalaxyHadKey = false;
@@ -3323,22 +3367,16 @@ prefsGalaxyKey.addEventListener("input", updatePrefsGalaxyValidity);
 
 /** Snapshot the currently-visible provider fields into prefsProviderStates. */
 function snapshotCurrentProvider(): void {
-  prefsProviderStates[prefsActiveProvider] = {
-    hadKey: prefsProviderStates[prefsActiveProvider]?.hadKey ?? false,
+  prefsProviderStates = captureProviderState(prefsProviderStates, prefsActiveProvider, {
     typedKey: prefsApiKey.value,
     model: prefsModel.value,
-    baseUrl: prefsBaseUrl.value.trim(),
-  };
+    baseUrl: prefsBaseUrl.value,
+  });
 }
 
 /** Load a provider's stored state into the visible fields. */
 function loadProviderFields(provider: string): void {
-  const state = prefsProviderStates[provider] ?? {
-    hadKey: false,
-    typedKey: "",
-    model: "",
-    baseUrl: "",
-  };
+  const state = providerStateFor(prefsProviderStates, provider);
   populateModels(provider, state.model || undefined);
   prefsApiKey.value = state.typedKey;
   prefsBaseUrl.value = state.baseUrl;
