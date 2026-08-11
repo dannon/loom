@@ -7,8 +7,11 @@
 // detail in its scrollable modal body. A shell that knows nothing about the
 // convention still shows the full text, just less prettily. #399
 
-/** How much of the approved command a prompt shows before cutting it off. */
+/** How much of the approved command a prompt shows before cutting it out. */
 export const APPROVAL_DETAIL_LIMIT = 2000;
+
+/** Characters of the cut-out region's tail to keep, so a suffix can't hide. */
+const TAIL_SHARE = 0.2;
 
 /**
  * @param {string} detail
@@ -16,12 +19,20 @@ export const APPROVAL_DETAIL_LIMIT = 2000;
  * @returns {string}
  */
 export function truncateApprovalDetail(detail, limit = APPROVAL_DETAIL_LIMIT) {
-  const text = String(detail ?? "").trim();
+  // No trimming: what's shown has to be byte-for-byte what gets approved.
+  const text = String(detail ?? "");
   const max = Math.max(0, limit);
   if (text.length <= max) return text;
+  // Cut the middle, not the tail -- a head-only cut is exactly where you'd
+  // hide the destructive half of a long command. Never truncate silently:
+  // approving what you can't see is the whole bug.
+  const tail = Math.floor(max * TAIL_SHARE);
+  const head = max - tail;
   const hidden = text.length - max;
-  // Never truncate silently: approving what you can't see is the whole bug.
-  return `${text.slice(0, max)}\n... (truncated -- ${hidden} of ${text.length} characters not shown)`;
+  const marker = `\n... (truncated -- ${hidden} of ${text.length} characters not shown) ...\n`;
+  return tail > 0
+    ? `${text.slice(0, head)}${marker}${text.slice(-tail)}`
+    : `${text.slice(0, head)}${marker.trimEnd()}`;
 }
 
 /**

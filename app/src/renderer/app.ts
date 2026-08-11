@@ -2661,10 +2661,10 @@ function openExtSelect(id: string, title: string, options: string[]): void {
   // where it can scroll and keep its newlines. #399
   const { heading, detail } = splitApprovalPrompt(title);
   extTitleEl.textContent = heading;
-  if (detail) {
-    extDetailEl.textContent = detail;
-    extDetailEl.classList.remove("hidden");
-  }
+  // Assigned unconditionally so a detail-less prompt can never inherit the
+  // previous prompt's command, even if the modal was left un-reset.
+  extDetailEl.textContent = detail;
+  extDetailEl.classList.toggle("hidden", !detail);
   extOptionsEl.classList.remove("hidden");
   extOverlay.classList.remove("hidden");
 

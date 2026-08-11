@@ -174,6 +174,19 @@ describe("registerExecGuard -- approval prompt legibility (#399)", () => {
     expect(title).toContain(String(huge.length));
   });
 
+  it("prompts with the command even when pi emits a capitalized tool name", async () => {
+    const select = vi.fn(async () => "Deny");
+    const c = ctx({ ui: { select, confirm: vi.fn(async () => false), notify: vi.fn() } });
+    await handler(
+      { type: "tool_call", toolName: "Bash", toolCallId: "p5", input: { command: "python x.py" } },
+      c,
+    );
+    expect(select).toHaveBeenCalled();
+    const { heading, detail } = splitApprovalPrompt(select.mock.calls[0][0] as string);
+    expect(heading).toBe("Allow claude-opus-4-8 to run this command?");
+    expect(detail).toBe("python x.py");
+  });
+
   it("gives path-gated tools the same heading/detail shape", async () => {
     const select = vi.fn(async () => "Deny");
     const c = ctx({ ui: { select, confirm: vi.fn(async () => false), notify: vi.fn() } });
