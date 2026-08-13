@@ -107,6 +107,26 @@ runs:
         echo "$APPLE_API_KEY_BASE64" | base64 --decode > "$KEY_PATH"
         echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
 
+    # TEMPORARY diagnostic: arm64 produces an adhoc-signed bundle while the
+    # Intel leg signs fine off the same cert. Print environment facts (counts
+    # only, no identity names) to find where the two runners diverge.
+    - name: Diagnose signing environment
+      if: inputs.platform == 'darwin'
+      shell: bash
+      run: |
+        echo "--- macOS / toolchain ---"
+        sw_vers
+        uname -m
+        codesign --version || true
+        echo "--- keychain search list ---"
+        security list-keychains -d user
+        echo "--- codesigning identity count ---"
+        security find-identity -v -p codesigning | tail -1
+        echo "--- APPLE_SIGNING_IDENTITY set? ---"
+        if [ -n "$APPLE_SIGNING_IDENTITY" ]; then echo "yes (len ${#APPLE_SIGNING_IDENTITY})"; else echo "NO"; fi
+      env:
+        APPLE_SIGNING_IDENTITY: ${{ inputs.apple-signing-identity }}
+
     - name: Make Orbit (${{ inputs.platform }}-${{ inputs.arch }})
       shell: bash
       working-directory: app
@@ -115,6 +135,9 @@ runs:
         APPLE_SIGNING_IDENTITY: ${{ inputs.apple-signing-identity }}
         APPLE_API_KEY_ID: ${{ inputs.apple-api-key-id }}
         APPLE_API_ISSUER: ${{ inputs.apple-api-issuer }}
+        # TEMPORARY: verbose osx-sign output to see which identity it selects
+        # and whether it signs at all on arm64.
+        DEBUG: "@electron/osx-sign*,electron-osx-sign*,@electron/packager*"
       run: npx electron-forge make --arch=${{ inputs.arch }} --platform=${{ inputs.platform }}
 
     - name: Upload artifacts
