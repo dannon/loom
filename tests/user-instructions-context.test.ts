@@ -10,6 +10,7 @@ import {
   buildUserInstructionsBlock,
   buildWorkspaceInstructionsContext,
   INSTRUCTIONS_FILENAME,
+  type FsLike,
 } from "../extensions/loom/user-instructions";
 import { setupContextInjection } from "../extensions/loom/context";
 
@@ -67,14 +68,33 @@ describe("buildUserInstructionsBlock -- the global file, in the system prompt", 
   });
 
   it("escapes a path so the source attribute stays well-formed", () => {
-    const block = buildUserInstructionsBlock({
-      cwd: seed("work"),
-      agentDir: seed('ag"e<n>t', "hi"),
-    });
+    // The awkward path is faked through the injected fs rather than created on
+    // disk: " < > are legal in POSIX filenames but reserved on Windows, so
+    // mkdir would throw on windows-latest before the assertion ever ran.
+    const agentDir = 'C:\\ag"e<n>t';
+    const target = path.join(agentDir, INSTRUCTIONS_FILENAME);
+    const fsLike: FsLike = {
+      statSync: (p: string) => {
+        if (p !== target) {
+          const err: NodeJS.ErrnoException = new Error("ENOENT");
+          err.code = "ENOENT";
+          throw err;
+        }
+        return { isFile: () => true };
+      },
+      openSync: () => 1,
+      readSync: (_fd, buffer) => buffer.write("hi"),
+      closeSync: () => undefined,
+      realpathSync: (p: string) => p,
+    };
+
+    const block = buildUserInstructionsBlock({ cwd: seed("work"), agentDir, fsLike });
 
     expect(block).toContain("&quot;");
     expect(block).toContain("&lt;");
     expect(block).toContain("&gt;");
+    // The raw characters must not survive into the attribute.
+    expect(block).not.toMatch(/source="[^"\n]*[<>]/);
   });
 });
 
