@@ -87,9 +87,20 @@ function decodeTruncated(buf: Buffer): string {
   return "";
 }
 
-export function capContent(raw: string): { text: string; truncated: boolean } {
+/**
+ * `alreadyTruncated` matters more than it looks. `readBounded` stops at the
+ * byte cap and decodes back to a codepoint boundary, so the string it returns
+ * is usually *under* MAX_BYTES even though the file was cut. Re-deriving
+ * truncation from the length of that string reports "not truncated" for three
+ * of every four byte alignments, and the user silently loses the tail of their
+ * file. The caller knows it hit the cap; it has to say so.
+ */
+export function capContent(
+  raw: string,
+  alreadyTruncated = false,
+): { text: string; truncated: boolean } {
   let text = raw.replace(/\s+$/, "");
-  let truncated = false;
+  let truncated = alreadyTruncated;
 
   const lines = text.split("\n");
   if (lines.length > MAX_LINES) {
@@ -105,14 +116,20 @@ export function capContent(raw: string): { text: string; truncated: boolean } {
   return { text: truncated ? text + TRUNCATION_MARKER : text, truncated };
 }
 
-/** Read at most MAX_BYTES + 1 bytes. Reading the whole file and capping
- *  afterwards would pull a multi-megabyte file into memory every single turn. */
-function readBounded(filePath: string, fsLike: FsLike): string {
+/**
+ * Read at most MAX_BYTES + 1 bytes. Reading the whole file and capping
+ * afterwards would pull a multi-megabyte file into memory every single turn.
+ *
+ * Reports `hitCap` separately from the text: decoding back to a codepoint
+ * boundary can drop up to three bytes, which would otherwise disguise an
+ * over-cap file as one that fit.
+ */
+function readBounded(filePath: string, fsLike: FsLike): { text: string; hitCap: boolean } {
   const fd = fsLike.openSync(filePath, "r");
   try {
     const buf = Buffer.alloc(MAX_BYTES + 1);
     const bytes = fsLike.readSync(fd, buf, 0, MAX_BYTES + 1, 0);
-    return decodeTruncated(buf.subarray(0, bytes));
+    return { text: decodeTruncated(buf.subarray(0, bytes)), hitCap: bytes > MAX_BYTES };
   } finally {
     fsLike.closeSync(fd);
   }
@@ -139,16 +156,16 @@ function readCandidate(
   }
   if (!stat.isFile()) return null;
 
-  let raw: string;
+  let read: { text: string; hitCap: boolean };
   try {
-    raw = readBounded(filePath, fsLike);
+    read = readBounded(filePath, fsLike);
   } catch (err) {
     return { scope, path: filePath, content: "", truncated: false, error: String(err) };
   }
 
-  if (!raw.trim()) return null;
+  if (!read.text.trim()) return null;
 
-  const { text, truncated } = capContent(raw);
+  const { text, truncated } = capContent(read.text, read.hitCap);
   return { scope, path: filePath, content: text, truncated };
 }
 

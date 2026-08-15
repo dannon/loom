@@ -87,6 +87,41 @@ describe("capContent", () => {
   });
 });
 
+describe("an over-cap file always says so", () => {
+  // The bug: readBounded stops at the byte cap and decodes back to a codepoint
+  // boundary, so the string it hands capContent is usually UNDER MAX_BYTES even
+  // though the file was cut. Re-deriving truncation from that string's length
+  // reported "not truncated" for 3 of 4 byte alignments and the user silently
+  // lost the tail of their file.
+  for (const prefix of [0, 1, 2, 3]) {
+    it(`reports truncation at byte alignment ${prefix}`, () => {
+      const cwd = seed("work", "a".repeat(prefix) + "\u{1F9EC}".repeat(5000));
+
+      const found = discoverInstructionFiles({ cwd, agentDir: seed("agent") });
+
+      expect(found).toHaveLength(1);
+      expect(found[0].truncated).toBe(true);
+      expect(found[0].content).toContain("truncated by Loom");
+    });
+  }
+
+  it("does not cry truncation for a file that genuinely fits", () => {
+    const cwd = seed("work", "Prefer IWC workflows.");
+
+    const found = discoverInstructionFiles({ cwd, agentDir: seed("agent") });
+
+    expect(found[0].truncated).toBe(false);
+    expect(found[0].content).not.toContain("truncated by Loom");
+  });
+
+  it("honours an explicit already-truncated signal even for short text", () => {
+    const { text, truncated } = capContent("short", true);
+
+    expect(truncated).toBe(true);
+    expect(text).toContain("truncated by Loom");
+  });
+});
+
 describe("discoverInstructionFiles", () => {
   it("returns nothing when no LOOM.md exists anywhere", () => {
     expect(discoverInstructionFiles({ cwd: seed("work"), agentDir: seed("agent") })).toEqual([]);
