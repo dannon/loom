@@ -30,10 +30,14 @@ class OpenAICompletions:
         return f"{base}/chat/completions"
 
     def headers(self, target):
+        # Bearer is the OpenAI-compatible standard. x-api-key is opt-in: browsers
+        # preflight every header, and endpoints that do not allow it (Gemini)
+        # reject the request before it is sent.
         headers = {"Content-Type": "application/json"}
         if target.api_key is not None:
             headers["Authorization"] = f"Bearer {target.api_key}"
-            headers["x-api-key"] = target.api_key
+            if target.compat("x_api_key", False):
+                headers["x-api-key"] = target.api_key
         return headers
 
     def build_request(self, target, messages, tools=None, tool_choice=None, parallel_tools=True):

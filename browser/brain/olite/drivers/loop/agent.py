@@ -44,6 +44,7 @@ class LoopDriver:
         exhausted = True  # cleared by whichever branch ends the loop deliberately
         aborted = False
         reported_overflow = False
+        usage = {"input": 0, "output": 0, "cost": None}
         # The provider's own token count and where it was measured.
         measured = None
         cancellation = cancellation or Cancellation()
@@ -81,6 +82,20 @@ class LoopDriver:
                     raise
                 aborted, exhausted = True, False
                 break
+
+            # Providers disagree on the key names, and some report only a total.
+            _u = reply.usage or {}
+            _in = _u.get("prompt_tokens") or _u.get("input_tokens") or 0
+            _out = _u.get("completion_tokens") or _u.get("output_tokens") or 0
+            if not _in and not _out:
+                _out = _u.get("total_tokens") or 0
+            usage["input"] += int(_in)
+            usage["output"] += int(_out)
+            # Only providers that price the call report this; others leave it None.
+            if _u.get("cost") is not None:
+                usage["cost"] = (usage["cost"] or 0.0) + float(_u["cost"])
+            if not _u:
+                logs.append("usage: provider reported none")
 
             truncated = reply.finish_reason == TRUNCATED
             tool_calls = reply.tool_calls
@@ -175,6 +190,7 @@ class LoopDriver:
             "aborted": aborted,
             "exhausted": exhausted,
             "artifacts": self.tools.artifacts,
+            "usage": usage,
         }
 
 

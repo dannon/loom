@@ -25,3 +25,6 @@ brain/olite/registry/skills/galaxy-skills/
 # Eval output
 evals/*.json
 !evals/models.json
+
+# Local credentials for a live run; never committed.
+.env.local

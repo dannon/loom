@@ -1,5 +1,6 @@
 """Scenario assertions, graded on loom's four decision-correctness dimensions."""
 
+import re
 from olite.drivers.loop import galaxy_tools, notebook
 
 from .plan import parse_latest_plan, step_has_description
@@ -111,6 +112,19 @@ def _tool_calls(spec, run, failures, exercised):
             failures.append(Failure("toolCalls.mustInclude", detail, "behavior"))
 
 
+# Models write 96000 as "96 000" or "96,000". Match the needle's grouped forms rather
+# than stripping separators from the text, which would join "chr1 100" into "chr1100".
+_SEPARATORS = (",", " ", "\u00a0", "\u202f", "_", ".")
+
+
+def _grouped_forms(needle):
+    if not needle.isdigit() or len(needle) <= 3:
+        return [needle]
+    rev = needle[::-1]
+    parts = [rev[i : i + 3][::-1] for i in range(0, len(rev), 3)][::-1]
+    return [needle] + [sep.join(parts) for sep in _SEPARATORS]
+
+
 def _chat_text(spec, run, failures, exercised):
     """loom's `chatText.mustInclude`: the answer itself has to contain something."""
     if not spec:
@@ -118,7 +132,7 @@ def _chat_text(spec, run, failures, exercised):
     exercised.add("behavior")
     text = run.chat_text or ""
     for needle in spec.get("mustInclude") or []:
-        if needle not in text:
+        if not any(form in text for form in _grouped_forms(needle)):
             failures.append(Failure("chatText.mustInclude", f"chat never contained {needle!r}", "behavior"))
 
 

@@ -94,7 +94,7 @@ def _google_retry_info(body):
 
 
 class HttpClient:
-    async def request(self, method, url, headers=None, body=None, signal=None, on_retry=None):
+    async def request(self, method, url, headers=None, body=None, signal=None, on_retry=None, binary=False):
         raise NotImplementedError
 
 
@@ -126,6 +126,14 @@ async def parse_response(response):
         return text
 
 
+async def parse_response_bytes(response):
+    """Undecoded bytes. text() would UTF-8 decode, which silently destroys BAM,
+    HDF5 and gzip content by replacing invalid sequences."""
+    if hasattr(response, "arrayBuffer"):  # browser fetch
+        return bytes((await response.arrayBuffer()).to_py())
+    return await response.read()  # aiohttp
+
+
 # ----------------------------
 
 
@@ -148,7 +156,7 @@ class BrowserHttpClient(HttpClient):
         self._fetch = fetch
         self._to_js = to_js
 
-    async def request(self, method, url, headers=None, body=None, signal=None, on_retry=None):
+    async def request(self, method, url, headers=None, body=None, signal=None, on_retry=None, binary=False):
         headers = headers or {}
         options = {
             "method": method.upper(),
@@ -166,7 +174,7 @@ class BrowserHttpClient(HttpClient):
         for attempt in range(MAX_RETRIES):
             response = await self._fetch(url, self._to_js(options))
             if response.ok:
-                return await parse_response(response)
+                return await (parse_response_bytes(response) if binary else parse_response(response))
 
             status = response.status
             text = await response.text()
@@ -204,7 +212,7 @@ class ServerHttpClient(HttpClient):
 
         self._aiohttp = aiohttp
 
-    async def request(self, method, url, headers=None, body=None, signal=None, on_retry=None):
+    async def request(self, method, url, headers=None, body=None, signal=None, on_retry=None, binary=False):
         # A browser AbortSignal has no meaning here; the loop's own checks still apply.
         del signal
         data = None
@@ -224,7 +232,7 @@ class ServerHttpClient(HttpClient):
                     data=data,
                 ) as response:
                     if response.status < 400:
-                        return await parse_response(response)
+                        return await (parse_response_bytes(response) if binary else parse_response(response))
 
                     status = response.status
                     text = await response.text()

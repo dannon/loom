@@ -12,14 +12,39 @@ from olite.substrate import Substrate
 from olite.substrate.llm import REGISTRY
 
 
+# A dataset the analysis scenario can actually compute over. Longer than the
+# 50-line preview cap on purpose, so a model that sums the preview instead of
+# reading the file gets a visibly wrong answer.
+_PRICES = [1200] * 50 + [3600] * 10
+DATASET_SUM = sum(_PRICES)  # 96000
+DATASET_ID = "ds_prices_1"
+DATASET_CSV = "Transaction_date,Product,Price,Country\n" + "\n".join(
+    f"1/{i % 28 + 1}/09 6:17,Product{i % 3 + 1},{price},United States"
+    for i, price in enumerate(_PRICES)
+)
+
+
 class StubGalaxy:
     """A Galaxy that answers plausibly and records what was asked."""
 
     def __init__(self):
         self.calls = []
 
-    async def get(self, path):
+    async def get(self, path, binary=False):
         self.calls.append(("GET", path))
+        # Real dataset bytes, so the download -> run_python path is exercised end to
+        # end rather than only the tool call being emitted.
+        if path.startswith(f"api/datasets/{DATASET_ID}/display"):
+            return DATASET_CSV.encode("utf-8") if binary else DATASET_CSV
+        if path.startswith(f"api/datasets/{DATASET_ID}"):
+            return {"id": DATASET_ID, "name": "prices.csv", "extension": "csv",
+                    "state": "ok", "file_size": len(DATASET_CSV)}
+        # The dataset has to be discoverable, not just fetchable: a well-behaved agent
+        # looks it up in the history before downloading it.
+        if "api/histories" in path and "contents" in path:
+            return [{"id": DATASET_ID, "hid": 1, "name": "prices.csv", "extension": "csv",
+                     "history_content_type": "dataset", "state": "ok", "deleted": False,
+                     "visible": True}]
         if "api/histories" in path:
             return [{"id": "hist1", "name": "Eval history", "state": "ok"}]
         if path.startswith("api/tools/"):

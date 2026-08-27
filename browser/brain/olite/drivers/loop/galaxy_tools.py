@@ -1,11 +1,23 @@
 """Orbit-compatible named Galaxy tools, cloned from galaxy-mcp."""
 
 import json
+import os
+import sys
+import tempfile
 from urllib.parse import urlencode
 
 from .galaxy_tool_docs import DOCS
 
 TOOLS = []
+
+# Pyodide's MEMFS is olite's equivalent of the filesystem Orbit has on disk.
+# Datasets land here so run_python can read them as files.
+# Pyodide's MEMFS allows a directory at the root; a host filesystem does not.
+DATA_DIR = "/data" if sys.platform == "emscripten" else os.path.join(tempfile.gettempdir(), "olite-data")
+# Enough to show the header and shape of a table without a run_python round trip.
+PREVIEW_LINES = 50
+MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
+PREVIEW_BYTES = 256 * 1024
 
 
 def _q(params):
@@ -111,10 +123,15 @@ async def _get_dataset_details(g, a):
     dataset = await g.get(f"api/datasets/{a['dataset_id']}") or {}
     if a.get("include_preview", True):
         try:
-            content = await g.get(f"api/datasets/{a['dataset_id']}/display")
-            text = content if isinstance(content, str) else json.dumps(content)
+            # A chunk, not the whole file: /display streams everything, so previewing a
+            # large dataset would pull it all into memory to show ten lines.
+            want = int(a.get("preview_lines", 10) or 10)
+            text = await _chunk(g, a["dataset_id"], PREVIEW_BYTES)
+            if text is None:
+                content = await g.get(f"api/datasets/{a['dataset_id']}/display")
+                text = content if isinstance(content, str) else json.dumps(content)
             dataset = dict(dataset)
-            dataset["preview"] = "\n".join(text.splitlines()[: a.get("preview_lines", 10)])
+            dataset["preview"] = "\n".join(text.splitlines()[:want])
         except Exception:
             pass
     return dataset
@@ -209,10 +226,60 @@ async def _get_collection_details(g, a):
     return await g.get(f"api/dataset_collections/{a['collection_id']}?instance_type=history")
 
 
+async def _chunk(g, dataset_id, size):
+    """A line-aligned prefix, or None if the datatype cannot be chunked."""
+    try:
+        got = await g.get(f"api/datasets/{dataset_id}/display?offset=0&ck_size={size}")
+    except Exception:
+        return None
+    return got.get("ck_data") if isinstance(got, dict) else None
+
+
 async def _download_dataset(g, a):
-    # PYODIDE: no local filesystem. Return the dataset content instead of writing a file.
-    content = await g.get(f"api/datasets/{a['dataset_id']}/display")
-    return {"dataset_id": a["dataset_id"], "content": content}
+    # Written to the filesystem as bytes: inline content breaks tool-call JSON, and
+    # decoding as text corrupts BAM/HDF5/gzip.
+    details = await g.get(f"api/datasets/{a['dataset_id']}") or {}
+    stated = details.get("file_size") if isinstance(details, dict) else None
+    partial = False
+    if isinstance(stated, int) and stated > MAX_DOWNLOAD_BYTES:
+        # Galaxy's chunked display: line-aligned, and it refuses binary itself.
+        chunk = await _chunk(g, a["dataset_id"], MAX_DOWNLOAD_BYTES)
+        if chunk is None:
+            return {
+                "error": (
+                    f"Dataset is {stated / 1e6:.1f} MB and cannot be read in chunks. "
+                    "Run a Galaxy tool on it instead."
+                ),
+                "dataset_id": a["dataset_id"],
+                "bytes": stated,
+            }
+        data, partial = chunk.encode("utf-8"), True
+    else:
+        data = await g.get(f"api/datasets/{a['dataset_id']}/display", binary=True)
+    if isinstance(data, str):  # a stub or a JSON-ish response
+        data = data.encode("utf-8")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    path = f"{DATA_DIR}/{a['dataset_id']}.dat"
+    with open(path, "wb") as f:
+        f.write(data)
+
+    out = {"dataset_id": a["dataset_id"], "path": path, "bytes": len(data)}
+    if partial:
+        out.update(partial=True, bytes_total=stated)
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        # Binary: a preview would be meaningless and would corrupt the transcript.
+        out.update(binary=True, preview=None, lines=None, truncated=False)
+        return out
+    lines = text.splitlines()
+    out.update(
+        binary=False,
+        lines=len(lines),
+        preview="\n".join(lines[:PREVIEW_LINES]),
+        truncated=len(lines) > PREVIEW_LINES,
+    )
+    return out
 
 
 async def _upload_file_from_url(g, a):
@@ -226,12 +293,36 @@ async def _upload_file_from_url(g, a):
 
 
 async def _upload_file(g, a):
-    # PYODIDE: no local filesystem, so a local path cannot be read. Use
-    return {
-        "error": "upload_file (local path) is not available in the browser (no local filesystem). "
-        "Use upload_file_from_url instead.",
-        "path": a.get("path"),
+    # The counterpart to download_dataset: read back from the Pyodide filesystem so a
+    # file produced by run_python can be sent to Galaxy. Uploaded as pasted content,
+    # since a browser cannot hand Galaxy a path on disk.
+    path = a["path"]
+    if not os.path.isfile(path):
+        return {"error": f"No such file: {path}", "path": path}
+    with open(path, "rb") as f:
+        raw = f.read()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        # Galaxy's fetch API takes pasted content as text (data_fetch.py uses StringIO),
+        # so binary would have to go up as multipart. Refuse rather than corrupt it.
+        return {
+            "error": "Cannot upload binary content: Galaxy accepts pasted uploads as text only. "
+            "Use upload_file_from_url for binary data.",
+            "path": path,
+            "bytes": len(raw),
+        }
+    element = {
+        "src": "pasted",
+        "paste_content": text,
+        "ext": a.get("file_type", "auto"),
+        "dbkey": a.get("dbkey", "?"),
+        "name": a.get("file_name") or os.path.basename(path),
     }
+    payload = {"targets": [{"destination": {"type": "hdas"}, "elements": [element]}]}
+    if a.get("history_id"):
+        payload["history_id"] = a["history_id"]
+    return await g.post("api/tools/fetch", payload)
 
 
 async def _list_workflows(g, a):
@@ -364,12 +455,19 @@ _tool("get_tool_run_examples", "read", "Get structural example inputs for a tool
       {"tool_id": _STR, "tool_version": _STR}, ["tool_id"], _get_tool_run_examples)
 _tool("get_collection_details", "read", "Get a dataset collection's details and elements.",
       {"collection_id": _STR, "max_elements": _INT}, ["collection_id"], _get_collection_details)
-_tool("download_dataset", "read", "Fetch a dataset's content (returned inline; no local file in the browser).",
+_tool("download_dataset", "read",
+      "Save a dataset to the local filesystem and return its path plus a short preview. "
+      "A dataset over 20 MB comes back as a line-aligned prefix with partial=true and "
+      "bytes_total set; never compute totals or counts from a partial read. "
+      "Read the file with run_python (e.g. pandas.read_csv(path, sep='\\t')); do not paste "
+      "the preview into code.",
       {"dataset_id": _STR, "require_ok_state": _BOOL}, ["dataset_id"], _download_dataset)
 _tool("upload_file_from_url", "write", "Upload a dataset into a history from a URL.",
       {"url": _STR, "history_id": _STR, "file_type": _STR, "dbkey": _STR, "file_name": _STR}, ["url"], _upload_file_from_url)
-_tool("upload_file", "write", "Upload a local file (NOT available in the browser; use upload_file_from_url).",
-      {"path": _STR, "history_id": _STR}, ["path"], _upload_file)
+_tool("upload_file", "write",
+      "Upload a file from the local filesystem to a history -- e.g. one written by run_python.",
+      {"path": _STR, "history_id": _STR, "file_name": _STR, "file_type": _STR, "dbkey": _STR},
+      ["path"], _upload_file)
 _tool("list_workflows", "read", "List stored workflows; optional name/id filter, published flag.",
       {"workflow_id": _STR, "name": _STR, "published": _BOOL}, [], _list_workflows)
 _tool("get_workflow_details", "read", "Get a stored workflow's details.",

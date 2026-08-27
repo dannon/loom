@@ -107,6 +107,10 @@ resources before deciding what runs where:
      preserves provenance, stays reusable across histories. Default to
      this whenever the glue is something a future user might want to
      run again.
+   - Light/exploratory (parsing, summarization, quick probes over a
+     dataset you have already fetched) -> use `run_python` rather than
+     a plan step. Reserve for work that doesn't belong in the durable
+     record.
 3. Document routing in the plan section header and inline per-step:
    `## Plan A: chrM Variant Calling [galaxy]`
    `Step 3: BWA alignment (Galaxy: bwa-mem2/2.2.1)`

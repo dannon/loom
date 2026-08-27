@@ -30,10 +30,19 @@ subprocess: the brain is a Python package, so `lib/harness.py` assembles the sam
 pieces `runtime.run` assembles and awaits the driver in-process — faster, no browser,
 and the whole transcript is in hand.
 
-**Galaxy is stubbed; the LLM is real.** These scenarios grade planning behaviour, and
+**Galaxy is stubbed; the LLM is real.** Most scenarios grade planning behaviour, and
 a live Galaxy would add a second source of failure without adding signal. The stub
 answers plausibly rather than erroring, because a tool that fails teaches the model to
 stop calling tools, which would confound the measurement.
+
+**One scenario grades the data path instead.** `dataset-analysis-sum` fetches real
+dataset bytes through `download_dataset` and computes over the file with `run_python`.
+It exists because grading only *which tool calls are emitted* left a blind spot: two
+live failures — inline dataset content breaking tool-call JSON on tabs and newlines,
+and a gateway 500 once a real tool result was echoed back — sat entirely outside what
+the plan scenarios measure. The fixture is 61 lines against a 50-line preview cap, so a
+model that sums the preview rather than reading the file answers 58800 instead of
+96000, and is marked wrong rather than passing by luck.
 
 The stub keeps the **full 46-tool surface advertised**. loom trims to
 `--tools read,write,edit` for its plan scenarios; olite deliberately does not, because

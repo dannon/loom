@@ -23,9 +23,9 @@ class GalaxyHttp:
             headers["x-api-key"] = self._key
         return headers
 
-    async def get(self, path):
+    async def get(self, path, binary=False):
         self.manifest.require("read")
-        return await http.request("GET", self._url(path), headers=self._headers())
+        return await http.request("GET", self._url(path), headers=self._headers(), binary=binary)
 
     async def post(self, path, body=None):
         self.manifest.require("write")

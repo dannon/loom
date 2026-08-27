@@ -1,5 +1,6 @@
 /** olite shell: mounts Orbit's ChatPanel, boots the Pyodide brain, drives the chat. */
 import "./orbit/styles.css";
+import "./olite.css";
 import { editRecord } from "./record-write";
 import { applyJobOutcome, noteSubmitted } from "./record-jobs";
 import { ChatPanel } from "./orbit/chat/chat-panel";
@@ -7,6 +8,7 @@ import { applyOrbitTheme } from "./orbit/theme";
 import { parseIncoming } from "./incoming";
 import { catalogRefusalMessage, galaxyCanRun } from "./catalog-gate";
 import { buildConfig } from "./config";
+import { ensureCredentials, switchProvider } from "./credentials-modal";
 import { describeError, lastLine, renderMessages, replayMessages, toolStatus } from "./transcript";
 import { SessionMemory, galaxyUserId, indexedDbStore } from "./session";
 import { writeSessionSummary } from "./session-summary";
@@ -42,7 +44,7 @@ async function main() {
 
     const container = document.getElementById(containerId)!;
     const incoming = parseIncoming(container);
-    applyOrbitTheme("dark", document.documentElement);
+    applyOrbitTheme("light", document.documentElement);
 
     // Orbit's layout chain, so the vendored styles.css applies as-is.
     container.innerHTML = `
@@ -77,6 +79,14 @@ async function main() {
           <div id="artifact-content"></div>
         </div>
       </div>
+      <div id="app-footer">
+        <button id="model-btn" class="footer-control is-interactive" title="Change the model provider">Model</button>
+        <button id="artifact-btn" class="footer-control is-interactive" title="Show or hide the artifact pane (Ctrl/Cmd+\\)">Artifact</button>
+        <div id="usage-bar" class="footer-control hidden" title="Session token usage">
+          <span id="usage-tokens">0 tok</span>
+          <span id="usage-cost"></span>
+        </div>
+      </div>
       <!-- Orbit's request modal, reduced to the confirm variant. -->
       <div id="ext-overlay" class="modal-overlay hidden">
         <div class="modal">
@@ -91,8 +101,37 @@ async function main() {
         </div>
       </div>`;
 
-    // Start with the artifact pane collapsed; it reveals when a tool produces one.
-    document.body.classList.add("artifact-collapsed");
+    // Artifact pane, ported from Orbit (app.ts:453-473). The split matters: a narrow
+    // window collapses the pane visually, but must not overwrite what the user chose.
+    const ARTIFACT_COLLAPSED_KEY = "olite.artifactCollapsed";
+    const ARTIFACT_BREAKPOINT = 700;
+
+    const chatPane = container.querySelector<HTMLElement>("#chat-pane")!;
+
+    const applyArtifactCollapsed = (collapsed: boolean) => {
+        document.body.classList.toggle("artifact-collapsed", collapsed);
+        if (collapsed) {
+            chatPane.style.flex = "";
+        }
+    };
+    const setArtifactCollapsed = (collapsed: boolean) => {
+        applyArtifactCollapsed(collapsed);
+        try {
+            localStorage.setItem(ARTIFACT_COLLAPSED_KEY, collapsed ? "1" : "0");
+        } catch {
+            // A blocked store only costs the preference, not the pane.
+        }
+    };
+    const artifactCollapsed = () => document.body.classList.contains("artifact-collapsed");
+
+    let storedCollapsed: string | null = null;
+    try {
+        storedCollapsed = localStorage.getItem(ARTIFACT_COLLAPSED_KEY);
+    } catch {
+        // Unreadable store: fall through to the collapsed default.
+    }
+    // Default collapsed (single-pane chat); revealed when a tool produces an artifact.
+    setArtifactCollapsed(storedCollapsed === null ? true : storedCollapsed === "1");
 
     const messagesEl = container.querySelector<HTMLElement>("#messages")!;
     const chat = new ChatPanel(messagesEl);
@@ -101,7 +140,10 @@ async function main() {
     const abortBtn = container.querySelector<HTMLButtonElement>("#abort-btn")!;
     const artifactContent = container.querySelector<HTMLElement>("#artifact-content")!;
 
-    const config = buildConfig(incoming);
+    // Ask for a provider/key before the worker starts: initialize carries the
+    // credentials, so a later prompt would mean re-initializing the brain.
+    const creds = await ensureCredentials(container);
+    const config = buildConfig(incoming, creds);
     // Runtime context: where relative fetches resolve and what origin Galaxy calls hit.
     console.log("[olite] context", {
         href: window.location.href,
@@ -123,6 +165,117 @@ async function main() {
         config.history_id,
         await galaxyUserId(config.galaxy_root, credentials),
     );
+    // Naming the active model in the button makes a misconfigured run obvious,
+    // and reopening the picker avoids clearing browser storage by hand.
+    // Orbit's auto-grow (app.ts:2375). The textarea is `resize: none`, so its height
+    // has to follow the content; 150 mirrors the max-height in the vendored CSS.
+    input.addEventListener("input", () => {
+        input.style.height = "auto";
+        // scrollHeight excludes the border that border-box counts in height, so adding
+        // it back is what stops a one-line box from showing a scrollbar.
+        const chrome = input.offsetHeight - input.clientHeight;
+        const wanted = input.scrollHeight + chrome;
+        input.style.height = Math.min(wanted, 150) + "px";
+        input.style.overflowY = wanted > 150 ? "auto" : "hidden";
+    });
+
+    // Session usage, accumulated across turns as Orbit does (app.ts:308).
+    const usageBar = container.querySelector<HTMLElement>("#usage-bar")!;
+    const usageTokens = container.querySelector<HTMLElement>("#usage-tokens")!;
+    const usageCost = container.querySelector<HTMLElement>("#usage-cost")!;
+    const sessionUsage = { input: 0, output: 0, cost: null as number | null };
+
+    const formatTokens = (n: number) => {
+        if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M";
+        if (n >= 1_000) return (n / 1_000).toFixed(1) + "k";
+        return String(n);
+    };
+
+    function renderUsage() {
+        const total = sessionUsage.input + sessionUsage.output;
+        if (!total) {
+            usageBar.classList.add("hidden");
+            return;
+        }
+        usageBar.classList.remove("hidden");
+        usageTokens.textContent = `${formatTokens(total)} tok`;
+        usageTokens.title =
+            `Session usage:\n  input: ${sessionUsage.input.toLocaleString()}` +
+            `\n  output: ${sessionUsage.output.toLocaleString()}`;
+        // Shown only when the provider priced the call; olite keeps no price table.
+        if (sessionUsage.cost === null) {
+            usageCost.textContent = "";
+            usageCost.classList.add("hidden");
+            return;
+        }
+        usageCost.textContent = sessionUsage.cost < 0.01 ? "<$0.01" : `$${sessionUsage.cost.toFixed(2)}`;
+        usageCost.title = `Session cost: $${sessionUsage.cost.toFixed(4)} (reported by the provider)`;
+        usageCost.classList.remove("hidden");
+    }
+
+    const artifactBtn = container.querySelector<HTMLButtonElement>("#artifact-btn")!;
+    artifactBtn.addEventListener("click", () => setArtifactCollapsed(!artifactCollapsed()));
+
+    // Orbit's Ctrl/Cmd+\ (app.ts:487). Scoped to the container: a Galaxy page owns the
+    // document, and a plugin should not claim shortcuts outside its own frame.
+    container.addEventListener("keydown", (e) => {
+        const ev = e as KeyboardEvent;
+        if ((ev.ctrlKey || ev.metaKey) && ev.key === "\\") {
+            ev.preventDefault();
+            setArtifactCollapsed(!artifactCollapsed());
+        }
+    });
+
+    // Responsive auto-collapse (Orbit's applyResponsiveLayout). Visual only, so a narrow
+    // window does not overwrite the stored preference -- Galaxy often renders a plugin
+    // in a panel narrower than this.
+    let wasNarrow = window.innerWidth < ARTIFACT_BREAKPOINT;
+    if (wasNarrow) {
+        applyArtifactCollapsed(true);
+    }
+    window.addEventListener("resize", () => {
+        const narrow = window.innerWidth < ARTIFACT_BREAKPOINT;
+        if (narrow === wasNarrow) {
+            return;
+        }
+        wasNarrow = narrow;
+        applyArtifactCollapsed(narrow ? true : storedCollapsed === "1");
+    });
+
+    // Divider drag (Orbit app.ts:2947), clamped so neither pane can be squeezed away.
+    const divider = container.querySelector<HTMLElement>("#divider")!;
+    const appMain = container.querySelector<HTMLElement>("#app-main")!;
+    let dragging = false;
+    divider.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        dragging = true;
+        divider.classList.add("dragging");
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+    });
+    document.addEventListener("mousemove", (e) => {
+        if (!dragging) {
+            return;
+        }
+        const width = appMain.getBoundingClientRect().width;
+        const left = chatPane.getBoundingClientRect().left;
+        const pct = (((e as MouseEvent).clientX - left) / width) * 100;
+        chatPane.style.flex = `0 0 ${Math.max(25, Math.min(75, pct))}%`;
+    });
+    document.addEventListener("mouseup", () => {
+        if (!dragging) {
+            return;
+        }
+        dragging = false;
+        divider.classList.remove("dragging");
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+    });
+
+    const modelBtn = container.querySelector<HTMLButtonElement>("#model-btn")!;
+    modelBtn.textContent = creds.model ? `${creds.provider} · ${creds.model}` : creds.provider;
+    modelBtn.addEventListener("click", () => void switchProvider(container));
+
     const resetBtn = container.querySelector<HTMLButtonElement>("#reset-btn")!;
     // Replay before the boot notice, so the restored turns sit above it as history.
     let resumed = false;
@@ -197,6 +350,7 @@ async function main() {
         }
         busy = true;
         input.value = "";
+        input.style.height = "auto";
         // Stop replaces Send for the duration of the turn, as in Orbit.
         sendBtn.classList.add("hidden");
         abortBtn.classList.remove("hidden");
@@ -279,9 +433,18 @@ async function main() {
                 orphanedActiveSteps: 0,
             });
             resetBtn.classList.toggle("hidden", !session.enabled);
+            const turnUsage = reply.usage;
+            if (turnUsage) {
+                sessionUsage.input += turnUsage.input || 0;
+                sessionUsage.output += turnUsage.output || 0;
+                if (turnUsage.cost != null) {
+                    sessionUsage.cost = (sessionUsage.cost || 0) + turnUsage.cost;
+                }
+                renderUsage();
+            }
             const artifacts = reply.artifacts || [];
             if (artifacts.length) {
-                document.body.classList.remove("artifact-collapsed");
+                setArtifactCollapsed(false);
                 artifactContent.innerHTML = "";
                 for (const a of artifacts) {
                     await renderArtifact(artifactContent, a);
@@ -383,6 +546,8 @@ async function main() {
             // Edit hands the draft back for the user to change; it does not submit.
             input.value = "Here is the plan with my edits — please revise your draft accordingly:\n\n```plan\n" + body + "\n```";
             input.focus();
+            // Setting .value does not raise `input`, so the box would stay one line tall.
+            input.dispatchEvent(new Event("input"));
         }
     });
 }
