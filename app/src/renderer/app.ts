@@ -453,10 +453,12 @@ modelIndicatorEl.addEventListener("click", () => {
 const ARTIFACT_COLLAPSED_KEY = "orbit.artifactCollapsed";
 const exportChatBtn = document.getElementById("export-chat-btn")!;
 const artifactToggleBtn = document.getElementById("artifact-toggle")!;
+const chatPane = document.getElementById("chat-pane")!;
 
 // Apply visual state without persisting; used by responsive auto-collapse.
 function applyArtifactCollapsed(collapsed: boolean): void {
   document.body.classList.toggle("artifact-collapsed", collapsed);
+  if (collapsed) chatPane.style.flex = "";
 }
 // User-initiated toggle; persists to localStorage.
 function setArtifactCollapsed(collapsed: boolean): void {
@@ -956,8 +958,7 @@ welcomeSave.addEventListener("click", async () => {
     // hiding it on a rejection stranded the user in front of a brain that never
     // started, with no way back to the key prompt.
     const res = (await window.orbit.provideLlmKey?.(welcomeProvider.value, key)) as
-      | { ok?: boolean; error?: string }
-      | undefined;
+      { ok?: boolean; error?: string } | undefined;
     if (res && res.ok === false) {
       welcomeError.textContent = res.error || "Could not start the agent with that key";
       return;
@@ -2940,7 +2941,6 @@ void window.orbit.getAgentStatus().then(({ status, message }) => {
 // ── Draggable Divider ─────────────────────────────────────────────────────────
 
 const divider = document.getElementById("divider")!;
-const chatPane = document.getElementById("chat-pane")!;
 
 let dragging = false;
 
