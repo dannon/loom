@@ -19,6 +19,7 @@ import { WebSocketServer, WebSocket } from "ws";
 
 import { buildBrainEnv } from "../shared/brain-env.js";
 import { summarizeStartupFailure, appendStderr } from "../shared/brain-exit.js";
+import { encodeEventPayload } from "./event-payload.js";
 import { evaluateBind, authorizeWsUpgrade } from "./auth.js";
 import { isForwardableUiResponse } from "./rpc-guard.js";
 import { isCustomProvider } from "../shared/custom-provider.js";
@@ -374,7 +375,7 @@ function sendEvent(event: string, ...payload: unknown[]): void {
   activeSocket.send(
     JSON.stringify({
       _event: event,
-      _payload: payload.length === 1 ? payload[0] : payload,
+      _payload: encodeEventPayload(payload),
     }),
   );
 }
