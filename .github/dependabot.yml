@@ -33,6 +33,17 @@ updates:
       - dependencies
     ignore:
       - dependency-name: "@earendil-works/*"
+      # TypeScript majors move ahead of typescript-eslint, which carries a hard
+      # upper bound on its typescript peer (>=4.8.4 <6.1.0 as of 8.68, the
+      # current latest). npm serves TS 7 as `latest` today, so an unfiltered
+      # bump writes a lockfile that nothing satisfies and `npm ci` fails with
+      # ERESOLVE on every platform before a single test runs -- a red PR every
+      # Monday until the lint toolchain widens the range. Minors and patches
+      # still flow. Drop this entry when typescript-eslint supports TS 7; the
+      # jump wants to be its own migration anyway, since TS 7 ships as
+      # per-platform native binaries rather than the old pure-JS tarball.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     # One grouped PR per tree per week rather than a PR per package.
     groups:
       npm-deps:
