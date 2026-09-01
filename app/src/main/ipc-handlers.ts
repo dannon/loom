@@ -28,6 +28,7 @@ import { normalizeGalaxyUrl, validateGalaxyUrl } from "./galaxy-url.js";
 import { getProviders, getModels } from "@earendil-works/pi-ai/compat";
 import { isDeprecatedModelId } from "./model-catalog.js";
 import { flagUnusableContextWindows } from "./model-context-window.js";
+import { checkBaseUrl, describeNetworkError } from "./endpoint-probe.js";
 import { discoverProviderModels } from "./model-discovery.js";
 import { checkLatestVersion } from "./version-check.js";
 import { resolveReleasePageUrl } from "./release-page.js";
@@ -862,6 +863,19 @@ export function registerIpcHandlers(agent: AgentManager): void {
 }
 
 /**
+ * Node's fetch ignores the proxy environment variables that curl and most
+ * shells honour, and Loom sets nothing up to compensate -- so on a network
+ * that only reaches the internet through a proxy, every probe here fails no
+ * matter how correct the URL and key are. We can't fix that from inside the
+ * catch block, but we can stop the user re-checking a URL that was fine.
+ */
+function hasEnvProxy(): boolean {
+  return ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"].some(
+    (name) => (process.env[name] ?? "").trim().length > 0,
+  );
+}
+
+/**
  * Live API key validation. Makes a minimal request against the provider's
  * auth-gated endpoint and maps the response to a pass/fail result.
  *
@@ -880,11 +894,9 @@ async function validateApiKey(
   const timer = setTimeout(() => controller.abort(), 5000);
   try {
     if (baseUrl) {
-      const trimmedBase = baseUrl.trim().replace(/\/+$/, "");
-      if (!/^https?:\/\//.test(trimmedBase)) {
-        return { valid: false, error: "Base URL must start with http(s)://" };
-      }
-      const res = await fetch(`${trimmedBase}/models`, {
+      const checked = checkBaseUrl(baseUrl);
+      if (!checked.ok) return { valid: false, error: checked.error };
+      const res = await fetch(`${checked.url}/models`, {
         headers: { authorization: `Bearer ${trimmed}` },
         signal: controller.signal,
       });
@@ -944,9 +956,7 @@ async function validateApiKey(
     }
     return { valid: true };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("abort")) return { valid: false, error: "Validation timed out" };
-    return { valid: false, error: `Network error: ${msg}` };
+    return { valid: false, error: describeNetworkError(err, { proxyConfigured: hasEnvProxy() }) };
   } finally {
     clearTimeout(timer);
   }
