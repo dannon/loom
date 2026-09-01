@@ -28,7 +28,7 @@ import { normalizeGalaxyUrl, validateGalaxyUrl } from "./galaxy-url.js";
 import { getProviders, getModels } from "@earendil-works/pi-ai/compat";
 import { isDeprecatedModelId } from "./model-catalog.js";
 import { flagUnusableContextWindows } from "./model-context-window.js";
-import { checkBaseUrl, describeNetworkError } from "./endpoint-probe.js";
+import { checkBaseUrl, describeNetworkError, interpretModelsResponse } from "./endpoint-probe.js";
 import { discoverProviderModels } from "./model-discovery.js";
 import { checkLatestVersion } from "./version-check.js";
 import { resolveReleasePageUrl } from "./release-page.js";
@@ -900,20 +900,9 @@ async function validateApiKey(
         headers: { authorization: `Bearer ${trimmed}` },
         signal: controller.signal,
       });
-      if (res.status === 401) return { valid: false, error: "Invalid API key (401)" };
-      if (!res.ok) return { valid: false, error: `Unexpected response: HTTP ${res.status}` };
-      try {
-        const body = (await res.json()) as { data?: unknown };
-        const raw = body.data;
-        const models = Array.isArray(raw)
-          ? raw
-              .map((m) => (m && typeof m === "object" ? (m as { id?: unknown }).id : undefined))
-              .filter((id): id is string => typeof id === "string")
-          : [];
-        return { valid: true, models };
-      } catch {
-        return { valid: true };
-      }
+      // Read as text, not res.json(): a body that isn't JSON is a result we
+      // have to report, not an exception to swallow. See endpoint-probe.ts.
+      return interpretModelsResponse(res.status, await res.text());
     }
     if (provider === "anthropic") {
       if (!trimmed.startsWith("sk-ant-")) {

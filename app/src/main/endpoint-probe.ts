@@ -1,11 +1,13 @@
 /**
- * Diagnosis for the OpenAI-compatible endpoint probe -- the `/models` call
- * behind live API-key validation and `models:discover`.
+ * Decision logic for the OpenAI-compatible endpoint probe -- the `/models`
+ * call behind live API-key validation and `models:discover`.
  *
  * Split out from ipc-handlers so the parts that decide *what to tell the user*
  * are reachable from tests without an Electron main process or a live server.
  * The I/O stays in the caller.
  */
+
+export type ProbeOutcome = { valid: boolean; error?: string; models?: string[] };
 
 /**
  * Undici reports every transport failure as `TypeError: fetch failed`. The
@@ -132,4 +134,63 @@ export function checkBaseUrl(
     return { ok: false, error: "Base URL is not a valid URL" };
   }
   return { ok: true, url: trimmed };
+}
+
+/** One line of server text, safe to drop into a status label. */
+function snippet(body: string): string {
+  const flat = body
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return flat.length > 120 ? `${flat.slice(0, 117)}...` : flat;
+}
+
+function extractModelIds(parsed: unknown): string[] {
+  const raw = Array.isArray(parsed) ? parsed : (parsed as { data?: unknown })?.data;
+  if (!Array.isArray(raw)) return [];
+  const ids = raw
+    .map((m) => (m && typeof m === "object" ? (m as { id?: unknown }).id : m))
+    .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+    .map((id) => id.trim());
+  return [...new Set(ids)];
+}
+
+/**
+ * Decide what a `/models` reply means.
+ *
+ * The non-JSON case is not pedantry. Blablador answers an unauthenticated
+ * `/v1/models` with `200 OK` and the plain-text line "You must provide a valid
+ * API key", so treating any 2xx as proof of a working key would tell someone
+ * their setup is fine while it serves no models. A body we cannot parse means
+ * we verified nothing, and the server's own sentence is usually the most
+ * useful thing we can put on screen.
+ */
+export function interpretModelsResponse(status: number, body: string): ProbeOutcome {
+  if (status === 401) return { valid: false, error: "Invalid API key (401)" };
+  if (status === 403) return { valid: false, error: "Endpoint rejected the key (403)" };
+  if (status < 200 || status >= 300) {
+    return { valid: false, error: `Unexpected response: HTTP ${status}` };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    const text = snippet(body);
+    if (!text) {
+      return {
+        valid: false,
+        error: `Endpoint returned an empty reply to /models (HTTP ${status})`,
+      };
+    }
+    if (text.startsWith("<")) {
+      return {
+        valid: false,
+        error: "Endpoint returned a web page, not a model list -- check the base URL",
+      };
+    }
+    return { valid: false, error: `Endpoint did not return a model list: ${text}` };
+  }
+  // Parseable but not an OpenAI-shaped list: the key got through, so stay out
+  // of the way and let the saved model stand.
+  return { valid: true, models: extractModelIds(parsed) };
 }

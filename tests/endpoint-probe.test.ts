@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { checkBaseUrl, describeNetworkError } from "../app/src/main/endpoint-probe.js";
+import {
+  checkBaseUrl,
+  describeNetworkError,
+  interpretModelsResponse,
+} from "../app/src/main/endpoint-probe.js";
 
 /** The shape undici actually throws: a bare TypeError with the reason on cause. */
 function fetchFailed(code: string, message = "some transport failure"): TypeError {
@@ -92,5 +96,73 @@ describe("checkBaseUrl", () => {
 
   it("does not object to non-ASCII outside the host", () => {
     expect(checkBaseUrl("https://api.example.test/v1/café").ok).toBe(true);
+  });
+});
+
+describe("interpretModelsResponse", () => {
+  it("reads an OpenAI-shaped list, deduped", () => {
+    const body = JSON.stringify({
+      object: "list",
+      data: [{ id: "alpha" }, { id: " beta " }, { id: "alpha" }, { id: 7 }],
+    });
+    expect(interpretModelsResponse(200, body)).toEqual({
+      valid: true,
+      models: ["alpha", "beta"],
+    });
+  });
+
+  it("accepts a bare array of ids", () => {
+    expect(interpretModelsResponse(200, JSON.stringify(["a", "b"]))).toEqual({
+      valid: true,
+      models: ["a", "b"],
+    });
+  });
+
+  it("keeps a parseable but unfamiliar JSON shape valid, with no models", () => {
+    expect(interpretModelsResponse(200, JSON.stringify({ ok: true }))).toEqual({
+      valid: true,
+      models: [],
+    });
+  });
+
+  // loom#441: blablador answers an unauthenticated /v1/models with 200 and a
+  // plain-text line. Treating that as proof of a working key is what made a
+  // rejected key look like a working endpoint that served no models.
+  it("does not call a 200 valid when the body is not JSON, and quotes the server", () => {
+    const res = interpretModelsResponse(
+      200,
+      "You must provide a valid API key. Obtain one from http://helmholtz.cloud",
+    );
+    expect(res.valid).toBe(false);
+    expect(res.error).toContain("You must provide a valid API key");
+  });
+
+  it("recognises an HTML body as a wrong base URL rather than quoting markup", () => {
+    const res = interpretModelsResponse(200, "<!doctype html><html><body>Sign in</body></html>");
+    expect(res.valid).toBe(false);
+    expect(res.error).toContain("web page");
+    expect(res.error).not.toContain("<");
+  });
+
+  it("reports an empty 200 body", () => {
+    const res = interpretModelsResponse(200, "   \n  ");
+    expect(res.valid).toBe(false);
+    expect(res.error).toContain("empty reply");
+  });
+
+  it("caps a long non-JSON body so it fits a status label", () => {
+    const res = interpretModelsResponse(200, "x".repeat(500));
+    expect(res.valid).toBe(false);
+    expect(res.error!.length).toBeLessThan(200);
+    expect(res.error).toContain("...");
+  });
+
+  it("maps auth and server statuses", () => {
+    expect(interpretModelsResponse(401, "")).toEqual({
+      valid: false,
+      error: "Invalid API key (401)",
+    });
+    expect(interpretModelsResponse(403, "").error).toContain("403");
+    expect(interpretModelsResponse(500, "").error).toBe("Unexpected response: HTTP 500");
   });
 });
