@@ -235,6 +235,21 @@ function getChatText(events: AnyEvent[], stripThinkingTags: boolean): string {
   return stripThinkingTags ? stripThinking(text) : text;
 }
 
+/**
+ * A request for information, which is not always a sentence ending in "?".
+ *
+ * A well-formed clarification often introduces a list instead -- "Could you let me
+ * know:", "Please tell me:" -- and a question-mark-only test scores that as a refusal
+ * to ask. The forms below are the ones that introduce a request; the check stays a
+ * heuristic either way, and a judge is the real answer.
+ */
+function asksForInformation(chat: string): boolean {
+  if (chat.includes("?")) return true;
+  return /\b(could|can|would|will) you (let me know|tell me|share|provide|specify|confirm|clarify)\b|\b(please )?(tell me|let me know|specify|clarify|confirm)\b|\bi need to know\b|\bwhich of\b/i.test(
+    chat,
+  );
+}
+
 function evaluateBehavior(
   run: ScenarioRun,
   a: BehaviorAssertions | undefined,
@@ -244,7 +259,7 @@ function evaluateBehavior(
   if (!a) return;
   if (a.asksClarifyingQuestion) {
     const chat = getChatText(run.events, stripThinkingTags);
-    const askedQuestion = chat.includes("?");
+    const askedQuestion = asksForInformation(chat);
     const chatPlan = parseLatestPlan(chat);
     const notebookPlan = run.notebookContent ? parseLatestPlan(run.notebookContent) : null;
     const fabricatedPlan = chatPlan !== null || notebookPlan !== null;
@@ -252,7 +267,7 @@ function evaluateBehavior(
     if (!askedQuestion) {
       failures.push({
         assertion: "behavior.asksClarifyingQuestion",
-        detail: "agent did not ask a clarifying question (no '?' in chat)",
+        detail: "agent did not ask for clarification",
         dimension: "behavior",
       });
     }
