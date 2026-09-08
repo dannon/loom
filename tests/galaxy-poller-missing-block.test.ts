@@ -242,6 +242,34 @@ describe("galaxy-poller missing-block reporting", () => {
     expect(missing[0].payload).toMatchObject({ blockKind: "job", id: "job-1" });
   });
 
+  it("reports the whole notebook disappearing, not just one block", async () => {
+    writeFileSync(nbPath, renderInvocationYaml(invocation()), "utf-8");
+    mockGalaxyGet.mockResolvedValue(invocationResponse("ready", "running") as never);
+    const notify = vi.fn();
+
+    await firstTick(notify);
+    rmSync(nbPath, { force: true });
+    await pollGalaxyNow();
+
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0][0]).toContain("QC workflow");
+  });
+
+  it("gives up on an id Galaxy keeps refusing rather than asking forever", async () => {
+    writeFileSync(nbPath, renderInvocationYaml(invocation()), "utf-8");
+    mockGalaxyGet.mockRejectedValue(new Error("Galaxy API 404"));
+    const notify = vi.fn();
+
+    await firstTick(notify);
+    writeFileSync(nbPath, "# Notes\n", "utf-8");
+    for (let i = 0; i < 6; i++) await pollGalaxyNow();
+
+    // Three attempts, then the id is dropped -- not one round trip per tick for
+    // the rest of the session.
+    expect(mockGalaxyGet).toHaveBeenCalledTimes(3);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
   it("keeps the id tracked when Galaxy can't be reached for the verdict", async () => {
     writeFileSync(nbPath, renderInvocationYaml(invocation()), "utf-8");
     mockGalaxyGet.mockRejectedValueOnce(new Error("Galaxy API 503"));

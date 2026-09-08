@@ -51,6 +51,7 @@ import {
   findJobBlocks,
   isTerminalJobState,
   jobStatusFromGalaxyState,
+  type JobYaml,
 } from "./galaxy-job-block.js";
 import { appendActivityEvent } from "./activity.js";
 
@@ -116,7 +117,17 @@ interface TrackedBlock {
   kind: "invocation" | "job";
   id: string;
   label: string;
+  /** Consecutive failed liveness checks after the block went missing. */
+  checkFailures?: number;
 }
+
+/**
+ * How many times a missing block's liveness check may fail before we give up on
+ * it. A 403 or a 404 doesn't get better by asking again, and retrying forever
+ * would spend a Galaxy round trip per tick, per id, for the rest of the
+ * session.
+ */
+const MAX_MISSING_CHECK_ATTEMPTS = 3;
 
 /**
  * Every in-flight block we've seen this session, keyed `<kind>:<id>`. The
@@ -224,8 +235,12 @@ async function reportMissingBlocks(content: string): Promise<void> {
       result = await isStillLive(block);
     } catch (err) {
       // Galaxy briefly unreachable. Stay tracked and ask again next tick; one
-      // unreachable id must not cost the others their check.
+      // unreachable id must not cost the others their check. A few attempts in,
+      // stop asking -- the answer isn't coming.
       console.error(`[galaxy-poller] ${block.kind} ${block.id} liveness check failed:`, err);
+      const failures = (block.checkFailures ?? 0) + 1;
+      if (failures >= MAX_MISSING_CHECK_ATTEMPTS) trackedActive.delete(key);
+      else trackedActive.set(key, { ...block, checkFailures: failures });
       continue;
     }
     // One verdict per id, either way: the block is gone, so there is nothing
@@ -251,7 +266,7 @@ const MAX_JOB_PERSIST_ATTEMPTS = 3;
 async function persistJobUpdate(
   nbPath: string,
   update: Parameters<typeof applyJobPollUpdate>[1],
-): Promise<boolean> {
+): Promise<{ written: boolean; priorStatus?: JobYaml["status"] }> {
   let lastError: unknown;
   for (let attempt = 0; attempt < MAX_JOB_PERSIST_ATTEMPTS; attempt++) {
     const stamp = await statNotebook(nbPath);
@@ -262,13 +277,17 @@ async function persistJobUpdate(
       lastError = new NotebookChangedError(nbPath);
       continue;
     }
+    // The status as it is now, not as the tick's opening snapshot had it: the
+    // write below refreshes last_polled_at either way, so "we wrote" is not the
+    // same question as "we changed the outcome".
+    const priorStatus = findJobBlocks(fresh).find((j) => j.jobId === update.jobId)?.status;
     const updated = applyJobPollUpdate(fresh, update);
     // Block gone, or already carrying this result: nothing to write, nothing
     // to announce.
-    if (updated === fresh) return false;
+    if (updated === fresh) return { written: false };
     try {
       await writeNotebook(nbPath, updated, stamp);
-      return true;
+      return { written: true, priorStatus };
     } catch (error) {
       if (!(error instanceof NotebookChangedError)) throw error;
       lastError = error;
@@ -338,7 +357,7 @@ async function tickJobs(content: string): Promise<void> {
 
     const status = jobStatusFromGalaxyState(state);
     const polledAt = new Date().toISOString();
-    let persisted: boolean;
+    let persisted: { written: boolean; priorStatus?: JobYaml["status"] };
     try {
       persisted = await withNotebookLock(nbPath, () =>
         persistJobUpdate(nbPath, {
@@ -357,7 +376,8 @@ async function tickJobs(content: string): Promise<void> {
     }
     // The block was deleted mid-poll, or another writer already advanced it.
     // Either way this tick didn't transition anything, so there's no news.
-    if (!persisted) continue;
+    if (!persisted.written) continue;
+    if (persisted.priorStatus === status) continue;
 
     const label = job.label || job.toolId || job.jobId;
     logTransition({
@@ -365,7 +385,7 @@ async function tickJobs(content: string): Promise<void> {
       id: job.jobId,
       label,
       toolId: job.toolId ?? null,
-      from: job.status,
+      from: persisted.priorStatus ?? job.status,
       to: status,
       galaxyState: state ?? null,
       lastPolledAt: polledAt,
@@ -396,7 +416,14 @@ async function runTick(): Promise<void> {
     // One read per tick, shared by everything below: what the notebook says is
     // in flight is the whole of the poller's worklist.
     const content = await readNotebookOrNull();
-    if (content === null) return;
+    if (content === null) {
+      // The notebook itself is gone, so every block we were watching went with
+      // it -- same silencing, one level up. An unreadable-but-present notebook
+      // is a transient we say nothing about; an absent one is not.
+      const nbPath = getNotebookPath();
+      if (nbPath && !(await statNotebook(nbPath))) await reportMissingBlocks("");
+      return;
+    }
     trackActiveBlocks(content);
     await reportMissingBlocks(content);
 

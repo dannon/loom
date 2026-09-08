@@ -220,6 +220,23 @@ describe("galaxy-poller activity log", () => {
     expect(rows[0].payload).toMatchObject({ to: "failed", outcome: "cancelled" });
   });
 
+  it("does not log a job transition another writer had already made", async () => {
+    // The tick's opening snapshot says in_progress; another writer records the
+    // outcome while the Galaxy request is in flight. The write still lands (it
+    // refreshes last_polled_at), but the status change wasn't ours to announce.
+    writeFileSync(nbPath, renderJobYaml(job()), "utf-8");
+    mockJobDetails.mockImplementation(async () => {
+      writeFileSync(nbPath, renderJobYaml(job({ status: "completed" })), "utf-8");
+      return { id: "job-1", state: "ok", tool_id: "bwa_mem", tool_version: "1.0" };
+    });
+
+    await tick();
+
+    expect(transitions()).toEqual([]);
+    // The write itself is not suppressed -- the poll's stamp still lands.
+    expect(findJobBlocks(readFileSync(nbPath, "utf-8"))[0].lastPolledAt).toBeTruthy();
+  });
+
   it("logs a job block's transition too, once it has actually been written", async () => {
     writeFileSync(nbPath, renderJobYaml(job()), "utf-8");
     mockJobDetails.mockResolvedValue({
