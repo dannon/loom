@@ -167,6 +167,24 @@ summary: ""
 
 The polling tool `galaxy_invocation_check_all` scans the notebook for in-flight blocks, polls Galaxy for each, and applies deterministic state transitions (all-jobs-ok → `completed`, any-error → `failed`) by rewriting the YAML in place. No external state store; the notebook is authoritative.
 
+### The evidence gate
+
+Most of what Loom enforces mechanically is about safety -- don't shell out, don't leak the key, don't delete the history. The epistemic discipline the product actually exists for ("evidence comes before assertion") was prose in the system prompt, and nothing checked it.
+
+The evidence gate is the first check on that. It watches `Edit`/`Write` calls against `notebook.md` and reads the file as it stood _before_ the write. A plan step going `- [ ]` → `- [x]` while the `loom-invocation` block bound to its anchor still reads `status: in_progress` is a contradiction: a verified result claimed for a run Galaxy says hasn't finished. That status comes from the poller, not the model, so it can't be satisfied by writing a convincing sentence -- and because the check reads the pre-image, rewriting `status:` in the same edit doesn't clear it either.
+
+It's deliberately narrow. Absence of evidence isn't decidable from a single write (the honest sequence Loom teaches spans two edits), so absence is never gated -- only contradiction is. A flip with no bound invocation gets no opinion, a `failed` block is never gated because it's sticky and can't be re-polled, and a rerun that leaves a stale block beside a `completed` one for the same anchor reads as fine.
+
+Modes are `off | warn | deny`, default **warn**: the write goes through and the decision lands in `activity.jsonl` as an `evidence.decision` event, so the real false-positive rate can be measured before anyone makes it a hard failure. Set it in `~/.loom/config.json`:
+
+```json
+{ "evidenceGate": { "mode": "warn" } }
+```
+
+or per session with `LOOM_EVIDENCE_GATE=deny`.
+
+One gap is known and pinned by a test rather than papered over: a model can still split the forgery across two edits, rewriting `status:` in one and flipping the checkbox in the next. Closing that needs the poller's status held somewhere the model can't author.
+
 ### Git-tracked notebooks
 
 When Loom starts in a directory that isn't already a git repo, it runs `git init`, drops a bioinformatics-friendly `.gitignore`, and marks the repo with `git config loom.managed true`. From then on every notebook write triggers an auto-commit, giving you:
