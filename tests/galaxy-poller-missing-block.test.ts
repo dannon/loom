@@ -186,6 +186,7 @@ describe("galaxy-poller missing-block reporting", () => {
     const notify = vi.fn();
 
     await firstTick(notify);
+    const polledBefore = mockCheck.mock.calls.length;
 
     // Only the first block goes.
     writeFileSync(
@@ -204,7 +205,7 @@ describe("galaxy-poller missing-block reporting", () => {
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify.mock.calls[0][0]).toContain("QC workflow");
     // inv-2 is still in the notebook and still gets polled.
-    expect(mockCheck).toHaveBeenCalled();
+    expect(mockCheck.mock.calls.length).toBeGreaterThan(polledBefore);
   });
 
   it("says nothing when the run had already finished before its block went", async () => {

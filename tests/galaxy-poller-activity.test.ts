@@ -82,6 +82,7 @@ function entry(overrides: Record<string, unknown> = {}) {
     priorStatus: "in_progress",
     jobSummary: { ok: 3, running: 0, queued: 0, error: 0, other: 0 },
     activeJobs: 0,
+    newStatus: "completed",
     lastPolledAt: "2026-04-25T01:00:00Z",
     autoAction: "completed",
     ...overrides,
@@ -139,6 +140,7 @@ describe("galaxy-poller activity log", () => {
       label: "QC workflow",
       from: "in_progress",
       to: "completed",
+      outcome: "completed",
       counters: { ok: 3, running: 0, queued: 0, error: 0, other: 0, active: 0 },
       lastPolledAt: "2026-04-25T01:00:00Z",
     });
@@ -158,6 +160,7 @@ describe("galaxy-poller activity log", () => {
         entry({
           invocationId: "inv-2",
           autoAction: "failed",
+          newStatus: "failed",
           jobSummary: { ok: 1, running: 0, queued: 0, error: 2, other: 0 },
         }),
       ]),
@@ -175,7 +178,9 @@ describe("galaxy-poller activity log", () => {
 
   it("writes nothing on a poll that changed no status", async () => {
     writeFileSync(nbPath, renderInvocationYaml(invocation()), "utf-8");
-    mockCheck.mockResolvedValue(resultWith([entry({ autoAction: undefined })]));
+    mockCheck.mockResolvedValue(
+      resultWith([entry({ autoAction: undefined, newStatus: undefined })]),
+    );
 
     await tick();
     await pollGalaxyNow();
@@ -189,6 +194,8 @@ describe("galaxy-poller activity log", () => {
       resultWith([
         entry({
           autoAction: "failing",
+          // A mid-flight failure writes a summary but leaves the status alone.
+          newStatus: "in_progress",
           jobSummary: { ok: 0, running: 2, queued: 0, error: 1, other: 0 },
           activeJobs: 2,
         }),
@@ -198,6 +205,19 @@ describe("galaxy-poller activity log", () => {
     await tick();
 
     expect(transitions()).toEqual([]);
+  });
+
+  it("records a cancelled invocation by the status the block took, not the outcome", async () => {
+    writeFileSync(nbPath, renderInvocationYaml(invocation()), "utf-8");
+    mockCheck.mockResolvedValue(
+      resultWith([entry({ autoAction: "cancelled", newStatus: "failed" })]),
+    );
+
+    await tick();
+
+    const rows = transitions();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].payload).toMatchObject({ to: "failed", outcome: "cancelled" });
   });
 
   it("logs a job block's transition too, once it has actually been written", async () => {

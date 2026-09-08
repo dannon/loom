@@ -235,6 +235,23 @@ describe("checkInvocations completion predicate", () => {
     expect(entry.autoAction).toBe("failed");
   });
 
+  it("closes out a cancelled invocation instead of watching it forever", async () => {
+    const { entry, notebook } = await poll("cancelled", ["ok", "ok"]);
+
+    // No third word for it in the block, so it lands terminal and the summary
+    // carries the truth -- but the poller is told it was a cancel, not a crash.
+    expect(entry.autoAction).toBe("cancelled");
+    expect(notebook).toContain("status: failed");
+    expect(notebook).toContain("Workflow cancelled: 2 job(s) finished before it stopped");
+  });
+
+  it("says cancelled, not failed, when the cancel deleted jobs on its way out", async () => {
+    const { entry, notebook } = await poll("cancelled", ["ok", "deleted"]);
+
+    expect(entry.autoAction).toBe("cancelled");
+    expect(notebook).toContain("1 job(s) finished before it stopped, 1 did not");
+  });
+
   it("fails an invocation Galaxy could not schedule, even with no errored job", async () => {
     const { entry, notebook } = await poll("failed", ["ok"]);
 

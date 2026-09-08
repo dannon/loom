@@ -78,6 +78,7 @@ interface PollResultEntry {
   priorStatus?: string;
   jobSummary?: { ok?: number; running?: number; queued?: number; error?: number; other?: number };
   activeJobs?: number;
+  newStatus?: string;
   lastPolledAt?: string;
   autoAction?: string;
 }
@@ -419,14 +420,19 @@ async function runTick(): Promise<void> {
     if (Array.isArray(results)) {
       for (const r of results) {
         const label = r.label || r.notebookAnchor || r.invocationId;
-        if (r.autoAction === "completed" || r.autoAction === "failed") {
+        // A row for what the block's status actually became, and only when it
+        // became something else: `autoAction` survives the check's own blanking
+        // only for a transition that landed on disk, and a mid-flight failure
+        // deliberately leaves the status where it was.
+        if (r.autoAction && r.newStatus && r.newStatus !== r.priorStatus) {
           logTransition({
             blockKind: "invocation",
             id: r.invocationId,
             label,
             notebookAnchor: r.notebookAnchor ?? null,
             from: r.priorStatus ?? "in_progress",
-            to: r.autoAction,
+            to: r.newStatus,
+            outcome: r.autoAction,
             counters: { ...(r.jobSummary ?? {}), active: r.activeJobs ?? 0 },
             lastPolledAt: r.lastPolledAt ?? null,
           });
@@ -441,6 +447,11 @@ async function runTick(): Promise<void> {
           notify(
             `❌ Galaxy: "${label}" failed (${r.jobSummary?.error ?? 0} job error(s)) — ask me to investigate.`,
             "warning",
+          );
+        } else if (r.autoAction === "cancelled") {
+          notify(
+            `⏹️ Galaxy: "${label}" was cancelled — ${r.jobSummary?.ok ?? 0} job(s) finished before it stopped.`,
+            "info",
           );
         } else if (r.autoAction === "failing" && !announcedFailing.has(r.invocationId)) {
           announcedFailing.add(r.invocationId);

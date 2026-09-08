@@ -643,6 +643,8 @@ interface CheckResultEntry {
   otherStates: Record<string, number>;
   /** Jobs Galaxy could still advance: running + queued + the non-terminal half of `other`. */
   activeJobs: number;
+  /** The status this poll wrote, when it wrote one. Absent on a no-op poll. */
+  newStatus?: InvocationYaml["status"];
   lastPolledAt?: string;
   autoAction?: string;
 }
@@ -848,7 +850,17 @@ export async function checkInvocations(
 
       if (schedulingDone && activeJobs === 0) {
         const ended = describeStates(otherStates);
-        if (summary.error > 0) {
+        if (inv.state === "cancelled") {
+          // A cancel is not a failure and not a completion, and the block has
+          // no third word for it -- so it lands terminal (nothing is coming
+          // that would move it again) and the summary says what happened.
+          const unfinished = summary.error > 0 ? `, ${summary.error} did not` : "";
+          transition = {
+            status: "failed",
+            summary: `Workflow cancelled: ${summary.ok} job(s) finished before it stopped${unfinished}`,
+          };
+          autoAction = "cancelled";
+        } else if (summary.error > 0) {
           transition = {
             status: "failed",
             summary: `Workflow failed: ${summary.error} job(s) errored, ${summary.ok} succeeded`,
@@ -912,6 +924,7 @@ export async function checkInvocations(
         jobSummary: summary,
         otherStates,
         activeJobs,
+        newStatus: transition?.status,
         lastPolledAt,
         autoAction,
       });
@@ -951,7 +964,10 @@ export async function checkInvocations(
     // transitions; it's news as long as the counters and summary carrying it
     // landed somewhere.
     for (const entry of results) {
-      const announced = entry.autoAction === "completed" || entry.autoAction === "failed";
+      const announced =
+        entry.autoAction === "completed" ||
+        entry.autoAction === "failed" ||
+        entry.autoAction === "cancelled";
       if (announced && !transitioned.has(entry.invocationId)) entry.autoAction = undefined;
       if (entry.autoAction === "failing" && !applied.has(entry.invocationId)) {
         entry.autoAction = undefined;
