@@ -52,6 +52,15 @@ export interface Assertions {
    * per `source` (default "any"). Preferred for decision-correctness scenarios.
    */
   plan?: PlanAssertions;
+  /**
+   * Structural assertions on the post-run `activity.jsonl` beside the
+   * notebook. This is where the harness's own decisions land -- gate
+   * adjudications, overrides, poller transitions -- and in `--mode json` it
+   * is the only place they land: `ctx.ui.notify` is a no-op with no UI
+   * attached, so a synchronous command that records something has no other
+   * observable surface.
+   */
+  activity?: ActivityAssertions;
   exitCode?: number;
   behavior?: BehaviorAssertions;
 }
@@ -63,6 +72,24 @@ export interface BehaviorAssertions {
    * in chat or notebook.
    */
   asksClarifyingQuestion?: boolean;
+}
+
+export interface ActivityAssertions {
+  /** Every entry must be satisfied by at least one row in activity.jsonl. */
+  mustInclude?: ActivityExpectation[];
+  /** No row may carry any of these `kind`s. */
+  mustNotIncludeKinds?: string[];
+}
+
+export interface ActivityExpectation {
+  kind: string;
+  source?: string;
+  /**
+   * Each key must be present in the row's payload with this value. Compared
+   * as strings so a scenario file doesn't have to mirror the payload's JSON
+   * types -- same coarseness as `toolCalls.argsContains`.
+   */
+  payloadContains?: Record<string, string>;
 }
 
 export interface NotebookAssertions {
@@ -206,6 +233,8 @@ export interface ScenarioRun {
   stderr: string;
   /** Final notebook.md content from the scenario's temp cwd, null if absent. */
   notebookContent: string | null;
+  /** Parsed rows of the scenario's activity.jsonl, empty if it was never written. */
+  activityEvents: ActivityEvent[];
   failures: ScenarioFailure[];
   durationMs: number;
 }
@@ -213,6 +242,14 @@ export interface ScenarioRun {
 export interface AnyEvent {
   type: string;
   [k: string]: unknown;
+}
+
+/** One line of activity.jsonl. Mirrors the brain's ActivityEvent envelope. */
+export interface ActivityEvent {
+  timestamp: string;
+  kind: string;
+  source: string;
+  payload: Record<string, unknown>;
 }
 
 export interface CellDimension {
