@@ -32,6 +32,7 @@ import {
   outstandingContradictions,
   resolveMode,
   resolveStepKey,
+  type PlanStep,
 } from "./evidence-gate.js";
 
 const USAGE =
@@ -48,22 +49,20 @@ export function planOverride(content: string, args: string): OverrideResult {
   const raw = args.trim();
   if (!raw) return { ok: false, message: renderStatus(content) };
 
-  const split = raw.indexOf(" ");
-  if (split === -1) {
-    return { ok: false, message: `A reason is required, so the record says why.\n${USAGE}` };
-  }
-  const keyInput = raw.slice(0, split);
-  const reason = raw.slice(split + 1).trim();
-  if (!reason) {
-    return { ok: false, message: `A reason is required, so the record says why.\n${USAGE}` };
-  }
-
-  const step = resolveStepKey(content, keyInput);
+  // Split on the LONGEST leading token that names a real step, not on the first
+  // space. `ANCHOR` is `\{#([^}]+)\}`, so an anchor may legitimately contain
+  // spaces, and splitting at the first one would lock the user out of
+  // overriding exactly those steps -- the gate failing closed with no way
+  // through, which is the failure mode this command exists to prevent.
+  const { step, reason } = splitKeyAndReason(content, raw);
   if (!step) {
     return {
       ok: false,
-      message: `No plan step matches '${keyInput}'.\n${renderStatus(content)}`,
+      message: `No plan step matches '${raw.split(" ")[0]}'.\n${renderStatus(content)}`,
     };
+  }
+  if (!reason) {
+    return { ok: false, message: `A reason is required, so the record says why.\n${USAGE}` };
   }
 
   // Only a standing contradiction can be overridden. Pre-authorizing one that
@@ -94,6 +93,24 @@ export function planOverride(content: string, args: string): OverrideResult {
       reason,
     },
   };
+}
+
+/**
+ * Longest-prefix split of `<step-key> <reason>`. Tries the whole argument as a
+ * key first and walks the space boundaries inward, so a spacey anchor wins over
+ * its own first word.
+ */
+function splitKeyAndReason(
+  content: string,
+  raw: string,
+): { step: PlanStep | null; reason: string } {
+  const words = raw.split(/\s+/).filter(Boolean);
+  for (let take = words.length; take > 0; take--) {
+    const candidate = words.slice(0, take).join(" ");
+    const step = resolveStepKey(content, candidate);
+    if (step) return { step, reason: words.slice(take).join(" ") };
+  }
+  return { step: null, reason: "" };
 }
 
 /** What the gate is holding right now, and how to address it. */

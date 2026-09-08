@@ -185,7 +185,9 @@ or per session with `LOOM_EVIDENCE_GATE=deny`.
 
 In `deny` the refusal stands for as long as the contradiction does. An earlier cut let the model's second attempt through, on the theory that an unwinnable retry loop is worse than an unevidenced claim -- but that made the decision advisory, since a model that disagrees only has to ask twice. The exception is yours instead: `/override <step-anchor> <reason>` clears one named step for one write and records the step, the invocation status at the time, and your reason to `activity.jsonl` as an `evidence.override` event. A contradiction that recurs on that step is refused again. Bare `/override` lists what the gate is currently holding.
 
-One gap is known and pinned by a test rather than papered over: a model can still split the forgery across two edits, rewriting `status:` in one and flipping the checkbox in the next. Closing that needs the poller's status held somewhere the model can't author.
+A clearance is session-scoped and held in memory: it is spent by the next write it lets through, and dropped at the next session start. Granting one in the CLI and then resuming in Orbit means granting it again. That is deliberate for now -- a durable clearance is a durable record, which is the registry's job -- but it is the rough edge to watch if `deny` ever becomes the default.
+
+Several gaps are known and pinned by tests rather than papered over, and they share one root: step identity and the poller's status both live in text the model may rewrite. A forgery can be split across two edits (rewrite `status:`, then flip); renaming the step's anchor, or the plan heading above it, in the same edit as the flip stops it reading as a flip at all; `bash` writes never reach the hook, since it watches the file tools; and `activity.jsonl` is itself an ordinary workspace file. The first three close when the poller's verdict is held out of band where the model can't author it. The last two are the exec-guard's write policy rather than a second gate here.
 
 ### Git-tracked notebooks
 

@@ -231,6 +231,15 @@ describe("/override -- the user-originated exception", () => {
     ]);
   });
 
+  it("records the invocation id, so a warn-mode row can be adjudicated later", async () => {
+    const pi = fakePi();
+    registerEvidenceGate(pi.api);
+    await pi.write(flipEdit(STEP2));
+    expect(payloads("evidence.decision")[0].contradictions).toEqual([
+      { step: "#plan-a-step-2", status: "in_progress", invocationId: "abc0000000000001" },
+    ]);
+  });
+
   it("names the overridden step in the decision it let through", async () => {
     process.env.LOOM_EVIDENCE_GATE = "deny";
     const pi = fakePi();
@@ -309,6 +318,34 @@ describe("/override -- the user-originated exception", () => {
     await pi.runCommand("override", "");
     expect(pi.notices[0]).toMatch(/Evidence gate: warn/);
     expect(pi.notices[0]).toMatch(/plan-a-step-2\s+in_progress\s+2\. \*\*Align reads\*\*/);
+  });
+
+  it("addresses a step whose anchor contains spaces", async () => {
+    // ANCHOR is `\{#([^}]+)\}`, so this is a legal anchor. Splitting the
+    // argument at the first space would make such a step un-overridable --
+    // the gate failing closed with no way through.
+    const spacey = PLAN.replace("{#plan-a-step-2}", "{#align step 2}");
+    setNotebook(
+      spacey + "\n" + renderInvocationYaml(invocation({ notebookAnchor: "align step 2" })),
+    );
+    const pi = fakePi();
+    registerEvidenceOverrideCommand(pi.api);
+    await pi.runCommand("override", "align step 2 checked the BAM by hand");
+    expect(payloads("evidence.override")[0]).toMatchObject({
+      step: "#align step 2",
+      reason: "checked the BAM by hand",
+    });
+  });
+
+  it("gates a write that names the notebook only under file_path", async () => {
+    process.env.LOOM_EVIDENCE_GATE = "deny";
+    const pi = fakePi();
+    registerEvidenceGate(pi.api);
+    const blocked = await pi.write({
+      file_path: "notebook.md",
+      edits: [{ oldText: `- [ ] ${STEP2}`, newText: `- [x] ${STEP2}` }],
+    });
+    expect(blocked?.block).toBe(true);
   });
 
   it("accepts the gate's own key spelling as well as the bare anchor", () => {

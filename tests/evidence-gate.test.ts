@@ -78,6 +78,20 @@ describe("detectCompletions", () => {
     expect(detectCompletions(PLAN, failed)).toHaveLength(0);
   });
 
+  it("counts failed -> complete, which was a two-edit bypass around the gate", () => {
+    // Mark the step failed, then mark it complete: neither edit touches the
+    // invocation block, and keying only on `- [ ]` meant neither was a flip.
+    const failed = PLAN.replace(`- [ ] ${STEP2}`, `- [!] ${STEP2}`);
+    expect(detectCompletions(failed, flip(failed.replace("[!]", "[ ]"), STEP2))).toHaveLength(1);
+    const revived = failed.replace(`- [!] ${STEP2}`, `- [x] ${STEP2}`);
+    expect(detectCompletions(failed, revived).map((s) => s.anchor)).toEqual(["plan-a-step-2"]);
+  });
+
+  it("an already-complete step rewritten in place is not a fresh completion", () => {
+    const done = flip(PLAN, STEP2);
+    expect(detectCompletions(done, done)).toHaveLength(0);
+  });
+
   it("never treats reopening as a completion", () => {
     expect(detectCompletions(flip(PLAN, STEP2), PLAN)).toHaveLength(0);
   });
@@ -130,6 +144,26 @@ describe("findContradictions", () => {
     expect(findContradictions(before, flips)).toHaveLength(0);
   });
 
+  it("gates failed -> complete while the rerun is still in flight", () => {
+    const before = withInvocation(invocation({ status: "in_progress" })).replace(
+      `- [ ] ${STEP2}`,
+      `- [!] ${STEP2}`,
+    );
+    const after = before.replace(`- [!] ${STEP2}`, `- [x] ${STEP2}`);
+    expect(findContradictions(before, detectCompletions(before, after))).toHaveLength(1);
+  });
+
+  it("says nothing about failed -> complete once a rerun has finished", () => {
+    // The honest recovery shape, and the reason gating the transition is safe:
+    // a finished rerun leaves a completed block for the anchor.
+    const before = withInvocation(
+      invocation({ invocationId: "abc0000000000001", status: "failed" }),
+      invocation({ invocationId: "def0000000000002", status: "completed" }),
+    ).replace(`- [ ] ${STEP2}`, `- [!] ${STEP2}`);
+    const after = before.replace(`- [!] ${STEP2}`, `- [x] ${STEP2}`);
+    expect(findContradictions(before, detectCompletions(before, after))).toHaveLength(0);
+  });
+
   it("has no opinion about a step with no bound invocation", () => {
     const before = withInvocation(invocation({ notebookAnchor: "plan-a-step-99" }));
     const flips = detectCompletions(before, flip(before, STEP2));
@@ -174,6 +208,43 @@ describe("adversarial: the bypasses that define the acceptance bar", () => {
     expect(d.gated).toBe(true);
   });
 
+  it("follows pi's fuzzy match, so a folded em-dash is not a free pass", () => {
+    // pi's edit retries in a normalized space (edit-diff.ts fuzzyFindText):
+    // NFKC, trailing whitespace per line, smart quotes, and every dash folded
+    // to `-`. An exact-only gate abstains on those while the write still
+    // lands, and models re-emit punctuation loosely by accident constantly.
+    const before = withInvocation(invocation({ status: "in_progress" }));
+    const folded = STEP2.replace("—", "-");
+    const d = decideNotebookWrite(
+      before,
+      "edit",
+      { path: "notebook.md", edits: [{ oldText: `- [ ] ${folded}`, newText: `- [x] ${folded}` }] },
+      "deny",
+    );
+    expect(d.gated).toBe(true);
+  });
+
+  it("also follows it for trailing whitespace, the other everyday drift", () => {
+    const before = withInvocation(invocation({ status: "in_progress" }));
+    const d = decideNotebookWrite(
+      before,
+      "edit",
+      {
+        path: "notebook.md",
+        edits: [{ oldText: `- [ ] ${STEP2}   `, newText: `- [x] ${STEP2}` }],
+      },
+      "deny",
+    );
+    expect(d.gated).toBe(true);
+  });
+
+  it("still abstains when pi would find nothing at all", () => {
+    const before = withInvocation(invocation({ status: "in_progress" }));
+    expect(
+      computeAfterContent(before, "edit", { edits: [{ oldText: "nope", newText: "x" }] }),
+    ).toBeNull();
+  });
+
   it("does not fail open when the call uses file_path instead of path", () => {
     // pi accepts both (dist/core/tools/edit.js:82); reading only `path` was a
     // one-key bypass. decideNotebookWrite is path-agnostic, so this asserts the
@@ -181,6 +252,44 @@ describe("adversarial: the bypasses that define the acceptance bar", () => {
     const before = withInvocation(invocation({ status: "in_progress" }));
     const call = editCall(`- [ ] ${STEP2}`, `- [x] ${STEP2}`, "file_path");
     expect(decideNotebookWrite(before, call.tool, call.input, "deny").gated).toBe(true);
+  });
+
+  it("KNOWN GAP: renaming the anchor in the same edit evades the flip check", () => {
+    // Step identity comes from the same model-editable text as the claim, so a
+    // renamed anchor reads as a different step and the flip is never detected.
+    // Closed by the registry, not here.
+    const before = withInvocation(invocation({ status: "in_progress" }));
+    const d = decideNotebookWrite(
+      before,
+      "edit",
+      {
+        path: "notebook.md",
+        edits: [
+          {
+            oldText: `- [ ] ${STEP2}`,
+            newText: `- [x] 2. **Align reads** {#plan-a-step-2b} — bwa mem`,
+          },
+        ],
+      },
+      "deny",
+    );
+    expect(d.gated).toBe(false);
+    expect(d.completions).toHaveLength(0);
+  });
+
+  it("KNOWN GAP: renaming the plan heading takes the step out of scope entirely", () => {
+    const before = withInvocation(invocation({ status: "in_progress" }));
+    const forged = flip(before, STEP2).replace(
+      "## Plan A: chrM Variant Calling [hybrid]",
+      "## Results",
+    );
+    const d = decideNotebookWrite(
+      before,
+      "write",
+      { path: "notebook.md", content: forged },
+      "deny",
+    );
+    expect(d.gated).toBe(false);
   });
 
   it("KNOWN GAP: splitting the forgery across two edits evades the pre-image check", () => {

@@ -58,10 +58,30 @@
  * person, a named step, a recorded reason, one write. A contradiction that
  * recurs on the same step is denied again.
  *
- * Known gap, recorded rather than papered over: a model can still split the
- * forgery across two edits -- rewrite `status:` in one, flip the checkbox in
- * the next -- and the pre-image check will not see it. Closing that needs the
- * poller's status kept out of band, where the model cannot author it.
+ * ## Known gaps, recorded rather than papered over
+ *
+ * All of these share one root: step identity and the poller's status both live
+ * in text the model is allowed to rewrite. They close together, when the
+ * poller's verdict is held out of band in a record the model cannot author --
+ * the approval/attempt registry, not here. Each has a test pinning current
+ * behaviour so it stays visible rather than forgotten.
+ *
+ * 1. **The two-edit split.** Rewrite `status:` in one edit, flip the checkbox
+ *    in the next. The pre-image of the second edit already says `completed`.
+ * 2. **Anchor rename plus flip, in one edit.** The post-image step key is no
+ *    longer the pre-image's, so it does not read as a flip at all.
+ * 3. **Plan-heading rename plus flip, in one edit.** The step leaves the
+ *    `## Plan X:` section and stops parsing as a plan step.
+ * 4. **Anything that is not a file tool.** `WRITE_TOOLS` is `write` and `edit`;
+ *    a `bash` heredoc or `sed -i` against `notebook.md` never reaches this
+ *    hook. Same class as the `.loom/` bash hole tracked separately; the right
+ *    home for it is the exec-guard's write policy, not a second gate here.
+ * 5. **`activity.jsonl` is writable by the model.** The audit trail this gate
+ *    appends to is an ordinary file in the workspace, so a sufficiently
+ *    motivated model can forge an `evidence.override` row or rewrite a past
+ *    decision. Also an exec-guard deny-floor question rather than one this
+ *    module can answer, and the reason the durable record has to be the
+ *    registry rather than the sidecar.
  */
 
 import fs from "node:fs";
@@ -153,13 +173,26 @@ export function parsePlanSteps(content: string): Map<string, PlanStep> {
 }
 
 /**
- * Steps that went `- [ ]` -> `- [x]` between two versions of the notebook.
+ * Steps that arrived at `- [x]` from some other state between two versions of
+ * the notebook.
  *
- * Only that transition counts. `- [ ]` -> `- [!]` records a failure, which is
- * the honest behaviour the discipline asks for and must never be gated, and
- * `- [x]` -> `- [ ]` is reopening. A step that is `[x]` in the new content with
- * no `[ ]` counterpart in the old is not a flip either -- that rule is what
- * keeps a first write, or a wholesale plan regeneration, from reading as a
+ * The claim being adjudicated is "this step is verified complete", so every way
+ * of arriving at it counts: `- [ ]` -> `- [x]` and `- [!]` -> `- [x]` alike.
+ * Keying only on the pending state, as the first cut did, left a two-edit
+ * bypass that never has to touch the invocation block at all -- mark the step
+ * failed, then mark it complete, and neither edit is a flip the gate can see.
+ *
+ * Gating the failed->complete transition costs nothing on the honest path.
+ * Recovering from a failure means rerunning, and a rerun that finished leaves a
+ * `completed` block for the anchor, which `findContradictions` already fails
+ * open on. What is left is the flip made while the rerun is still in flight,
+ * which is the contradiction this gate exists for.
+ *
+ * The reverse directions stay silent. `- [ ]` -> `- [!]` records a failure,
+ * which is the honest behaviour the discipline asks for and must never be
+ * gated, and `- [x]` -> `- [ ]` is reopening. A step that is `[x]` in the new
+ * content with no counterpart in the old is not a flip either -- that rule is
+ * what keeps a first write, or a wholesale plan regeneration, from reading as a
  * pile of unevidenced completions.
  */
 export function detectCompletions(before: string, after: string): PlanStep[] {
@@ -169,7 +202,7 @@ export function detectCompletions(before: string, after: string): PlanStep[] {
   for (const [key, step] of post) {
     if (step.state !== "x") continue;
     const prior = pre.get(key);
-    if (prior && prior.state === " ") flips.push(step);
+    if (prior && prior.state !== "x") flips.push(step);
   }
   return flips;
 }
@@ -265,9 +298,57 @@ export function resolveStepKey(content: string, input: string): PlanStep | null 
 }
 
 /**
+ * Mirror of pi's fuzzy-match normalization (`core/tools/edit-diff.ts`,
+ * `normalizeForFuzzyMatch`), reimplemented rather than imported because
+ * reaching into pi's `dist/core/**` from here is exactly the deep-path
+ * coupling that has broken loom on an upstream repackage before.
+ *
+ * It has to exist. pi's `edit` does not require `oldText` to match byte for
+ * byte: it tries an exact `indexOf` first and then retries in this normalized
+ * space, so an `oldText` whose em-dash arrived as a hyphen, or whose line lost
+ * its trailing space, still lands on disk. A gate that only did the exact
+ * match would silently abstain on those -- and models normalize punctuation
+ * when echoing text back all the time, so that is a hole a model falls through
+ * by accident as often as on purpose, under-counting the warn-mode audit as
+ * well as letting a deny-mode flip past.
+ */
+function normalizeForMatch(text: string): string {
+  return text
+    .normalize("NFKC")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, "-")
+    .replace(/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g, " ");
+}
+
+/**
+ * Apply one replacement the way pi will, or null if pi would not find it.
+ *
+ * pi rejects an `oldText` that occurs more than once (`getDuplicateError`), so
+ * first-match is not a guess here: an ambiguous edit never reaches the disk,
+ * and the one that does is the one we simulated. On the fuzzy path pi rewrites
+ * the whole file in normalized space, so returning normalized content is what
+ * actually lands, not an approximation of it.
+ */
+function applyOneEdit(content: string, oldText: string, newText: string): string | null {
+  const exact = content.indexOf(oldText);
+  if (exact !== -1) {
+    return content.slice(0, exact) + newText + content.slice(exact + oldText.length);
+  }
+  const normalized = normalizeForMatch(content);
+  const needle = normalizeForMatch(oldText);
+  const fuzzy = normalized.indexOf(needle);
+  if (fuzzy === -1) return null;
+  return normalized.slice(0, fuzzy) + newText + normalized.slice(fuzzy + needle.length);
+}
+
+/**
  * Reconstruct what the file will contain after this call, or null when we
  * can't tell. Null always means "no opinion" -- an unreadable file or an edit
- * whose oldText doesn't match is not ours to adjudicate, and guessing would
+ * pi itself would not land is not ours to adjudicate, and guessing would
  * manufacture exactly the false positives that get gates disabled.
  */
 export function computeAfterContent(
@@ -285,9 +366,9 @@ export function computeAfterContent(
   for (const raw of edits) {
     const e = raw as { oldText?: unknown; newText?: unknown };
     if (typeof e.oldText !== "string" || typeof e.newText !== "string") return null;
-    const idx = out.indexOf(e.oldText);
-    if (idx === -1) return null; // pi will reject this edit anyway
-    out = out.slice(0, idx) + e.newText + out.slice(idx + e.oldText.length);
+    const next = applyOneEdit(out, e.oldText, e.newText);
+    if (next === null) return null; // pi will reject this edit anyway
+    out = next;
   }
   return out;
 }
@@ -302,7 +383,9 @@ export function contradictionReason(c: Contradiction): string {
     `\`- [!]\` and record what failed. If Galaxy has actually finished and the ` +
     `block is stale, call \`galaxy_invocation_check_all\` to refresh it, inspect ` +
     `the outputs, record that evidence, and then flip the checkbox.\n` +
-    `Do not retry this write unchanged -- it will be refused again. If you ` +
+    `Do not retry this write unchanged -- it will be refused again. If the run ` +
+    `was abandoned and the work was done another way, that block is the thing ` +
+    `to reconcile first: it still says a run for this step is in flight. If you ` +
     `believe the gate is wrong, say so and ask the user to run ` +
     `\`/override ${c.step.anchor ?? c.step.key} <reason>\`; only they can clear it, ` +
     `and the reason is recorded.`
@@ -367,10 +450,6 @@ const overrides = new Set<string>();
 /** Grant one clearance for `stepKey`. Idempotent -- a token is a token. */
 export function grantEvidenceOverride(stepKey: string): void {
   overrides.add(stepKey);
-}
-
-export function hasEvidenceOverride(stepKey: string): boolean {
-  return overrides.has(stepKey);
 }
 
 /** Session boundary / test reset. */
@@ -448,19 +527,27 @@ export function registerEvidenceGate(pi: ExtensionAPI): void {
     const nbPath = getNotebookPath();
     if (!nbPath) return;
     const input = event.input as Record<string, unknown>;
-    // pi's edit and write both accept `file_path` as an alias for `path`
-    // (dist/core/tools/edit.js:82, write.js:94). Reading only `path` leaves a
-    // one-key bypass. (exec-guard/policy.ts has the same gap -- tracked
-    // separately; it is a safety gate, so it matters more there than here.)
-    const target =
-      typeof input.path === "string"
-        ? input.path
-        : typeof input.file_path === "string"
-          ? input.file_path
-          : undefined;
-    if (!target) return;
-    const abs = path.isAbsolute(target) ? target : path.resolve(ctx.cwd, target);
-    if (!sameFile(abs, nbPath)) return;
+    // `file_path` is read as well as `path`, defensively. In the pinned pi it
+    // is not actually an execution alias: `editSchema`/`writeSchema` require
+    // `path`, `validateToolArguments` throws when it is missing, and both
+    // `execute` bodies destructure `path`, so a call naming only `file_path`
+    // never reaches the filesystem. Only pi's *render* helpers read the alias
+    // (`getRenderablePreviewInput`, `formatEditCall`). Kept because it costs
+    // one ternary and covers pi adding the alias, or another shell forwarding
+    // a tool call in that shape. (exec-guard/policy.ts reads only `path` too;
+    // tracked separately as P0.3.)
+    // Adjudicate if ANY spelling of the target names the notebook, rather than
+    // picking one and trusting the precedence to match pi's. Precedence is a
+    // thing to get wrong later; "does this call mention the notebook at all"
+    // is not. A call naming some other file under the other key is adversarial
+    // or malformed, and pi refuses it, so there is no honest write to misjudge.
+    const targets = [input.path, input.file_path].filter(
+      (t): t is string => typeof t === "string" && t.length > 0,
+    );
+    const touchesNotebook = targets.some((t) =>
+      sameFile(path.isAbsolute(t) ? t : path.resolve(ctx.cwd, t), nbPath),
+    );
+    if (!touchesNotebook) return;
 
     let before: string;
     try {
@@ -489,6 +576,10 @@ export function registerEvidenceGate(pi: ExtensionAPI): void {
         contradictions: decision.contradictions.map((c) => ({
           step: c.step.key,
           status: c.invocation.status,
+          // The id is what makes a row adjudicable: warn mode records the
+          // would-block decision, and deciding later whether it was a false
+          // positive means going and looking at this invocation in Galaxy.
+          invocationId: c.invocation.invocationId,
         })),
         overridden: adjudication.block ? [] : adjudication.cleared.map((c) => c.step.key),
         outcome: adjudication.outcome,
