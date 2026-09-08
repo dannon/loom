@@ -183,6 +183,8 @@ Modes are `off | warn | deny`, default **warn**: the write goes through and the 
 
 or per session with `LOOM_EVIDENCE_GATE=deny`.
 
+In `deny` the refusal stands for as long as the contradiction does. An earlier cut let the model's second attempt through, on the theory that an unwinnable retry loop is worse than an unevidenced claim -- but that made the decision advisory, since a model that disagrees only has to ask twice. The exception is yours instead: `/override <step-anchor> <reason>` clears one named step for one write and records the step, the invocation status at the time, and your reason to `activity.jsonl` as an `evidence.override` event. A contradiction that recurs on that step is refused again. Bare `/override` lists what the gate is currently holding.
+
 One gap is known and pinned by a test rather than papered over: a model can still split the forgery across two edits, rewriting `status:` in one and flipping the checkbox in the next. Closing that needs the poller's status held somewhere the model can't author.
 
 ### Git-tracked notebooks
@@ -614,6 +616,7 @@ Type `/` in the chat to open the autocomplete popup. Tab to accept; Enter still 
 | `/connect [name]`         | Open Galaxy connection settings (or switch to an existing profile)                 |
 | `/profiles`               | List saved Galaxy server profiles                                                  |
 | `/execute` (alias `/run`) | Tell the agent to advance the next pending step in the latest plan section         |
+| `/override <step> <why>`  | Clear the evidence gate for one plan step, once, with a recorded reason            |
 | `/help`                   | Show this list                                                                     |
 
 ## Tool reference

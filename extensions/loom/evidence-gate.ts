@@ -47,6 +47,17 @@
  * agent action that clears that, and a gate whose remediation cannot be
  * executed is the gate people switch off.
  *
+ * ## The exception is the user's, not the model's
+ *
+ * The first cut of this gate kept a `denied` set and let the second attempt on
+ * a step through, reasoning that an unwinnable retry loop is worse than an
+ * unevidenced claim. That is true of a loop and false of this: it made the
+ * decision advisory, since a model that disagrees only has to ask twice. So the
+ * deny now persists for as long as the contradiction does, and the escape hatch
+ * is `/override <step-key> <reason>` (`evidence-override-command.ts`) -- a
+ * person, a named step, a recorded reason, one write. A contradiction that
+ * recurs on the same step is denied again.
+ *
  * Known gap, recorded rather than papered over: a model can still split the
  * forgery across two edits -- rewrite `status:` in one, flip the checkbox in
  * the next -- and the pre-image check will not see it. Closing that needs the
@@ -220,6 +231,40 @@ export function findContradictions(before: string, flips: PlanStep[]): Contradic
 }
 
 /**
+ * Every plan step the gate would currently fire on, regardless of what its
+ * checkbox says right now. The gate itself only adjudicates flips, but the
+ * user asking "what is blocked, and under what key?" is asking about the
+ * standing state -- and after a deny the step is still `- [ ]`, so keying the
+ * answer off the checkbox would report nothing. Same predicate, applied to
+ * every step in the file.
+ */
+export function outstandingContradictions(content: string): Contradiction[] {
+  return findContradictions(content, [...parsePlanSteps(content).values()]);
+}
+
+/**
+ * Resolve a user-typed step key against the notebook. Accepts the gate's own
+ * key (`#plan-a-step-2`), the bare anchor as it appears in the markdown
+ * (`plan-a-step-2`), and either spelled with different case -- anchors are
+ * copied out of the notebook by hand, and a gate whose override is hard to
+ * address is a gate people work around.
+ */
+export function resolveStepKey(content: string, input: string): PlanStep | null {
+  const steps = parsePlanSteps(content);
+  const raw = input.trim();
+  if (!raw) return null;
+  for (const candidate of [raw, `#${raw}`]) {
+    const hit = steps.get(candidate);
+    if (hit) return hit;
+  }
+  const lowered = raw.toLowerCase();
+  for (const [key, step] of steps) {
+    if (key.toLowerCase() === lowered || key.toLowerCase() === `#${lowered}`) return step;
+  }
+  return null;
+}
+
+/**
  * Reconstruct what the file will contain after this call, or null when we
  * can't tell. Null always means "no opinion" -- an unreadable file or an edit
  * whose oldText doesn't match is not ours to adjudicate, and guessing would
@@ -256,8 +301,17 @@ export function contradictionReason(c: Contradiction): string {
     `If the run is still going, leave the step pending. If it failed, mark it ` +
     `\`- [!]\` and record what failed. If Galaxy has actually finished and the ` +
     `block is stale, call \`galaxy_invocation_check_all\` to refresh it, inspect ` +
-    `the outputs, record that evidence, and then flip the checkbox.`
+    `the outputs, record that evidence, and then flip the checkbox.\n` +
+    `Do not retry this write unchanged -- it will be refused again. If you ` +
+    `believe the gate is wrong, say so and ask the user to run ` +
+    `\`/override ${c.step.anchor ?? c.step.key} <reason>\`; only they can clear it, ` +
+    `and the reason is recorded.`
   );
+}
+
+/** The reason shown to the agent for the contradictions actually blocking it. */
+export function renderBlockReason(contradictions: Contradiction[]): string {
+  return contradictions.map(contradictionReason).join("\n\n");
 }
 
 export interface GateDecision {
@@ -289,8 +343,85 @@ export function decideNotebookWrite(
     mode,
     completions,
     contradictions,
-    reason: contradictions.map(contradictionReason).join("\n\n"),
+    reason: renderBlockReason(contradictions),
   };
+}
+
+/**
+ * Session-scoped, user-granted clearances, keyed by plan-step key.
+ *
+ * Deliberately not a "the model asked twice" escape. The gate used to keep a
+ * `denied` set and let the second attempt through on the theory that an
+ * unwinnable retry loop is worse than an unevidenced claim; that made the
+ * decision advisory, because a model that disagrees only has to ask again. A
+ * repeated model request is not an exception. An exception is a person saying
+ * so, with a reason, on one named step -- which is what `/override` grants and
+ * what lands in `activity.jsonl` as `evidence.override`.
+ *
+ * One token per step, consumed by the first write it actually clears. The
+ * contradiction it cleared can recur (the step is reopened, or a new
+ * invocation for the anchor goes in flight) and the next one is denied again.
+ */
+const overrides = new Set<string>();
+
+/** Grant one clearance for `stepKey`. Idempotent -- a token is a token. */
+export function grantEvidenceOverride(stepKey: string): void {
+  overrides.add(stepKey);
+}
+
+export function hasEvidenceOverride(stepKey: string): boolean {
+  return overrides.has(stepKey);
+}
+
+/** Session boundary / test reset. */
+export function resetEvidenceOverrides(): void {
+  overrides.clear();
+}
+
+export type GateOutcome = "recorded" | "warned" | "overridden" | "blocked";
+
+export interface GateAdjudication {
+  decision: GateDecision;
+  /** Contradictions a standing user override would clear on this write. */
+  cleared: Contradiction[];
+  /** Contradictions with no override behind them. */
+  unresolved: Contradiction[];
+  block: boolean;
+  outcome: GateOutcome;
+}
+
+/**
+ * The full decision for one write, overrides included. Split out from the hook
+ * so the interesting half is testable without a session: the hook's only job
+ * on top of this is to consume the tokens, log, and return the block.
+ *
+ * Tokens are only spent when the write actually proceeds. A write carrying
+ * contradictions on two steps where only one is overridden is still blocked,
+ * and burning the granted token there would make the user grant it twice for
+ * one flip. In `warn` the decision was never going to block, so nothing is
+ * spent and nothing about the recorded outcome changes.
+ */
+export function adjudicateNotebookWrite(
+  before: string,
+  toolName: string,
+  input: Record<string, unknown>,
+  mode: EvidenceGateMode,
+  granted: ReadonlySet<string>,
+): GateAdjudication {
+  const decision = decideNotebookWrite(before, toolName, input, mode);
+  const cleared = decision.gated
+    ? decision.contradictions.filter((c) => granted.has(c.step.key))
+    : [];
+  const unresolved = decision.contradictions.filter((c) => !cleared.includes(c));
+  const block = decision.gated && unresolved.length > 0;
+  const outcome: GateOutcome = block
+    ? "blocked"
+    : cleared.length > 0
+      ? "overridden"
+      : decision.contradictions.length > 0
+        ? "warned"
+        : "recorded";
+  return { decision, cleared, unresolved, block, outcome };
 }
 
 function sameFile(a: string, b: string): boolean {
@@ -302,10 +433,12 @@ function sameFile(a: string, b: string): boolean {
 }
 
 export function registerEvidenceGate(pi: ExtensionAPI): void {
-  // One deny per step per session. A model that disagrees with the gate must be
-  // able to proceed on the second attempt -- an unwinnable retry loop is worse
-  // than the unevidenced claim, and the user retains the right to override.
-  const denied = new Set<string>();
+  // A clearance the user granted and the gate never spent must not outlive the
+  // session it was granted in. Registered here rather than in
+  // session-lifecycle.ts so the gate owns the whole lifetime of its own state.
+  pi.on("session_start", async () => {
+    resetEvidenceOverrides();
+  });
 
   pi.on("tool_call", async (event, ctx) => {
     const mode = resolveMode();
@@ -336,11 +469,14 @@ export function registerEvidenceGate(pi: ExtensionAPI): void {
       return; // no notebook on disk yet -- nothing to compare against
     }
 
-    const decision = decideNotebookWrite(before, event.toolName, input, mode);
+    const adjudication = adjudicateNotebookWrite(before, event.toolName, input, mode, overrides);
+    const { decision } = adjudication;
     if (decision.completions.length === 0) return;
 
-    const fresh = decision.contradictions.filter((c) => !denied.has(c.step.key));
-    const willBlock = decision.gated && fresh.length > 0;
+    // Spend the tokens only on the write they actually let through.
+    if (!adjudication.block) {
+      for (const c of adjudication.cleared) overrides.delete(c.step.key);
+    }
 
     appendActivityEvent(path.dirname(nbPath), {
       timestamp: new Date().toISOString(),
@@ -354,12 +490,12 @@ export function registerEvidenceGate(pi: ExtensionAPI): void {
           step: c.step.key,
           status: c.invocation.status,
         })),
-        outcome: willBlock ? "blocked" : decision.contradictions.length ? "warned" : "recorded",
+        overridden: adjudication.block ? [] : adjudication.cleared.map((c) => c.step.key),
+        outcome: adjudication.outcome,
       },
     });
 
-    if (!willBlock) return;
-    for (const c of fresh) denied.add(c.step.key);
-    return { block: true, reason: decision.reason };
+    if (!adjudication.block) return;
+    return { block: true, reason: renderBlockReason(adjudication.unresolved) };
   });
 }

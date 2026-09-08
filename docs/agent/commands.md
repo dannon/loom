@@ -31,4 +31,9 @@ There are no `analysis_*` plan tools. Plans are markdown sections.
 | `/connect [name]`         | Connect to Galaxy (prompts for credentials, or switches profile)                                                                                  |
 | `/profiles`               | List saved Galaxy server profiles                                                                                                                 |
 | `/execute` (alias `/run`) | Tell the agent to run the next pending step in the latest plan section                                                                            |
+| `/override <step> <why>`  | User-only. Clear the evidence gate for one plan step, once, with the reason recorded                                                              |
 | `/compact [instructions]` | Compact the conversation to reclaim context; optional summary steer (Orbit defaults to a notebook-aware summary; terminal CLI uses pi's built-in) |
+
+`/override` is the user's, not yours. Bare `/override` lists the plan
+steps the evidence gate is currently holding and the anchor to address
+each one by.

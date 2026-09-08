@@ -117,6 +117,13 @@ bound invocation gets no opinion, a `failed` block is never gated (it is
 sticky and cannot be re-polled), and a rerun that leaves a stale block
 beside a `completed` one for the same anchor is not a contradiction.
 
+A refused write stays refused for as long as the contradiction stands.
+Do not retry it unchanged. The exception belongs to the user, not to
+you: if you think the gate is wrong, say so and ask them to run
+`/override <step-anchor> <reason>`, which clears that one step for one
+write and records the reason. Repeating the write is not a way to get
+past it.
+
 ## Artifact verification
 
 Generated Galaxy artifacts are not complete just because a file exists
