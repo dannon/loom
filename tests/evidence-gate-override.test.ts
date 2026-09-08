@@ -10,6 +10,7 @@ vi.mock("../extensions/loom/config", () => ({ loadConfig: () => ({}) }));
 import * as state from "../extensions/loom/state";
 import {
   adjudicateNotebookWrite,
+  overrideToken,
   registerEvidenceGate,
   resetEvidenceOverrides,
   resolveMode,
@@ -337,6 +338,23 @@ describe("/override -- the user-originated exception", () => {
     });
   });
 
+  it("gates a write that spells the path the way pi will resolve it", async () => {
+    // pi's resolveToCwd strips a leading `@` and expands `~`, so a literal
+    // path.resolve sends these somewhere else and the gate abstained on a
+    // write pi was about to make.
+    process.env.LOOM_EVIDENCE_GATE = "deny";
+    for (const spelling of ["@notebook.md", "./notebook.md", nbPath]) {
+      resetEvidenceOverrides();
+      const pi = fakePi();
+      registerEvidenceGate(pi.api);
+      const blocked = await pi.write({
+        path: spelling,
+        edits: [{ oldText: `- [ ] ${STEP2}`, newText: `- [x] ${STEP2}` }],
+      });
+      expect(blocked?.block, spelling).toBe(true);
+    }
+  });
+
   it("gates a write that names the notebook only under file_path", async () => {
     process.env.LOOM_EVIDENCE_GATE = "deny";
     const pi = fakePi();
@@ -348,12 +366,78 @@ describe("/override -- the user-originated exception", () => {
     expect(blocked?.block).toBe(true);
   });
 
+  it("refuses an ambiguous key rather than picking one", async () => {
+    // Anchors are model-authored. With `align` and `align checked` both live,
+    // longest-prefix would silently aim the user's clearance at the wrong step
+    // and eat the first words of their reason as part of the key.
+    const two = PLAN.replace("{#plan-a-step-1}", "{#align}").replace(
+      "{#plan-a-step-2}",
+      "{#align checked}",
+    );
+    setNotebook(
+      two +
+        "\n" +
+        renderInvocationYaml(invocation({ notebookAnchor: "align" })) +
+        "\n" +
+        renderInvocationYaml(
+          invocation({ invocationId: "def0000000000002", notebookAnchor: "align checked" }),
+        ),
+    );
+    const pi = fakePi();
+    registerEvidenceOverrideCommand(pi.api);
+    await pi.runCommand("override", "align checked the BAM by hand");
+    expect(pi.notices[0]).toMatch(/could mean/);
+    expect(payloads("evidence.override")).toHaveLength(0);
+
+    // Quoting is the way through.
+    await pi.runCommand("override", '"align" checked the BAM by hand');
+    expect(payloads("evidence.override")[0]).toMatchObject({
+      step: "#align",
+      reason: "checked the BAM by hand",
+    });
+  });
+
+  it("survives an anchor with a double space", async () => {
+    const spacey = PLAN.replace("{#plan-a-step-2}", "{#align  step}");
+    setNotebook(
+      spacey + "\n" + renderInvocationYaml(invocation({ notebookAnchor: "align  step" })),
+    );
+    const pi = fakePi();
+    registerEvidenceOverrideCommand(pi.api);
+    await pi.runCommand("override", "align  step checked by hand");
+    expect(payloads("evidence.override")[0]).toMatchObject({ step: "#align  step" });
+  });
+
+  it("a clearance does not carry over to a later run of the same step", async () => {
+    // Granted while one invocation was in flight; that one fails and a rerun
+    // starts. The user approved that run being ahead of its checkbox.
+    process.env.LOOM_EVIDENCE_GATE = "deny";
+    const pi = fakePi();
+    registerEvidenceGate(pi.api);
+    registerEvidenceOverrideCommand(pi.api);
+    await pi.runCommand("override", "plan-a-step-2 the first run is basically done");
+
+    setNotebook(
+      withInvocation(
+        invocation({ invocationId: "abc0000000000001", status: "failed" }),
+        invocation({ invocationId: "def0000000000002", status: "in_progress" }),
+      ),
+    );
+    expect((await pi.write(flipEdit(STEP2)))?.block).toBe(true);
+  });
+
   it("accepts the gate's own key spelling as well as the bare anchor", () => {
     const content = withInvocation(invocation());
     expect(planOverride(content, "#plan-a-step-2 fine").ok).toBe(true);
     expect(planOverride(content, "plan-a-step-2 fine").ok).toBe(true);
     expect(planOverride(content, "PLAN-A-STEP-2 fine").ok).toBe(true);
     expect(planOverride(content, "plan-a-step-9 fine").ok).toBe(false);
+  });
+
+  it("records the invocation the clearance is for", () => {
+    const content = withInvocation(invocation());
+    const result = planOverride(content, "plan-a-step-2 fine");
+    expect(result.ok && result.event.invocationId).toBe("abc0000000000001");
   });
 
   it("does not survive a session boundary", async () => {
@@ -408,7 +492,7 @@ describe("adjudicateNotebookWrite", () => {
   const call = flipEdit(STEP2);
 
   it("an override only counts in deny mode -- warn had nothing to clear", () => {
-    const granted = new Set(["#plan-a-step-2"]);
+    const granted = new Set([overrideToken("#plan-a-step-2", "abc0000000000001")]);
     expect(adjudicateNotebookWrite(before, "edit", call, "warn", granted).outcome).toBe("warned");
     expect(adjudicateNotebookWrite(before, "edit", call, "deny", granted).outcome).toBe(
       "overridden",
@@ -416,10 +500,17 @@ describe("adjudicateNotebookWrite", () => {
   });
 
   it("blocks when the granted key is for a different step", () => {
-    const a = adjudicateNotebookWrite(before, "edit", call, "deny", new Set(["#plan-a-step-1"]));
+    const granted = new Set([overrideToken("#plan-a-step-1", "abc0000000000001")]);
+    const a = adjudicateNotebookWrite(before, "edit", call, "deny", granted);
     expect(a.block).toBe(true);
     expect(a.unresolved).toHaveLength(1);
     expect(a.cleared).toHaveLength(0);
+  });
+
+  it("blocks when the clearance was granted for a different run of the same step", () => {
+    // The user approved one run being ahead of its checkbox, not the step.
+    const granted = new Set([overrideToken("#plan-a-step-2", "def0000000000002")]);
+    expect(adjudicateNotebookWrite(before, "edit", call, "deny", granted).block).toBe(true);
   });
 
   it("says nothing at all when the write carries no completion", () => {

@@ -85,6 +85,7 @@
  */
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config";
@@ -148,8 +149,22 @@ function normalizeTitle(raw: string): string {
 export function parsePlanSteps(content: string): Map<string, PlanStep> {
   const out = new Map<string, PlanStep>();
   let inPlan = false;
+  let inFence = false;
   let planKey = "";
   for (const line of content.split("\n")) {
+    // Fenced content is quoted, not asserted. A plan section that shows an
+    // example checkbox in a ``` block was otherwise parsed as a real step, and
+    // because the map is keyed by anchor and last-write-wins, an example
+    // carrying the same anchor as a real step overwrote the real step's state
+    // -- flip the step and paste a pending copy of it in a fence below, and the
+    // completion vanished from the post-image. Also the honest reading: the
+    // `loom-invocation` blocks are fenced too, and nothing in one is a plan
+    // step.
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
     const heading = line.match(PLAN_HEADING);
     if (heading) {
       inPlan = true;
@@ -324,25 +339,65 @@ function normalizeForMatch(text: string): string {
     .replace(/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g, " ");
 }
 
+/** pi normalizes both the file and every edit to LF before matching. */
+function toLF(text: string): string {
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+interface Span {
+  start: number;
+  end: number;
+  newText: string;
+}
+
 /**
- * Apply one replacement the way pi will, or null if pi would not find it.
+ * Locate every edit the way pi does, or null if pi would refuse the call.
  *
- * pi rejects an `oldText` that occurs more than once (`getDuplicateError`), so
- * first-match is not a guess here: an ambiguous edit never reaches the disk,
- * and the one that does is the one we simulated. On the fuzzy path pi rewrites
- * the whole file in normalized space, so returning normalized content is what
- * actually lands, not an approximation of it.
+ * Three things here are pi's behaviour rather than the obvious behaviour, and
+ * each of them was a way past the gate when this simulated the obvious one:
+ *
+ * 1. **Every edit matches against the ORIGINAL file, not against the running
+ *    result.** pi resolves all matches up front and only then applies them.
+ *    Folding them in sequence let one edit manufacture the text a later edit
+ *    matched: insert a `[ ]` into a prose line, then "flip" that, and the
+ *    simulator saw a checkbox appear in prose while pi -- matching the second
+ *    edit against the original -- flipped the real plan step.
+ * 2. **A non-unique `oldText` is refused outright** (`getDuplicateError`), and
+ *    so is an overlapping pair. Abstaining on those is not a gap: the call
+ *    errors and nothing reaches the disk.
+ * 3. **Line endings are normalized to LF first.** A `newText` ending `\r\n`
+ *    left a stray CR in the simulated line, which `STEP_LINE` then failed to
+ *    parse, so the completion disappeared from the post-image while pi wrote
+ *    it happily.
  */
-function applyOneEdit(content: string, oldText: string, newText: string): string | null {
-  const exact = content.indexOf(oldText);
-  if (exact !== -1) {
-    return content.slice(0, exact) + newText + content.slice(exact + oldText.length);
+function locateEdits(
+  content: string,
+  edits: { oldText: string; newText: string }[],
+): Span[] | null {
+  const spans: Span[] = [];
+  for (const edit of edits) {
+    const oldText = toLF(edit.oldText);
+    const newText = toLF(edit.newText);
+    if (oldText.length === 0) return null; // pi throws on an empty oldText
+    const first = content.indexOf(oldText);
+    if (first === -1) return null; // caller retries in pi's fuzzy space
+    if (content.indexOf(oldText, first + 1) !== -1) return null; // pi: duplicate, refused
+    spans.push({ start: first, end: first + oldText.length, newText });
   }
-  const normalized = normalizeForMatch(content);
-  const needle = normalizeForMatch(oldText);
-  const fuzzy = normalized.indexOf(needle);
-  if (fuzzy === -1) return null;
-  return normalized.slice(0, fuzzy) + newText + normalized.slice(fuzzy + needle.length);
+  const ordered = [...spans].sort((a, b) => a.start - b.start);
+  for (let i = 1; i < ordered.length; i++) {
+    if (ordered[i - 1].end > ordered[i].start) return null; // pi: overlapping, refused
+  }
+  return ordered;
+}
+
+/** Apply located spans right to left so earlier offsets stay valid. */
+function applySpans(content: string, spans: Span[]): string {
+  let out = content;
+  for (let i = spans.length - 1; i >= 0; i--) {
+    out = out.slice(0, spans[i].start) + spans[i].newText + out.slice(spans[i].end);
+  }
+  return out;
 }
 
 /**
@@ -360,17 +415,30 @@ export function computeAfterContent(
     return typeof input.content === "string" ? input.content : null;
   }
   if (toolName !== "edit") return null;
-  const edits = input.edits;
-  if (!Array.isArray(edits)) return null;
-  let out = before;
-  for (const raw of edits) {
-    const e = raw as { oldText?: unknown; newText?: unknown };
+  const raw = input.edits;
+  if (!Array.isArray(raw)) return null;
+  const edits: { oldText: string; newText: string }[] = [];
+  for (const entry of raw) {
+    const e = entry as { oldText?: unknown; newText?: unknown };
     if (typeof e.oldText !== "string" || typeof e.newText !== "string") return null;
-    const next = applyOneEdit(out, e.oldText, e.newText);
-    if (next === null) return null; // pi will reject this edit anyway
-    out = next;
+    edits.push({ oldText: e.oldText, newText: e.newText });
   }
-  return out;
+  if (edits.length === 0) return null;
+
+  const content = toLF(before);
+  const exact = locateEdits(content, edits);
+  if (exact) return applySpans(content, exact);
+
+  // Nothing matched exactly, so pi is in its fuzzy pass, where it rewrites the
+  // whole file in normalized space. Simulate on the same footing.
+  const fuzzyContent = normalizeForMatch(content);
+  const fuzzyEdits = edits.map((e) => ({
+    oldText: normalizeForMatch(toLF(e.oldText)),
+    newText: toLF(e.newText),
+  }));
+  const fuzzy = locateEdits(fuzzyContent, fuzzyEdits);
+  if (!fuzzy) return null;
+  return applySpans(fuzzyContent, fuzzy);
 }
 
 export function contradictionReason(c: Contradiction): string {
@@ -441,9 +509,14 @@ export function decideNotebookWrite(
  * so, with a reason, on one named step -- which is what `/override` grants and
  * what lands in `activity.jsonl` as `evidence.override`.
  *
- * One token per step, consumed by the first write it actually clears. The
- * contradiction it cleared can recur (the step is reopened, or a new
- * invocation for the anchor goes in flight) and the next one is denied again.
+ * One token per step *and invocation*, consumed by the first write it actually
+ * clears. Keying on the step alone let a clearance outlive the thing it was
+ * granted for: override while run one is in flight, watch the poller fail it,
+ * submit run two for the same anchor, and the stale token cleared a
+ * contradiction the user never saw. The user approved a specific run being
+ * ahead of its checkbox, not the step forever. A contradiction that recurs on
+ * the step, from a different invocation or after the step is reopened, is
+ * denied again.
  *
  * Module-level, and cleared on `session_start`, which is the same one-session-
  * per-process assumption `state.ts` already makes -- the notebook path itself
@@ -456,9 +529,14 @@ export function decideNotebookWrite(
  */
 const overrides = new Set<string>();
 
-/** Grant one clearance for `stepKey`. Idempotent -- a token is a token. */
-export function grantEvidenceOverride(stepKey: string): void {
-  overrides.add(stepKey);
+/** The clearance is for this run of this step, not for the step in general. */
+export function overrideToken(stepKey: string, invocationId: string): string {
+  return `${stepKey}\u0000${invocationId}`;
+}
+
+/** Grant one clearance for `stepKey` while `invocationId` is the run in flight. */
+export function grantEvidenceOverride(stepKey: string, invocationId: string): void {
+  overrides.add(overrideToken(stepKey, invocationId));
 }
 
 /** Session boundary / test reset. */
@@ -498,7 +576,9 @@ export function adjudicateNotebookWrite(
 ): GateAdjudication {
   const decision = decideNotebookWrite(before, toolName, input, mode);
   const cleared = decision.gated
-    ? decision.contradictions.filter((c) => granted.has(c.step.key))
+    ? decision.contradictions.filter((c) =>
+        granted.has(overrideToken(c.step.key, c.invocation.invocationId)),
+      )
     : [];
   const unresolved = decision.contradictions.filter((c) => !cleared.includes(c));
   const block = decision.gated && unresolved.length > 0;
@@ -518,6 +598,45 @@ function sameFile(a: string, b: string): boolean {
   } catch {
     return path.resolve(a) === path.resolve(b);
   }
+}
+
+/** Unicode spaces pi folds to a plain space before resolving (utils/paths.ts). */
+const UNICODE_SPACES = /[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g;
+
+/**
+ * Does this tool argument name the notebook, once pi is done with it?
+ *
+ * `path.resolve` is not what pi does. `resolveToCwd` runs the argument through
+ * `normalizePath` with `stripAtPrefix` and `normalizeUnicodeSpaces` on and
+ * tilde expansion defaulted on, so `@notebook.md`, `~/work/x/notebook.md` and
+ * a path carrying a non-breaking space all land on the real file while a
+ * literal `path.resolve` sends them somewhere else entirely -- and the gate
+ * that resolved them literally would abstain on a write pi was about to make.
+ *
+ * Every plausible spelling is tested rather than one canonical form, because
+ * the question here is only "is this call about the notebook". Over-including
+ * costs an adjudication of a write that was never going to touch it; under-
+ * including is a silent bypass.
+ */
+function resolvesToNotebook(raw: string, cwd: string, nbPath: string): boolean {
+  const candidates = new Set<string>();
+  const add = (value: string) => {
+    if (!value) return;
+    candidates.add(value);
+    if (value.startsWith("@")) candidates.add(value.slice(1));
+  };
+  add(raw);
+  add(raw.replace(UNICODE_SPACES, " "));
+  for (const candidate of [...candidates]) {
+    if (candidate === "~") candidates.add(os.homedir());
+    else if (candidate.startsWith("~/"))
+      candidates.add(path.join(os.homedir(), candidate.slice(2)));
+  }
+  for (const candidate of candidates) {
+    const abs = path.isAbsolute(candidate) ? candidate : path.resolve(cwd, candidate);
+    if (sameFile(abs, nbPath)) return true;
+  }
+  return false;
 }
 
 export function registerEvidenceGate(pi: ExtensionAPI): void {
@@ -553,9 +672,7 @@ export function registerEvidenceGate(pi: ExtensionAPI): void {
     const targets = [input.path, input.file_path].filter(
       (t): t is string => typeof t === "string" && t.length > 0,
     );
-    const touchesNotebook = targets.some((t) =>
-      sameFile(path.isAbsolute(t) ? t : path.resolve(ctx.cwd, t), nbPath),
-    );
+    const touchesNotebook = targets.some((t) => resolvesToNotebook(t, ctx.cwd, nbPath));
     if (!touchesNotebook) return;
 
     let before: string;
@@ -571,7 +688,9 @@ export function registerEvidenceGate(pi: ExtensionAPI): void {
 
     // Spend the tokens only on the write they actually let through.
     if (!adjudication.block) {
-      for (const c of adjudication.cleared) overrides.delete(c.step.key);
+      for (const c of adjudication.cleared) {
+        overrides.delete(overrideToken(c.step.key, c.invocation.invocationId));
+      }
     }
 
     appendActivityEvent(path.dirname(nbPath), {

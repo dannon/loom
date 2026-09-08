@@ -254,6 +254,66 @@ describe("adversarial: the bypasses that define the acceptance bar", () => {
     expect(decideNotebookWrite(before, call.tool, call.input, "deny").gated).toBe(true);
   });
 
+  it("edits match the ORIGINAL file, so one edit cannot bait the next", () => {
+    // Insert a checkbox into prose, then "flip" that -- the sequential
+    // simulator chased its own insertion while pi, matching both edits against
+    // the original, flipped the real step.
+    const before = (
+      "Memo line\n\n" + withInvocation(invocation({ status: "in_progress" }))
+    ).replace(`- [ ] ${STEP2}`, `- [ ] ${STEP2}`);
+    const d = decideNotebookWrite(
+      before,
+      "edit",
+      {
+        path: "notebook.md",
+        edits: [
+          { oldText: "Memo line", newText: "- [ ] decoy" },
+          { oldText: `- [ ] ${STEP2}`, newText: `- [x] ${STEP2}` },
+        ],
+      },
+      "deny",
+    );
+    expect(d.gated).toBe(true);
+  });
+
+  it("abstains on a duplicate oldText, which pi refuses outright", () => {
+    const before = withInvocation(invocation({ status: "in_progress" }));
+    expect(
+      computeAfterContent(before, "edit", { edits: [{ oldText: "- [ ] ", newText: "- [x] " }] }),
+    ).toBeNull();
+  });
+
+  it("a CRLF newText does not hide the completion pi normalizes to LF", () => {
+    const before = withInvocation(invocation({ status: "in_progress" }));
+    const d = decideNotebookWrite(
+      before,
+      "edit",
+      {
+        path: "notebook.md",
+        edits: [{ oldText: `- [ ] ${STEP2}`, newText: `- [x] ${STEP2}\r\n` }],
+      },
+      "deny",
+    );
+    expect(d.gated).toBe(true);
+  });
+
+  it("a fenced example cannot shadow the real step it quotes", () => {
+    // The map is keyed by anchor and last write wins, so a pending copy of the
+    // step inside a ``` block below it erased the completion above.
+    const before = withInvocation(invocation({ status: "in_progress" }));
+    const forged = flip(before, STEP2).replace(
+      `- [x] ${STEP2}`,
+      `- [x] ${STEP2}\n\n\`\`\`markdown\n- [ ] ${STEP2}\n\`\`\``,
+    );
+    const d = decideNotebookWrite(
+      before,
+      "write",
+      { path: "notebook.md", content: forged },
+      "deny",
+    );
+    expect(d.gated).toBe(true);
+  });
+
   it("KNOWN GAP: renaming the anchor in the same edit evades the flip check", () => {
     // Step identity comes from the same model-editable text as the claim, so a
     // renamed anchor reads as a different step and the flip is never detected.

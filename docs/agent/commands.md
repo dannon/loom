@@ -36,4 +36,6 @@ There are no `analysis_*` plan tools. Plans are markdown sections.
 
 `/override` is the user's, not yours. Bare `/override` lists the plan
 steps the evidence gate is currently holding and the anchor to address
-each one by.
+each one by. A clearance covers one step and the invocation that was in
+flight when it was granted, and is spent by the next write it lets
+through.

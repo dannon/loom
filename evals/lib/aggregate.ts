@@ -37,6 +37,7 @@ function otherDeclared(a: Assertions): boolean {
     a.toolCalls ||
     a.events ||
     a.chatText ||
+    a.activity ||
     a.notebook?.contains?.length ||
     a.notebook?.mustNotContain?.length ||
     a.notebook?.exists !== undefined,

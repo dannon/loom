@@ -54,13 +54,23 @@ export function planOverride(content: string, args: string): OverrideResult {
   // spaces, and splitting at the first one would lock the user out of
   // overriding exactly those steps -- the gate failing closed with no way
   // through, which is the failure mode this command exists to prevent.
-  const { step, reason } = splitKeyAndReason(content, raw);
-  if (!step) {
+  const split = splitKeyAndReason(content, raw);
+  if (split.kind === "none") {
     return {
       ok: false,
-      message: `No plan step matches '${raw.split(" ")[0]}'.\n${renderStatus(content)}`,
+      message: `No plan step matches '${raw.split(/\s/)[0]}'.\n${renderStatus(content)}`,
     };
   }
+  if (split.kind === "ambiguous") {
+    const names = split.candidates.map((c) => `"${c.anchor ?? c.key}"`).join(" and ");
+    return {
+      ok: false,
+      message:
+        `That could mean ${names}, and this is not a thing to guess at. ` +
+        `Quote the one you mean: /override "<step-key>" <reason>`,
+    };
+  }
+  const { step, reason } = split;
   if (!reason) {
     return { ok: false, message: `A reason is required, so the record says why.\n${USAGE}` };
   }
@@ -95,22 +105,53 @@ export function planOverride(content: string, args: string): OverrideResult {
   };
 }
 
+export type KeySplit =
+  | { kind: "ok"; step: PlanStep; reason: string }
+  | { kind: "none" }
+  | { kind: "ambiguous"; candidates: PlanStep[] };
+
 /**
- * Longest-prefix split of `<step-key> <reason>`. Tries the whole argument as a
- * key first and walks the space boundaries inward, so a spacey anchor wins over
- * its own first word.
+ * Split `<step-key> <reason>` without ever guessing which step was meant.
+ *
+ * An anchor is `\{#([^}]+)\}`, so it may contain spaces, which rules out
+ * splitting at the first one -- a step anchored `align step 2` would be
+ * unaddressable, the gate failing closed with no way through. Taking the
+ * longest matching prefix instead is worse: with steps anchored `align` and
+ * `align checked` in the same notebook, `/override align checked the BAM by
+ * hand` silently authorises `align checked` and eats the first three words of
+ * the user's reason. Anchors are model-authored, so that is a way for the
+ * model to aim a user's clearance at a step they did not name.
+ *
+ * So: a quoted key is taken literally, and an unquoted one is only accepted
+ * when exactly one prefix resolves. Two or more and the command refuses and
+ * says which, rather than picking. Offsets come from the original string, so
+ * an anchor with a double space or a tab survives the round trip.
  */
-function splitKeyAndReason(
-  content: string,
-  raw: string,
-): { step: PlanStep | null; reason: string } {
-  const words = raw.split(/\s+/).filter(Boolean);
-  for (let take = words.length; take > 0; take--) {
-    const candidate = words.slice(0, take).join(" ");
-    const step = resolveStepKey(content, candidate);
-    if (step) return { step, reason: words.slice(take).join(" ") };
+export function splitKeyAndReason(content: string, raw: string): KeySplit {
+  const quoted = raw.match(/^(["'])([^"']*)\1\s*([\s\S]*)$/);
+  if (quoted) {
+    const step = resolveStepKey(content, quoted[2]);
+    return step ? { kind: "ok", step, reason: quoted[3].trim() } : { kind: "none" };
   }
-  return { step: null, reason: "" };
+
+  // Every offset at which a prefix of `raw` ends on a whitespace boundary.
+  const boundaries: number[] = [];
+  for (let i = 1; i <= raw.length; i++) {
+    if (i === raw.length || /\s/.test(raw[i])) boundaries.push(i);
+  }
+
+  const hits: { step: PlanStep; end: number }[] = [];
+  const seen = new Set<string>();
+  for (const end of boundaries) {
+    const step = resolveStepKey(content, raw.slice(0, end));
+    if (!step || seen.has(step.key)) continue;
+    seen.add(step.key);
+    hits.push({ step, end });
+  }
+
+  if (hits.length === 0) return { kind: "none" };
+  if (hits.length > 1) return { kind: "ambiguous", candidates: hits.map((h) => h.step) };
+  return { kind: "ok", step: hits[0].step, reason: raw.slice(hits[0].end).trim() };
 }
 
 /** What the gate is holding right now, and how to address it. */
@@ -156,7 +197,7 @@ export function registerEvidenceOverrideCommand(pi: ExtensionAPI): void {
         return;
       }
 
-      grantEvidenceOverride(String(result.event.step));
+      grantEvidenceOverride(String(result.event.step), String(result.event.invocationId));
       appendActivityEvent(path.dirname(nbPath), {
         timestamp: new Date().toISOString(),
         kind: "evidence.override",

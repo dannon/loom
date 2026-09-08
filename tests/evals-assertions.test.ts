@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { evaluate } from "../evals/lib/assertions";
+import { aggregateCells, declaredDimensions } from "../evals/lib/aggregate";
 import type {
   ActivityEvent,
   AnyEvent,
@@ -393,5 +394,17 @@ describe("evals assertions: activity log", () => {
 
   it("says nothing when the scenario has no activity assertions", () => {
     expect(evaluate(makeRun({ activityEvents, assertions: {} }))).toHaveLength(0);
+  });
+
+  it("declares a dimension, so an activity-only scenario can actually fail the run", () => {
+    // Without this the failure is recorded, aggregation reports no dimensions,
+    // and the CLI exits 0 -- a scenario that silently cannot fail.
+    const assertions = { activity: { mustInclude: [{ kind: "evidence.override" }] } };
+    expect(declaredDimensions({ name: "x", tier: 1, inputs: [], assertions })).toContain("other");
+
+    const run = makeRun({ activityEvents: [], assertions });
+    run.failures = evaluate(run);
+    const [cell] = aggregateCells([run]);
+    expect(cell.dimensions.other?.verdict).toBe(false);
   });
 });
