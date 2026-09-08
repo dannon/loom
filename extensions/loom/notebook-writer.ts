@@ -368,12 +368,29 @@ export function applyInvocationUpdates(
   return { content: next, applied, transitioned };
 }
 
-/** True when `onDisk` is a strictly later poll timestamp than `ours`. */
+/**
+ * How far ahead of now an on-disk `last_polled_at` may sit and still be read as
+ * a real reading. A competing poller stamps its update within milliseconds of
+ * ours -- the window only has to cover clock differences between two writers of
+ * the same file, which is seconds at worst.
+ */
+const MAX_POLL_CLOCK_SKEW_MS = 60_000;
+
+/**
+ * True when `onDisk` is a strictly later poll timestamp than `ours`.
+ *
+ * A timestamp further ahead than the skew window did not come from a poll: it
+ * came from someone editing the block, and honouring it silences the poller for
+ * that invocation permanently -- every later update looks stale forever. Nobody
+ * can outrun the clock, so an implausible future reading is ignored rather than
+ * obeyed.
+ */
 function isNewerPoll(onDisk: string | undefined, ours: string | undefined): boolean {
   if (!onDisk || !ours) return false;
   const a = Date.parse(onDisk);
   const b = Date.parse(ours);
   if (Number.isNaN(a) || Number.isNaN(b)) return false;
+  if (a > Date.now() + MAX_POLL_CLOCK_SKEW_MS) return false;
   return a > b;
 }
 

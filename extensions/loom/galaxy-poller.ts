@@ -29,6 +29,7 @@
  * call from the agent doesn't race the poller.
  */
 
+import * as path from "path";
 import { getNotebookPath } from "./state.js";
 import {
   findInvocationBlocks,
@@ -38,21 +39,32 @@ import {
   withNotebookLock,
   writeNotebook,
 } from "./notebook-writer.js";
-import { checkInvocations } from "./tools.js";
-import { getGalaxyConfig, galaxyGetJobDetails } from "./galaxy-api.js";
+import { checkInvocations, isInvocationLive } from "./tools.js";
+import {
+  getGalaxyConfig,
+  galaxyGet,
+  galaxyGetJobDetails,
+  type GalaxyInvocationResponse,
+} from "./galaxy-api.js";
 import {
   applyJobPollUpdate,
   findJobBlocks,
   isTerminalJobState,
   jobStatusFromGalaxyState,
 } from "./galaxy-job-block.js";
+import { appendActivityEvent } from "./activity.js";
 
 // 15s — ~4 polls/min × a few in-flight invocations stays well under
 // usegalaxy.org's per-user rate budget while still feeling live.
 const POLL_INTERVAL_MS = 15_000;
 
 let timer: ReturnType<typeof setInterval> | null = null;
-let inFlight = false;
+/**
+ * The tick currently running, if any. Ticks don't stack -- a slow Galaxy GET
+ * would otherwise let the interval pile them up -- and holding the promise
+ * rather than a boolean lets a caller wait for the one already in flight.
+ */
+let inFlightTick: Promise<void> | null = null;
 
 /** Surface a toast to the shell when a background invocation finishes. */
 type PollerNotify = (text: string, level: "info" | "warning" | "error") => void;
@@ -76,6 +88,130 @@ interface PollResultEntry {
  * Reset per session in startGalaxyPoller.
  */
 const announcedFailing = new Set<string>();
+
+/** A block the poller has seen in flight in the notebook this session. */
+interface TrackedBlock {
+  kind: "invocation" | "job";
+  id: string;
+  label: string;
+}
+
+/**
+ * Every in-flight block we've seen this session, keyed `<kind>:<id>`. The
+ * notebook is the poller's only index of what to watch, so a block that leaves
+ * it -- an agent edit, a `bash` rewrite, a hand-pruned file -- takes a live
+ * Galaxy run out of Loom's sight with nothing said. We can't put the block back
+ * (it is the user's file, and re-inserting it would fight whoever removed it),
+ * but we can refuse to let it go quietly. Reset per session in
+ * startGalaxyPoller.
+ */
+const trackedActive = new Map<string, TrackedBlock>();
+
+function trackKey(kind: TrackedBlock["kind"], id: string): string {
+  return `${kind}:${id}`;
+}
+
+/**
+ * Remember the blocks that are in flight right now, and forget the ones that
+ * have reached a terminal status. What survives is exactly the set whose
+ * disappearance would cost us a running job.
+ */
+function trackActiveBlocks(content: string): void {
+  for (const inv of findInvocationBlocks(content)) {
+    const key = trackKey("invocation", inv.invocationId);
+    if (inv.status === "in_progress") {
+      trackedActive.set(key, {
+        kind: "invocation",
+        id: inv.invocationId,
+        label: inv.label || inv.notebookAnchor || inv.invocationId,
+      });
+    } else {
+      trackedActive.delete(key);
+    }
+  }
+  for (const job of findJobBlocks(content)) {
+    const key = trackKey("job", job.jobId);
+    if (job.status === "in_progress") {
+      trackedActive.set(key, {
+        kind: "job",
+        id: job.jobId,
+        label: job.label || job.toolId || job.jobId,
+      });
+    } else {
+      trackedActive.delete(key);
+    }
+  }
+}
+
+/** Ask Galaxy whether a run whose block has vanished is still going. */
+async function isStillLive(block: TrackedBlock): Promise<{ live: boolean; state?: string }> {
+  if (block.kind === "invocation") {
+    const inv = await galaxyGet<GalaxyInvocationResponse>(`/invocations/${block.id}`);
+    return { live: isInvocationLive(inv), state: inv.state };
+  }
+  const details = await galaxyGetJobDetails(block.id);
+  return { live: !isTerminalJobState(details.state), state: details.state };
+}
+
+/** Say once, in the activity log and in the UI, that a live run left the notebook. */
+function announceMissingBlock(block: TrackedBlock, state: string | undefined): void {
+  const nbPath = getNotebookPath();
+  if (nbPath) {
+    appendActivityEvent(path.dirname(nbPath), {
+      timestamp: new Date().toISOString(),
+      kind: "poll.block_missing",
+      source: "galaxy-poller",
+      payload: {
+        blockKind: block.kind,
+        id: block.id,
+        label: block.label,
+        galaxyState: state ?? null,
+      },
+    });
+  }
+  if (notify) {
+    notify(
+      `⚠️ Galaxy: "${block.label}" is still ${state ?? "running"} on Galaxy, but its ${block.kind} block is gone from the notebook — Loom has stopped tracking it.`,
+      "warning",
+    );
+  }
+}
+
+/**
+ * Compare what we're tracking against what the notebook still holds, and report
+ * anything that went missing while Galaxy says the run is alive. A block that
+ * disappeared after its run finished is unremarkable: it costs one GET and
+ * nothing else.
+ */
+async function reportMissingBlocks(content: string): Promise<void> {
+  if (trackedActive.size === 0) return;
+  const present = new Set<string>();
+  for (const inv of findInvocationBlocks(content)) {
+    present.add(trackKey("invocation", inv.invocationId));
+  }
+  for (const job of findJobBlocks(content)) present.add(trackKey("job", job.jobId));
+
+  const missing = [...trackedActive.entries()].filter(([key]) => !present.has(key));
+  if (missing.length === 0) return;
+  // No credentials, no verdict: keep the ids and ask again next tick.
+  if (!getGalaxyConfig()) return;
+
+  for (const [key, block] of missing) {
+    let result: { live: boolean; state?: string };
+    try {
+      result = await isStillLive(block);
+    } catch (err) {
+      // Galaxy briefly unreachable. Stay tracked and ask again next tick; one
+      // unreachable id must not cost the others their check.
+      console.error(`[galaxy-poller] ${block.kind} ${block.id} liveness check failed:`, err);
+      continue;
+    }
+    // One verdict per id, either way: the block is gone, so there is nothing
+    // left to re-examine. Recording it again re-arms the tracking.
+    trackedActive.delete(key);
+    if (result.live) announceMissingBlock(block, result.state);
+  }
+}
 
 /** How many times a job update re-reads and retries before giving up the tick. */
 const MAX_JOB_PERSIST_ATTEMPTS = 3;
@@ -137,16 +273,20 @@ function jobFinishedToast(
   }
 }
 
-async function hasInProgressInvocations(): Promise<boolean> {
+/** The notebook as it is right now, or null if there isn't one to read. */
+async function readNotebookOrNull(): Promise<string | null> {
   const nbPath = getNotebookPath();
-  if (!nbPath) return false;
+  if (!nbPath) return null;
   try {
-    const content = await readNotebook(nbPath);
-    return findInvocationBlocks(content).some((b) => b.status === "in_progress");
+    return await readNotebook(nbPath);
   } catch {
-    // Notebook missing or unreadable — no invocations to poll.
-    return false;
+    // Notebook missing or unreadable — nothing to advance this tick.
+    return null;
   }
+}
+
+function hasInProgressInvocations(content: string): boolean {
+  return findInvocationBlocks(content).some((b) => b.status === "in_progress");
 }
 
 /**
@@ -155,16 +295,11 @@ async function hasInProgressInvocations(): Promise<boolean> {
  * still running, so an idle notebook costs nothing beyond the scan the
  * invocation path already does.
  */
-async function tickJobs(): Promise<void> {
+async function tickJobs(content: string): Promise<void> {
   const nbPath = getNotebookPath();
   if (!nbPath) return;
 
-  let pending: ReturnType<typeof findJobBlocks>;
-  try {
-    pending = findJobBlocks(await readNotebook(nbPath)).filter((j) => j.status === "in_progress");
-  } catch {
-    return; // notebook missing or unreadable -- nothing to advance
-  }
+  const pending = findJobBlocks(content).filter((j) => j.status === "in_progress");
   if (pending.length === 0) return;
   if (!getGalaxyConfig()) return;
 
@@ -206,16 +341,38 @@ async function tickJobs(): Promise<void> {
   }
 }
 
-async function tick(): Promise<void> {
-  if (inFlight) return;
-  inFlight = true;
+/** Run a poll tick now, or hand back the one already running. */
+function tick(): Promise<void> {
+  if (inFlightTick) return inFlightTick;
+  inFlightTick = runTick().finally(() => {
+    inFlightTick = null;
+  });
+  return inFlightTick;
+}
+
+/**
+ * Poll once and wait for it. Exported so a caller that wants fresh counters
+ * right now doesn't have to sit out the interval.
+ */
+export function pollGalaxyNow(): Promise<void> {
+  return tick();
+}
+
+async function runTick(): Promise<void> {
   try {
+    // One read per tick, shared by everything below: what the notebook says is
+    // in flight is the whole of the poller's worklist.
+    const content = await readNotebookOrNull();
+    if (content === null) return;
+    trackActiveBlocks(content);
+    await reportMissingBlocks(content);
+
     // Tool runs are tracked separately from workflow invocations and are the
     // only thing advancing in a session that never invoked a workflow (#413).
-    await tickJobs();
+    await tickJobs(content);
 
-    // Cheap path when nothing's in-flight: read notebook, scan, return.
-    if (!(await hasInProgressInvocations())) return;
+    // Cheap path when nothing's in-flight: scan and return.
+    if (!hasInProgressInvocations(content)) return;
     if (!getGalaxyConfig()) {
       // Credentials disappeared (user disconnected mid-session). Skip
       // this tick; if creds come back the next tick picks up.
@@ -253,8 +410,6 @@ async function tick(): Promise<void> {
     // Don't kill the timer on a single bad poll — Galaxy may be
     // briefly unreachable. Log and try again on the next tick.
     console.error("[galaxy-poller] tick failed:", err);
-  } finally {
-    inFlight = false;
   }
 }
 
@@ -263,6 +418,7 @@ export function startGalaxyPoller(notifyFn?: PollerNotify): void {
   // background invocation can toast the user. Refreshed each session_start.
   notify = notifyFn ?? null;
   announcedFailing.clear();
+  trackedActive.clear();
   // Idempotent: a brain restart triggers a new session_start without
   // session_shutdown firing first in some failure modes. Stop any
   // pre-existing timer so we don't double-poll.

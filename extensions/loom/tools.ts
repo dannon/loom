@@ -671,6 +671,72 @@ function describeStates(counts: Record<string, number>): string {
     .join(", ");
 }
 
+/** What one invocation's jobs add up to. */
+export interface InvocationJobRollup {
+  summary: { ok: number; running: number; queued: number; error: number; other: number };
+  /** The raw Galaxy states behind `summary.other`, counted. */
+  otherStates: Record<string, number>;
+  /** Jobs Galaxy could still advance: running + queued + the non-terminal half of `other`. */
+  activeJobs: number;
+  totalJobs: number;
+  completedSteps: number;
+}
+
+/** Count an invocation's jobs by state, keeping what `other` is actually made of. */
+export function rollUpInvocationJobs(inv: GalaxyInvocationResponse): InvocationJobRollup {
+  const summary = { ok: 0, running: 0, queued: 0, error: 0, other: 0 };
+  // What is actually behind `other`, counted by state. The rollup can't tell a
+  // paused job (Galaxy will run it) from a skipped one (a conditional step that
+  // never will), and both used to be ignored outright.
+  const otherStates: Record<string, number> = {};
+  let activeOther = 0;
+  let totalJobs = 0;
+  let completedSteps = 0;
+  for (const invStep of inv.steps) {
+    let stepJobs = 0;
+    let stepOk = 0;
+    for (const job of invStep.jobs) {
+      stepJobs++;
+      totalJobs++;
+      if (job.state === "ok") {
+        summary.ok++;
+        stepOk++;
+      } else if (job.state === "running") summary.running++;
+      else if (job.state === "queued" || job.state === "new" || job.state === "waiting")
+        summary.queued++;
+      else if (FAILED_JOB_STATES.has(job.state)) summary.error++;
+      else {
+        summary.other++;
+        const state = job.state || "unknown";
+        otherStates[state] = (otherStates[state] ?? 0) + 1;
+        // `skipped` and `stopped` are over; `paused`, `upload`,
+        // `setting_metadata`, `deleting` and friends are not.
+        if (!isTerminalJobState(job.state)) activeOther++;
+      }
+    }
+    if (stepJobs > 0 && stepJobs === stepOk) completedSteps++;
+  }
+  return {
+    summary,
+    otherStates,
+    activeJobs: summary.running + summary.queued + activeOther,
+    totalJobs,
+    completedSteps,
+  };
+}
+
+/**
+ * True while Galaxy could still advance this invocation — either it hasn't
+ * finished scheduling, or a job it already scheduled is still moving.
+ *
+ * The poller asks this about an invocation whose notebook block has vanished:
+ * a live run nobody is watching is worth saying out loud, a finished one isn't.
+ */
+export function isInvocationLive(inv: GalaxyInvocationResponse): boolean {
+  if (!TERMINAL_INVOCATION_STATES.has(inv.state)) return true;
+  return rollUpInvocationJobs(inv).activeJobs > 0;
+}
+
 interface CheckInvocationsResult {
   content: { type: "text"; text: string }[];
   details: Record<string, unknown>;
@@ -766,38 +832,8 @@ export async function checkInvocations(
         signal,
       );
 
-      const summary = { ok: 0, running: 0, queued: 0, error: 0, other: 0 };
-      // What is actually behind `other`, counted by state. The rollup can't tell
-      // a paused job (Galaxy will run it) from a skipped one (a conditional step
-      // that never will), and both used to be ignored outright.
-      const otherStates: Record<string, number> = {};
-      let activeOther = 0;
-      let totalJobs = 0;
-      let completedSteps = 0;
-      for (const invStep of inv.steps) {
-        let stepJobs = 0;
-        let stepOk = 0;
-        for (const job of invStep.jobs) {
-          stepJobs++;
-          totalJobs++;
-          if (job.state === "ok") {
-            summary.ok++;
-            stepOk++;
-          } else if (job.state === "running") summary.running++;
-          else if (job.state === "queued" || job.state === "new" || job.state === "waiting")
-            summary.queued++;
-          else if (FAILED_JOB_STATES.has(job.state)) summary.error++;
-          else {
-            summary.other++;
-            const state = job.state || "unknown";
-            otherStates[state] = (otherStates[state] ?? 0) + 1;
-            // `skipped` and `stopped` are over; `paused`, `upload`,
-            // `setting_metadata`, `deleting` and friends are not.
-            if (!isTerminalJobState(job.state)) activeOther++;
-          }
-        }
-        if (stepJobs > 0 && stepJobs === stepOk) completedSteps++;
-      }
+      const { summary, otherStates, activeJobs, totalJobs, completedSteps } =
+        rollUpInvocationJobs(inv);
 
       let autoAction: string | undefined;
       let transition: InvocationPollUpdate["transition"];
@@ -807,7 +843,6 @@ export async function checkInvocations(
       // workflow whose first two steps are ok while the third is still being
       // scheduled is not finished, and neither is one holding a paused job.
       const schedulingDone = TERMINAL_INVOCATION_STATES.has(inv.state);
-      const activeJobs = summary.running + summary.queued + activeOther;
 
       if (schedulingDone && activeJobs === 0) {
         const ended = describeStates(otherStates);

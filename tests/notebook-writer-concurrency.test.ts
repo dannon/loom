@@ -291,6 +291,36 @@ describe("applyInvocationUpdates", () => {
     expect(content).toContain("status: completed");
   });
 
+  it("ignores a last_polled_at further ahead than any clock could be", () => {
+    // A model that writes itself a future timestamp would otherwise silence the
+    // poller for this invocation permanently: every later update reads as stale.
+    const onDisk = renderInvocationYaml({
+      ...base,
+      lastPolledAt: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    const { content, applied, transitioned } = applyInvocationUpdates(onDisk, [
+      poll({
+        lastPolledAt: new Date().toISOString(),
+        transition: { status: "completed", summary: "all done" },
+      }),
+    ]);
+    expect(applied).toEqual(["inv-1"]);
+    expect(transitioned).toEqual(["inv-1"]);
+    expect(content).toContain("status: completed");
+  });
+
+  it("still yields to a competing poller whose clock runs slightly ahead", () => {
+    const onDisk = renderInvocationYaml({
+      ...base,
+      status: "completed",
+      lastPolledAt: new Date(Date.now() + 5_000).toISOString(),
+    });
+    const { applied } = applyInvocationUpdates(onDisk, [
+      poll({ lastPolledAt: new Date().toISOString() }),
+    ]);
+    expect(applied).toEqual([]);
+  });
+
   it("applies when the block on disk has never been polled", () => {
     const { applied } = applyInvocationUpdates(renderInvocationYaml(base), [poll()]);
     expect(applied).toEqual(["inv-1"]);
