@@ -636,6 +636,8 @@ interface CheckResultEntry {
   notebookAnchor: string;
   label: string;
   invocationState: string;
+  /** The block's status before this poll, so a transition can name both ends. */
+  priorStatus: InvocationYaml["status"];
   jobSummary: { ok: number; running: number; queued: number; error: number; other: number };
   /** The raw Galaxy states behind `jobSummary.other`, counted, so they can be named. */
   otherStates: Record<string, number>;
@@ -906,6 +908,7 @@ export async function checkInvocations(
         notebookAnchor: block.notebookAnchor,
         label: block.label,
         invocationState: inv.state,
+        priorStatus: block.status,
         jobSummary: summary,
         otherStates,
         activeJobs,
@@ -919,6 +922,7 @@ export async function checkInvocations(
         notebookAnchor: block.notebookAnchor,
         label: block.label,
         invocationState: "error_checking",
+        priorStatus: block.status,
         jobSummary: { ok: 0, running: 0, queued: 0, error: 0, other: 0 },
         otherStates: {},
         activeJobs: 0,

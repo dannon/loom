@@ -75,9 +75,30 @@ interface PollResultEntry {
   invocationId: string;
   notebookAnchor?: string;
   label?: string;
-  jobSummary?: { ok?: number; error?: number };
+  priorStatus?: string;
+  jobSummary?: { ok?: number; running?: number; queued?: number; error?: number; other?: number };
   activeJobs?: number;
+  lastPolledAt?: string;
   autoAction?: string;
+}
+
+/**
+ * Record a status change in the session's activity log.
+ *
+ * The poller calls checkInvocations directly rather than through the tool
+ * dispatcher, so every transition it made — the ones the user sees as a toast
+ * and a rewritten block — used to leave no row behind at all. This is the audit
+ * trail for work that advances between turns, with nobody watching.
+ */
+function logTransition(payload: Record<string, unknown>): void {
+  const nbPath = getNotebookPath();
+  if (!nbPath) return;
+  appendActivityEvent(path.dirname(nbPath), {
+    timestamp: new Date().toISOString(),
+    kind: "poll.transition",
+    source: "galaxy-poller",
+    payload,
+  });
 }
 
 /**
@@ -315,6 +336,7 @@ async function tickJobs(content: string): Promise<void> {
     if (!isTerminalJobState(state)) continue;
 
     const status = jobStatusFromGalaxyState(state);
+    const polledAt = new Date().toISOString();
     let persisted: boolean;
     try {
       persisted = await withNotebookLock(nbPath, () =>
@@ -322,7 +344,7 @@ async function tickJobs(content: string): Promise<void> {
           jobId: job.jobId,
           status,
           galaxyState: state,
-          lastPolledAt: new Date().toISOString(),
+          lastPolledAt: polledAt,
         }),
       );
     } catch (err) {
@@ -337,6 +359,16 @@ async function tickJobs(content: string): Promise<void> {
     if (!persisted) continue;
 
     const label = job.label || job.toolId || job.jobId;
+    logTransition({
+      blockKind: "job",
+      id: job.jobId,
+      label,
+      toolId: job.toolId ?? null,
+      from: job.status,
+      to: status,
+      galaxyState: state ?? null,
+      lastPolledAt: polledAt,
+    });
     if (notify) notify(...jobFinishedToast(status, label, state));
   }
 }
@@ -384,9 +416,22 @@ async function runTick(): Promise<void> {
     // an autoAction of completed/failed is a fresh transition that won't recur
     // (the block is terminal next tick and no longer checked) — notify once.
     const results = (result.details as { results?: PollResultEntry[] } | undefined)?.results;
-    if (notify && Array.isArray(results)) {
+    if (Array.isArray(results)) {
       for (const r of results) {
         const label = r.label || r.notebookAnchor || r.invocationId;
+        if (r.autoAction === "completed" || r.autoAction === "failed") {
+          logTransition({
+            blockKind: "invocation",
+            id: r.invocationId,
+            label,
+            notebookAnchor: r.notebookAnchor ?? null,
+            from: r.priorStatus ?? "in_progress",
+            to: r.autoAction,
+            counters: { ...(r.jobSummary ?? {}), active: r.activeJobs ?? 0 },
+            lastPolledAt: r.lastPolledAt ?? null,
+          });
+        }
+        if (!notify) continue;
         if (r.autoAction === "completed") {
           notify(
             `✅ Galaxy: "${label}" finished (${r.jobSummary?.ok ?? 0} jobs ok) — ask me to verify the outputs.`,
