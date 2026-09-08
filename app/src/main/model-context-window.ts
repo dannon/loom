@@ -18,6 +18,16 @@
 //
 // This number is downstream of the baseline prompt: if you grow that prefix,
 // revisit this rather than assuming it still holds.
+//
+// A second, deliberately LOWER floor lands alongside this one in the renderer:
+// MIN_WORKABLE_CONTEXT_WINDOW (16_000) in chat/error-humanizer.ts (#419). Do not
+// harmonize them and do not share one constant -- they answer different
+// questions. This one decides what Orbit *offers*, so it can afford to be
+// strict: excluding a marginal model costs the user a missing option. That one
+// backs a claim made to someone who has *already* selected a model ("this
+// model's window is too small to run Orbit"), so it has to be provably true --
+// at 32K, compacting a genuinely long conversation still works, and telling
+// that user to switch models would be the mirror image of the bug it fixes.
 export const MIN_USABLE_CONTEXT_WINDOW = 50_000;
 
 // pi's registry window is not authoritative for locally-served models -- the
@@ -32,18 +42,6 @@ function hasKnownContextWindow(window: unknown): window is number {
   return typeof window === "number" && Number.isFinite(window) && window > 0;
 }
 
-/**
- * Drop models whose context window is too small to run a Loom session at all.
- *
- * Two deliberate escape hatches, both of which fail toward showing a model
- * rather than hiding one:
- *   - a model that reports no usable window is kept, because excluding
- *     unknowns is how you silently empty a provider;
- *   - if the filter would remove *every* model for a provider, the unfiltered
- *     list is returned instead. The caller drops providers with no models, so
- *     an empty result would make the provider vanish from the picker with no
- *     explanation -- the worst outcome available here.
- */
 /**
  * Mark, rather than remove, the models that are too small to run a session.
  *
@@ -62,6 +60,18 @@ export function flagUnusableContextWindows<T extends { id: string; contextWindow
   return models.map((m) => ({ ...m, tooSmall: usableIds.has(m.id) ? undefined : true }));
 }
 
+/**
+ * Which models are too small to run a Loom session at all.
+ *
+ * Two deliberate escape hatches, both of which fail toward offering a model
+ * rather than hiding one:
+ *   - a model that reports no usable window is kept, because excluding
+ *     unknowns is how you silently empty a provider;
+ *   - if the filter would reject *every* model for a provider, the unfiltered
+ *     list is returned instead. Every caller drops a provider once it has no
+ *     offerable models, so rejecting them all would make the provider vanish
+ *     from the picker with no explanation -- the worst outcome available here.
+ */
 export function filterUnusableContextWindows<T extends { contextWindow?: number }>(
   provider: string,
   models: readonly T[],
