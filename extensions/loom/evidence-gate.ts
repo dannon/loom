@@ -444,6 +444,15 @@ export function decideNotebookWrite(
  * One token per step, consumed by the first write it actually clears. The
  * contradiction it cleared can recur (the step is reopened, or a new
  * invocation for the anchor goes in flight) and the next one is denied again.
+ *
+ * Module-level, and cleared on `session_start`, which is the same one-session-
+ * per-process assumption `state.ts` already makes -- the notebook path itself
+ * is a module-level singleton reset in that same hook, so two concurrent
+ * sessions in one brain process is not a shape that exists. It does mean a
+ * clearance does not survive a restart: granting one in the CLI and resuming
+ * in Orbit means granting it again. Deliberate while the token is one-shot; a
+ * clearance that outlives the process is a durable record, and durable records
+ * are the registry's job.
  */
 const overrides = new Set<string>();
 
