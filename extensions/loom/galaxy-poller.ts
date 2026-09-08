@@ -471,7 +471,16 @@ export function startGalaxyPoller(notifyFn?: PollerNotify): void {
   // Fire one immediate tick so a session resumed with in-flight blocks
   // gets fresh counters within the first second instead of waiting 15s.
   void tick();
-  timer = setInterval(tick, POLL_INTERVAL_MS);
+  const interval = setInterval(tick, POLL_INTERVAL_MS);
+  // A background refresher must never be the reason the process stays alive.
+  // In print/rpc modes (`--mode json`, evals) the work finishes and nothing
+  // else holds the loop, so an armed interval kept the process up until
+  // something killed it; session_shutdown clears the timer, but relying on
+  // shutdown running is what made that a 15s-per-run tax when it didn't.
+  // Interactive and Orbit sessions are held open by stdin, so unref costs
+  // them nothing.
+  interval.unref?.();
+  timer = interval;
 }
 
 export function stopGalaxyPoller(): void {

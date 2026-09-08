@@ -178,6 +178,18 @@ describe("galaxy-poller completion notifications", () => {
     }
   });
 
+  it("does not hold the event loop open on the poll interval", () => {
+    // `--mode json` runs finish with nothing else holding the loop, so a refed
+    // 15s interval kept the process up until something killed it.
+    const spy = vi.spyOn(globalThis, "setInterval");
+    mockCheck.mockResolvedValue(resultWith([]));
+
+    startGalaxyPoller(vi.fn());
+
+    const handle = spy.mock.results[0].value as NodeJS.Timeout;
+    expect(handle.hasRef()).toBe(false);
+  });
+
   it("swallows a throwing notifier so the poll loop's catch keeps the timer alive", async () => {
     mockCheck.mockResolvedValue(
       resultWith([
