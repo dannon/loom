@@ -64,8 +64,18 @@ interface PollResultEntry {
   notebookAnchor?: string;
   label?: string;
   jobSummary?: { ok?: number; error?: number };
+  activeJobs?: number;
   autoAction?: string;
 }
+
+/**
+ * Invocations we've already told the user about a mid-flight job failure for.
+ * That one is reported from a block that stays `in_progress` on purpose (the
+ * rest of the workflow is still under observation), so unlike a terminal
+ * transition it recurs on every tick until the run ends — announce it once.
+ * Reset per session in startGalaxyPoller.
+ */
+const announcedFailing = new Set<string>();
 
 /** How many times a job update re-reads and retries before giving up the tick. */
 const MAX_JOB_PERSIST_ATTEMPTS = 3;
@@ -230,6 +240,12 @@ async function tick(): Promise<void> {
             `❌ Galaxy: "${label}" failed (${r.jobSummary?.error ?? 0} job error(s)) — ask me to investigate.`,
             "warning",
           );
+        } else if (r.autoAction === "failing" && !announcedFailing.has(r.invocationId)) {
+          announcedFailing.add(r.invocationId);
+          notify(
+            `⚠️ Galaxy: "${label}" — ${r.jobSummary?.error ?? 0} job(s) failed, ${r.activeJobs ?? 0} still running — ask me to investigate.`,
+            "warning",
+          );
         }
       }
     }
@@ -246,6 +262,7 @@ export function startGalaxyPoller(notifyFn?: PollerNotify): void {
   // Capture the shell notifier (from the session_start ctx) so a completed
   // background invocation can toast the user. Refreshed each session_start.
   notify = notifyFn ?? null;
+  announcedFailing.clear();
   // Idempotent: a brain restart triggers a new session_start without
   // session_shutdown firing first in some failure modes. Stop any
   // pre-existing timer so we don't double-poll.

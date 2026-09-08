@@ -20,6 +20,9 @@ vi.mock("../extensions/loom/galaxy-api.js", () => ({
 }));
 
 import { startGalaxyPoller, stopGalaxyPoller } from "../extensions/loom/galaxy-poller";
+
+/** Matches POLL_INTERVAL_MS in galaxy-poller.ts. */
+const POLL_INTERVAL_MS = 15_000;
 import { checkInvocations } from "../extensions/loom/tools.js";
 
 const mockCheck = vi.mocked(checkInvocations);
@@ -138,6 +141,41 @@ describe("galaxy-poller completion notifications", () => {
     await vi.waitFor(() => expect(mockCheck).toHaveBeenCalled());
     await Promise.resolve();
     expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("warns once when a job fails while the rest of the workflow is still running", async () => {
+    // The block stays in_progress on purpose, so this result recurs every tick.
+    mockCheck.mockResolvedValue(
+      resultWith([
+        {
+          invocationId: "inv1",
+          label: "Variant call",
+          jobSummary: { ok: 1, error: 1 },
+          activeJobs: 2,
+          autoAction: "failing",
+        },
+      ]),
+    );
+    const notify = vi.fn();
+
+    // Fake timers from before the poller starts, so the interval it installs is
+    // one we can advance: the same unfinished failure comes back every tick.
+    vi.useFakeTimers();
+    try {
+      startGalaxyPoller(notify);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(notify).toHaveBeenCalledTimes(1);
+      expect(notify).toHaveBeenCalledWith(
+        '⚠️ Galaxy: "Variant call" — 1 job(s) failed, 2 still running — ask me to investigate.',
+        "warning",
+      );
+
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 2);
+      expect(mockCheck.mock.calls.length).toBeGreaterThan(1);
+      expect(notify).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("swallows a throwing notifier so the poll loop's catch keeps the timer alive", async () => {
