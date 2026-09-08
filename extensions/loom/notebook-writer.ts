@@ -320,14 +320,20 @@ export interface InvocationPollUpdate {
  * pre-poll snapshot (#391). Each update is merged onto the block as it exists
  * in `content`, so fields the poller doesn't own survive.
  *
- * Two updates are dropped rather than applied:
+ * Three updates are dropped rather than applied:
  *   - the block is gone from `content` — someone deleted it while we were
  *     talking to Galaxy, and `upsertInvocationBlock` would resurrect it at the
  *     end of the file;
  *   - the block on disk carries a newer `last_polled_at` than ours — a second
  *     poller (another Loom process, or the agent calling check_all while the
  *     background timer is mid-tick) already recorded a later reading, and our
- *     counters would walk it backwards.
+ *     counters would walk it backwards;
+ *   - the update would reopen a block that is already terminal on disk. A poll
+ *     that saw a job erroring while others ran writes `in_progress` on purpose,
+ *     and a slow round trip can deliver that verdict *after* a faster checker
+ *     recorded the run's real end — our timestamp is later, our snapshot isn't.
+ *     Nothing ever moves a terminal block back to running, so the reopening is
+ *     always the stale one.
  *
  * A transition always lands, including one terminal state correcting another:
  * completion is inferred from the jobs Galaxy has materialized so far, so a
@@ -351,6 +357,7 @@ export function applyInvocationUpdates(
     const current = findInvocationBlocks(next).find((b) => b.invocationId === update.invocationId);
     if (!current) continue;
     if (isNewerPoll(current.lastPolledAt, update.lastPolledAt)) continue;
+    if (update.transition?.status === "in_progress" && current.status !== "in_progress") continue;
     const merged: InvocationYaml = {
       ...current,
       totalSteps: update.totalSteps,
