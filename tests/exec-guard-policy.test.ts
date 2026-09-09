@@ -223,6 +223,51 @@ describe("decide", () => {
       ).decision,
     ).toBe("ask");
   });
+  it("a bash write into the Orbit analysis workspace prompts, it is not denied (P0.8)", () => {
+    // Parity with the write tool three tests up: the same file, the same
+    // workspace. The catastrophic pattern for Loom state used to deny this
+    // outright because Orbit's DEFAULT_CWD lives under ~/.loom.
+    const wcwd = "/home/alice/.loom/analyses/proj";
+    const wdeps = {
+      resolver: { contains: (p: string) => ({ resolved: p, inside: p.startsWith(wcwd) }) },
+      home: HOME,
+    };
+    const r = decide(req({ cwd: wcwd, toolInput: { command: `echo x > ${wcwd}/out.txt` } }), wdeps);
+    expect(r.decision).toBe("ask");
+    expect(r.category).toBe("bash:unknown");
+    // Loom's own state on the same session is still an unappealable deny.
+    for (const command of [
+      `echo x > ${HOME}/.loom/config.json`,
+      `cp evil ${wcwd}/.loom/activity.jsonl`,
+    ]) {
+      const d = decide(req({ cwd: wcwd, toolInput: { command } }), wdeps);
+      expect(d.decision, command).toBe("deny");
+      expect(d.category, command).toBe("bash:catastrophic");
+    }
+  });
+  it("a bash write through a symlink into Loom state is still catastrophic (P0.8)", () => {
+    // The classifier only sees the string. A path that looks like ordinary work
+    // product but realpaths into Loom's own state has to come back as a deny --
+    // this is the resolver the file-tool branch has always had.
+    const wcwd = "/home/alice/.loom/analyses/proj";
+    const link = `${wcwd}/link`;
+    const sdeps = {
+      resolver: {
+        contains: (p: string) => ({
+          resolved: p === link ? "/home/alice/.loom/config.json" : p,
+          inside: p.startsWith(wcwd),
+        }),
+      },
+      home: HOME,
+    };
+    const r = decide(req({ cwd: wcwd, toolInput: { command: `cp evil ${link}` } }), sdeps);
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("bash:catastrophic");
+    // the same command at a target that really is work product still prompts
+    expect(
+      decide(req({ cwd: wcwd, toolInput: { command: `cp evil ${wcwd}/out.txt` } }), sdeps).decision,
+    ).toBe("ask");
+  });
   it("gates a .git write even when cwd is inside the .git dir (no carve-away)", () => {
     // adversarial-review regression: the protected floor must not relativize a
     // real .git away just because the session cwd happens to sit inside it.

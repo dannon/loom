@@ -1,5 +1,10 @@
 import { classifyBash } from "./bash-risk";
-import { isSensitivePath, isCredentialStore, isProtectedWritePath } from "./sensitive-read";
+import {
+  isSensitivePath,
+  isCredentialStore,
+  isProtectedWritePath,
+  isLoomStatePath,
+} from "./sensitive-read";
 import type { PolicyDeps, PolicyRequest, PolicyResult } from "./types";
 import {
   classifyGalaxyDestructive,
@@ -103,6 +108,18 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     const c = classifyBash(command, deps.home);
     if (c.kind === "catastrophic") {
       return { decision: "deny", category: "bash:catastrophic", reason: c.reason };
+    }
+    // The classifier judges the command string; only this layer has a resolver.
+    // A write target that looks like ordinary work product in the analysis
+    // workspace but realpaths into Loom's own state is still Loom's own state.
+    for (const p of c.loomWriteTargets) {
+      if (isLoomStatePath(deps.resolver.contains(p).resolved, deps.home)) {
+        return {
+          decision: "deny",
+          category: "bash:catastrophic",
+          reason: "write to the Loom config directory",
+        };
+      }
     }
     // Sensitive-read floor: every content-read target, including inside a pipe or
     // compound command (closes the `cat secret | tool` evasion). A dedicated
