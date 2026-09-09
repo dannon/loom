@@ -81,6 +81,24 @@ describe("registerExecGuard", () => {
     );
     expect(r?.block).toBeFalsy();
   });
+  it("the approval prompt names every path the call carries", async () => {
+    // The policy layer gates `path` and `file_path` both, and pi's own renderer
+    // shows `file_path ?? path` -- so a prompt that named only one of them could
+    // be answered while looking at the other.
+    const select = vi.fn(async () => "Deny");
+    const c = ctx({ ui: { select, confirm: vi.fn(async () => false), notify: vi.fn() } });
+    await handler(
+      {
+        toolName: "write",
+        input: { path: path.join(sandbox, "project", ".env"), file_path: "/etc/cron.d/x" },
+      },
+      c,
+    );
+    const prompt = String(select.mock.calls[0][0]);
+    expect(prompt).toContain(".env");
+    expect(prompt).toContain("/etc/cron.d/x");
+  });
+
   it("non-interactive denies unknown bash without prompting", async () => {
     const c = ctx({ hasUI: false });
     const r = await handler(

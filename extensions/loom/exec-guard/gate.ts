@@ -127,11 +127,13 @@ export function registerExecGuard(pi: ExtensionAPI): void {
 
     const modelName = ctx.model?.id ?? "the model";
     // File tools also arrive with the Anthropic `file_path` spelling and the policy
-    // layer gates both, so the prompt has to name the file that was judged.
+    // layer gates both, so the prompt names every path the call carries: answering
+    // it while looking at one of two different targets is not consent.
+    const paths = [...new Set([input.path, input.file_path].filter((v) => typeof v === "string"))];
     const detail =
       event.toolName === "bash"
         ? `run: ${String(input.command ?? "").slice(0, 200)}`
-        : `${event.toolName}: ${String(input.path ?? input.file_path ?? "")}`;
+        : `${event.toolName}: ${paths.join(" + ")}`;
     const choice = await ctx.ui.select(
       `Allow ${modelName} to ${detail}?`,
       [
