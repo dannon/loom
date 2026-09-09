@@ -126,10 +126,12 @@ export function registerExecGuard(pi: ExtensionAPI): void {
     }
 
     const modelName = ctx.model?.id ?? "the model";
+    // File tools also arrive with the Anthropic `file_path` spelling and the policy
+    // layer gates both, so the prompt has to name the file that was judged.
     const detail =
       event.toolName === "bash"
         ? `run: ${String(input.command ?? "").slice(0, 200)}`
-        : `${event.toolName}: ${String(input.path ?? "")}`;
+        : `${event.toolName}: ${String(input.path ?? input.file_path ?? "")}`;
     const choice = await ctx.ui.select(
       `Allow ${modelName} to ${detail}?`,
       [
