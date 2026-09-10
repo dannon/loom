@@ -20,6 +20,22 @@ export interface MatrixLoadResult {
   skipped: { model: ModelEntry; missing: string[] }[];
 }
 
+/**
+ * Env vars a model genuinely can't run without. `envRequires` is the curated
+ * list, but a providerConfig names its own baseUrl/apiKey vars -- deriving those
+ * instead of trusting the two lists to stay in sync is what keeps a missing
+ * credential a skip rather than a crash mid-matrix.
+ */
+export function requiredEnvVars(model: ModelEntry): string[] {
+  const names = [...(model.envRequires ?? [])];
+  const cfg = model.providerConfig;
+  if (cfg) {
+    if (cfg.baseUrlIsEnvVar) names.push(cfg.baseUrl);
+    names.push(cfg.apiKeyEnvVar);
+  }
+  return [...new Set(names)];
+}
+
 export function loadMatrix(filterIds?: string[]): MatrixLoadResult {
   const raw = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8")) as ModelMatrix;
   const available: ModelEntry[] = [];
@@ -27,7 +43,7 @@ export function loadMatrix(filterIds?: string[]): MatrixLoadResult {
 
   for (const model of raw.models) {
     if (filterIds && filterIds.length > 0 && !filterIds.includes(model.id)) continue;
-    const missing = (model.envRequires ?? []).filter((v) => !process.env[v]);
+    const missing = requiredEnvVars(model).filter((v) => !process.env[v]);
     if (missing.length > 0) {
       skipped.push({ model, missing });
       continue;
@@ -51,12 +67,19 @@ export function writePiModelsConfig(model: ModelEntry, agentDir: string): void {
     throw new Error(`Model ${model.id}: providerConfig.baseUrl env var '${cfg.baseUrl}' is unset`);
   }
 
+  // A BARE env var name here is not indirection -- pi reads it as the literal
+  // credential and sends it as the bearer token, which is how the whole matrix
+  // silently 401'd ("Received=PROX****_KEY"). The `$` prefix is what makes pi
+  // interpolate from the environment at request time (resolve-config-value.ts),
+  // so the real key stays out of the file the agent under test can read.
+  const apiKey = `$${cfg.apiKeyEnvVar}`;
+
   const piModels = {
     providers: {
       [model.provider]: {
         baseUrl,
         api: "openai-completions",
-        apiKey: cfg.apiKeyEnvVar,
+        apiKey,
         models: [
           {
             id: model.model,

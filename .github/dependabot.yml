@@ -1,0 +1,58 @@
+# Dependabot owns everything EXCEPT the pi packages.
+#
+# pi is ignored here and handled by .github/workflows/pi-update.yml instead.
+# The root and app/ trees install separately and must land on one pi version:
+# when they drift, both copies resolve independently and pi's module-level
+# state splits in two, which is what check-version-lockstep.mjs guards. Grouping
+# is per-directory by default, and `group-by: dependency-name` switches it to
+# one pull request per dependency spanning every directory -- never both at
+# once, so there is no way to say "all three pi package names, across both
+# trees, at one coordinated version". Under `group-by` the pi-ai PR would land
+# on its own and split pi-ai from pi-coding-agent; without it, the root PR would
+# land without app/. Either way a partial bump fails the lockstep gate by
+# design, so pointing Dependabot at pi would mint a red PR on every pi release.
+#
+# Note this is an `ignore` and not an `allow` list, on purpose. Both keys filter
+# security updates as well as version updates, so an allowlist would quietly
+# drop vulnerability remediation for every dependency it left out. Ignoring only
+# the pi family keeps security updates working for the whole rest of the tree.
+# The cost is that pi itself gets no security PR -- the weekly workflow picks up
+# pi releases instead, so a fix that ships as a release is covered, but one that
+# needs a pin bump on an unchanged version is not.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories:
+      - "/"
+      - "/app"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 4
+    labels:
+      - dependencies
+    ignore:
+      - dependency-name: "@earendil-works/*"
+    # One grouped PR per tree per week rather than a PR per package.
+    groups:
+      npm-deps:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "deps"
+
+  # GitHub's own actions drift quietly and break nothing until a runner image
+  # retires a Node version out from under them.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci"
