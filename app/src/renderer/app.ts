@@ -477,10 +477,12 @@ modelIndicatorEl.addEventListener("click", () => {
 const ARTIFACT_COLLAPSED_KEY = "orbit.artifactCollapsed";
 const exportChatBtn = document.getElementById("export-chat-btn")!;
 const artifactToggleBtn = document.getElementById("artifact-toggle")!;
+const chatPane = document.getElementById("chat-pane")!;
 
 // Apply visual state without persisting; used by responsive auto-collapse.
 function applyArtifactCollapsed(collapsed: boolean): void {
   document.body.classList.toggle("artifact-collapsed", collapsed);
+  if (collapsed) chatPane.style.flex = "";
 }
 // User-initiated toggle; persists to localStorage.
 function setArtifactCollapsed(collapsed: boolean): void {
@@ -3048,7 +3050,6 @@ void window.orbit.getAgentStatus().then(({ status, message }) => {
 // ── Draggable Divider ─────────────────────────────────────────────────────────
 
 const divider = document.getElementById("divider")!;
-const chatPane = document.getElementById("chat-pane")!;
 
 let dragging = false;
 
