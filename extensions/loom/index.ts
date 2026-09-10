@@ -27,6 +27,8 @@ import { isTeamDispatchEnabled } from "./teams/is-enabled";
 import { registerSessionIndexTools } from "./session-index/tools";
 import { isSessionIndexEnabled } from "./session-index/is-enabled";
 import { registerConfusablesHint } from "./confusables-hint";
+import { registerEvidenceGate } from "./evidence-gate";
+import { registerEvidenceOverrideCommand } from "./evidence-override-command";
 import { registerExecGuard } from "./exec-guard";
 import { registerSandbox } from "./sandbox";
 import { isLocalExecDisabled } from "./local-exec";
@@ -95,6 +97,8 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerTesterIdCommand(pi);
   registerInstructionsCommand(pi);
   registerConfusablesHint(pi);
+  registerEvidenceGate(pi);
+  registerEvidenceOverrideCommand(pi);
   if (isTeamDispatchEnabled()) {
     registerTeamTools(pi);
   }

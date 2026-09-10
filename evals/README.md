@@ -58,6 +58,17 @@ Plans are read from wherever they land (`plan.source` defaults to `"any"` =
 notebook if it has a plan, else chat), because the matrix models don't
 reliably follow Loom's draft-in-chat-then-write gate.
 
+## Asserting on the activity log
+
+`assertions.activity` matches rows of the `activity.jsonl` the run wrote
+beside its notebook -- `{ kind, source?, payloadContains? }` per entry,
+plus `mustNotIncludeKinds`. This is the surface for anything the harness
+decides rather than the model: gate adjudications, overrides, poller
+transitions. It matters most in Tier 1, where there is no model, no
+assistant text, and no tool call to look at: `--mode json` attaches no
+UI, so `ctx.ui.notify` is a no-op and a synchronous command that records
+a decision leaves no other trace.
+
 Each (scenario, model) cell runs **n=3** times by default (`scenario.runs`
 overrides; Tier 1 runs once). A dimension's cell verdict is a majority of the
 runs (`pass >= ceil(total/2)`), so a flaky model shows as a pass-rate rather

@@ -10,6 +10,8 @@
 
 import { parseLatestPlan } from "./notebook-parser.js";
 import type {
+  ActivityAssertions,
+  ActivityEvent,
   AnyEvent,
   Assertions,
   BehaviorAssertions,
@@ -56,8 +58,52 @@ export function evaluate(run: ScenarioRun): ScenarioFailure[] {
   evaluateUnifiedPlan(run, a.plan, stripThink, failures);
   evaluateBehavior(run, a.behavior, stripThink, failures);
   evaluateNotebook(run.notebookContent, a.notebook, failures);
+  evaluateActivity(run.activityEvents, a.activity, failures);
 
   return failures;
+}
+
+/**
+ * Assert on the harness's own audit trail. Tier 1 scenarios drive a
+ * synchronous command with no model attached, so there is no assistant text
+ * and no tool call to look at -- if the thing under test records a decision,
+ * activity.jsonl is the only place it shows up.
+ */
+function evaluateActivity(
+  events: ActivityEvent[],
+  a: ActivityAssertions | undefined,
+  failures: ScenarioFailure[],
+): void {
+  if (!a) return;
+
+  for (const expected of a.mustInclude ?? []) {
+    const hit = events.some((e) => {
+      if (e.kind !== expected.kind) return false;
+      if (expected.source && e.source !== expected.source) return false;
+      return Object.entries(expected.payloadContains ?? {}).every(
+        ([k, v]) => String((e.payload ?? {})[k]) === v,
+      );
+    });
+    if (!hit) {
+      failures.push({
+        assertion: "activity.mustInclude",
+        detail:
+          `no activity row matched ${JSON.stringify(expected)}; saw ` +
+          `[${events.map((e) => e.kind).join(", ") || "nothing"}]`,
+        dimension: "other",
+      });
+    }
+  }
+
+  for (const banned of a.mustNotIncludeKinds ?? []) {
+    if (events.some((e) => e.kind === banned)) {
+      failures.push({
+        assertion: "activity.mustNotIncludeKinds",
+        detail: `banned activity kind '${banned}' was recorded`,
+        dimension: "other",
+      });
+    }
+  }
 }
 
 function evaluateToolCalls(events: AnyEvent[], a: Assertions, failures: ScenarioFailure[]): void {

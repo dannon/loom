@@ -167,6 +167,28 @@ summary: ""
 
 The polling tool `galaxy_invocation_check_all` scans the notebook for in-flight blocks, polls Galaxy for each, and applies deterministic state transitions (all-jobs-ok → `completed`, any-error → `failed`) by rewriting the YAML in place. No external state store; the notebook is authoritative.
 
+### The evidence gate
+
+Most of what Loom enforces mechanically is about safety -- don't shell out, don't leak the key, don't delete the history. The epistemic discipline the product actually exists for ("evidence comes before assertion") was prose in the system prompt, and nothing checked it.
+
+The evidence gate is the first check on that. It watches `Edit`/`Write` calls against `notebook.md` and reads the file as it stood _before_ the write. A plan step going `- [ ]` → `- [x]` while the `loom-invocation` block bound to its anchor still reads `status: in_progress` is a contradiction: a verified result claimed for a run Galaxy says hasn't finished. That status comes from the poller, not the model, so it can't be satisfied by writing a convincing sentence -- and because the check reads the pre-image, rewriting `status:` in the same edit doesn't clear it either.
+
+It's deliberately narrow. Absence of evidence isn't decidable from a single write (the honest sequence Loom teaches spans two edits), so absence is never gated -- only contradiction is. A flip with no bound invocation gets no opinion, a `failed` block is never gated because it's sticky and can't be re-polled, and a rerun that leaves a stale block beside a `completed` one for the same anchor reads as fine.
+
+Modes are `off | warn | deny`, default **warn**: the write goes through and the decision lands in `activity.jsonl` as an `evidence.decision` event, so the real false-positive rate can be measured before anyone makes it a hard failure. Set it in `~/.loom/config.json`:
+
+```json
+{ "evidenceGate": { "mode": "warn" } }
+```
+
+or per session with `LOOM_EVIDENCE_GATE=deny`.
+
+In `deny` the refusal stands for as long as the contradiction does. An earlier cut let the model's second attempt through, on the theory that an unwinnable retry loop is worse than an unevidenced claim -- but that made the decision advisory, since a model that disagrees only has to ask twice. The exception is yours instead: `/override <step-anchor> <reason>` clears one named step for one write and records the step, the invocation status at the time, and your reason to `activity.jsonl` as an `evidence.override` event. A contradiction that recurs on that step is refused again. Bare `/override` lists what the gate is currently holding.
+
+A clearance is for one named step _and the run in flight when you granted it_: if that run fails and a rerun starts, the next contradiction is refused again, because what you approved was that run being ahead of its checkbox, not the step forever. It is also session-scoped and held in memory, so granting one in the CLI and then resuming in Orbit means granting it again. That is deliberate for now -- a durable clearance is a durable record, which is the registry's job -- but it is the rough edge to watch if `deny` ever becomes the default. If a key you type could name two steps, the command says so and asks you to quote the one you mean rather than guessing.
+
+Several gaps are known and pinned by tests rather than papered over, and they share one root: step identity and the poller's status both live in text the model may rewrite. A forgery can be split across two edits (rewrite `status:`, then flip); renaming the step's anchor, or the plan heading above it, in the same edit as the flip stops it reading as a flip at all; `bash` writes never reach the hook, since it watches the file tools; and `activity.jsonl` is itself an ordinary workspace file. The first three close when the poller's verdict is held out of band where the model can't author it. The last two are the exec-guard's write policy rather than a second gate here.
+
 ### Git-tracked notebooks
 
 When Loom starts in a directory that isn't already a git repo, it runs `git init`, drops a bioinformatics-friendly `.gitignore`, and marks the repo with `git config loom.managed true`. From then on every notebook write triggers an auto-commit, giving you:
@@ -629,6 +651,7 @@ Type `/` in the chat to open the autocomplete popup. Tab to accept; Enter still 
 | `/connect [name]`         | Open Galaxy connection settings (or switch to an existing profile)                 |
 | `/profiles`               | List saved Galaxy server profiles                                                  |
 | `/execute` (alias `/run`) | Tell the agent to advance the next pending step in the latest plan section         |
+| `/override <step> <why>`  | Clear the evidence gate for one plan step, once, with a recorded reason            |
 | `/help`                   | Show this list                                                                     |
 
 ## Tool reference
