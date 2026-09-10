@@ -136,7 +136,11 @@ export function registerExecGuard(pi: ExtensionAPI): void {
     const heading = isBash
       ? `Allow ${modelName} to run this command?`
       : `Allow ${modelName} to ${event.toolName} this path?`;
-    const detail = String((isBash ? input.command : input.path) ?? "");
+    // File tools also arrive with the Anthropic `file_path` spelling and the policy
+    // layer gates both, so the prompt names every path the call carries: answering
+    // it while looking at one of two different targets is not consent.
+    const paths = [...new Set([input.path, input.file_path].filter((v) => typeof v === "string"))];
+    const detail = String(isBash ? (input.command ?? "") : paths.join(" + "));
     const choice = await ctx.ui.select(
       buildApprovalPrompt(heading, detail),
       [
