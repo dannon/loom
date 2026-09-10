@@ -34,7 +34,7 @@ updates:
     ignore:
       - dependency-name: "@earendil-works/*"
       # TypeScript majors move ahead of typescript-eslint, which carries a hard
-      # upper bound on its typescript peer (>=4.8.4 <6.1.0 as of 8.68, the
+      # upper bound on its typescript peer (>=4.8.4 <6.1.0 as of 8.70, the
       # current latest). npm serves TS 7 as `latest` today, so an unfiltered
       # bump writes a lockfile that nothing satisfies and `npm ci` fails with
       # ERESOLVE on every platform before a single test runs -- a red PR every
