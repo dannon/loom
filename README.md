@@ -21,7 +21,7 @@ That web shell already has a working seed today: a browser-served build of the O
 1. You open Orbit (or run `loom`) in an analysis directory. A `notebook.md` is created on first launch and committed to git.
 2. You chat with the agent: ask questions, drop file paths, request data lookups. None of this requires a "plan" — the conversation is just a conversation.
 3. When you ask for a plan, the agent drafts it **in chat** as a markdown section, then waits for you to approve. Once you approve, it asks you to review parameters; once you approve those too, it writes the plan section into `notebook.md` and starts executing.
-4. If Galaxy is connected, the agent considers per-step routing during drafting (does an IWC workflow match? does Galaxy have the heavy tool installed?) and tags each step `[local]`, `[hybrid]`, or `[remote]` in the markdown.
+4. If Galaxy is connected, the agent considers per-step routing during drafting (does an IWC workflow match? does Galaxy have the heavy tool installed?) and tags each step `[galaxy]`, `[local]`, `[hybrid]`, or `[remote]` in the markdown.
 5. While a Galaxy step runs, a `loom-invocation` YAML block in the notebook tracks the invocation. The polling tool reads those blocks, queries Galaxy, and updates them in place when jobs finish or fail.
 6. Multiple plans coexist in the notebook. After interpreting one analysis, ask for another — the new plan section appends below the previous one.
 7. Come back the next day, open the same directory, the notebook is the project. Sessions resume automatically.
@@ -122,7 +122,7 @@ frequencies across tissues.
 
 Conventions:
 
-- Routing tag in the section header: `[local]`, `[hybrid]`, or `[remote]`. Literal so future tooling can grep.
+- Routing tag in the section header: `[galaxy]`, `[hybrid]`, `[local]`, or `[remote]`. Literal so future tooling can grep.
 - Step status by the checkbox: `- [ ]` pending, `- [x]` verified completed, `- [!]` failed.
 - If verification is blocked or inconclusive but the step itself has not failed, leave the step pending and record the blocker.
 - Anchors `{#plan-X-step-N}` so Galaxy invocation YAML can reference individual steps.
