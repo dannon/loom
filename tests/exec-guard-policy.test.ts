@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import { describe, it, expect } from "vitest";
 import { decide } from "../extensions/loom/exec-guard/policy";
 import type {
@@ -254,8 +255,11 @@ describe("decide", () => {
     const sdeps = {
       resolver: {
         contains: (p: string) => ({
-          resolved: p === link ? "/home/alice/.loom/config.json" : p,
-          inside: p.startsWith(wcwd),
+          resolved:
+            path.normalize(p) === path.normalize(link)
+              ? path.normalize("/home/alice/.loom/config.json")
+              : p,
+          inside: path.normalize(p).startsWith(path.normalize(wcwd)),
         }),
       },
       home: HOME,

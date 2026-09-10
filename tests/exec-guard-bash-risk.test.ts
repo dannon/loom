@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import { describe, it, expect } from "vitest";
 import { classifyBash } from "../extensions/loom/exec-guard/bash-risk";
 
@@ -316,7 +317,7 @@ describe("classifyBash -- .loom writes vs Orbit's default workspace (#P0.8)", ()
     // classifyBash judges strings; only the policy layer has a resolver, so a
     // carved-out target is handed over rather than declared safe outright.
     expect(classifyBash(`cp a.txt ${ANALYSIS}/b.txt`, HOME).loomWriteTargets).toEqual([
-      `${ANALYSIS}/b.txt`,
+      path.normalize(`${ANALYSIS}/b.txt`),
     ]);
     expect(classifyBash(`echo x > ${HOME}/.loom/config.json`, HOME).loomWriteTargets).toEqual([]);
     expect(classifyBash(`cat ${ANALYSIS}/notebook.md`, HOME).loomWriteTargets).toEqual([]);
