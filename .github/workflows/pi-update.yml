@@ -1,0 +1,287 @@
+# Open a single coordinated pi bump.
+#
+# pi lives in two trees that install separately: the root project and app/.
+# They must resolve the same version -- when they drift, both copies land on
+# disk, a bare import resolves to a different module instance depending on who
+# imported it, and anything pi holds in module-level state splits in two. That
+# is what check-version-lockstep.mjs exists to catch, and it is why Dependabot
+# is not allowed near these packages: its grouping is either per-directory or
+# per-dependency, so it would bump one tree and leave the other behind.
+#
+# This workflow resolves ONE target version and applies it everywhere, so the
+# resulting PR is lockstep by construction.
+#
+# Which packages to bump and which manifest section each lives in are derived by
+# scripts/pi-packages.mjs rather than written down here, so adding a fourth pi
+# package needs no edit to this file.
+name: pi update
+
+on:
+  schedule:
+    # Monday 06:00 UTC, ahead of the week rather than during it.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            app/package-lock.json
+
+      # pi-coding-agent is the package that pulls the rest, so its latest
+      # release is the version the whole set moves to.
+      #
+      # `current` comes from the LOCKFILES, across both trees -- not from the
+      # manifest ranges. A caret range is a floor, so it can answer neither
+      # question that matters here: what is actually installed, and do the two
+      # trees agree. Reading the root's range alone would report "nothing to do"
+      # while app/ sat a version behind, which is the exact split state this
+      # workflow exists to repair. More than one version in `current` means the
+      # trees have already drifted and there is work to do regardless of latest.
+      - name: Resolve target version
+        id: target
+        run: |
+          current=$(node scripts/pi-packages.mjs --versions)
+          latest=$(npm view @earendil-works/pi-coding-agent version)
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "Resolved pi versions on disk: $current"
+          node scripts/pi-packages.mjs
+          if [ "$current" = "$latest" ]; then
+            echo "pi is already at $latest in both trees"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            case "$current" in
+              *,*) echo "pi versions disagree ($current) -- realigning on $latest" ;;
+              *)   echo "pi $current -> $latest" ;;
+            esac
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A pull request in ANY state means this version has already been put in
+      # front of a human -- open is in flight, closed is a decision. Skip those.
+      # A branch with no pull request means a previous run pushed and then failed
+      # to open one; recover by reusing the branch rather than skipping the
+      # version forever. Keying on branch existence alone conflated the three.
+      - name: Decide whether there is work to do
+        if: steps.target.outputs.changed == 'true'
+        id: branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST: ${{ steps.target.outputs.latest }}
+        run: |
+          branch="deps/pi-$LATEST"
+          echo "name=$branch" >> "$GITHUB_OUTPUT"
+          pr_state=$(gh pr list --head "$branch" --state all --limit 1 --json state --jq '.[0].state // ""')
+          if [ -n "$pr_state" ]; then
+            echo "a pull request for $branch already exists ($pr_state) -- nothing to do"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "reuse=false" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "$branch exists with no pull request -- recovering"
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            echo "reuse=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            echo "reuse=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Root first, then app/ -- the same order build.yml installs in, and for
+      # the same reason: the root test run imports through app/src/main into
+      # "electron", which only exists in app/node_modules.
+      - name: Install
+        if: steps.target.outputs.changed == 'true' && steps.branch.outputs.proceed == 'true'
+        run: |
+          npm ci
+          cd app && npm ci
+
+      # One version, every manifest. The plan comes from the manifests, so the
+      # save flag follows whichever section each package actually lives in
+      # rather than a flag hardcoded here -- pi-ai is a devDependency at the root
+      # and a runtime dependency in app/, and if that ever legitimately changes
+      # this must not quietly change it back.
+      #
+      # Packages are named on the command line deliberately. npm treats an
+      # explicit request as an override and downgrades a conflicting peer to a
+      # warning, while re-resolving a manifest edited in place turns the same
+      # conflict into a fatal ERESOLVE. pi-mcp-adapter declares an optional peer
+      # on a caret range of pi-ai, so the first pi minor that leaves that range
+      # would otherwise abort the run before there was any branch to look at.
+      # The conflict is worth reporting, not worth dying on: it is recorded as a
+      # row in the PR table below.
+      - name: Bump pi everywhere
+        if: steps.target.outputs.changed == 'true' && steps.branch.outputs.proceed == 'true'
+        id: bump
+        env:
+          LATEST: ${{ steps.target.outputs.latest }}
+        run: |
+          node scripts/pi-packages.mjs --install-plan "$LATEST" > /tmp/plan.tsv
+          cat /tmp/plan.tsv
+          : > /tmp/bump.log
+          rc=0
+          while IFS="$(printf '\t')" read -r dir flag specs; do
+            [ -n "$dir" ] || continue
+            echo "== ($dir) npm install $flag $specs" >> /tmp/bump.log
+            # specs is a space-separated list of name@version and must split.
+            # shellcheck disable=SC2086
+            ( cd "$dir" && npm install $flag $specs ) >> /tmp/bump.log 2>&1 || rc=1
+          done < /tmp/plan.tsv
+          cat /tmp/bump.log
+
+          if grep -q ERESOLVE /tmp/bump.log; then
+            echo "peers=CONFLICT (overridden)" >> "$GITHUB_OUTPUT"
+          else
+            echo "peers=pass" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "$rc" -ne 0 ]; then
+            echo "install=FAIL" >> "$GITHUB_OUTPUT"
+            # Nothing moved means there is no diff to put in a pull request, so
+            # there is nothing useful to hand a human. Fail loudly instead.
+            if git diff --quiet -- package.json package-lock.json app/package.json app/package-lock.json; then
+              echo "The bump failed and changed nothing -- no pull request to open."
+              exit 1
+            fi
+            echo "The bump reported errors but did change the manifests -- continuing so the PR shows what happened."
+          else
+            echo "install=pass" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Every check that build.yml would run, minus the OS matrix and the
+      # Electron package step. Keep this list in step with build.yml -- if a
+      # check is added there and not here, the "everything build.yml runs" claim
+      # in the PR body quietly stops being true.
+      #
+      # Failures are recorded, not fatal: a pi release that needs a code
+      # migration should still produce a PR saying so -- that is the most useful
+      # thing this workflow can tell a human.
+      - name: Validate
+        if: steps.target.outputs.changed == 'true' && steps.branch.outputs.proceed == 'true'
+        id: validate
+        run: |
+          status() { if [ "$1" -eq 0 ]; then echo "pass"; else echo "FAIL"; fi; }
+          set +e
+          npm run check:versions;   lockstep=$?
+          npm run typecheck;        tc_root=$?
+          (cd app && npx tsc --noEmit); tc_app=$?
+          npm test;                 tests=$?
+          npm run smoke:pack;       smoke=$?
+          set -e
+          {
+            echo "lockstep=$(status $lockstep)"
+            echo "typecheck_root=$(status $tc_root)"
+            echo "typecheck_app=$(status $tc_app)"
+            echo "tests=$(status $tests)"
+            echo "smoke=$(status $smoke)"
+          } >> "$GITHUB_OUTPUT"
+          if [ $((lockstep + tc_root + tc_app + tests + smoke)) -eq 0 ]; then
+            echo "clean=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "clean=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Values reach the shell through env rather than being pasted into the
+      # script text: ${{ }} is substituted before bash parses the line, so a
+      # registry-sourced string interpolated directly would be shell source.
+      - name: Open the pull request
+        if: steps.target.outputs.changed == 'true' && steps.branch.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST: ${{ steps.target.outputs.latest }}
+          CURRENT: ${{ steps.target.outputs.current }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+          REUSE: ${{ steps.branch.outputs.reuse }}
+          V_INSTALL: ${{ steps.bump.outputs.install }}
+          V_PEERS: ${{ steps.bump.outputs.peers }}
+          V_LOCKSTEP: ${{ steps.validate.outputs.lockstep }}
+          V_TC_ROOT: ${{ steps.validate.outputs.typecheck_root }}
+          V_TC_APP: ${{ steps.validate.outputs.typecheck_app }}
+          V_TESTS: ${{ steps.validate.outputs.tests }}
+          V_SMOKE: ${{ steps.validate.outputs.smoke }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add package.json package-lock.json app/package.json app/package-lock.json
+          if git diff --cached --quiet; then
+            echo "Nothing staged -- the bump produced no change."
+            exit 1
+          fi
+          git commit -m "Move pi to $LATEST
+
+          Automated lockstep bump: one version applied to the root and app/
+          trees together, so neither can resolve a pi package the other does
+          not. Validation results are in the pull request body."
+          if [ "$REUSE" = "true" ]; then
+            git push --force origin "HEAD:$BRANCH"
+          else
+            git push origin "$BRANCH"
+          fi
+
+          # Built by node reading env, so no registry string is ever parsed as
+          # shell and the markdown keeps its backticks.
+          node - > /tmp/pr-body.md <<'JS'
+          const e = process.env;
+          const rows = [
+            ["dependency install", e.V_INSTALL],
+            ["peer ranges", e.V_PEERS],
+            ["version lockstep", e.V_LOCKSTEP],
+            ["typecheck (root)", e.V_TC_ROOT],
+            ["typecheck (app)", e.V_TC_APP],
+            ["tests", e.V_TESTS],
+            ["packed-tarball smoke", e.V_SMOKE],
+          ];
+          const from = e.CURRENT.includes(",")
+            ? "the split versions `" + e.CURRENT + "`"
+            : "`" + e.CURRENT + "`";
+          console.log(
+            [
+              "Moves pi from " + from + " to `" + e.LATEST + "` across both trees in one commit, so the root and `app/` cannot drift apart.",
+              "",
+              "| check | result |",
+              "| --- | --- |",
+              ...rows.map(([k, v]) => "| " + k + " | " + (v || "n/a") + " |"),
+              "",
+              ...(/CONFLICT/.test(e.V_PEERS || "")
+                ? [
+                    "The peer conflict means a package outside the pi family -- `pi-mcp-adapter` declares an optional peer on `pi-ai` -- pins a range this version leaves. npm was told to override it and the tree installed, but the mismatch is real and wants a look.",
+                    "",
+                  ]
+                : []),
+              "Run on ubuntu only. **`build.yml` does not run on this PR** -- GitHub does not trigger workflows for events raised by `GITHUB_TOKEN`. Push a commit, or close and reopen, to get the full three-OS matrix. (Swapping in a PAT or GitHub App token would fix that permanently.)",
+              "",
+              "Deliberately a draft. Every pi minor so far has needed hand-written migration -- 0.80 moved pi-ai's globals to `/compat`, 0.83 dropped APIs outright, 0.84 changed the OAuth login prompt contract -- and the 0.80 break was a runtime one that a green typecheck sailed straight past. Read the table as \"here is what a bump would cost\", not as a merge signal.",
+            ].join("\n"),
+          );
+          JS
+
+          gh pr create --draft --base main --head "$BRANCH" \
+            --title "Move pi to $LATEST" \
+            --body-file /tmp/pr-body.md
+
+          # Non-fatal: the branch and PR exist by this point, and a missing
+          # label is not worth failing the run over.
+          gh pr edit "$BRANCH" --add-label dependencies || true
+
+      # Last, so the pull request is already open when this fires. Without it the
+      # scheduled run reports success even when every check failed, which is the
+      # opposite of what a human skimming the Actions tab needs to see.
+      - name: Fail the run if validation did not pass
+        if: steps.target.outputs.changed == 'true' && steps.branch.outputs.proceed == 'true' && steps.validate.outputs.clean != 'true'
+        env:
+          LATEST: ${{ steps.target.outputs.latest }}
+        run: |
+          echo "pi $LATEST does not build clean -- see the pull request body for which checks failed."
+          exit 1

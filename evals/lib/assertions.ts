@@ -2,9 +2,10 @@
  * Evaluate scenario assertions against a captured event stream.
  *
  * Tool calls live in `tool_execution_start` events. Chat text is the
- * concatenated `text_delta` from `message_update` events. We deliberately
- * keep the matchers simple (substring / ordered subsequence) -- if a
- * scenario needs more, it should be expressed as multiple assertions.
+ * concatenated `text_delta` from `message_update` events. Matchers stay
+ * deliberately coarse (substring / ordered subsequence, plus a regex form
+ * for properties with several legitimate spellings) -- if a scenario needs
+ * more, it should be expressed as multiple assertions.
  */
 
 import { parseLatestPlan } from "./notebook-parser.js";
@@ -22,6 +23,22 @@ import type {
 export function evaluate(run: ScenarioRun): ScenarioFailure[] {
   const failures: ScenarioFailure[] = [];
   const a = run.scenario.assertions;
+
+  // A tier-2 run where the model said nothing at all is an infrastructure
+  // result -- auth, proxy, a provider returning empty content -- and the
+  // content assertions that follow can only report it as "chat text did not
+  // include ...", which reads exactly like a model that answered badly. That
+  // ambiguity is what let a broken proxy credential masquerade as a capability
+  // ceiling across the whole matrix. Name it instead.
+  if (run.model && collectChatText(run.events).trim() === "") {
+    failures.push({
+      assertion: "run.noModelOutput",
+      detail:
+        `model produced no assistant text (${run.events.length} events, exit ${run.exitCode}, ` +
+        `${run.durationMs}ms) -- check credentials/proxy before reading this as a capability failure`,
+      dimension: "other",
+    });
+  }
 
   if (a.exitCode !== undefined && run.exitCode !== a.exitCode) {
     failures.push({
@@ -146,6 +163,49 @@ function evaluateChatText(
       });
     }
   }
+  for (const pattern of a.chatText.mustMatch ?? []) {
+    const re = compilePattern(pattern, "chatText.mustMatch", failures);
+    if (re && !re.test(text)) {
+      failures.push({
+        assertion: "chatText.mustMatch",
+        detail: `chat text did not match /${pattern}/`,
+        dimension: "other",
+      });
+    }
+  }
+  for (const pattern of a.chatText.mustNotMatch ?? []) {
+    const re = compilePattern(pattern, "chatText.mustNotMatch", failures);
+    if (re && re.test(text)) {
+      failures.push({
+        assertion: "chatText.mustNotMatch",
+        detail: `chat text matched banned /${pattern}/`,
+        dimension: "other",
+      });
+    }
+  }
+}
+
+/**
+ * A malformed pattern is an authoring bug, but throwing out of `evaluate`
+ * would take the whole matrix run down with it (run.ts exits 2 before the
+ * report is printed). Record it as a failure instead; tests/evals-scenarios
+ * compiles every committed pattern so it never gets that far in CI.
+ */
+function compilePattern(
+  pattern: string,
+  assertion: string,
+  failures: ScenarioFailure[],
+): RegExp | null {
+  try {
+    return new RegExp(pattern);
+  } catch (err) {
+    failures.push({
+      assertion,
+      detail: `invalid regex /${pattern}/: ${err instanceof Error ? err.message : String(err)}`,
+      dimension: "other",
+    });
+    return null;
+  }
 }
 
 function collectChatText(events: AnyEvent[]): string {
@@ -161,7 +221,13 @@ function collectChatText(events: AnyEvent[]): string {
 }
 
 function stripThinking(text: string): string {
-  return text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  // The second pass covers a run killed at the timeout mid-thought: with no
+  // closing tag the non-greedy pair regex matches nothing and the entire
+  // chain-of-thought gets graded as though it were the answer.
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/g, "")
+    .replace(/<think>[\s\S]*$/, "")
+    .trim();
 }
 
 function getChatText(events: AnyEvent[], stripThinkingTags: boolean): string {

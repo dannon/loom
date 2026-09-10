@@ -40,6 +40,7 @@ describe("providerStateFor", () => {
       typedKey: "sk-openai",
       model: "gpt-5.4",
       baseUrl: "",
+      savedBaseUrl: "",
     });
   });
 
@@ -83,7 +84,7 @@ describe("captureProviderState", () => {
 
   it("preserves the stored-key flag across a re-capture", () => {
     const states = captureProviderState(
-      { anthropic: { hadKey: true, typedKey: "", model: "claude-opus-5", baseUrl: "" } },
+      { anthropic: { hadKey: true, typedKey: "", model: "claude-opus-5", baseUrl: "", savedBaseUrl: "" } },
       "anthropic",
       { typedKey: "", model: "claude-sonnet-5", baseUrl: "" },
     );
@@ -92,6 +93,7 @@ describe("captureProviderState", () => {
       typedKey: "",
       model: "claude-sonnet-5",
       baseUrl: "",
+      savedBaseUrl: "",
     });
   });
 
@@ -282,13 +284,13 @@ describe("ProviderFieldStore", () => {
     const store = new ProviderFieldStore("openai");
     store.select("deepseek", openaiFields);
     expect(store.select("openai", { typedKey: "", model: "deepseek-v4-pro", baseUrl: "" })).toEqual(
-      { hadKey: false, ...openaiFields },
+      { hadKey: false, ...openaiFields, savedBaseUrl: "" },
     );
   });
 
   it("keeps what's on screen when the selection doesn't actually change", () => {
     const store = new ProviderFieldStore("openai");
-    expect(store.select("openai", openaiFields)).toEqual({ hadKey: false, ...openaiFields });
+    expect(store.select("openai", openaiFields)).toEqual({ hadKey: false, ...openaiFields, savedBaseUrl: "" });
   });
 
   it("saves each key under its own provider, with the selected one active", () => {

@@ -12,6 +12,7 @@ import {
   encryptSecret,
   isAvailable as safeStorageAvailable,
   resolveGalaxyApiKey,
+  resolveProviderApiKey,
 } from "./secure-config.js";
 import {
   resolveGalaxyStatus,
@@ -26,13 +27,18 @@ import { normalizeGalaxyUrl, validateGalaxyUrl } from "./galaxy-url.js";
 // directly or these are undefined at runtime.
 import { getProviders, getModels } from "@earendil-works/pi-ai/compat";
 import { isDeprecatedModelId } from "./model-catalog.js";
+import { flagUnusableContextWindows } from "./model-context-window.js";
+import { discoverProviderModels } from "./model-discovery.js";
 import { checkLatestVersion } from "./version-check.js";
 import { resolveReleasePageUrl } from "./release-page.js";
 import { postFeedback } from "./feedback.js";
 import type { FeedbackPayload } from "../../../shared/feedback-contract.js";
+import { buildReportSysinfo } from "./report-sysinfo.js";
 import {
   getOAuthStatus,
-  isOAuthProvider,
+  isOAuthOnlyProvider,
+  providerOffersSignIn,
+  whenOAuthProvidersReady,
   listOAuthProviders,
   signInOAuth,
   signOutOAuth,
@@ -70,12 +76,13 @@ function maskConfig(cfg: LoomConfig): MaskedLoomConfig {
           {
             model: v.model,
             baseUrl: v.baseUrl,
-            // OAuth providers authenticate via ~/.pi/agent/auth.json -- an
+            // OAuth-ONLY providers authenticate via ~/.pi/agent/auth.json -- an
             // orphan apiKey on the entry (manual edit, or the legacy-shape
             // migrator) is dead weight, not a real credential. Don't surface
             // it to the renderer or it'll mis-render "Key stored" UI for
-            // an account that actually authenticates by sign-in.
-            hasApiKey: isOAuthProvider(k) ? false : Boolean(v.apiKey || v.apiKeyEncrypted),
+            // an account that actually authenticates by sign-in. A dual-auth
+            // provider's key is real, though, so report it honestly (#429).
+            hasApiKey: isOAuthOnlyProvider(k) ? false : Boolean(v.apiKey || v.apiKeyEncrypted),
           },
         ]),
       ),
@@ -376,6 +383,28 @@ export function registerIpcHandlers(agent: AgentManager): void {
     },
   );
 
+  // Re-run OpenAI-compatible model discovery for a saved provider (#432).
+  // Preferences can't do this itself: config:get is masked, so the renderer
+  // only knows *that* a key is stored, never its value -- which is why the
+  // discovered list used to vanish on reopen until the user retyped the key.
+  //
+  // The renderer passes a provider *name* only; the URL contacted and the key
+  // sent both come from disk, and neither reaches the renderer. Note what that
+  // does and doesn't buy: a hostile renderer still can't read the key, but it
+  // can call config:save first to repoint a provider's baseUrl while the
+  // UNCHANGED_SECRET sentinel preserves the key, and then have this probe (or
+  // simply the next agent turn, which is the same hole today) carry the key to
+  // the new host. Binding a stored key to the endpoint it was saved for
+  // belongs in config:save, not here.
+  ipc.handle("models:discover", async (_e, provider: unknown) => {
+    const name = typeof provider === "string" ? provider : "";
+    return discoverProviderModels(name, {
+      config: loadConfig(),
+      resolveKey: resolveProviderApiKey,
+      probe: (baseUrl, key) => validateApiKey(name, key, baseUrl),
+    });
+  });
+
   // Top-level config keys the renderer is allowed to set. Anything else
   // submitted via config:save is dropped before saveConfig() runs — the
   // renderer is the smaller trust boundary, so a markdown XSS that
@@ -521,16 +550,21 @@ export function registerIpcHandlers(agent: AgentManager): void {
   });
 
   ipc.handle("oauth:status", (_e, provider: string) => {
-    if (!isOAuthProvider(provider)) {
+    if (!providerOffersSignIn(provider)) {
       return { signedIn: false };
     }
     return getOAuthStatus(provider);
   });
 
-  ipc.handle("oauth:providers", () => listOAuthProviders());
+  // Await the registry read: the renderer fetches this map exactly once, so a
+  // pre-prime answer would pin it to the seed for the rest of the session.
+  ipc.handle("oauth:providers", async () => {
+    await whenOAuthProvidersReady();
+    return listOAuthProviders();
+  });
 
   ipc.handle("oauth:sign-in", async (_e, provider: string) => {
-    if (!isOAuthProvider(provider)) {
+    if (!providerOffersSignIn(provider)) {
       return { ok: false as const, error: `Unknown OAuth provider: ${provider}` };
     }
     try {
@@ -545,7 +579,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
   });
 
   ipc.handle("oauth:sign-out", async (_e, provider: string) => {
-    if (!isOAuthProvider(provider)) {
+    if (!providerOffersSignIn(provider)) {
       return { ok: false as const, error: `Unknown OAuth provider: ${provider}` };
     }
     try {
@@ -665,15 +699,19 @@ export function registerIpcHandlers(agent: AgentManager): void {
   });
 
   // Issue reporter: returns sysinfo for the renderer to bundle into the
-  // report body. No secrets — just versions + platform + arch.
-  ipc.handle("report:sysinfo", () => ({
-    appVersion: app.getVersion(),
-    electronVersion: process.versions.electron,
-    nodeVersion: process.versions.node,
-    chromeVersion: process.versions.chrome,
-    platform: process.platform,
-    arch: process.arch,
-  }));
+  // report body. No secrets — just versions + platform + arch + a WSL flag.
+  ipc.handle("report:sysinfo", () =>
+    buildReportSysinfo({
+      appVersion: app.getVersion(),
+      electronVersion: process.versions.electron,
+      nodeVersion: process.versions.node,
+      chromeVersion: process.versions.chrome,
+      platform: process.platform,
+      arch: process.arch,
+      env: process.env,
+      release: os.release(),
+    }),
+  );
 
   // Version checker: surfaces a "new release available" banner in the
   // renderer. No auto-install (unsigned macOS builds can't be patched by
@@ -775,7 +813,13 @@ export function registerIpcHandlers(agent: AgentManager): void {
       "deepseek",
     ]);
     type Pricing = { input: number; output: number; cacheRead?: number; cacheWrite?: number };
-    type Entry = { id: string; label: string; pricing: Pricing; contextWindow?: number };
+    type Entry = {
+      id: string;
+      label: string;
+      pricing: Pricing;
+      contextWindow?: number;
+      tooSmall?: boolean;
+    };
     const out: Record<string, Entry[]> = {};
     try {
       for (const provider of getProviders()) {
@@ -784,7 +828,13 @@ export function registerIpcHandlers(agent: AgentManager): void {
         // still lists them but they 404 on use, so they shouldn't reach the picker (#221).
         const models = getModels(provider).filter((m) => !isDeprecatedModelId(provider, m.id));
         if (!models.length) continue;
-        out[provider] = models.map((m) => {
+        // Models too small to hold Orbit's baseline prompt don't 404 -- they
+        // accept the request and fail on the user's very first message (#418).
+        // They're flagged rather than dropped: the renderer keeps them out of
+        // the picker, but still learns their contextWindow, which is what lets
+        // the overflow message tell an already-stranded user that their window
+        // is the problem instead of advising /compact (#419).
+        out[provider] = flagUnusableContextWindows(provider, models).map((m) => {
           const cleanName = m.name.replace(/^Claude\s+/i, "");
           const priceTag = `$${m.cost.input}/$${m.cost.output}`;
           return {
@@ -799,6 +849,8 @@ export function registerIpcHandlers(agent: AgentManager): void {
             // Model's max context window (tokens). Powers the renderer's
             // context-fill indicator. May be undefined for some providers.
             contextWindow: typeof m.contextWindow === "number" ? m.contextWindow : undefined,
+            // Known to the renderer, but not offered in the picker (#418).
+            tooSmall: m.tooSmall,
           };
         });
       }

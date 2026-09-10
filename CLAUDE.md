@@ -49,3 +49,4 @@ cd app && npm start
 
 - Prefer validating root tests plus app typecheck after architectural changes.
 - When changing shell contracts or startup/session behavior, verify both the extension side and the Orbit side.
+- Renderer, status-surface, or shell-event changes need an actual look, not just green tests. `docs/browser-validation.md` covers driving the web shell (same renderer, scriptable) with `agent-browser` -- including how to force a failure path and how to point it at a real model.

@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALL_NUDGES_ARMED,
   GALAXY_RECONNECT_NUDGE,
+  GALAXY_TIMEOUT_NUDGE,
   isGalaxyTransportError,
   transportNudgeDecision,
 } from "../extensions/loom/galaxy-transport-error.js";
+
+const DROPPED = "Failed to call tool: Not connected";
+const TIMED_OUT = "Failed to call tool: Request timed out";
 
 describe("isGalaxyTransportError", () => {
   it("matches the bare SDK 'Not connected' on a galaxy_* tool", () => {
@@ -56,44 +61,70 @@ describe("isGalaxyTransportError", () => {
 });
 
 describe("transportNudgeDecision", () => {
-  it("fires the nudge once on the first transport error and disarms", () => {
-    const d = transportNudgeDecision(
-      true,
-      "galaxy_get_histories",
-      "Failed to call tool: Not connected",
-    );
-    expect(d.showNudge).toBe(true);
-    expect(d.armed).toBe(false);
+  it("fires the nudge once on the first transport error and disarms that kind", () => {
+    const d = transportNudgeDecision(ALL_NUDGES_ARMED, "galaxy_get_histories", DROPPED);
+    expect(d.nudge).toBe(GALAXY_RECONNECT_NUDGE);
+    expect(d.armed).toEqual({ timeout: true, dropped: false });
   });
 
   it("suppresses repeat nudges while disarmed (no spam during the retry loop)", () => {
     const d = transportNudgeDecision(
-      false,
+      { timeout: true, dropped: false },
       "galaxy_get_histories",
-      "Failed to call tool: Not connected",
+      DROPPED,
     );
-    expect(d.showNudge).toBe(false);
-    expect(d.armed).toBe(false);
+    expect(d.nudge).toBeNull();
+    expect(d.armed).toEqual({ timeout: true, dropped: false });
   });
 
-  it("re-arms after a healthy galaxy call so a later outage nudges again", () => {
-    const d = transportNudgeDecision(false, "galaxy_get_histories", '{"success": true}');
-    expect(d.showNudge).toBe(false);
-    expect(d.armed).toBe(true);
+  it("re-arms both kinds after a healthy galaxy call so a later outage nudges again", () => {
+    const d = transportNudgeDecision(
+      { timeout: false, dropped: false },
+      "galaxy_get_histories",
+      '{"success": true}',
+    );
+    expect(d.nudge).toBeNull();
+    expect(d.armed).toEqual({ timeout: true, dropped: true });
   });
 
   it("leaves state untouched for unrelated (non-galaxy) results", () => {
-    expect(transportNudgeDecision(true, "bash", "anything")).toEqual({
-      showNudge: false,
-      armed: true,
+    expect(transportNudgeDecision(ALL_NUDGES_ARMED, "bash", "anything")).toEqual({
+      nudge: null,
+      armed: ALL_NUDGES_ARMED,
     });
-    expect(transportNudgeDecision(false, "read", "anything")).toEqual({
-      showNudge: false,
-      armed: false,
+    const halfArmed = { timeout: false, dropped: true };
+    expect(transportNudgeDecision(halfArmed, "read", "anything")).toEqual({
+      nudge: null,
+      armed: halfArmed,
     });
+  });
+
+  // The reason arming is per kind: these two need opposite advice, so one must
+  // not be able to silence the other before the user has seen it.
+  it("still warns about a drop that follows a timeout", () => {
+    const first = transportNudgeDecision(ALL_NUDGES_ARMED, "galaxy_run_tool", TIMED_OUT);
+    expect(first.nudge).toBe(GALAXY_TIMEOUT_NUDGE);
+    const second = transportNudgeDecision(first.armed, "galaxy_run_tool", DROPPED);
+    expect(second.nudge).toBe(GALAXY_RECONNECT_NUDGE);
+    expect(second.armed).toEqual({ timeout: false, dropped: false });
+  });
+
+  it("still warns about a timeout that follows a drop", () => {
+    const first = transportNudgeDecision(ALL_NUDGES_ARMED, "galaxy_run_tool", DROPPED);
+    expect(first.nudge).toBe(GALAXY_RECONNECT_NUDGE);
+    const second = transportNudgeDecision(first.armed, "galaxy_run_tool", TIMED_OUT);
+    expect(second.nudge).toBe(GALAXY_TIMEOUT_NUDGE);
   });
 
   it("exposes an actionable nudge message pointing at /mcp reconnect galaxy", () => {
     expect(GALAXY_RECONNECT_NUDGE).toMatch(/\/mcp reconnect galaxy/);
+  });
+
+  // The timeout advice must stay followable: no mcp.json path (loom rewrites
+  // that file), and no claim that the server is healthy.
+  it("keeps the timeout advice actionable and honest", () => {
+    expect(GALAXY_TIMEOUT_NUDGE).not.toMatch(/mcp\.json/);
+    expect(GALAXY_TIMEOUT_NUDGE).not.toMatch(/is responding/);
+    expect(GALAXY_TIMEOUT_NUDGE).toMatch(/asking for less/);
   });
 });

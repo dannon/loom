@@ -1,31 +1,45 @@
 /**
- * Per-provider credential state for the screens that let you pick an LLM
- * provider (Preferences and the first-run welcome overlay).
+ * Per-provider credential and field state for the screens that let you pick an
+ * LLM provider (Preferences and the first-run welcome overlay).
  *
  * Both screens show one set of inputs for whichever provider the dropdown has
  * selected, so the fields have to be swapped out when the selection changes.
  * Preferences has always done this; the welcome screen did not, and left the
  * key you typed for provider A sitting in the field under provider B -- which
- * Save then persisted as B's credential (issue #401). These helpers are the
- * DOM-free half of that capture/restore, so the contract can be tested without
- * standing up the renderer.
+ * Save then persisted as B's credential (issue #401).
+ *
+ * Most of that state is just what is in the form, but two pieces are not:
+ * `savedBaseUrl` (the base URL as it sits on disk) and `discoveredModels`.
+ * Rebuilding this object from the form fields alone silently reintroduces #432
+ * (model discovery skips every probe).
  */
 
-/** A provider's in-memory field state while the screen is open. */
-export interface ProviderState {
-  /** A key for this provider is already on disk (masked -- never sent here). */
-  hadKey: boolean;
-  /** What the user typed into the API key input, verbatim. */
+/** The visible inputs, read off the form at snapshot time. */
+export interface ProviderFieldValues {
   typedKey: string;
   model: string;
   baseUrl: string;
 }
 
-/** The visible inputs, read off the form at capture time. */
-export interface ProviderFields {
+/** Alias for ProviderFieldValues for backwards compatibility. */
+export type ProviderFields = ProviderFieldValues;
+
+/** A provider's in-memory state while Preferences or Onboarding is open. */
+export interface ProviderState {
+  /** Config has a key for this provider (masked -- the key never reaches us). */
+  hadKey: boolean;
+  /** What the user typed into the API key input, verbatim. */
   typedKey: string;
   model: string;
+  /** Base URL as it sits in the editable field. */
   baseUrl: string;
+  /**
+   * Base URL as it sits in config -- what main would actually contact for a
+   * discovery probe. Not editable, so a form snapshot must not overwrite it.
+   */
+  savedBaseUrl: string;
+  /** Ids last reported by a custom endpoint's /models, if it was asked. */
+  discoveredModels?: string[];
 }
 
 /** A provider entry as `config:save` expects it (see main/ipc-handlers.ts). */
@@ -36,7 +50,31 @@ export interface ProviderConfigEntry {
 }
 
 export function emptyProviderState(): ProviderState {
-  return { hadKey: false, typedKey: "", model: "", baseUrl: "" };
+  return { hadKey: false, typedKey: "", model: "", baseUrl: "", savedBaseUrl: "" };
+}
+
+/**
+ * Stash the visible fields into `provider`'s slot when switching away.
+ *
+ * `hadKey`, `savedBaseUrl` and `discoveredModels` describe config and the
+ * endpoint's answer, not the form, so they are carried forward from `prev`
+ * rather than read off the inputs. Rebuilding this object from the form fields
+ * alone silently reintroduces #432: `planModelDiscovery` reads a blank
+ * `savedBaseUrl`, skips every probe, and the model picker stays empty with all
+ * tests still green. `tests/provider-state.test.ts` pins that.
+ */
+export function snapshotProviderState(
+  prev: ProviderState | undefined,
+  fields: ProviderFieldValues,
+): ProviderState {
+  return {
+    hadKey: prev?.hadKey ?? false,
+    typedKey: fields.typedKey,
+    model: fields.model,
+    baseUrl: fields.baseUrl.trim(),
+    savedBaseUrl: prev?.savedBaseUrl ?? "",
+    discoveredModels: prev?.discoveredModels,
+  };
 }
 
 /**
@@ -59,16 +97,11 @@ export function providerStateFor(
 export function captureProviderState(
   states: Readonly<Record<string, ProviderState>>,
   provider: string,
-  fields: ProviderFields,
+  fields: ProviderFieldValues,
 ): Record<string, ProviderState> {
   return {
     ...states,
-    [provider]: {
-      hadKey: states[provider]?.hadKey ?? false,
-      typedKey: fields.typedKey,
-      model: fields.model,
-      baseUrl: fields.baseUrl.trim(),
-    },
+    [provider]: snapshotProviderState(states[provider], fields),
   };
 }
 
@@ -136,7 +169,7 @@ export class ProviderFieldStore {
   }
 
   /** Stash the visible fields under the provider they were typed for. */
-  snapshot(fields: ProviderFields): void {
+  snapshot(fields: ProviderFieldValues): void {
     this.states = captureProviderState(this.states, this.active, fields);
   }
 
@@ -145,7 +178,7 @@ export class ProviderFieldStore {
    * form should show next -- blank for a provider that hasn't been visited,
    * which is what gets the previous provider's key out of the input.
    */
-  select(provider: string, visible: ProviderFields): ProviderState {
+  select(provider: string, visible: ProviderFieldValues): ProviderState {
     this.snapshot(visible);
     this.active = provider;
     return providerStateFor(this.states, provider);

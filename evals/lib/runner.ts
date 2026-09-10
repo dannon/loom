@@ -43,12 +43,13 @@ export async function runScenario(
     copyDir(fixtureCwd, tmpCwd);
   }
 
-  if (model) {
-    writePiModelsConfig(model, tmpAgentDir);
-  }
-
   const start = Date.now();
   try {
+    // Inside the try so a failed config write still hits the cleanup below
+    // rather than orphaning the temp dir.
+    if (model) {
+      writePiModelsConfig(model, tmpAgentDir);
+    }
     const result = await spawnLoom(scenario, model, tmpCwd, tmpAgentDir, tmpRoot);
     const events = parseJsonLines(result.stdout);
     const notebookContent = readNotebook(tmpCwd);

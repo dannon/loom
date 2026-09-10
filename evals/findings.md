@@ -263,3 +263,157 @@ No LLM-judge plan-_quality_ scoring (tool allow-sets stay coarse
 substring heuristics -- a model naming a tool in surrounding prose can pass
 `mentionsOneOf`), no end-to-end execution, no recorded/live Galaxy MCP. The
 assertion library leaves seams for each.
+
+## UDT authoring: container choice and typed inputs (2026-08-19)
+
+Two scenarios added alongside `udt-authoring-threads`:
+`udt-authoring-container` (does the drafted UDT name an image that actually
+ships the library it imports?) and `udt-authoring-select-params` (are a
+tool's options modeled as typed inputs, or baked into the command?). Both
+mirror axes of Galaxy's own `custom_tool` eval
+(galaxyproject/galaxy#22968, #22981).
+
+### The harness was scoring zeros for the wrong reason
+
+Before any of this could run, `writePiModelsConfig` had to be fixed. It wrote
+the _bare name_ of the API-key env var into pi's `models.json`. pi parses that
+field as a template: `$PROXY_API_KEY` or `${PROXY_API_KEY}` interpolates from
+the environment at request time, a leading `!` runs a shell command, and
+anything else -- including a bare env var name -- is the literal credential. So
+the proxy received `PROXY_API_KEY` as the bearer token and 401'd. Every tier-2
+run died in ~1.3s with no events, and the assertions reported plain "chat text
+did not include ...", which is indistinguishable from a model that simply
+answered badly. Any tier-2 matrix number produced between that pi drift and
+this fix is meaningless.
+
+The fix is the `$` prefix, which also keeps the key off disk -- worth caring
+about because the runner points the agent under test at a fake `HOME`, so a
+resolved key written into `models.json` would sit somewhere a scenario with
+`read` or `bash` could fetch it and echo it into chat text the reporter prints.
+Confirmed against a local stand-in proxy: a bare name sends
+`Authorization: Bearer PROXY_API_KEY`, the `$`-prefixed form sends the real key.
+
+Two lessons worth keeping. A credential failure and a capability failure looked
+identical in the report -- `evaluate` now emits a `run.noModelOutput` failure
+when a tier-2 run produces no assistant text at all, so the next drift of this
+shape names itself. And the same bare-name assumption is written into
+`shared/custom-provider.js`'s docblock for the Orbit custom-provider path; that
+one is masked in practice because `bin/loom.js` passes `--api-key` at runtime,
+which takes precedence, but the comment is wrong about pi and the file is one
+character from not needing the flag.
+
+### Results, n=3, before and after galaxy-skills#32
+
+Both scenarios were run twice: once against galaxy-skills `main` (the skill as
+published) and once against the `udt-agent-parity` branch (galaxy-skills#32,
+which rewrites the container section around verified resolution and spells out
+that a bare language image ships no third-party libraries).
+
+| model            | container (main) | container (#32) | select-params (main) | select-params (#32) |
+| ---------------- | ---------------- | --------------- | -------------------- | ------------------- |
+| Qwen3-32B        | 2/3              | **3/3**         | 1/3                  | 1/3                 |
+| MiniMax-M2.7     | 0/3              | **2/3**         | 0/3                  | **3/3**             |
+| Llama-4-Maverick | 0/3              | 0/3             | 0/3                  | 0/3                 |
+| gemma-4-31B      | 0/3              | 0/3             | 0/3                  | 0/3                 |
+| Llama-3.3-70B    | 0/3              | 0/3             | 0/3                  | 0/3                 |
+| Llama-3.1-8B     | 0/3              | 0/3             | 0/3                  | 0/3                 |
+| gpt-oss-120b     | 0/3              | 0/3             | 0/3                  | 0/3                 |
+
+**The skill change does measurable work, on exactly the failure it targets.**
+On `main`, MiniMax emitted `container: python:` for a pandas tool on 3 of 3
+runs -- the bare-image mistake that can't `import pandas`, and the one
+galaxyproject/galaxy#22981 was chasing. On the #32 branch that string does not
+appear in a single run, from any model. Qwen's one `container: python:` run
+also disappears. This is the clearest before/after the suite has produced
+so far.
+
+> **These numbers are frozen to the assertions that produced them.** Both
+> scenarios' content assertions were retuned right after this run, so the
+> columns are not comparable to anything scored later and shouldn't be carried
+> forward as a baseline. `udt-authoring-container` dropped the
+> `mustNotInclude: ["container: python:"]` ban entirely -- an absence check over
+> chat text is anti-correlated with the understanding being measured, since a
+> model that learned the lesson is likely to write the mistake in order to warn
+> against it -- and widened the positive check to a regex covering YAML quoting,
+> `docker://` prefixes and the `depot.galaxyproject.org` mirror. That cuts both
+> ways for the table above: some `container` cells may have been red for
+> punctuation, and the "does not appear in a single run" observation is a fact
+> about the transcripts, not evidence of understanding, because a model that
+> stopped explaining itself produces the same absence.
+> `udt-authoring-select-params` line-anchored its needles, so the old columns
+> could credit a run that named `type: select` and "the options: dna, rna,
+> protein" in prose without declaring a single typed input -- MiniMax's 3/3 in
+> particular is worth re-running before it's believed. The direction of the
+> before/after (the skill content changes container choice for the two models
+> that can author at all) is what survives; the per-cell counts don't.
+
+### Re-run on the retuned assertions
+
+The `(main)` columns were re-run after the retune landed, same seven models,
+n=3, against galaxy-skills `main` -- #32 is still open, and `skills_fetch`
+follows the repo's configured branch, so a local run can only reproduce the
+`(main)` half of the table.
+
+| model            | container (main) | re-run  | select-params (main) | re-run  |
+| ---------------- | ---------------- | ------- | -------------------- | ------- |
+| Qwen3-32B        | 2/3              | **3/3** | 1/3                  | **0/3** |
+| MiniMax-M2.7     | 0/3              | **1/3** | 0/3                  | 0/3     |
+| Llama-4-Maverick | 0/3              | 0/3     | 0/3                  | 0/3     |
+| gemma-4-31B      | 0/3              | 0/3     | 0/3                  | 0/3     |
+| Llama-3.3-70B    | 0/3              | 0/3     | 0/3                  | 0/3     |
+| Llama-3.1-8B     | 0/3              | 0/3     | 0/3                  | 0/3     |
+| gpt-oss-120b     | 0/3              | 0/3     | 0/3                  | 0/3     |
+
+Both effects the caveat predicted show up, in opposite directions, which is the
+useful part. On `container` the widened regex recovers runs that were red for
+punctuation rather than for the image family (Qwen 2/3 -> 3/3, MiniMax
+0/3 -> 1/3). On `select-params` the line-anchored needles withdraw a credit the
+substrings were giving away: Qwen's old 1/3 came from prose, and under the new
+assertions it is 0/3. Reading the transcripts, Qwen drafts a real tool and
+matches `type: select` and a populated `options:` block every time -- it fails
+only `type: integer`, because it models the minimum length as `type: text` with
+`value: "20"` on all three runs. That is the narrow, real gap the per-model note
+below describes, now isolated to one assertion instead of inferred.
+
+Two things this run does **not** settle. The `#32` columns are still scored
+under the old assertions, so they remain un-re-run -- including MiniMax's
+select-params 3/3, which is the cell most worth confirming. And the reason
+given above for dropping the `container: python:` ban is still an argument
+rather than a measurement: the anti-correlation it describes is a property of a
+model that has _learned_ the lesson, which is the `#32` condition, so a `main`
+run cannot exercise it. Across the twelve `main` transcripts with any output,
+the old ban would not have fired falsely on a single passing run. The positive
+regex is the better check on its own merits; the anti-correlation claim should
+be treated as untested until someone re-runs `#32`.
+
+The re-run also gave `run.noModelOutput` its first real workout: it fired on 25
+of the 42 runs. Only two of the seven models put any usable text on the wire at
+all, which means most of this matrix is measuring plumbing rather than UDT
+authoring, and the leaderboard should be read that way.
+
+Per-model notes on the rest:
+
+- **Llama-4-Maverick and gpt-oss-120b never call `skills_fetch`.** They fail
+  the progressive-disclosure assertion before content is even in play, so
+  their 0/3 says nothing about UDT authoring. Maverick's failure is a
+  tool-calling format breakdown rather than a refusal: every run emits the
+  literal string `<|python_start|>skills_fetch(` repeated until it stops, 116
+  characters of special tokens leaking through as chat text.
+- **gpt-oss-120b is additionally broken on this proxy**, now for a second
+  reason: LiteLLM rejects `reasoning_effort` for it (400) on top of the
+  `reasoning_content` problem recorded above. It dies in ~1.7s.
+- **Llama-3.3-70B hits the 120s timeout on all six runs** without emitting
+  YAML -- consistent with what `udt-authoring-threads` saw. Note this is also
+  the case that used to defeat `stripThinkingTags`: SIGTERM lands mid-thought,
+  there's no closing `</think>`, and the non-greedy pair regex stripped nothing,
+  so the raw chain-of-thought was graded as the answer. Fixed since this run.
+- **Llama-3.1-8B and gemma-4-31B** fetch the skill but never produce a
+  `class: GalaxyUserTool` block.
+- **Qwen3-32B on select-params** is the interesting near-miss: it drafts the
+  tool and gets `type: select` with real options, but models the minimum
+  length as something other than `type: integer` on 2 of 3 runs. A narrow,
+  real gap rather than a wholesale failure.
+
+So the honest read is that UDT authoring is a two-model capability on this
+matrix today (Qwen3-32B and MiniMax-M2.7), and for those two the skill content
+is what decides whether the container is right.

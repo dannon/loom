@@ -20,6 +20,15 @@ export interface Assertions {
   chatText?: {
     mustInclude?: string[];
     mustNotInclude?: string[];
+    /**
+     * Same idea as mustInclude/mustNotInclude, but each entry is a JS regex
+     * source string (no delimiters, no flags) tested against the chat text.
+     * Reach for these when the thing being graded is a property with several
+     * legitimate spellings -- a YAML value that may or may not be quoted, a
+     * key whose separator spacing varies -- rather than one fixed string.
+     */
+    mustMatch?: string[];
+    mustNotMatch?: string[];
   };
   /**
    * Structural plan checks parsed from the agent's chat text. Use this for

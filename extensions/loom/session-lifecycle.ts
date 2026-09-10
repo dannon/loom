@@ -15,6 +15,7 @@ import {
   type SessionSummaryYaml,
 } from "./notebook-writer.js";
 import { activeGalaxyStatus, type ActiveGalaxyStatus } from "./profiles.js";
+import { isUvxAvailable, uvxMissingNotice } from "../../shared/uvx-runner.js";
 import { maybeNudgeGalaxyReconnect } from "./galaxy-cred-drift.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -181,8 +182,8 @@ function syncSessionJsonlSymlink(ctx: ExtensionContext): void {
   }
 }
 
-type GreetingAction =
-  { kind: "model"; message: string } | { kind: "notify"; text: string; level: "info" | "warning" };
+type NotifyAction = { kind: "notify"; text: string; level: "info" | "warning" };
+type GreetingAction = { kind: "model"; message: string } | NotifyAction;
 
 /**
  * Decide the startup greeting from the active Galaxy credential status. Pure so
@@ -227,7 +228,41 @@ export function planStartupGreeting(status: ActiveGalaxyStatus, isOrbit: boolean
   };
 }
 
-export function sendStartupGreeting(pi: ExtensionAPI, ctx: ExtensionContext): void {
+/**
+ * Warn at startup when Galaxy is configured but the runner that launches
+ * galaxy-mcp is missing, so the gap is visible before the user asks for Galaxy
+ * work rather than as a failed tool call mid-analysis.
+ *
+ * The CLI already prints this (bin/loom.js), but it writes to stderr -- which
+ * in a GUI shell lands in a log file nobody reads. Returning a notify action
+ * puts the same text where Orbit renders it. Pure so it can be unit-tested.
+ */
+export function planUvxWarning(
+  status: ActiveGalaxyStatus,
+  uvxAvailable: boolean,
+): NotifyAction | null {
+  // "none" has no Galaxy to reach, so a missing runner is not yet a problem;
+  // "configured-unusable" already gets its own, more specific warning.
+  if (status !== "usable" || uvxAvailable) return null;
+  return { kind: "notify", level: "warning", text: uvxMissingNotice() };
+}
+
+export function sendStartupGreeting(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  uvxAvailable: boolean = isUvxAvailable(),
+): void {
+  // Surface the missing-runner warning before the greeting: the greeting tells
+  // the model to call galaxy_connect(), which is exactly what will fail.
+  const uvxWarning = planUvxWarning(activeGalaxyStatus(), uvxAvailable);
+  if (uvxWarning) {
+    try {
+      ctx.ui.notify(uvxWarning.text, uvxWarning.level);
+    } catch {
+      /* headless/stale ctx -- the CLI still prints this to stderr */
+    }
+  }
+
   const isOrbit = process.env.LOOM_SHELL_KIND === "orbit";
   const action = planStartupGreeting(activeGalaxyStatus(), isOrbit);
   if (action.kind === "model") {
