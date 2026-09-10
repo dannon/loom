@@ -408,3 +408,27 @@ describe("evals assertions: activity log", () => {
     expect(cell.dimensions.other?.verdict).toBe(false);
   });
 });
+
+describe("behavior.asksClarifyingQuestion", () => {
+  const ask = (chat: string) =>
+    evaluate({
+      scenario: { name: "t", assertions: { behavior: { asksClarifyingQuestion: true } } },
+      events: [
+        { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: chat } },
+      ],
+      exitCode: 0,
+      durationMs: 0,
+    } as never).map((f) => f.assertion);
+
+  it("accepts a question mark", () => {
+    expect(ask("What kind of data do you have?")).toEqual([]);
+  });
+
+  it("accepts a request that introduces a list", () => {
+    expect(ask("I need a few details first. Could you let me know:\n1. the data type")).toEqual([]);
+  });
+
+  it("still fails an answer that asks for nothing", () => {
+    expect(ask("Here is a summary of your data.")).toContain("behavior.asksClarifyingQuestion");
+  });
+});
