@@ -11,6 +11,7 @@
 
 const DONE = "- [x]";
 const PENDING = "- [ ]";
+const FAILED = "- [!]";
 
 export interface JobOutcome {
     id: string;
@@ -48,8 +49,15 @@ export function applyJobOutcome(content: string, outcome: JobOutcome): string {
     while (step >= 0 && !lines[step].trimStart().startsWith(PENDING) && !lines[step].trimStart().startsWith(DONE)) {
         step -= 1;
     }
-    if (step >= 0 && lines[step].trimStart().startsWith(PENDING) && !outcome.failed) {
-        lines[step] = lines[step].replace(PENDING, DONE);
+    if (step >= 0) {
+        const marker = lines[step].trimStart();
+        if (marker.startsWith(PENDING) && !outcome.failed) {
+            lines[step] = lines[step].replace(PENDING, DONE);
+        } else if (marker.startsWith(DONE) && outcome.failed) {
+            // Verified-complete for a job Galaxy says failed is a false claim. A step still
+            // pending is left alone: it was never claimed, and a retry is legitimate.
+            lines[step] = lines[step].replace(DONE, FAILED);
+        }
     }
 
     const indent = (lines[at].match(/^\s*/) || [""])[0];

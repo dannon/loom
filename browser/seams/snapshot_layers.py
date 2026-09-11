@@ -50,6 +50,8 @@ def main():
             "source": pathlib.Path(mcp_path).parts[-2],
             "allowed_divergence": ALLOWED_TOOL_DIVERGENCE,
             "upstream": layers.mcp_tool_table(mcp_path),
+            # What upstream builds, so a passthrough with matching text is still caught.
+            "shaped_returns": layers.mcp_shaped_returns(mcp_path),
         }
     registry["layers"] = layer_data
     (ROOT / "seams/registry.json").write_text(json.dumps(registry, indent=2) + "\n")

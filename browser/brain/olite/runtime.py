@@ -66,11 +66,22 @@ RECORD_MARKER = "<!-- olite:record -->"
 
 
 def _inject_record(transcripts, text):
-    """Refresh the record excerpt as its own message, dropping the previous copy."""
+    """Refresh the record excerpt as its own message, dropping the previous copy.
+
+    Placed before the last user turn, not after it: the record is agent-writable and
+    carries dataset names, and the final slot is where a model is most prone to read
+    content as the operative instruction. loom: context.ts `insert`.
+    """
     kept = [m for m in transcripts if RECORD_MARKER not in (m.get("content") or "")]
     if not text:
         return kept
-    return [*kept, {"role": "system", "content": f"{RECORD_MARKER}\n{text}"}]
+    message = {"role": "system", "content": f"{RECORD_MARKER}\n{text}"}
+    last_user = next(
+        (i for i in range(len(kept) - 1, -1, -1) if kept[i].get("role") == "user"), None
+    )
+    if last_user is None:
+        return [*kept, message]
+    return [*kept[:last_user], message, *kept[last_user:]]
 
 
 def _inject_context(transcripts, text):

@@ -39,7 +39,7 @@ def _terminal_graph(output):
 
 
 def _run(surface):
-    return json.loads(asyncio.run(surface.dispatch("run_process", {"name": "p", "inputs": {}})).text)
+    return json.loads(asyncio.run(surface.dispatch("p", {})).text)
 
 
 def test_artifact_is_routed_out_of_band_and_reduced_to_a_reference():
@@ -78,14 +78,93 @@ def test_a_process_without_an_artifact_returns_its_output_unchanged():
     assert surface.artifacts == []
 
 
+class _GraphCatalog:
+    """Answers the one graph op lineage_report calls, and records the request."""
+
+    def __init__(self, graph):
+        self.graph = graph
+        self.calls = []
+
+    async def call(self, target, input=None):
+        self.calls.append((target, input or {}))
+        return {"ok": True, "result": self.graph}
+
+
+class _GraphManifest:
+    def allows(self, *_):
+        return True
+
+    def __contains__(self, _):
+        return True
+
+
+class _GraphSubstrate:
+    def __init__(self, graph):
+        self.catalog = _GraphCatalog(graph)
+        self.manifest = _GraphManifest()
+
+    def scoped(self, capabilities):
+        return self
+
+
+GRAPH = {
+    "nodes": [
+        {"src": "hda", "id": "d1", "name": "reads.fastq"},
+        {"src": "job", "id": "j1", "tool_id": "bwa_mem", "tool_name": "BWA-MEM"},
+        {"src": "hda", "id": "d2", "name": "aligned.bam"},
+    ],
+    "edges": [
+        {"source": {"src": "hda", "id": "d1"}, "target": {"src": "job", "id": "j1"},
+         "type": "dataset_input"},
+        {"source": {"src": "job", "id": "j1"}, "target": {"src": "hda", "id": "d2"},
+         "type": "dataset_output"},
+    ],
+    "truncated": {"item_count_capped": False},
+}
+
+
 def test_lineage_report_declares_its_diagram_as_a_mermaid_artifact():
     """Guards the wiring the shell's mermaid renderer depends on."""
     proc = ProcessRegistry().load_packaged().get("lineage_report")
-    output = proc.graph["nodes"]["done"]["output"]
+    substrate = _GraphSubstrate(GRAPH)
+    output = asyncio.run(proc.run(substrate, {"history_id": "h1", "dataset_id": "d2"}))["last"]["result"]
 
     assert output["artifact"]["kind"] == "mermaid"
-    assert output["artifact"]["diagram"] == {"$ref": "state.mermaid"}
-    # The narrative still goes to the model.
-    assert output["summary"] == {"$ref": "state.summary"}
-    # The diagram travels as an artifact, not as a top-level output field.
+    assert output["artifact"]["title"] == "Dataset lineage"
+    assert output["artifact"]["diagram"].startswith("flowchart TD")
+    # The graph the model reasons over travels alongside the diagram.
+    assert [n["id"] for n in output["nodes"]] == ["d1", "j1", "d2"]
+    assert len(output["edges"]) == 2
+    # Galaxy states truncation; the process does not infer it.
+    assert output["truncated"] == {"item_count_capped": False}
+    # The diagram is not also a top-level output field.
     assert "mermaid" not in output
+
+
+def test_lineage_report_asks_galaxy_to_walk_backward_from_the_seed():
+    """The traversal is the endpoint's job now, not the client's."""
+    proc = ProcessRegistry().load_packaged().get("lineage_report")
+    substrate = _GraphSubstrate(GRAPH)
+    asyncio.run(proc.run(substrate, {"history_id": "h1", "dataset_id": "d2", "depth": 2}))
+
+    target, sent = substrate.catalog.calls[0]
+    assert target == "galaxy.histories.show.graph.get"
+    assert sent["seed_src"] == "hda"
+    assert sent["seed_id"] == "d2"
+    assert sent["direction"] == "backward"
+    assert sent["depth"] == 2
+    # One call: no per-node walk.
+    assert len(substrate.catalog.calls) == 1
+
+
+def test_the_lineage_diagram_reaches_the_shell_and_not_the_model():
+    """End to end: the flowchart source must never enter the context."""
+    from olite.drivers.loop.tools import ToolSurface
+
+    substrate = _GraphSubstrate(GRAPH)
+    surface = ToolSurface(substrate, ProcessRegistry().load_packaged())
+    text = asyncio.run(surface.dispatch("lineage_report", {"history_id": "h1", "dataset_id": "d2"}))
+
+    assert surface.artifacts and surface.artifacts[0]["kind"] == "mermaid"
+    assert "flowchart TD" in surface.artifacts[0]["diagram"]
+    assert "flowchart TD" not in str(text)

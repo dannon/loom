@@ -14,8 +14,10 @@ start: fetch
 inputs:
   dataset_id:
     type: string
+    required: true
   request:
     type: string
+    required: true
 
 state:
   raw:
@@ -24,6 +26,10 @@ state:
     type: array
   profile:
     type: object
+  source:
+    type: object
+  transformed:
+    type: boolean
   intent:
     type: object
   extract_choice:
@@ -62,6 +68,8 @@ nodes:
         $ref: result.values
       state.profile:
         $ref: result.profile
+      state.source:
+        $ref: result.source
     next: parse_intent
 
   # 2. Understand the request: analytical goal + which fields are for the chart vs filtering.
@@ -113,6 +121,8 @@ nodes:
         $ref: result.values
       state.profile:
         $ref: result.profile
+      state.transformed:
+        $ref: result.transformed
     next: choose_shell
 
   # 4. Choose the chart shell from the ones applicable to the profile.
@@ -168,11 +178,15 @@ nodes:
         $ref: state.values
       params:
         $ref: state.params
+      transformed:
+        $ref: state.transformed
     emit:
       state.values:
         $ref: result.values
       state.profile:
         $ref: result.profile
+      state.transformed:
+        $ref: result.transformed
     next: compile
 
   # 7. Validate the params against the profile, then compile the Vega-Lite spec.
@@ -188,6 +202,12 @@ nodes:
         $ref: state.params
       profile:
         $ref: state.profile
+      dataset_id:
+        $ref: inputs.dataset_id
+      source:
+        $ref: state.source
+      transformed:
+        $ref: state.transformed
     emit:
       state.spec:
         $ref: result.spec
@@ -199,6 +219,12 @@ nodes:
   done:
     type: terminal
     output:
+      chart:
+        $ref: state.title
+      shell:
+        $ref: state.shell_id
+      encoding:
+        $ref: state.params
       artifact:
         kind: vega-lite
         title:

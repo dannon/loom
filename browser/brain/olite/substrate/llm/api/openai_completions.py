@@ -16,6 +16,8 @@ class Reply:
     """What the loop needs from a completion, named rather than dug out of JSON."""
 
     content: str = ""
+    # gpt-oss puts its chain of thought here and leaves content empty on a tool call.
+    reasoning: str = ""
     tool_calls: list = field(default_factory=list)
     finish_reason: str | None = None
     usage: dict = field(default_factory=dict)
@@ -64,6 +66,7 @@ class OpenAICompletions:
         message = choice.get("message") or {}
         reply = Reply(
             content=message.get("content") or "",
+            reasoning=message.get("reasoning_content") or message.get("reasoning") or "",
             tool_calls=message.get("tool_calls") or [],
             finish_reason=choice.get("finish_reason"),
             usage=payload.get("usage") or {},

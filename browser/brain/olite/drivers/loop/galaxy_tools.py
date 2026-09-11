@@ -1,6 +1,8 @@
 """Orbit-compatible named Galaxy tools, cloned from galaxy-mcp."""
 
 import json
+
+from .tool_inputs import build_input_template, summarize_tool_inputs
 import os
 import sys
 import tempfile
@@ -77,8 +79,19 @@ async def _list_history_ids(g, a):
     return [{"id": h.get("id"), "name": h.get("name")} for h in histories]
 
 
+CONTENTS_NOTE = ("This is just a count. To get actual datasets, use "
+                 "get_history_contents(history_id, limit=25, order='create_time-dsc') "
+                 "for newest datasets first.")
+
+
 async def _get_history_details(g, a):
-    return await g.get(f"api/histories/{a['history_id']}")
+    # galaxy-mcp pairs the metadata with a count and steers to get_history_contents,
+    # so a model does not read a metadata-only reply as an empty history.
+    history = await g.get(f"api/histories/{a['history_id']}")
+    contents = await g.get(f"api/histories/{a['history_id']}/contents{_q({'v': 'dev', 'keys': 'id'})}")
+    total = len(contents) if isinstance(contents, list) else 0
+    return {"history": history,
+            "contents_summary": {"total_items": total, "note": CONTENTS_NOTE}}
 
 
 async def _get_history_contents(g, a):
@@ -207,12 +220,22 @@ async def _get_tool_panel(g, a):
 
 
 async def _get_tool_citations(g, a):
-    return await g.get(f"api/tools/{a['tool_id']}/citations")
+    info = await g.get(f"api/tools/{a['tool_id']}") or {}
+    citations = info.get("citations") or []
+    return {"tool_name": info.get("name", a["tool_id"]),
+            "tool_version": info.get("version", "unknown"),
+            "citations": citations}
 
 
 async def _get_tool_input_template(g, a):
-    # The parameter request schema is the modern, machine-usable input template.
-    return await g.get(f"api/tools/{a['tool_id']}/parameter_request_schema")
+    # galaxy-mcp builds the skeleton the description promises; the raw request schema
+    # hides a repeat behind three $refs and the model submits an empty one.
+    info = await g.get(f"api/tools/{a['tool_id']}{_q({'io_details': True})}") or {}
+    return {
+        "tool_id": a["tool_id"],
+        "inputs_template": build_input_template(info),
+        "parameters": summarize_tool_inputs(info),
+    }
 
 
 async def _get_tool_run_examples(g, a):
@@ -222,8 +245,19 @@ async def _get_tool_run_examples(g, a):
     return await g.get(path)
 
 
+COLLECTION_ELEMENT_CAP = 100
+
+
 async def _get_collection_details(g, a):
-    return await g.get(f"api/dataset_collections/{a['collection_id']}?instance_type=history")
+    got = await g.get(f"api/dataset_collections/{a['collection_id']}?instance_type=history")
+    if not isinstance(got, dict):
+        return got
+    limit = int(a.get("max_elements") or COLLECTION_ELEMENT_CAP)
+    elements = got.get("elements")
+    if isinstance(elements, list) and len(elements) > limit:
+        return {**got, "elements": elements[:limit], "elements_truncated": True,
+                "elements_shown": limit, "element_count": got.get("element_count", len(elements))}
+    return got
 
 
 async def _chunk(g, dataset_id, size):
@@ -358,7 +392,8 @@ async def _invoke_workflow(g, a):
 
 
 async def _cancel_workflow_invocation(g, a):
-    return await g.delete(f"api/invocations/{a['invocation_id']}")
+    result = await g.delete(f"api/invocations/{a['invocation_id']}")
+    return {"cancelled": True, "invocation": result}
 
 
 async def _get_invocations(g, a):
@@ -383,7 +418,8 @@ async def _create_user_tool(g, a):
 
 
 async def _delete_user_tool(g, a):
-    return await g.delete(f"api/dynamic_tools/{a['uuid']}")
+    await g.delete(f"api/dynamic_tools/{a['uuid']}")
+    return {"uuid": a["uuid"], "deactivated": True}
 
 
 async def _run_user_tool(g, a):

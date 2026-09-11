@@ -50,6 +50,15 @@ describe("applyJobOutcome", () => {
         expect(out).toContain("Status: failed (error)");
     });
 
+    it("unticks a step claimed verified for a job that failed", () => {
+        const claimed = RECORD.replace("- [ ] 1. **Filter rows**", "- [x] 1. **Filter rows**");
+        const out = applyJobOutcome(claimed, {
+            id: "d071e794759ab192", kind: "job", state: "error", failed: true,
+        });
+        expect(out).toContain("- [!] 1. **Filter rows**");
+        expect(out).not.toContain("- [x] 1. **Filter rows**");
+    });
+
     it("does nothing to an empty record", () => {
         expect(applyJobOutcome("", ok("d071e794759ab192"))).toBe("");
     });

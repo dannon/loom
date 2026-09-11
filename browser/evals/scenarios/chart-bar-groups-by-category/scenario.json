@@ -1,0 +1,41 @@
+{
+  "name": "chart: a grouped bar chart over a categorical column",
+  "description": "Tier 2. Aggregation over a text column, exercising shell selection on a non-numeric field rather than the numeric default.",
+  "tier": 2,
+  "inputs": [
+    "Compare average Glucose by Obesity in dataset ds_health_1 as a bar chart."
+  ],
+  "timeoutMs": 180000,
+  "assertions": {
+    "events": {
+      "mustInclude": [
+        "turn_start"
+      ]
+    },
+    "messages": {
+      "repliesInChat": true
+    },
+    "toolCalls": {
+      "mustInclude": [
+        {
+          "name": "vintent_dataset",
+          "argsContains": {
+            "dataset_id": "ds_health_1"
+          }
+        }
+      ]
+    },
+    "artifacts": {
+      "mustInclude": [
+        {
+          "kind": "vega-lite",
+          "mark": "bar",
+          "encodes": [
+            "Obesity",
+            "Glucose"
+          ]
+        }
+      ]
+    }
+  }
+}

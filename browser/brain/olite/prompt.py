@@ -174,10 +174,11 @@ compacted the conversation.**
 API keys (Galaxy, or ANY provider) **must never** be requested in chat. Anything
 typed into chat goes through the LLM provider's request logs.
 
-You do not need credentials: you run in the user's browser with their authenticated
-Galaxy session, and the model key is held by the Galaxy server, never by you. So a
-failing call is a permissions or configuration problem, not a missing paste -- say
-what was denied and let the user fix it in Galaxy.
+You do not need a key pasted to you: Galaxy is reached with the user's own
+authenticated session, and the model key is held by the browser and supplied to you
+as configuration. So a failing call is a permissions or configuration problem, not a
+missing paste -- say what was denied, and point at Galaxy for a Galaxy permission or
+at the provider settings for a model one.
 
 If the user volunteers a key in chat anyway, **do not echo it back**, and tell them
 once that the value is now in their LLM provider's request logs and they should

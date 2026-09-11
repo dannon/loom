@@ -65,6 +65,21 @@ def rows_from_tabular(text: str) -> List[Dict[str, Any]]:
     return rows_from_csv(clean_text)
 
 
+def source_format(text: str) -> Dict[str, Any]:
+    """Vega `format` for reading this file directly; tabular needs the col:N names."""
+    clean_text = skip_comment_lines(text)
+    delimiter = detect_delimiter(clean_text)
+    if delimiter != '\t':
+        return {"type": "csv"}
+    first_line = clean_text.split('\n')[0] if clean_text else ''
+    width = len(first_line.split('\t')) if first_line else 0
+    return {
+        "type": "dsv",
+        "delimiter": "\t",
+        "header": [f"col:{j + 1}" for j in range(width)],
+    }
+
+
 def rows_from_tab(tab_text: str) -> List[Dict[str, Any]]:
     """Parse tab-delimited text into list of dicts with auto-generated column names.
 

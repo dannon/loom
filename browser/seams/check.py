@@ -112,6 +112,19 @@ def check_layers(data):
             if mine[name] != theirs[name] and name not in allowed:
                 out.append(("DRIFT", f"layer.tool-surface/{name}",
                             "description or parameters differ from galaxy-mcp"))
+
+        # The tables above fingerprint description and parameters, so a tool can match on
+        # both and still return something else. get_tool_input_template shipped galaxy-mcp's
+        # "ready-to-fill skeleton" wording over a raw schema passthrough for months.
+        shaped = surface.get("shaped_returns") or {}
+        if shaped:
+            passthrough = layers.olite_passthrough_handlers()
+            for name in sorted(set(shaped) & passthrough):
+                if name in allowed:
+                    continue
+                keys = ", ".join(shaped[name])
+                out.append(("SHAPE", f"layer.tool-return/{name}",
+                            f"galaxy-mcp returns {{{keys}}}; olite passes the response through"))
     return out
 
 
@@ -153,6 +166,18 @@ def main():
     problems += check_layers(json.loads((ROOT / "seams/registry.json").read_text()).get("layers") or {})
 
     anchored = {r["olite"]["symbol"] for r in registry if r.get("olite")}
+    for row in registry:
+        premise = row.get("premise") or {}
+        for rel in premise.get("present") or []:
+            if not (ROOT / rel).exists():
+                problems.append(("PREMISE", row["id"],
+                                 f"{rel} is gone; this row's reasoning assumed it: {premise['claim']}"))
+        for rel in premise.get("absent") or []:
+            if (ROOT / rel).exists():
+                problems.append(("PREMISE", row["id"],
+                                 f"{rel} now exists; this row's reasoning assumed it would not: "
+                                 f"{premise['claim']}"))
+
     for name in sorted(olite_prompt_symbols() - anchored):
         problems.append(("ORPHAN", f"prompt.{name}",
                          "emitted but not in the registry -- name its loom anchor, or label it ADDED"))

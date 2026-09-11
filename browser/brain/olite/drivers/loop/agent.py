@@ -8,6 +8,7 @@ from olite.substrate import Cancellation
 
 from .brief import brief
 
+from .secret_redaction import collect_secret_values, redact_secrets
 from .tools import ToolSurface
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,8 @@ class LoopDriver:
         self.compaction = compaction.Settings(
             getattr(substrate, "config", None), getattr(substrate.llm, "target", None)
         )
+        # A tool result carries whatever a command printed, including a key it read.
+        self.secrets = collect_secret_values(getattr(substrate, "config", None))
 
     async def run(self, transcripts, on_event=None, cancellation=None):
         messages = [dict(m) for m in transcripts]
@@ -113,6 +116,10 @@ class LoopDriver:
                 "content": reply.content,
                 "tool_calls": tool_calls,
             }
+            # Without it the transcript is a run of contentless tool calls: the model
+            # cannot see what it already concluded and re-issues the same call.
+            if reply.reasoning:
+                assistant["reasoning_content"] = reply.reasoning
             messages.append(assistant)
             produced.append(assistant)
             # Kept beside the message, which goes back to the provider verbatim.
@@ -159,7 +166,7 @@ class LoopDriver:
                     "role": "tool",
                     "tool_call_id": call_id,
                     "name": name,
-                    "content": content,
+                    "content": redact_secrets(content, self.secrets),
                 }
                 messages.append(tool_message)
                 produced.append(tool_message)

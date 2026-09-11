@@ -48,6 +48,52 @@ def mcp_tool_table(server_py):
     return out
 
 
+def mcp_shaped_returns(server_py):
+    """Tools where galaxy-mcp constructs a result rather than passing the response through.
+
+    The tool tables fingerprint description and parameters, so a tool can keep both and
+    still return something else entirely. That is how get_tool_input_template shipped
+    galaxy-mcp's "ready-to-fill skeleton" text over a raw schema passthrough.
+    """
+    tree = ast.parse(pathlib.Path(server_py).read_text())
+    out = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not any("tool" in ast.unparse(d) for d in node.decorator_list):
+            continue
+        for call in ast.walk(node):
+            if not isinstance(call, ast.Call):
+                continue
+            for kw in call.keywords:
+                if kw.arg == "data" and isinstance(kw.value, ast.Dict):
+                    keys = sorted(k.value for k in kw.value.keys
+                                  if isinstance(k, ast.Constant) and isinstance(k.value, str))
+                    if keys:
+                        out[node.name] = keys
+    return out
+
+
+def olite_passthrough_handlers():
+    """Handlers whose whole body is one `return await g.<verb>(...)`."""
+    src = (ROOT / "brain/olite/drivers/loop/galaxy_tools.py").read_text()
+    tree = ast.parse(src)
+    out = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.AsyncFunctionDef) or not node.name.startswith("_"):
+            continue
+        body = [n for n in node.body if not isinstance(n, ast.Expr)
+                or not isinstance(getattr(n, "value", None), ast.Constant)]
+        if len(body) != 1 or not isinstance(body[0], ast.Return):
+            continue
+        value = body[0].value
+        if isinstance(value, ast.Await) and isinstance(value.value, ast.Call):
+            func = value.value.func
+            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id == "g":
+                out.add(node.name.lstrip("_"))
+    return out
+
+
 def olite_tool_table():
     sys.path.insert(0, str(ROOT / "brain"))
     from olite.drivers.loop import galaxy_tools as gt

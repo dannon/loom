@@ -129,7 +129,8 @@ DECISIONS = {
 }
 
 
-def test_scatter_matches_vintent_expected_output_exactly():
+def test_scatter_encoding_matches_vintent_but_references_the_dataset():
+    """The chart is vintent's; the data is a reference, not a copy."""
     expected = _scatter_fixture()
     csv_text = _csv_from_rows(expected["data"]["values"])
     out = _run_graph(csv_text, DECISIONS["scatter"])
@@ -137,7 +138,36 @@ def test_scatter_matches_vintent_expected_output_exactly():
     assert spec["mark"] == expected["mark"]
     assert spec["encoding"] == expected["encoding"]
     assert spec["$schema"] == expected["$schema"]
-    assert spec["data"]["values"] == expected["data"]["values"]
+    # Nothing rewrote the rows, so the dataset speaks for itself.
+    assert spec["data"] == {"url": "/api/datasets/d1/display", "format": {"type": "csv"}}
+    assert "values" not in spec["data"]
+
+
+def test_a_transformed_chart_still_embeds_its_rows():
+    """histogram bins in Python, so the file behind the URL no longer matches the encoding."""
+    csv_text = _csv_from_rows(_scatter_fixture()["data"]["values"])
+    out = _run_graph(csv_text, DECISIONS["histogram"])
+    spec = out["artifact"]["spec"]
+    assert "values" in spec["data"]
+    assert "url" not in spec["data"]
+
+
+def test_headerless_tabular_is_referenced_with_explicit_column_names():
+    """Galaxy tabular has no header row; Vega is told the names vintent generated."""
+    rows = _scatter_fixture()["data"]["values"][:6]
+    keys = list(rows[0])
+    tab_text = "\n".join("\t".join(str(r[k]) for k in keys) for r in rows) + "\n"
+    decisions = {**DECISIONS["scatter"],
+                 "intent": {"goal": "relationship", "shell_fields": ["col:1", "col:2"],
+                            "extract_fields": []},
+                 "fill": {"x": "col:1", "y": "col:2"}}
+    out = _run_graph(tab_text, decisions)
+    data = out["artifact"]["spec"]["data"]
+    assert data["url"] == "/api/datasets/d1/display"
+    assert data["format"]["type"] == "dsv"
+    assert data["format"]["delimiter"] == "\t"
+    # One name per column, in file order, matching what the profiler invented.
+    assert data["format"]["header"] == [f"col:{i + 1}" for i in range(len(keys))]
 
 
 def test_histogram_graph_equals_leaf_orchestration():
@@ -158,13 +188,19 @@ def test_bar_aggregate_graph_equals_leaf_orchestration():
 
 
 def test_artifact_envelope_shape():
+    """The diagram travels as an artifact; what it charted travels beside it."""
     csv_text = _csv_from_rows(_scatter_fixture()["data"]["values"])
     out = _run_graph(csv_text, DECISIONS["scatter"])
-    assert set(out.keys()) == {"artifact"}
+    assert set(out.keys()) == {"chart", "shell", "encoding", "artifact"}
     art = out["artifact"]
     assert art["kind"] == "vega-lite"
     assert art["title"] == "Scatter Plot"
     assert "spec" in art
+    # Without these the model gets a bare ok and polls the history for an output
+    # that never arrives; it ran to the step cap doing so.
+    assert out["chart"] == "Scatter Plot"
+    assert out["shell"] == "scatter"
+    assert out["encoding"] == {"x": "BMI", "y": "Glucose"}
 
 
 def test_fetch_uses_scoped_catalog_display_op():
@@ -177,7 +213,7 @@ def test_fetch_uses_scoped_catalog_display_op():
     ]
 
 
-def test_run_process_surfaces_graph_failure_not_null():
+def test_a_process_failure_surfaces_instead_of_returning_null():
     """A failed fetch must reach the model as an error, not a bare null."""
     from olite.drivers.loop.tools import ToolSurface
 
@@ -196,10 +232,27 @@ def test_run_process_surfaces_graph_failure_not_null():
             return self
 
     surface = ToolSurface(Sub(), ProcessRegistry().load_packaged())
-    out = asyncio.run(surface.dispatch("run_process", {"name": "vintent_dataset", "inputs": {"dataset_id": "d1"}})).text
+    inputs = {"dataset_id": "d1", "request": "scatter x vs y"}
+    out = asyncio.run(surface.dispatch("vintent_dataset", inputs)).text
     payload = json.loads(out)
     assert payload["ok"] is False
     assert payload["error"]["code"] == "catalog_unavailable"
+
+
+def test_a_process_called_without_a_required_input_says_which_one():
+    """Caught against the generated schema, before the graph or any API call."""
+    from olite.drivers.loop.tools import ToolSurface
+
+    class Sub:
+        manifest = FakeManifest()
+
+        def scoped(self, capabilities):
+            return self
+
+    surface = ToolSurface(Sub(), ProcessRegistry().load_packaged())
+    outcome = asyncio.run(surface.dispatch("vintent_dataset", {"dataset_id": "d1"}))
+    assert outcome.is_error
+    assert "request" in outcome.text
 
 
 def test_choose_shell_and_fill_schemas_are_state_derived():
@@ -217,7 +270,7 @@ def test_choose_shell_and_fill_schemas_are_state_derived():
 
 
 class LoopLlm:
-    """A loop-level model: calls run_process once, then finishes."""
+    """A loop-level model: calls the process tool once, then finishes."""
 
     def __init__(self, decisions):
         self.decisions = decisions
@@ -232,9 +285,9 @@ class LoopLlm:
                 "id": "call_1",
                 "type": "function",
                 "function": {
-                    "name": "run_process",
+                    "name": "vintent_dataset",
                     "arguments": json.dumps(
-                        {"name": "vintent_dataset", "inputs": {"dataset_id": "d1", "request": "scatter BMI vs Glucose"}}
+                        {"dataset_id": "d1", "request": "scatter BMI vs Glucose"}
                     ),
                 },
             }
@@ -274,7 +327,7 @@ def test_full_loop_routes_artifact_and_injects_skill():
     ends = [e for e in events if e["type"] == "tool_end"]
     assert starts and len(starts) == len(ends)
     assert [e["id"] for e in starts] == [e["id"] for e in ends]
-    assert any(e["name"] == "run_process" for e in starts)
+    assert any(e["name"] == "vintent_dataset" for e in starts)
     assert all("content" in e for e in ends)
 
     artifacts = result.get("artifacts") or []
@@ -283,8 +336,8 @@ def test_full_loop_routes_artifact_and_injects_skill():
     assert artifacts[0]["spec"]["mark"] == {"type": "point"}
 
     # The model saw a compact reference, not the full spec.
-    tool_msgs = [m for m in result["messages"] if m.get("role") == "tool" and m.get("name") == "run_process"]
-    assert tool_msgs, "no run_process tool result in transcript"
+    tool_msgs = [m for m in result["messages"] if m.get("role") == "tool" and m.get("name") == "vintent_dataset"]
+    assert tool_msgs, "no vintent_dataset tool result in transcript"
     payload = json.loads(tool_msgs[0]["content"])
     assert payload["artifact"] == {"kind": "vega-lite", "title": "Scatter Plot"}
     assert "spec" not in payload["artifact"]
@@ -298,3 +351,35 @@ def test_unfence_unwraps_planner_json_code_fences():
     assert _unfence('```\n{"nolang": true}\n```') == '{"nolang": true}'
     # Fence-free content passes through unchanged.
     assert _unfence('{"already": "clean"}') == '{"already": "clean"}'
+
+
+def test_the_vintent_tool_produces_a_chart_and_routes_it_out_of_band():
+    """The tool path a model actually takes: dispatch by process name, chart comes back."""
+    from olite.drivers.loop.tools import ToolSurface
+
+    csv_text = _csv_from_rows(_scatter_fixture()["data"]["values"])
+    substrate = FakeSubstrate(csv_text, DECISIONS["scatter"])
+    surface = ToolSurface(substrate, ProcessRegistry().load_packaged())
+
+    outcome = asyncio.run(surface.dispatch(
+        "vintent_dataset", {"dataset_id": "d1", "request": "BMI against Glucose"}
+    ))
+    payload = json.loads(outcome.text)
+
+    # The spec goes to the shell; the model sees only a reference to it.
+    assert payload["artifact"] == {"kind": "vega-lite", "title": "Scatter Plot"}
+    assert "spec" not in json.dumps(payload)
+    assert len(surface.artifacts) == 1
+    assert surface.artifacts[0]["spec"]["mark"] == _scatter_fixture()["mark"]
+
+
+def test_the_vintent_tool_reads_the_dataset_it_was_given():
+    from olite.drivers.loop.tools import ToolSurface
+
+    csv_text = _csv_from_rows(_scatter_fixture()["data"]["values"])
+    substrate = FakeSubstrate(csv_text, DECISIONS["scatter"])
+    surface = ToolSurface(substrate, ProcessRegistry().load_packaged())
+    asyncio.run(surface.dispatch("vintent_dataset", {"dataset_id": "abc123", "request": "x vs y"}))
+    assert substrate.catalog.calls == [
+        ("galaxy.datasets.show.display.get", {"history_content_id": "abc123"})
+    ]

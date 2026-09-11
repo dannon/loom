@@ -1,46 +1,37 @@
-"""Renders a dataset/job lineage as a Mermaid flowchart."""
+"""Renders a history graph subgraph as a Mermaid flowchart."""
 
 from olite.drivers.graph import register_materializer
 
+# Edges Galaxy reports; datasets and collections are boxes, jobs are stadiums.
+JOB_SRC = "job"
+
 
 @register_materializer("lineage.mermaid")
-def generate_mermaid(datasets=None, jobs=None, source_dataset_id=None):
-    """Render a dataset/job lineage as a Mermaid flowchart."""
-    datasets = datasets or []
-    jobs = jobs or []
-
-    def node_id(prefix, raw):
-        return f"{prefix}_" + "".join(c if c.isalnum() else "_" for c in str(raw))
+def generate_mermaid(nodes=None, edges=None, seed_id=None):
+    """Render a history graph's nodes and edges as a Mermaid flowchart."""
+    nodes = nodes or []
+    edges = edges or []
 
     lines = ["flowchart TD"]
+    for n in nodes:
+        ref = _node_id(n.get("src"), n.get("id"))
+        label = n.get("name") or n.get("tool_name") or n.get("tool_id") or n.get("id")
+        marker = "*" if n.get("id") == seed_id else ""
+        shape = '(["{}"])' if n.get("src") == JOB_SRC else '["{}"]'
+        lines.append(f"    {ref}" + shape.format(f"{marker}{label}"))
 
-    for d in datasets:
-        did = d.get("id")
-        label = d.get("name") or did
-        marker = "*" if did == source_dataset_id else ""
-        lines.append(f'    {node_id("ds", did)}["{marker}{label}"]')
-
-    for j in jobs:
-        jid = j.get("id")
-        label = j.get("tool_id") or jid
-        lines.append(f'    {node_id("job", jid)}(["{label}"])')
-        for ref in _dataset_ids(j.get("inputs")):
-            lines.append(f'    {node_id("ds", ref)} --> {node_id("job", jid)}')
-        for ref in _dataset_ids(j.get("outputs")):
-            lines.append(f'    {node_id("job", jid)} --> {node_id("ds", ref)}')
+    for e in edges:
+        source, target = e.get("source") or {}, e.get("target") or {}
+        if not source.get("id") or not target.get("id"):
+            continue
+        lines.append(
+            f'    {_node_id(source.get("src"), source.get("id"))}'
+            f' --> {_node_id(target.get("src"), target.get("id"))}'
+        )
 
     return "\n".join(lines)
 
 
-def _dataset_ids(container):
-    """Extract dataset ids from a job inputs/outputs mapping or list."""
-    if not container:
-        return []
-    items = container.values() if isinstance(container, dict) else container
-    ids = []
-    for v in items:
-        if isinstance(v, dict) and "id" in v:
-            ids.append(v["id"])
-        elif isinstance(v, str):
-            ids.append(v)
-    return ids
+def _node_id(src, raw):
+    """A Mermaid-safe identifier; src keeps hda and hdca ids from colliding."""
+    return f"{src or 'n'}_" + "".join(c if c.isalnum() else "_" for c in str(raw))

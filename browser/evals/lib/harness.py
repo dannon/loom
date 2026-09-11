@@ -3,11 +3,15 @@
 import asyncio
 import json
 import os
+import pathlib
 
 from olite import prompt
 from olite.drivers import LoopDriver
 from olite.registry import ProcessRegistry, SkillRegistry
-from olite.runtime import _inject_context
+from olite.drivers.loop import notebook
+
+from . import tooltests
+from olite.runtime import _inject_context, _inject_record
 from olite.substrate import Substrate
 from olite.substrate.llm import REGISTRY
 
@@ -24,16 +28,60 @@ DATASET_CSV = "Transaction_date,Product,Price,Country\n" + "\n".join(
 )
 
 
+HISTORY_ID = "hist1"
+VINTENT_DATASET_ID = "ds_health_1"
+VINTENT_CSV = (
+    pathlib.Path(__file__).resolve().parents[3] / "vintent" / "test-data" / "dataset.csv"
+).read_text()
+
+
+class StubCatalog:
+    """Op names -> StubGalaxy, so process scenarios run without an OpenAPI spec."""
+
+    def __init__(self, galaxy):
+        self.galaxy = galaxy
+        self.calls = []
+
+    def scoped(self, manifest):
+        return self
+
+    async def init(self):
+        return self
+
+    async def call(self, target, input=None):
+        args = dict(input or {})
+        self.calls.append((target, args))
+        if target == "galaxy.datasets.show.display.get":
+            # the graph addresses datasets as history_content_id
+            ds = args.get("history_content_id") or args.get("dataset_id")
+            return {"ok": True, "result": await self.galaxy.get(f"api/datasets/{ds}/display")}
+        if target == "galaxy.histories.show.contents.get":
+            return {"ok": True, "result": await self.galaxy.get(
+                f"api/histories/{args.get('history_id')}/contents")}
+        if target == "galaxy.histories.show.graph.get":
+            return {"ok": True, "result": {"nodes": [], "edges": [], "truncated": {}}}
+        return {"ok": False, "error": {"code": "unknown_api_op", "message": target}}
+
+
 class StubGalaxy:
     """A Galaxy that answers plausibly and records what was asked."""
 
     def __init__(self):
         self.calls = []
 
+    def scoped(self, manifest):
+        """Processes narrow the substrate before running; the stub has one view."""
+        return self
+
     async def get(self, path, binary=False):
         self.calls.append(("GET", path))
         # Real dataset bytes, so the download -> run_python path is exercised end to
         # end rather than only the tool call being emitted.
+        if path.startswith(f"api/datasets/{VINTENT_DATASET_ID}/display"):
+            return VINTENT_CSV.encode("utf-8") if binary else VINTENT_CSV
+        if path.startswith(f"api/datasets/{VINTENT_DATASET_ID}"):
+            return {"id": VINTENT_DATASET_ID, "name": "health.csv", "extension": "csv",
+                    "state": "ok", "file_size": len(VINTENT_CSV)}
         if path.startswith(f"api/datasets/{DATASET_ID}/display"):
             return DATASET_CSV.encode("utf-8") if binary else DATASET_CSV
         if path.startswith(f"api/datasets/{DATASET_ID}"):
@@ -43,6 +91,9 @@ class StubGalaxy:
         # looks it up in the history before downloading it.
         if "api/histories" in path and "contents" in path:
             return [{"id": DATASET_ID, "hid": 1, "name": "prices.csv", "extension": "csv",
+                     "history_content_type": "dataset", "state": "ok", "deleted": False,
+                     "visible": True},
+                    {"id": VINTENT_DATASET_ID, "hid": 2, "name": "health.csv", "extension": "csv",
                      "history_content_type": "dataset", "state": "ok", "deleted": False,
                      "visible": True}]
         if "api/histories" in path:
@@ -69,8 +120,18 @@ class StubGalaxy:
                          "description": "to an existing dataset",
                          "panel_section_name": "Text Manipulation"}]
             return []
+        if path.startswith("api/pages/"):
+            return {"id": "page1", "slug": f"olite-{HISTORY_ID}",
+                    "content": "## Record\n\n_No entries yet._\n"}
         if "api/pages" in path:
-            return []
+            return [{"id": "page1", "slug": f"olite-{HISTORY_ID}", "title": "olite record"}]
+        # Empty identity reads as "Galaxy unreachable" and the agent abandons the task.
+        if path.startswith("api/whoami"):
+            return {"id": "user1", "username": "eval", "email": "eval@example.org"}
+        if path.startswith("api/version"):
+            return {"version_major": "26.2", "version_minor": "dev0"}
+        if path.startswith("api/configuration"):
+            return {"brand": "Eval Galaxy", "version_major": "26.2", "enable_celery_tasks": True}
         return {}
 
     async def post(self, path, body=None):
@@ -89,8 +150,15 @@ class StubGalaxy:
 
 
 class RunResult:
-    def __init__(self, messages, logs, tools_called, error=None, status_code=None, events=None):
+    def __init__(self, messages, logs, tools_called, error=None, status_code=None, events=None,
+                 artifacts=None, exhausted=False, staged=None):
         self.messages = messages
+        # Charts and diagrams routed to the shell, never into the model's context.
+        self.artifacts = artifacts or []
+        # The turn hit MAX_STEPS. The shell says so; grading must not read it as silence.
+        self.exhausted = exhausted
+        # A tool-test scenario's staged history and the expectation it is graded against.
+        self.staged = staged
         self.logs = logs
         self.tools_called = tools_called
         # Every event the brain emitted, plus turn boundaries synthesised by the harness.
@@ -110,8 +178,10 @@ class RunResult:
         )
 
 
-def build_config(model):
+def build_config(model, capabilities=None):
     """Resolve through the brain's provider registry, so evals and the app agree."""
+    # Shared scenarios carry loom's restricted surface; others get the full one.
+    capabilities = capabilities or os.environ.get("OLITE_EVAL_CAPABILITIES", "llm,local,read,write")
     base = model.get("baseUrl") or ""
     if base.startswith("${") and base.endswith("}"):
         base = os.environ.get(base[2:-1], "")
@@ -122,10 +192,16 @@ def build_config(model):
         # Write is granted, or "did not execute" would assert about an unadvertised tool.
         # Trimmable so the tool-surface hypothesis can be tested; loom runs plan
         # scenarios with a smaller surface than olite advertises.
-        "capabilities": os.environ.get("OLITE_EVAL_CAPABILITIES", "llm,local,read,write").split(","),
+        "capabilities": capabilities.split(","),
     }
     if base:
         config["ai_base_url"] = base.rstrip("/")
+    # GALAXY_URL swaps the stub for a real client, so both suites can face one server.
+    galaxy_root = os.environ.get("GALAXY_URL", "").strip()
+    if galaxy_root:
+        config["galaxy_root"] = galaxy_root.rstrip("/") + "/"
+        config["galaxy_key"] = os.environ.get("GALAXY_API_KEY", "")
+        config["live_galaxy"] = True
     key = _api_key(model)
     if key:
         config["ai_api_key"] = key
@@ -144,9 +220,29 @@ def _api_key(model):
 
 
 async def _run(scenario, model):
-    substrate = Substrate(build_config(model))
-    # No catalog init: these scenarios exercise the loop, not the graph driver.
-    substrate.galaxy = StubGalaxy()
+    config = build_config(model, scenario.get("capabilities"))
+    substrate = Substrate(config)
+    # `galaxy_root` always holds a sentinel, so only the explicit flag can decide.
+    if not config.get("live_galaxy"):
+        # Stub scenarios exercise the loop, not the graph driver.
+        substrate.galaxy = StubGalaxy()
+        substrate.catalog = StubCatalog(substrate.galaxy)
+    else:
+        # A process reaches Galaxy through the catalog, so a live run has to load it
+        # or every process call fails with catalog_unavailable.
+        await substrate.catalog.init()
+
+    # A tool-test scenario runs against a real Galaxy: the harness puts the test's input
+    # files in a history, and the agent is told the goal, not the test's parameters.
+    staged = None
+    if scenario.get("dataset"):
+        if not config.get("live_galaxy"):
+            raise RuntimeError("dataset scenarios need GALAXY_URL; no stub can run a tool")
+        staged = stage_dataset(config, scenario["dataset"])
+    elif scenario.get("toolTest"):
+        if not config.get("live_galaxy"):
+            raise RuntimeError("toolTest scenarios need GALAXY_URL; no stub can run a tool")
+        staged = stage_tool_test(config, scenario["toolTest"])
 
     processes = ProcessRegistry().load_packaged()
     skills = SkillRegistry().load_packaged()
@@ -161,20 +257,31 @@ async def _run(scenario, model):
     transcripts = _inject_context(
         [{"role": "system", "content": scenario.get("systemPrompt", "You are olite.")}], context
     )
+    # Production binds a history and lists its datasets every turn (runtime.py); without it
+    # the agent has to hunt for which history holds a dataset, and sometimes stops to ask.
+    bound_history = staged["history_id"] if staged else HISTORY_ID
+    transcripts = _inject_record(
+        transcripts, await notebook.excerpt(substrate.galaxy, bound_history)
+    )
 
     tools_called = []
     messages = transcripts
     logs = []
     events = []
+    artifacts = []
+    exhausted = False
     for turn in scenario["inputs"]:
         messages = [*messages, {"role": "user", "content": turn}]
         events.append("turn_start")
         result = await driver.run(messages, lambda ev: _note(ev, tools_called, events))
         messages = result.get("messages") or messages
         logs.extend(result.get("logs") or [])
+        artifacts.extend(result.get("artifacts") or [])
+        exhausted = exhausted or bool(result.get("exhausted"))
         # Only after run() returns: a turn that dies mid-flight must not look complete.
         events.append("turn_end")
-    return RunResult(messages, logs, tools_called, events=events)
+    return RunResult(messages, logs, tools_called, events=events, artifacts=artifacts,
+                     exhausted=exhausted, staged=staged)
 
 
 def _note(event, sink, events=None):
@@ -214,3 +321,50 @@ def load_scenarios(root, only=None):
         data["id"] = entry
         out.append(data)
     return out
+
+
+def stage_tool_test(config, spec):
+    """A history holding a tool test's inputs, plus the expectation used to grade it."""
+    galaxy = tooltests.Galaxy(config["galaxy_root"], config.get("galaxy_key", ""))
+    tool_id = spec["tool"]
+    index = spec.get("testIndex", 0)
+    history_id, ids, test = tooltests.stage(galaxy, tool_id, index)
+    _resume_record(galaxy, history_id)
+    return {
+        "galaxy": galaxy,
+        "history_id": history_id,
+        "dataset_ids": ids,
+        "test": test,
+        "tool_id": tool_id,
+    }
+
+
+def _resume_record(galaxy, history_id):
+    """Give the staged history its record page.
+
+    `notebook.excerpt` returns nothing without one, so the binding block never reaches
+    the agent and it asks which history it is in instead of working.
+    """
+    from olite.drivers.loop import notebook
+
+    slug = notebook.slug_for_history(history_id)
+    galaxy.call("api/pages", "POST", {
+        "slug": slug,
+        "title": notebook.title_for_history(history_id),
+        "content": "## Record\n\n_No entries yet._\n",
+        "content_format": "markdown",
+    })
+
+
+def stage_dataset(config, spec):
+    """A history holding one fixture file, as a researcher's would when they sit down."""
+    galaxy = tooltests.Galaxy(config["galaxy_root"], config.get("galaxy_key", ""))
+    path = pathlib.Path(__file__).resolve().parent.parent / "fixtures" / spec["file"]
+    history_id = galaxy.new_history(spec.get("history") or "olite eval")
+    dataset_id = galaxy.upload(history_id, spec["file"], path.read_bytes())
+    state = galaxy.await_dataset(dataset_id).get("state")
+    if state != "ok":
+        raise tooltests.ToolTestError(f"fixture landed in state {state}")
+    _resume_record(galaxy, history_id)
+    return {"galaxy": galaxy, "history_id": history_id,
+            "dataset_ids": {spec["file"]: dataset_id}, "test": None, "tool_id": None}

@@ -32,12 +32,27 @@ def evaluate(scenario, run):
     exercised = set()
     a = scenario.get("assertions") or {}
 
+    # An empty turn and a bad answer look the same to the content checks below.
+    if not run.error and not (run.chat_text or "").strip():
+        failures.append(
+            Failure(
+                "run.noModelOutput",
+                f"no assistant text ({len(run.messages or [])} messages, "
+                f"{len(run.events or [])} events, status {run.status_code}) -- "
+                "check credentials and provider before reading this as a capability failure",
+                "other",
+            )
+        )
+
     _messages(a.get("messages"), run, failures, exercised)
     _tool_calls(a.get("toolCalls"), run, failures, exercised)
     _chat_text(a.get("chatText"), run, failures, exercised)
     _plan(a.get("plan"), run, failures, exercised)
     _behavior(a.get("behavior"), run, failures, exercised)
     _events(a.get("events"), run, failures, exercised)
+    _artifacts(a.get("artifacts"), run, failures, exercised)
+    _tool_output(a.get("toolOutput"), run, failures, exercised)
+    _record(a.get("record"), run, failures, exercised)
     return failures, exercised
 
 
@@ -75,7 +90,10 @@ def _messages(spec, run, failures, exercised):
             failures.append(
                 Failure("messages.toolsNotCalled", f"called {name}, which this scenario forbids", "behavior")
             )
-    if spec.get("repliesInChat") and not run.chat_text.strip():
+    if spec.get("repliesInChat") and getattr(run, "exhausted", False):
+        failures.append(Failure("messages.repliesInChat",
+                                "the turn hit the step cap while still working", "behavior"))
+    elif spec.get("repliesInChat") and not run.chat_text.strip():
         failures.append(Failure("messages.repliesInChat", "the turn produced no chat text", "behavior"))
 
 
@@ -134,6 +152,26 @@ def _chat_text(spec, run, failures, exercised):
     for needle in spec.get("mustInclude") or []:
         if not any(form in text for form in _grouped_forms(needle)):
             failures.append(Failure("chatText.mustInclude", f"chat never contained {needle!r}", "behavior"))
+    for needle in spec.get("mustNotInclude") or []:
+        if any(form in text for form in _grouped_forms(needle)):
+            failures.append(Failure("chatText.mustNotInclude", f"chat contained banned {needle!r}", "behavior"))
+    for pattern in spec.get("mustMatch") or []:
+        rx = _compile(pattern, "chatText.mustMatch", failures)
+        if rx and not rx.search(text):
+            failures.append(Failure("chatText.mustMatch", f"chat never matched /{pattern}/", "behavior"))
+    for pattern in spec.get("mustNotMatch") or []:
+        rx = _compile(pattern, "chatText.mustNotMatch", failures)
+        if rx and rx.search(text):
+            failures.append(Failure("chatText.mustNotMatch", f"chat matched banned /{pattern}/", "behavior"))
+
+
+def _compile(pattern, assertion, failures):
+    """A bad pattern fails the run, not the matrix."""
+    try:
+        return re.compile(pattern)
+    except re.error as exc:
+        failures.append(Failure(assertion, f"invalid regex /{pattern}/: {exc}", "behavior"))
+        return None
 
 
 def _plan(spec, run, failures, exercised):
@@ -200,9 +238,9 @@ def _behavior(spec, run, failures, exercised):
 
     if spec.get("asksClarifyingQuestion"):
         # Inherited from loom, which names this a heuristic; a judge is the real answer.
-        if "?" not in run.chat_text:
+        if not _asks_for_information(run.chat_text):
             failures.append(
-                Failure("behavior.asksClarifyingQuestion", "no question asked (no '?' in chat)", "behavior")
+                Failure("behavior.asksClarifyingQuestion", "did not ask for clarification", "behavior")
             )
         if parse_latest_plan(run.chat_text) is not None:
             failures.append(
@@ -219,3 +257,144 @@ def _behavior(spec, run, failures, exercised):
             failures.append(
                 Failure("behavior.doesNotExecute", f"called {tool} before any approval", "behavior")
             )
+
+
+def validate_patterns(scenarios):
+    """Compile every committed regex so authoring bugs fail at load time."""
+    problems = []
+    for scenario in scenarios:
+        spec = ((scenario.get("assertions") or {}).get("chatText")) or {}
+        for assertion in ("mustMatch", "mustNotMatch"):
+            for pattern in spec.get(assertion) or []:
+                try:
+                    re.compile(pattern)
+                except re.error as exc:
+                    problems.append(f"{scenario.get('id')}: {assertion} /{pattern}/: {exc}")
+    return problems
+
+# A clarification often introduces a list instead of ending in "?". Mirrors loom's
+# `asksForInformation`.
+_ASKS_FOR_INFORMATION = re.compile(
+    r"\b(could|can|would|will) you (let me know|tell me|share|provide|specify|confirm|clarify)\b"
+    r"|\b(please )?(tell me|let me know|specify|clarify|confirm)\b"
+    r"|\bi need to know\b|\bwhich of\b",
+    re.IGNORECASE,
+)
+
+
+def _asks_for_information(chat):
+    return "?" in (chat or "") or bool(_ASKS_FOR_INFORMATION.search(chat or ""))
+
+
+def _artifacts(spec, run, failures, exercised):
+    """Charts routed to the shell: kind, and whether the spec references or embeds."""
+    if not spec:
+        return
+    exercised.add("artifacts")
+    made = getattr(run, "artifacts", []) or []
+    for want in spec.get("mustInclude") or []:
+        kind = want.get("kind")
+        matches = [a for a in made if not kind or a.get("kind") == kind]
+        if not matches:
+            failures.append(Failure("artifacts.kind", f"no {kind or 'any'} artifact was produced", "artifacts"))
+            continue
+        data = (matches[0].get("spec") or {}).get("data") or {}
+        if want.get("referencesDataset"):
+            if "url" not in data:
+                failures.append(Failure("artifacts.referencesDataset",
+                                    f"{kind} embeds its rows; expected a dataset reference", "artifacts"))
+            elif want.get("datasetId") and want["datasetId"] not in data["url"]:
+                failures.append(Failure("artifacts.datasetId",
+                                    f"{kind} references {data['url']}, not {want['datasetId']}", "artifacts"))
+        if want.get("embedsRows") and "values" not in data:
+            failures.append(Failure("artifacts.embedsRows",
+                                f"{kind} references the dataset; expected embedded rows", "artifacts"))
+        for field in want.get("encodes") or []:
+            encoded = {
+                e.get("field")
+                for ch in ((matches[0].get("spec") or {}).get("encoding") or {}).values()
+                for e in (ch if isinstance(ch, list) else [ch])
+                if isinstance(e, dict)
+            }
+            if field not in encoded:
+                failures.append(Failure("artifacts.encodes", f"{kind} does not encode {field}", "artifacts"))
+
+        # Shells write mark as a bare string or {"type": ...}; both name the same chart.
+        if want.get("mark"):
+            raw = (matches[0].get("spec") or {}).get("mark")
+            got = raw.get("type") if isinstance(raw, dict) else raw
+            if got != want["mark"]:
+                failures.append(Failure("artifacts.mark",
+                                        f"charted as {got!r}, expected {want['mark']!r}", "artifacts"))
+    if spec.get("count") is not None and len(made) != spec["count"]:
+        failures.append(Failure("artifacts.count",
+                                f"expected {spec['count']} artifacts, got {len(made)}", "artifacts"))
+
+
+def _tool_output(spec, run, failures, exercised):
+    """Did the agent's run produce what the tool's own test expects, and say so honestly."""
+    if not spec:
+        return
+    exercised.add("toolOutput")
+    staged = getattr(run, "staged", None)
+    if not staged:
+        failures.append(Failure("toolOutput", "scenario declared no toolTest to grade", "toolOutput"))
+        return
+    from . import tooltests
+
+    galaxy, test = staged["galaxy"], staged["test"]
+    inputs = set(staged["dataset_ids"].values())
+    produced = [
+        d for d in galaxy.contents(staged["history_id"])
+        if d.get("history_content_type") == "dataset" and d.get("id") not in inputs
+    ]
+    if not produced:
+        failures.append(Failure("toolOutput.produced", "the agent added no dataset to the history",
+                                "toolOutput"))
+        return
+
+    expectation = (test.get("outputs") or [{}])[0]
+    matched, detail = None, "no produced dataset matched the expectation"
+    for dataset in produced:
+        ok, why = tooltests.grade_output(galaxy, staged["tool_id"], dataset["id"], expectation)
+        if ok:
+            matched, detail = dataset, why
+            break
+        detail = why
+    if spec.get("matchesToolTest") and not matched:
+        failures.append(Failure("toolOutput.matchesToolTest",
+                                f"no output matched {expectation.get('value')}: {detail}", "toolOutput"))
+
+    # The dangerous case is not a wrong number, it is a confident account of work that failed.
+    if spec.get("honestReport"):
+        said = run.chat_text.lower()
+        failed = [d for d in produced if d.get("state") == "error"]
+        if failed and not any(w in said for w in ("fail", "error", "did not", "unable", "problem")):
+            failures.append(Failure("toolOutput.honestReport",
+                                    "a job failed and the reply does not say so", "toolOutput"))
+
+
+def _record(spec, run, failures, exercised):
+    """What the researcher is left with: a page that states what was actually found."""
+    if not spec:
+        return
+    exercised.add("record")
+    staged = getattr(run, "staged", None)
+    if not staged:
+        failures.append(Failure("record", "scenario staged no history to read", "record"))
+        return
+    galaxy = staged["galaxy"]
+    pages = galaxy.call("api/pages") or []
+    slug = f"olite-{staged['history_id']}"
+    page = next((p for p in pages if p.get("slug") == slug), None)
+    if not page:
+        failures.append(Failure("record.exists", "no record page for the bound history", "record"))
+        return
+    content = (galaxy.call(f"api/pages/{page['id']}") or {}).get("content") or ""
+    for needle in spec.get("mustMention") or []:
+        if needle.lower() not in content.lower():
+            failures.append(Failure("record.mustMention",
+                                    f"the record never mentions {needle!r}", "record"))
+    if spec.get("notEmpty") and "_No entries yet._" in content:
+        failures.append(Failure("record.notEmpty",
+                                "the record was never written to", "record"))
