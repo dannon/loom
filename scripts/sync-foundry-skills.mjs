@@ -49,7 +49,10 @@ function transform(text, targetName) {
 }
 
 function sha256(text) {
-  return crypto.createHash("sha256").update(text, "utf-8").digest("hex");
+  return crypto
+    .createHash("sha256")
+    .update(text.replace(/\r\n/g, "\n"), "utf-8")
+    .digest("hex");
 }
 
 function readManifest() {
