@@ -84,7 +84,15 @@ describe("captureProviderState", () => {
 
   it("preserves the stored-key flag across a re-capture", () => {
     const states = captureProviderState(
-      { anthropic: { hadKey: true, typedKey: "", model: "claude-opus-5", baseUrl: "", savedBaseUrl: "" } },
+      {
+        anthropic: {
+          hadKey: true,
+          typedKey: "",
+          model: "claude-opus-5",
+          baseUrl: "",
+          savedBaseUrl: "",
+        },
+      },
       "anthropic",
       { typedKey: "", model: "claude-sonnet-5", baseUrl: "" },
     );
@@ -290,7 +298,11 @@ describe("ProviderFieldStore", () => {
 
   it("keeps what's on screen when the selection doesn't actually change", () => {
     const store = new ProviderFieldStore("openai");
-    expect(store.select("openai", openaiFields)).toEqual({ hadKey: false, ...openaiFields, savedBaseUrl: "" });
+    expect(store.select("openai", openaiFields)).toEqual({
+      hadKey: false,
+      ...openaiFields,
+      savedBaseUrl: "",
+    });
   });
 
   it("saves each key under its own provider, with the selected one active", () => {

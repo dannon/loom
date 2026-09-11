@@ -46,6 +46,7 @@ import {
   galaxyGetJobDetails,
   type GalaxyInvocationResponse,
 } from "./galaxy-api.js";
+import { buildResumePrompt } from "./auto-resume.js";
 import {
   applyJobPollUpdate,
   findJobBlocks,
@@ -70,6 +71,17 @@ let inFlightTick: Promise<void> | null = null;
 /** Surface a toast to the shell when a background invocation finishes. */
 type PollerNotify = (text: string, level: "info" | "warning" | "error") => void;
 let notify: PollerNotify | null = null;
+
+/**
+ * Hand a finished run back to the agent as a queued follow-up, so it verifies
+ * outputs itself instead of the toast asking the user to relay. Null when
+ * auto-resume is off, which is the default.
+ *
+ * Must queue rather than interrupt: delivering a prompt to a brain that is
+ * mid-turn fails outright with "Agent is already processing".
+ */
+type PollerResume = (text: string) => void;
+let resume: PollerResume | null = null;
 
 /** Subset of a checkInvocations result entry the poller needs for notifications. */
 interface PollResultEntry {
@@ -301,16 +313,23 @@ function jobFinishedToast(
   status: ReturnType<typeof jobStatusFromGalaxyState>,
   label: string,
   state: string | undefined,
+  willResume = false,
 ): [string, "info" | "warning" | "error"] {
   switch (status) {
     case "completed":
-      return [`✅ Galaxy: "${label}" finished — ask me to verify the outputs.`, "info"];
+      return [
+        `✅ Galaxy: "${label}" finished${willResume ? " — verifying outputs…" : " — ask me to verify the outputs."}`,
+        "info",
+      ];
     case "cancelled":
       return [`⏹️ Galaxy: "${label}" was cancelled (${state}) — it produced no outputs.`, "info"];
     case "skipped":
       return [`⏭️ Galaxy: "${label}" was skipped — its step's condition wasn't met.`, "info"];
     default:
-      return [`❌ Galaxy: "${label}" failed (${state}) — ask me to investigate.`, "warning"];
+      return [
+        `❌ Galaxy: "${label}" failed (${state})${willResume ? " — investigating…" : " — ask me to investigate."}`,
+        "warning",
+      ];
   }
 }
 
@@ -390,7 +409,11 @@ async function tickJobs(content: string): Promise<void> {
       galaxyState: state ?? null,
       lastPolledAt: polledAt,
     });
-    if (notify) notify(...jobFinishedToast(status, label, state));
+    const willResume = resume !== null && (status === "completed" || status === "failed");
+    if (notify) notify(...jobFinishedToast(status, label, state, willResume));
+    if (status === "completed" || status === "failed") {
+      resume?.(buildResumePrompt(label, status, status === "failed" ? state : undefined));
+    }
   }
 }
 
@@ -444,7 +467,10 @@ async function runTick(): Promise<void> {
     // an autoAction of completed/failed is a fresh transition that won't recur
     // (the block is terminal next tick and no longer checked) — notify once.
     const results = (result.details as { results?: PollResultEntry[] } | undefined)?.results;
+    // Not gated on `notify`: a headless shell has no toast to show but must
+    // still hand the finished run back to the agent when auto-resume is on.
     if (Array.isArray(results)) {
+      const willResume = resume !== null;
       for (const r of results) {
         const label = r.label || r.notebookAnchor || r.invocationId;
         // A row for what the block's status actually became, and only when it
@@ -464,25 +490,26 @@ async function runTick(): Promise<void> {
             lastPolledAt: r.lastPolledAt ?? null,
           });
         }
-        if (!notify) continue;
         if (r.autoAction === "completed") {
-          notify(
-            `✅ Galaxy: "${label}" finished (${r.jobSummary?.ok ?? 0} jobs ok) — ask me to verify the outputs.`,
+          notify?.(
+            `✅ Galaxy: "${label}" finished (${r.jobSummary?.ok ?? 0} jobs ok)${willResume ? " — verifying outputs…" : " — ask me to verify the outputs."}`,
             "info",
           );
+          resume?.(buildResumePrompt(label, "completed"));
         } else if (r.autoAction === "failed") {
-          notify(
-            `❌ Galaxy: "${label}" failed (${r.jobSummary?.error ?? 0} job error(s)) — ask me to investigate.`,
+          notify?.(
+            `❌ Galaxy: "${label}" failed (${r.jobSummary?.error ?? 0} job error(s))${willResume ? " — investigating…" : " — ask me to investigate."}`,
             "warning",
           );
+          resume?.(buildResumePrompt(label, "failed", `${r.jobSummary?.error ?? 0} job error(s)`));
         } else if (r.autoAction === "cancelled") {
-          notify(
+          notify?.(
             `⏹️ Galaxy: "${label}" was cancelled — ${r.jobSummary?.ok ?? 0} job(s) finished before it stopped.`,
             "info",
           );
         } else if (r.autoAction === "failing" && !announcedFailing.has(r.invocationId)) {
           announcedFailing.add(r.invocationId);
-          notify(
+          notify?.(
             `⚠️ Galaxy: "${label}" — ${r.jobSummary?.error ?? 0} job(s) failed, ${r.activeJobs ?? 0} still running — ask me to investigate.`,
             "warning",
           );
@@ -496,10 +523,13 @@ async function runTick(): Promise<void> {
   }
 }
 
-export function startGalaxyPoller(notifyFn?: PollerNotify): void {
+export function startGalaxyPoller(notifyFn?: PollerNotify, resumeFn?: PollerResume): void {
   // Capture the shell notifier (from the session_start ctx) so a completed
   // background invocation can toast the user. Refreshed each session_start.
   notify = notifyFn ?? null;
+  // Null unless auto-resume is opted in; the caller decides, so the poller
+  // stays free of config lookups on a 15s timer.
+  resume = resumeFn ?? null;
   announcedFailing.clear();
   trackedActive.clear();
   // Idempotent: a brain restart triggers a new session_start without
