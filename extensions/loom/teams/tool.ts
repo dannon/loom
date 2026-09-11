@@ -1,8 +1,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { Text } from "@earendil-works/pi-tui";
-import { completeSimple } from "@earendil-works/pi-ai";
-import type { Model } from "@earendil-works/pi-ai";
+// pi 0.80 moved the global API to /compat. The extension loader aliases the
+// root at runtime, but the typecheck resolves the published types, so import
+// the real path.
+import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { Model } from "@earendil-works/pi-ai/compat";
 import { runTeamDispatch } from "./dispatcher";
 import { validateTeamSpec } from "./validate";
 import type { DispatchDeps, RoleTurnResult, TeamSpec, RoleSpec } from "./types";

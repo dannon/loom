@@ -69,8 +69,7 @@ function setup(): { container: HTMLElement; btn: HTMLButtonElement } {
   const container = document.createElement("div");
   // happy-dom has no layout: give the chat scrollport a real viewport band so
   // computeCopyButtonPlacement sees the selection as visible inside it.
-  container.getBoundingClientRect = () =>
-    ({ top: 0, bottom: 700, left: 0, right: 900 }) as DOMRect;
+  container.getBoundingClientRect = () => ({ top: 0, bottom: 700, left: 0, right: 900 }) as DOMRect;
   document.body.appendChild(container);
   new ChatPanel(container);
   const btn = document.querySelector<HTMLButtonElement>(".chat-copy-btn")!;
@@ -169,7 +168,7 @@ describe("copy button dismissal after clicking it (#377)", () => {
   it("shows a confirmation beat then dismisses and clears the selection", async () => {
     const writeText = stubClipboard(true);
     const { container, btn } = setup();
-    const sel = currentSelection = makeSelection(container, "copy me");
+    const sel = (currentSelection = makeSelection(container, "copy me"));
     selectionchange();
 
     fire(btn, "mousedown"); // on the button itself: must not dismiss
@@ -188,7 +187,7 @@ describe("copy button dismissal after clicking it (#377)", () => {
   it("dismisses honestly when the clipboard write is refused, keeping the selection", async () => {
     stubClipboard(false);
     const { container, btn } = setup();
-    const sel = currentSelection = makeSelection(container, "copy me");
+    const sel = (currentSelection = makeSelection(container, "copy me"));
     selectionchange();
 
     btn.click();
@@ -211,7 +210,7 @@ describe("copy button dismissal after clicking it (#377)", () => {
   it("does not let the stale confirmation timer clobber a newer selection", async () => {
     stubClipboard(true);
     const { container, btn } = setup();
-    const first = currentSelection = makeSelection(container, "first");
+    const first = (currentSelection = makeSelection(container, "first"));
     selectionchange();
     btn.click();
     await vi.advanceTimersByTimeAsync(0);
@@ -253,9 +252,7 @@ describe("copy button dismissal after clicking it (#377)", () => {
 
   it("does not suppress a re-selected identical range when a slow copy fails", async () => {
     let reject: (e: Error) => void = () => {};
-    const writeText = vi.fn().mockImplementation(
-      () => new Promise((_res, rej) => (reject = rej)),
-    );
+    const writeText = vi.fn().mockImplementation(() => new Promise((_res, rej) => (reject = rej)));
     Object.defineProperty(globalThis.navigator, "clipboard", {
       value: { writeText },
       configurable: true,

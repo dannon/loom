@@ -25,6 +25,7 @@ import {
   type InvocationYaml,
   type InvocationPollUpdate,
 } from "./notebook-writer";
+import { isTerminalJobState, upsertJobBlock, type JobYaml } from "./galaxy-job-block";
 import { getGalaxyConfig, galaxyGet, type GalaxyInvocationResponse } from "./galaxy-api";
 import { listEnabledSkillRepos, findSkillRepo } from "./skills";
 import { fetchSkillFile, githubRawBase } from "./skills-discovery";
@@ -525,10 +526,98 @@ Writes a fenced \`loom-invocation\` YAML block at the end of the notebook. Polli
     },
     renderResult: (result) => {
       const d = result.details as
-        | { invocationId?: string; notebookAnchor?: string; error?: boolean }
-        | undefined;
+        { invocationId?: string; notebookAnchor?: string; error?: boolean } | undefined;
       if (d?.error) return new Text("❌ Failed to record invocation");
       return new Text(`🔗 Invocation ${d?.invocationId} → ${d?.notebookAnchor}`);
+    },
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Tool: Record a Galaxy tool run (job) in the notebook
+  // ─────────────────────────────────────────────────────────────────────────────
+  pi.registerTool({
+    name: "galaxy_job_record",
+    label: "Record Galaxy Job",
+    description: `Record a Galaxy TOOL run in the project notebook so its progress is tracked in
+the background. Call right after submitting a tool via Galaxy MCP (galaxy_run_tool), the same way
+galaxy_invocation_record is called after invoking a workflow. Without this the run is invisible to
+the background poller: nothing advances its status and nothing notifies anyone when it finishes.
+Writes a fenced \`loom-job\` YAML block; the poller updates it in place.`,
+    parameters: Type.Object({
+      jobId: Type.String({ description: "Galaxy job ID returned from galaxy_run_tool" }),
+      notebookAnchor: Type.String({
+        description: "Stable anchor where this run lives, e.g. 'plan-1-step-3'",
+      }),
+      label: Type.String({
+        description: "Human-readable description for status display, e.g. 'BWA alignment'",
+      }),
+      toolId: Type.Optional(
+        Type.String({ description: "Galaxy tool id, e.g. 'bwa_mem' — shown if no label fits" }),
+      ),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      const notebookPath = getNotebookPath();
+      if (!notebookPath) {
+        return {
+          content: [
+            { type: "text", text: JSON.stringify({ success: false, error: "No notebook open." }) },
+          ],
+          details: { error: true } as Record<string, unknown>,
+        };
+      }
+
+      const cfg = getGalaxyConfig();
+      try {
+        const job: JobYaml = {
+          jobId: params.jobId,
+          galaxyServerUrl: cfg?.url || "",
+          notebookAnchor: params.notebookAnchor,
+          label: params.label,
+          toolId: params.toolId,
+          submittedAt: new Date().toISOString(),
+          status: "in_progress",
+        };
+        await withNotebookLock(notebookPath, async () => {
+          const content = await readNotebook(notebookPath);
+          await writeNotebook(notebookPath, upsertJobBlock(content, job));
+        });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  success: true,
+                  jobId: job.jobId,
+                  notebookAnchor: job.notebookAnchor,
+                  label: job.label,
+                  status: job.status,
+                  message: `Recorded job ${job.jobId} (${job.label}) at ${job.notebookAnchor}. The background poller will advance it and notify on completion.`,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          details: { jobId: job.jobId, notebookAnchor: job.notebookAnchor } as Record<
+            string,
+            unknown
+          >,
+        };
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: msg }) }],
+          details: { error: true } as Record<string, unknown>,
+        };
+      }
+    },
+    renderResult: (result) => {
+      const d = result.details as
+        { jobId?: string; notebookAnchor?: string; error?: boolean } | undefined;
+      if (d?.error) return new Text("❌ Failed to record job");
+      return new Text(`🔗 Job ${d?.jobId} → ${d?.notebookAnchor}`);
     },
   });
 
@@ -539,8 +628,10 @@ Writes a fenced \`loom-invocation\` YAML block at the end of the notebook. Polli
     name: "galaxy_invocation_check_all",
     label: "Check All Galaxy Invocations",
     description: `Scan the notebook for in-flight loom-invocation blocks, poll Galaxy for each,
-and apply deterministic state transitions (all-jobs-ok → completed, any-error → failed,
-otherwise still in_progress). Updates the YAML blocks in place. Returns a summary list.`,
+and apply deterministic state transitions: an invocation Galaxy has finished scheduling whose
+jobs have all stopped becomes completed (or failed, if any errored); anything still scheduling,
+running, queued or paused stays in_progress. Updates the YAML blocks in place. Returns a summary
+list.`,
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, signal, _onUpdate, _ctx) {
       return await checkInvocations(undefined, signal);
@@ -583,8 +674,109 @@ interface CheckResultEntry {
   notebookAnchor: string;
   label: string;
   invocationState: string;
+  /** The block's status before this poll, so a transition can name both ends. */
+  priorStatus: InvocationYaml["status"];
   jobSummary: { ok: number; running: number; queued: number; error: number; other: number };
+  /** The raw Galaxy states behind `jobSummary.other`, counted, so they can be named. */
+  otherStates: Record<string, number>;
+  /** Jobs Galaxy could still advance: running + queued + the non-terminal half of `other`. */
+  activeJobs: number;
+  /** The status this poll wrote, when it wrote one. Absent on a no-op poll. */
+  newStatus?: InvocationYaml["status"];
+  lastPolledAt?: string;
   autoAction?: string;
+}
+
+/**
+ * Invocation states in which Galaxy has stopped scheduling steps
+ * (`WorkflowInvocation.states`). Anything else -- `new`, `ready`, `cancelling`,
+ * and whatever Galaxy adds next -- means more jobs may still appear, so the
+ * jobs materialized so far cannot be the whole story.
+ *
+ * Listing the terminal states rather than the transient ones is the same safe
+ * default the job-state table uses: an unrecognised state keeps us watching
+ * instead of declaring an outcome we can't name.
+ */
+const TERMINAL_INVOCATION_STATES: ReadonlySet<string> = new Set([
+  "scheduled",
+  "cancelled",
+  "failed",
+]);
+
+/** Galaxy job states that mean "this job failed", as opposed to ended some other way. */
+const FAILED_JOB_STATES: ReadonlySet<string> = new Set(["error", "failed", "deleted"]);
+
+/** "1 paused, 2 skipped" — for naming the states hiding behind `other`. */
+function describeStates(counts: Record<string, number>): string {
+  return Object.entries(counts)
+    .map(([state, n]) => `${n} ${state}`)
+    .join(", ");
+}
+
+/** What one invocation's jobs add up to. */
+export interface InvocationJobRollup {
+  summary: { ok: number; running: number; queued: number; error: number; other: number };
+  /** The raw Galaxy states behind `summary.other`, counted. */
+  otherStates: Record<string, number>;
+  /** Jobs Galaxy could still advance: running + queued + the non-terminal half of `other`. */
+  activeJobs: number;
+  totalJobs: number;
+  completedSteps: number;
+}
+
+/** Count an invocation's jobs by state, keeping what `other` is actually made of. */
+export function rollUpInvocationJobs(inv: GalaxyInvocationResponse): InvocationJobRollup {
+  const summary = { ok: 0, running: 0, queued: 0, error: 0, other: 0 };
+  // What is actually behind `other`, counted by state. The rollup can't tell a
+  // paused job (Galaxy will run it) from a skipped one (a conditional step that
+  // never will), and both used to be ignored outright.
+  const otherStates: Record<string, number> = {};
+  let activeOther = 0;
+  let totalJobs = 0;
+  let completedSteps = 0;
+  for (const invStep of inv.steps) {
+    let stepJobs = 0;
+    let stepOk = 0;
+    for (const job of invStep.jobs) {
+      stepJobs++;
+      totalJobs++;
+      if (job.state === "ok") {
+        summary.ok++;
+        stepOk++;
+      } else if (job.state === "running") summary.running++;
+      else if (job.state === "queued" || job.state === "new" || job.state === "waiting")
+        summary.queued++;
+      else if (FAILED_JOB_STATES.has(job.state)) summary.error++;
+      else {
+        summary.other++;
+        const state = job.state || "unknown";
+        otherStates[state] = (otherStates[state] ?? 0) + 1;
+        // `skipped` and `stopped` are over; `paused`, `upload`,
+        // `setting_metadata`, `deleting` and friends are not.
+        if (!isTerminalJobState(job.state)) activeOther++;
+      }
+    }
+    if (stepJobs > 0 && stepJobs === stepOk) completedSteps++;
+  }
+  return {
+    summary,
+    otherStates,
+    activeJobs: summary.running + summary.queued + activeOther,
+    totalJobs,
+    completedSteps,
+  };
+}
+
+/**
+ * True while Galaxy could still advance this invocation — either it hasn't
+ * finished scheduling, or a job it already scheduled is still moving.
+ *
+ * The poller asks this about an invocation whose notebook block has vanished:
+ * a live run nobody is watching is worth saying out loud, a finished one isn't.
+ */
+export function isInvocationLive(inv: GalaxyInvocationResponse): boolean {
+  if (!TERMINAL_INVOCATION_STATES.has(inv.state)) return true;
+  return rollUpInvocationJobs(inv).activeJobs > 0;
 }
 
 interface CheckInvocationsResult {
@@ -687,42 +879,66 @@ export async function checkInvocations(
         signal,
       );
 
-      const summary = { ok: 0, running: 0, queued: 0, error: 0, other: 0 };
-      let totalJobs = 0;
-      let completedSteps = 0;
-      for (const invStep of inv.steps) {
-        let stepJobs = 0;
-        let stepOk = 0;
-        for (const job of invStep.jobs) {
-          stepJobs++;
-          totalJobs++;
-          if (job.state === "ok") {
-            summary.ok++;
-            stepOk++;
-          } else if (job.state === "running") summary.running++;
-          else if (job.state === "queued" || job.state === "new" || job.state === "waiting")
-            summary.queued++;
-          else if (job.state === "error" || job.state === "deleted") summary.error++;
-          else summary.other++;
-        }
-        if (stepJobs > 0 && stepJobs === stepOk) completedSteps++;
-      }
+      const { summary, otherStates, activeJobs, totalJobs, completedSteps } =
+        rollUpInvocationJobs(inv);
 
       let autoAction: string | undefined;
       let transition: InvocationPollUpdate["transition"];
 
-      if (summary.error === 0 && summary.running === 0 && summary.queued === 0 && summary.ok > 0) {
-        transition = {
-          status: "completed",
-          summary: `Workflow completed: ${summary.ok} jobs succeeded`,
-        };
-        autoAction = "completed";
+      // Two questions, both of which the old predicate skipped: is Galaxy done
+      // handing out jobs, and is any job it already handed out still moving? A
+      // workflow whose first two steps are ok while the third is still being
+      // scheduled is not finished, and neither is one holding a paused job.
+      const schedulingDone = TERMINAL_INVOCATION_STATES.has(inv.state);
+
+      if (schedulingDone && activeJobs === 0) {
+        const ended = describeStates(otherStates);
+        if (inv.state === "cancelled") {
+          // A cancel is not a failure and not a completion, and the block has
+          // no third word for it -- so it lands terminal (nothing is coming
+          // that would move it again) and the summary says what happened.
+          const unfinished = summary.error > 0 ? `, ${summary.error} did not` : "";
+          transition = {
+            status: "failed",
+            summary: `Workflow cancelled: ${summary.ok} job(s) finished before it stopped${unfinished}`,
+          };
+          autoAction = "cancelled";
+        } else if (summary.error > 0) {
+          transition = {
+            status: "failed",
+            summary: `Workflow failed: ${summary.error} job(s) errored, ${summary.ok} succeeded`,
+          };
+          autoAction = "failed";
+        } else if (inv.state === "failed") {
+          // Galaxy failed to schedule the workflow. No job carries the failure,
+          // so without this the block sits at in_progress with nothing left to
+          // poll it into a terminal state.
+          transition = {
+            status: "failed",
+            summary: `Workflow failed: Galaxy reported invocation state "failed"`,
+          };
+          autoAction = "failed";
+        } else if (summary.ok > 0 && inv.state === "scheduled") {
+          transition = {
+            status: "completed",
+            summary:
+              `Workflow completed: ${summary.ok} jobs succeeded` + (ended ? ` (${ended})` : ""),
+          };
+          autoAction = "completed";
+        }
       } else if (summary.error > 0) {
+        // A failure with work still in flight. Keep the block in_progress so the
+        // rest stays under observation -- terminal blocks are never polled again
+        // -- but say so in the summary and let the poller raise it once.
+        const tail =
+          activeJobs > 0
+            ? `${activeJobs} still running`
+            : `invocation still scheduling (state: ${inv.state})`;
         transition = {
-          status: "failed",
-          summary: `Workflow failed: ${summary.error} job(s) errored, ${summary.ok} succeeded`,
+          status: "in_progress",
+          summary: `Workflow in progress: ${summary.error} job(s) failed, ${tail}`,
         };
-        autoAction = "failed";
+        autoAction = "failing";
       }
 
       // Always update the block — even if the rolled-up status didn't
@@ -730,6 +946,7 @@ export async function checkInvocations(
       // renderer wants those for the live progress bar. Status and summary
       // ride along only on a transition, so a no-op poll can't overwrite an
       // edit the agent made to the block while we were talking to Galaxy.
+      const lastPolledAt = new Date().toISOString();
       updates.push({
         invocationId: block.invocationId,
         totalSteps: inv.steps.length,
@@ -737,7 +954,7 @@ export async function checkInvocations(
         totalJobs,
         completedJobs: summary.ok,
         failedJobs: summary.error,
-        lastPolledAt: new Date().toISOString(),
+        lastPolledAt,
         transition,
       });
 
@@ -746,7 +963,12 @@ export async function checkInvocations(
         notebookAnchor: block.notebookAnchor,
         label: block.label,
         invocationState: inv.state,
+        priorStatus: block.status,
         jobSummary: summary,
+        otherStates,
+        activeJobs,
+        newStatus: transition?.status,
+        lastPolledAt,
         autoAction,
       });
     } catch (error) {
@@ -756,7 +978,10 @@ export async function checkInvocations(
         notebookAnchor: block.notebookAnchor,
         label: block.label,
         invocationState: "error_checking",
+        priorStatus: block.status,
         jobSummary: { ok: 0, running: 0, queued: 0, error: 0, other: 0 },
+        otherStates: {},
+        activeJobs: 0,
         autoAction: `check_error: ${msg}`,
       });
     }
@@ -770,16 +995,26 @@ export async function checkInvocations(
   // rename fails the stamp check and is retried against fresh content rather
   // than silently overwriting it.
   if (updates.length > 0) {
-    const transitioned = await withNotebookLock(notebookPath, () =>
+    const { applied, transitioned } = await withNotebookLock(notebookPath, () =>
       persistInvocationUpdates(notebookPath, updates),
     );
     // A transition we didn't actually record isn't news. The poller turns
     // "completed"/"failed" straight into a user-facing toast, so leaving the
     // flag on a block that was deleted mid-poll — or that another poller had
     // already advanced — would announce a state change nothing wrote.
+    //
+    // "failing" never changes the status, so it can't be checked against the
+    // transitions; it's news as long as the counters and summary carrying it
+    // landed somewhere.
     for (const entry of results) {
-      const announced = entry.autoAction === "completed" || entry.autoAction === "failed";
+      const announced =
+        entry.autoAction === "completed" ||
+        entry.autoAction === "failed" ||
+        entry.autoAction === "cancelled";
       if (announced && !transitioned.has(entry.invocationId)) entry.autoAction = undefined;
+      if (entry.autoAction === "failing" && !applied.has(entry.invocationId)) {
+        entry.autoAction = undefined;
+      }
     }
   }
 
@@ -806,7 +1041,7 @@ const MAX_PERSIST_ATTEMPTS = 3;
 /**
  * Read -> fold in the polled blocks -> write, retrying against fresh content if
  * the notebook changed under us. Call with the notebook lock held. Returns the
- * invocation ids whose status this call actually changed on disk.
+ * invocation ids this call wrote, and separately those whose status it changed.
  *
  * The stamp is taken *before* the read on purpose. Stamping afterwards would
  * let a write that landed between the read and the stat look unchanged — the
@@ -816,7 +1051,7 @@ const MAX_PERSIST_ATTEMPTS = 3;
 async function persistInvocationUpdates(
   notebookPath: string,
   updates: InvocationPollUpdate[],
-): Promise<Set<string>> {
+): Promise<{ applied: Set<string>; transitioned: Set<string> }> {
   let lastError: unknown;
   for (let attempt = 0; attempt < MAX_PERSIST_ATTEMPTS; attempt++) {
     const stamp = await statNotebook(notebookPath);
@@ -834,10 +1069,10 @@ async function persistInvocationUpdates(
     const { content, applied, transitioned } = applyInvocationUpdates(fresh, updates);
     // Every block was deleted or already has a newer poll on disk — nothing to
     // write, so don't rewrite the file (and don't risk a race) for no change.
-    if (applied.length === 0) return new Set();
+    if (applied.length === 0) return { applied: new Set(), transitioned: new Set() };
     try {
       await writeNotebook(notebookPath, content, stamp);
-      return new Set(transitioned);
+      return { applied: new Set(applied), transitioned: new Set(transitioned) };
     } catch (error) {
       if (!(error instanceof NotebookChangedError)) throw error;
       lastError = error;

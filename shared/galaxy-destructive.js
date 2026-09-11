@@ -127,8 +127,7 @@ export function describeGalaxyDestructive(op) {
       return { headline: `Permanently PURGE ${target} -- this cannot be undone.` };
     }
     return {
-      headline:
-        `Mark ${target} as deleted. Recoverable via Undelete on most Galaxy servers.`,
+      headline: `Mark ${target} as deleted. Recoverable via Undelete on most Galaxy servers.`,
     };
   }
   if (op.irreversible) {
@@ -218,7 +217,9 @@ export function isGalaxyDestructiveCurl(command) {
 
   // A single dataset: in-history contents (legacy /contents/{id} or typed
   // /contents/datasets/{id}) or the top-level singleton/batch /api/datasets[/{id}] routes.
-  const inHistory = cmd.match(/\/api\/histories\/[^/\s"'?]+\/contents\/(?:datasets\/)?([^/\s"'?]+)/);
+  const inHistory = cmd.match(
+    /\/api\/histories\/[^/\s"'?]+\/contents\/(?:datasets\/)?([^/\s"'?]+)/,
+  );
   const singleton = inHistory ? null : cmd.match(/\/api\/datasets\/([^/\s"'?]+)/);
   const batch = inHistory || singleton ? false : /\/api\/datasets(?=[?\s"']|$)/.test(cmd);
   if (inHistory || singleton || batch) {

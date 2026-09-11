@@ -83,9 +83,28 @@ describe("sendStartupGreeting (dispatch)", () => {
     process.env.GALAXY_URL = "https://x.galaxyproject.org";
     process.env.GALAXY_API_KEY = "injected-by-orbit";
     const { pi, ctx } = fakes();
-    sendStartupGreeting(pi as never, ctx as never);
+    // uvx presence is an independent axis -- pin it so the suite doesn't depend
+    // on whether the machine running it happens to have uv installed.
+    sendStartupGreeting(pi as never, ctx as never, true);
     expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
     expect(ctx.ui.notify).not.toHaveBeenCalled();
+  });
+
+  it("usable but no uvx -> warning notify AND the model turn", () => {
+    writeConfig({
+      active: "default",
+      profiles: { default: { url: "https://x.galaxyproject.org", apiKeyEncrypted: "ZW5j" } },
+    });
+    process.env.GALAXY_URL = "https://x.galaxyproject.org";
+    process.env.GALAXY_API_KEY = "injected-by-orbit";
+    const { pi, ctx } = fakes();
+    sendStartupGreeting(pi as never, ctx as never, false);
+    // Both, not either: the warning explains why Galaxy tools will fail, and the
+    // greeting still runs because credentials are fine.
+    expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+    expect(ctx.ui.notify.mock.calls[0][1]).toBe("warning");
+    expect(ctx.ui.notify.mock.calls[0][0]).toContain("uvx");
+    expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
   });
 
   it("encrypted-only profile, no env -> warning notify, no model turn", () => {

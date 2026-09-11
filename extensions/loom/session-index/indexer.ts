@@ -81,8 +81,7 @@ export function scanSessions(db: Db, sessionsDir: string = defaultSessionsDir())
 
   const indexOne = db.transaction((filePath: string) => {
     const prior = selState.get(filePath) as
-      | { session_id: string; last_indexed_offset: number }
-      | undefined;
+      { session_id: string; last_indexed_offset: number } | undefined;
     const startOffset = prior?.last_indexed_offset ?? 0;
     const fileSize = fs.statSync(filePath).size;
     if (prior && startOffset >= fileSize) return;

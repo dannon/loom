@@ -15,9 +15,19 @@ import { refreshGalaxyHistory } from "./galaxy-history.js";
 import { formatGalaxyTooltip } from "./galaxy-tooltip.js";
 import { PromptQueue, queuedPreview } from "./prompt-queue.js";
 import { FeedbackDraftStore } from "./feedback-draft.js";
+import {
+  ProviderFieldStore,
+  captureProviderState,
+  providerStateFor,
+  snapshotProviderState,
+  type ProviderFields,
+  type ProviderState,
+} from "./provider-state.js";
 import { applyOrbitTheme } from "./theme.js";
 import { caretVisualLineFlags, shouldRecallOnArrow } from "./input-history-nav.js";
 import { shouldAcceptSlashCommandOnEnter } from "./slash-popup-nav.js";
+import { buildDiscoveredModelOptions, type ModelOption } from "./model-options.js";
+import { planModelDiscovery } from "./model-discovery-gate.js";
 import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
 import { ALLOWED_SKILLS_PREFIX, isAllowedSkillUrl } from "../../../shared/loom-config.js";
 import {
@@ -26,8 +36,13 @@ import {
   capFeedbackPayload,
 } from "../../../shared/feedback-contract.js";
 import type { FeedbackPayload, FeedbackSysinfo } from "../../../shared/feedback-contract.js";
+import { toFeedbackSysinfo } from "./feedback-sysinfo.js";
+import type { FeedbackConfigView } from "./feedback-sysinfo.js";
 import changelogRaw from "../../../CHANGELOG.md?raw";
 import { parseChangelog, decideWhatsNew, releaseUrlFor } from "../../../shared/whats-new.js";
+import { isOAuthOnly, SEED_PROVIDER_AUTH_CAPS } from "../../../shared/provider-auth-caps.js";
+import type { ProviderAuthCaps } from "../../../shared/provider-auth-caps.js";
+import { splitApprovalPrompt } from "../../../shared/approval-prompt.js";
 import { openReleaseWithFallback, clearReleaseFallback } from "./update-banner.js";
 
 declare global {
@@ -135,6 +150,11 @@ let streaming = false;
 let PRICING: Record<string, { in: number; out: number; cacheRead?: number; cacheWrite?: number }> =
   {
     // Anthropic
+    "claude-fable-5": { in: 10, out: 50, cacheRead: 1, cacheWrite: 12.5 },
+    "claude-opus-5": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+    // Sonnet 5 is at introductory pricing; the registry is the source of truth
+    // if that lapses.
+    "claude-sonnet-5": { in: 2, out: 10, cacheRead: 0.2, cacheWrite: 2.5 },
     "claude-opus-4-8": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
     "claude-opus-4-7": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
     "claude-opus-4-6": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
@@ -167,6 +187,9 @@ let PRICING: Record<string, { in: number; out: number; cacheRead?: number; cache
 // under-report on those paths. Documented; not special-cased.
 let CONTEXT_WINDOWS: Record<string, Record<string, number>> = {
   anthropic: {
+    "claude-fable-5": 1_000_000,
+    "claude-opus-5": 1_000_000,
+    "claude-sonnet-5": 1_000_000,
     "claude-opus-4-8": 1_000_000,
     "claude-opus-4-7": 1_000_000,
     "claude-opus-4-6": 1_000_000,
@@ -370,6 +393,23 @@ function contextWindowFor(provider: string | null, model: string | null): number
   return best;
 }
 
+/**
+ * The same lookup as contextWindowFor, minus the cross-provider fallback --
+ * null unless the ACTIVE provider's own table knows this model.
+ *
+ * The fallback above prefers the smallest match, which is the safe bias for a
+ * warning bar (warn early) but the wrong one for telling a user their model is
+ * too small to run Orbit at all (#419): a custom OpenAI-compatible endpoint
+ * serving its own large-window "gpt-4" would inherit OpenAI's 8,192 and be
+ * declared unusable. Only a provider-qualified hit is trustworthy enough to
+ * make that claim; anything else leaves the humanizer on its default advice.
+ */
+function knownContextWindowFor(provider: string | null, model: string | null): number | null {
+  if (!provider || !model) return null;
+  const table = CONTEXT_WINDOWS[provider];
+  return table ? windowFromTable(table, model) : null;
+}
+
 // Context-fill indicator: shows how full the current model's context window is,
 // so the user sees an impending overflow before it happens. The numerator is
 // the LATEST turn's request size (contextTokens), NOT cumulative sessionUsage.
@@ -404,7 +444,7 @@ function shortModelLabel(model: string): string {
   // Strip date suffix (claude-opus-4-6-20250514 → claude-opus-4-6)
   const id = model.replace(/-\d{8}$/, "");
   // Anthropic
-  const cm = id.match(/^claude-(opus|sonnet|haiku)-(\d+(?:-\d+)?)/);
+  const cm = id.match(/^claude-(opus|sonnet|haiku|fable)-(\d+(?:-\d+)?)/);
   if (cm) {
     const family = cm[1].charAt(0).toUpperCase() + cm[1].slice(1);
     const ver = cm[2].replace(/-/g, ".");
@@ -445,10 +485,12 @@ modelIndicatorEl.addEventListener("click", () => {
 const ARTIFACT_COLLAPSED_KEY = "orbit.artifactCollapsed";
 const exportChatBtn = document.getElementById("export-chat-btn")!;
 const artifactToggleBtn = document.getElementById("artifact-toggle")!;
+const chatPane = document.getElementById("chat-pane")!;
 
 // Apply visual state without persisting; used by responsive auto-collapse.
 function applyArtifactCollapsed(collapsed: boolean): void {
   document.body.classList.toggle("artifact-collapsed", collapsed);
+  if (collapsed) chatPane.style.flex = "";
 }
 // User-initiated toggle; persists to localStorage.
 function setArtifactCollapsed(collapsed: boolean): void {
@@ -754,6 +796,7 @@ const JETSTREAM_MODELS = ["gpt-oss-120b", "llama-4-scout"];
 const welcomeApiKeyHintRow = document.getElementById("welcome-api-key-hint-row")!;
 const welcomeOauthRow = document.getElementById("welcome-oauth-row")!;
 const welcomeOauthHintRow = document.getElementById("welcome-oauth-hint-row")!;
+const welcomeOauthHintText = document.getElementById("welcome-oauth-hint-text")!;
 const welcomeOauthStatus = document.getElementById("welcome-oauth-status")!;
 const welcomeOauthSignIn = document.getElementById("welcome-oauth-signin") as HTMLButtonElement;
 const welcomeGalaxyUrl = document.getElementById("welcome-galaxy-url") as HTMLInputElement;
@@ -763,11 +806,67 @@ const welcomeBrowseCwd = document.getElementById("welcome-browse-cwd")!;
 const welcomeSave = document.getElementById("welcome-save")!;
 const welcomeError = document.getElementById("welcome-error")!;
 
-/** Provider IDs that authenticate via OAuth rather than an API key. */
-const OAUTH_PROVIDERS = new Set<string>(["openai-codex"]);
-function isOAuthProvider(provider: string): boolean {
-  return OAUTH_PROVIDERS.has(provider);
+/**
+ * Provider IDs that offer a sign-in flow, keyed to their auth capabilities.
+ * Populated from the main process at startup; the shared seed keeps the first
+ * paint correct for the provider that ships enabled if that call hasn't landed
+ * yet. The sign-in-only predicate is imported rather than reimplemented here --
+ * #429 was the renderer and the main process disagreeing about it.
+ */
+let OAUTH_PROVIDERS: Record<string, ProviderAuthCaps> = { ...SEED_PROVIDER_AUTH_CAPS };
+/** Does this provider offer a sign-in flow? True for dual-auth providers too. */
+function providerOffersSignIn(provider: string): boolean {
+  return provider in OAUTH_PROVIDERS;
 }
+/**
+ * Sign-in is the ONLY way in for this provider, so there is no API key to ask
+ * for. Dual-auth providers (anthropic, xai, ...) answer false and keep their
+ * key field -- conflating the two is what hid Anthropic's key in #429.
+ */
+function isOAuthOnlyProvider(provider: string): boolean {
+  return isOAuthOnly(OAUTH_PROVIDERS[provider]);
+}
+/** Button text for a provider's sign-in, e.g. "Sign in with GitHub Copilot". */
+function oauthSignInLabel(provider: string, signedIn: boolean): string {
+  if (signedIn) return "Sign in again";
+  const caps = OAUTH_PROVIDERS[provider];
+  if (caps?.signInLabel) return caps.signInLabel;
+  return caps?.providerLabel ? `Sign in with ${caps.providerLabel}` : "Sign in";
+}
+
+/** The account a sign-in gets you, for prose. Falls back to the bare id. */
+function oauthAccountLabel(provider: string): string {
+  return OAUTH_PROVIDERS[provider]?.providerLabel || provider;
+}
+
+/**
+ * These hint rows show for every sign-in-capable provider now, so the copy has
+ * to follow the provider -- the markup used to hardcode OpenAI's plan list, and
+ * an Anthropic user reading about ChatGPT was the other half of #429. Only
+ * providers whose requirements are worth spelling out get their own line; the
+ * rest are described by pi's own name for the account.
+ */
+const OAUTH_HINTS: Record<string, string> = {
+  "openai-codex":
+    "Opens your browser to OpenAI. Requires a ChatGPT Plus, Pro, Business, Edu, or Enterprise subscription.",
+};
+function oauthHintText(provider: string): string {
+  const specific = OAUTH_HINTS[provider];
+  const opener = specific || `Opens your browser to sign in with ${oauthAccountLabel(provider)}.`;
+  return `${opener} Token refresh is handled automatically.`;
+}
+// Never rejects: three UI paths await this (welcome overlay, welcome auth rows,
+// Preferences auth rows), so letting an IPC failure through would leave a fresh
+// install with no welcome screen at all. Falling back to the seed is the whole
+// point of having one.
+const oauthProvidersReady = window.orbit
+  .oauthProviders()
+  .then((p) => {
+    if (p && Object.keys(p).length > 0) OAUTH_PROVIDERS = p;
+  })
+  .catch((err) => {
+    console.error("[oauth] could not read the provider map; using the seed:", err);
+  });
 
 function formatOAuthStatus(s: {
   signedIn: boolean;
@@ -786,6 +885,18 @@ function formatOAuthStatus(s: {
   return who;
 }
 
+/** Replace a model <select>'s options. */
+function renderModelOptions(el: HTMLSelectElement, options: ModelOption[]): void {
+  el.innerHTML = "";
+  for (const o of options) {
+    const opt = document.createElement("option");
+    opt.value = o.id;
+    opt.textContent = o.label;
+    if (o.selected) opt.selected = true;
+    el.appendChild(opt);
+  }
+}
+
 // Wire a provider-dropdown / API-key-input / status-label triple to do
 // debounced live validation (see main/ipc-handlers.ts validateApiKey).
 // Same helper used from both the Welcome screen and Preferences.
@@ -795,6 +906,7 @@ function wireApiKeyValidation(
   statusEl: HTMLElement,
   baseUrlEl?: HTMLInputElement,
   modelEl?: HTMLSelectElement,
+  onModels?: (provider: string, models: string[]) => void,
 ): void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let seq = 0;
@@ -814,27 +926,27 @@ function wireApiKeyValidation(
     setStatus("checking", "Checking…");
     try {
       const res = await window.orbit.validateApiKey(provider, key, baseUrl);
-      if (mySeq !== seq) return;
+      // The provider dropdown's own change fires this on a 600ms debounce, so
+      // a reply that outlived a provider switch would otherwise paint one
+      // provider's models into another's picker.
+      if (mySeq !== seq || providerEl.value !== provider) return;
       if (res.valid) {
         setStatus("valid", "\u2713 Valid");
         if (modelEl && res.models && res.models.length > 0) {
-          const selected = modelEl.value;
-          modelEl.innerHTML = "";
-          for (const id of res.models) {
-            const opt = document.createElement("option");
-            opt.value = id;
-            opt.textContent = id;
-            if (id === selected) opt.selected = true;
-            modelEl.appendChild(opt);
-          }
+          renderModelOptions(modelEl, buildDiscoveredModelOptions(res.models, modelEl.value));
+          onModels?.(provider, res.models);
         }
       } else setStatus("invalid", `\u2717 ${res.error || "Invalid"}`);
     } catch (err) {
-      if (mySeq !== seq) return;
+      if (mySeq !== seq || providerEl.value !== provider) return;
       setStatus("invalid", `\u2717 ${err instanceof Error ? err.message : String(err)}`);
     }
   };
   const schedule = () => {
+    // Retire any in-flight request here rather than in validateNow: the
+    // debounce means a reply about the *previous* key or provider would
+    // otherwise have 600ms to land and repaint the picker.
+    seq++;
     if (timer) clearTimeout(timer);
     timer = setTimeout(validateNow, 600);
   };
@@ -843,18 +955,64 @@ function wireApiKeyValidation(
   baseUrlEl?.addEventListener("input", schedule);
 }
 
-function populateWelcomeModels(provider: string): void {
+function populateWelcomeModels(provider: string, selected?: string): void {
   welcomeModel.innerHTML = "";
   const models = MODELS_BY_PROVIDER[provider] || [];
   for (const m of models) {
     const opt = document.createElement("option");
     opt.value = m.id;
     opt.textContent = m.label;
+    if (selected && m.id === selected) opt.selected = true;
+    welcomeModel.appendChild(opt);
+  }
+  // A model the catalog doesn't carry (custom endpoint, Jetstream preset) still
+  // has to survive a trip through another provider and back.
+  if (selected && !models.some((m) => m.id === selected)) {
+    const opt = document.createElement("option");
+    opt.value = selected;
+    opt.textContent = `${selected} (custom)`;
+    opt.selected = true;
     welcomeModel.appendChild(opt);
   }
 }
+
+// Per-provider field state, same idea as Preferences: the overlay shows one set
+// of inputs, so switching the dropdown has to stash the old provider's fields
+// and restore the new one's. Without it the key typed for provider A stayed in
+// the input and got saved as provider B's credential (#401).
+const welcomeProviders = new ProviderFieldStore(welcomeProvider.value);
+
+function readWelcomeFields(): ProviderFields {
+  return {
+    typedKey: welcomeApiKey.value,
+    model: welcomeModel.value,
+    baseUrl: welcomeBaseUrl.value,
+  };
+}
+
+function showWelcomeFields(provider: string, state: ProviderState): void {
+  populateWelcomeModels(provider, state.model || undefined);
+  welcomeApiKey.value = state.typedKey;
+  welcomeBaseUrl.value = state.baseUrl;
+  // The validation verdict belongs to the key that just left the field.
+  welcomeApiKeyStatus.className = "api-key-status";
+  welcomeApiKeyStatus.textContent = "";
+}
+
+/** Point the overlay at `provider`, stashing whatever is on screen first. */
+function selectWelcomeProvider(provider: string): void {
+  showWelcomeFields(provider, welcomeProviders.select(provider, readWelcomeFields()));
+}
+
+/** Wipe the typed keys once they've been handed off (or abandoned). */
+function forgetWelcomeKeys(): void {
+  welcomeProviders.clear();
+  welcomeApiKey.value = "";
+  welcomeBaseUrl.value = "";
+}
+
 welcomeProvider.addEventListener("change", () => {
-  populateWelcomeModels(welcomeProvider.value);
+  selectWelcomeProvider(welcomeProvider.value);
   void updateWelcomeAuthUi();
 });
 wireApiKeyValidation(
@@ -878,18 +1036,21 @@ welcomeJetstreamPreset.addEventListener("click", () => {
 });
 
 async function updateWelcomeAuthUi(): Promise<void> {
-  const oauth = isOAuthProvider(welcomeProvider.value);
+  await oauthProvidersReady;
+  const signIn = providerOffersSignIn(welcomeProvider.value);
+  const oauthOnly = isOAuthOnlyProvider(welcomeProvider.value);
   const custom = welcomeProvider.value === "openai-compatible";
   welcomeBaseUrlRow.classList.toggle("hidden", !custom);
-  welcomeApiKeyRow.classList.toggle("hidden", oauth);
-  welcomeApiKeyHintRow.classList.toggle("hidden", oauth);
-  welcomeOauthRow.classList.toggle("hidden", !oauth);
-  welcomeOauthHintRow.classList.toggle("hidden", !oauth);
-  if (oauth) {
+  welcomeApiKeyRow.classList.toggle("hidden", oauthOnly);
+  welcomeApiKeyHintRow.classList.toggle("hidden", oauthOnly);
+  welcomeOauthRow.classList.toggle("hidden", !signIn);
+  welcomeOauthHintRow.classList.toggle("hidden", !signIn);
+  if (signIn) {
+    welcomeOauthHintText.textContent = oauthHintText(welcomeProvider.value);
     const status = await window.orbit.oauthStatus(welcomeProvider.value);
     welcomeOauthStatus.textContent = formatOAuthStatus(status);
     welcomeOauthStatus.classList.toggle("signed-in", status.signedIn);
-    welcomeOauthSignIn.textContent = status.signedIn ? "Sign in again" : "Sign in with ChatGPT";
+    welcomeOauthSignIn.textContent = oauthSignInLabel(welcomeProvider.value, status.signedIn);
   }
 }
 
@@ -917,12 +1078,45 @@ welcomeBrowseCwd.addEventListener("click", async () => {
   if (dir) welcomeCwd.value = dir;
 });
 
+// Remote (web/GxIT) BYO-key entry: when the server reports no LLM key, reuse
+// this overlay to collect a provider key and hand it to the server
+// (provideLlmKey) instead of writing config.json, which remote mode rejects.
+let remoteKeyEntry = false;
+
 welcomeSave.addEventListener("click", async () => {
   welcomeError.textContent = "";
-  const oauth = isOAuthProvider(welcomeProvider.value);
+  if (remoteKeyEntry) {
+    const key = welcomeApiKey.value.trim();
+    if (!key) {
+      welcomeError.textContent = "API key is required";
+      return;
+    }
+    // Keep the overlay up if the server couldn't route the key anywhere --
+    // hiding it on a rejection stranded the user in front of a brain that never
+    // started, with no way back to the key prompt.
+    const res = (await window.orbit.provideLlmKey?.(welcomeProvider.value, key)) as
+      { ok?: boolean; error?: string } | undefined;
+    if (res && res.ok === false) {
+      welcomeError.textContent = res.error || "Could not start the agent with that key";
+      return;
+    }
+    forgetWelcomeKeys();
+    welcomeOverlay.classList.add("hidden");
+    await refreshGalaxyStatus();
+    return;
+  }
+  const signIn = providerOffersSignIn(welcomeProvider.value);
+  const oauthOnly = isOAuthOnlyProvider(welcomeProvider.value);
   const apiKey = welcomeApiKey.value.trim();
-  if (!oauth && !apiKey) {
-    welcomeError.textContent = "API key is required";
+  const signedIn = signIn
+    ? (await window.orbit.oauthStatus(welcomeProvider.value)).signedIn
+    : false;
+  // Dual-auth providers are satisfied by either credential, so only insist on a
+  // key when there is no sign-in to fall back on.
+  if (!oauthOnly && !apiKey && !signedIn) {
+    welcomeError.textContent = signIn
+      ? "Enter an API key, or sign in above."
+      : "API key is required";
     return;
   }
   const custom = welcomeProvider.value === "openai-compatible";
@@ -930,12 +1124,9 @@ welcomeSave.addEventListener("click", async () => {
     welcomeError.textContent = "Enter a base URL (or use the Jetstream preset).";
     return;
   }
-  if (oauth) {
-    const status = await window.orbit.oauthStatus(welcomeProvider.value);
-    if (!status.signedIn) {
-      welcomeError.textContent = "Sign in with ChatGPT before continuing.";
-      return;
-    }
+  if (oauthOnly && !signedIn) {
+    welcomeError.textContent = `${oauthSignInLabel(welcomeProvider.value, false)} before continuing.`;
+    return;
   }
 
   // Galaxy: both-or-neither. The Preferences modal enforces the same
@@ -949,18 +1140,22 @@ welcomeSave.addEventListener("click", async () => {
     return;
   }
 
-  // OAuth providers persist their credential in ~/.pi/agent/auth.json (written
-  // by the sign-in flow above), not in config.json. Skip writing apiKey for
-  // those so a leftover plaintext field doesn't shadow the real auth path.
-  const providerEntry: Record<string, unknown> = { model: welcomeModel.value || undefined };
-  if (!oauth) providerEntry.apiKey = apiKey;
-  if (welcomeBaseUrl.value.trim()) providerEntry.baseUrl = welcomeBaseUrl.value.trim();
+  // Persist every provider that got a key, each under its own name, with the
+  // selected one active -- so a key typed before switching the dropdown isn't
+  // lost (or, worse, saved as the wrong provider's). OAuth-only providers persist
+  // their credential in ~/.pi/agent/auth.json (written by the sign-in flow
+  // above), not in config.json, so no apiKey is written for those.
+  welcomeProviders.snapshot(readWelcomeFields());
   const cfg: Record<string, unknown> = {
     llm: {
       active: welcomeProvider.value,
-      providers: {
-        [welcomeProvider.value]: providerEntry,
-      },
+      providers: welcomeProviders.saveEntries({
+        isOAuthProvider: isOAuthOnlyProvider,
+        // Only the provider on screen gets the base-URL check above, so a
+        // custom endpoint the user stashed half-configured is dropped rather
+        // than written as an unreachable key.
+        requiresBaseUrl: (provider) => provider === "openai-compatible",
+      }),
     },
   };
 
@@ -974,7 +1169,15 @@ welcomeSave.addEventListener("click", async () => {
   const cwd = welcomeCwd.value.trim();
   if (cwd) cfg.defaultCwd = cwd;
 
-  await window.orbit.saveConfig(cfg);
+  // Keep the overlay (and the typed keys) if main rejected the config -- e.g.
+  // a Galaxy URL that fails validation. Dismissing here would drop every key
+  // the user entered without any of them having been persisted.
+  const result = await window.orbit.saveConfig(cfg);
+  if (!result.success) {
+    welcomeError.textContent = result.error || "Could not save your settings";
+    return;
+  }
+  forgetWelcomeKeys();
   welcomeOverlay.classList.add("hidden");
   await refreshGalaxyStatus();
 });
@@ -984,6 +1187,7 @@ welcomeSave.addEventListener("click", async () => {
 // in chat where to come back when they're ready.
 const welcomeSkip = document.getElementById("welcome-skip")!;
 welcomeSkip.addEventListener("click", () => {
+  forgetWelcomeKeys();
   welcomeOverlay.classList.add("hidden");
   chat.addInfoMessage(
     `<i>No LLM provider configured yet. Open <code>Preferences</code> ` +
@@ -1003,19 +1207,38 @@ async function checkFirstRun(): Promise<void> {
     _mode?: string;
     llm?: { active?: string; providers?: Record<string, { hasApiKey?: boolean }> };
   };
-  // Remote shells inject creds server-side; the first-run credential flow is N/A
-  // there and its OAuth/key controls aren't wired in the web shim.
-  if (cfg._mode === "remote") return;
+  // Remote shells inject Galaxy creds server-side, but the LLM key may be
+  // missing (no admin-baked key). When it is, reuse the welcome overlay to
+  // collect a provider key and hand it to the server (BYO-key); otherwise the
+  // first-run flow is N/A.
+  if (cfg._mode === "remote") {
+    const active = cfg.llm?.active;
+    const hasKey = active ? Boolean(cfg.llm?.providers?.[active]?.hasApiKey) : false;
+    if (!hasKey) {
+      remoteKeyEntry = true;
+      if (active) welcomeProvider.value = active;
+      selectWelcomeProvider(welcomeProvider.value);
+      void updateWelcomeAuthUi();
+      // Remote: cwd is fixed (/tmp/loom-session) and Galaxy creds are injected,
+      // so hide both optional <details> sections; "Skip" would leave no agent.
+      welcomeCwd.closest("details")?.classList.add("hidden");
+      welcomeGalaxyUrl.closest("details")?.classList.add("hidden");
+      welcomeSkip.classList.add("hidden");
+      welcomeOverlay.classList.remove("hidden");
+    }
+    return;
+  }
   const active = cfg.llm?.active;
   // Treat an OAuth-only setup (no API key, but provider has a stored token)
   // as fully configured -- skip the welcome screen.
-  if (active && isOAuthProvider(active)) {
+  await oauthProvidersReady;
+  if (active && providerOffersSignIn(active)) {
     const status = await window.orbit.oauthStatus(active);
     if (status.signedIn) return;
   }
   const hasKey = active ? Boolean(cfg.llm?.providers?.[active]?.hasApiKey) : false;
   if (!hasKey) {
-    populateWelcomeModels(welcomeProvider.value);
+    selectWelcomeProvider(welcomeProvider.value);
     void updateWelcomeAuthUi();
     welcomeOverlay.classList.remove("hidden");
   }
@@ -1033,7 +1256,12 @@ async function populateDynamicModelData(): Promise<void> {
     const newPricing: typeof PRICING = {};
     const newWindows: typeof CONTEXT_WINDOWS = {};
     for (const [provider, entries] of Object.entries(res.providers)) {
-      newModels[provider] = entries.map((e) => ({ id: e.id, label: e.label }));
+      // Flagged models stay out of the picker but keep their window below --
+      // an already-stranded user needs the number to be told why their model
+      // can't run (#418/#419).
+      newModels[provider] = entries
+        .filter((e) => !e.tooSmall)
+        .map((e) => ({ id: e.id, label: e.label }));
       for (const e of entries) {
         newPricing[e.id] = {
           in: e.pricing.input,
@@ -1047,7 +1275,12 @@ async function populateDynamicModelData(): Promise<void> {
         }
       }
     }
-    if (Object.keys(newModels).length === 0) return; // never replace with empty
+    // Never replace with empty. A provider whose every model was flagged also
+    // drops out here rather than showing an empty picker.
+    for (const [provider, list] of Object.entries(newModels)) {
+      if (!list.length) delete newModels[provider];
+    }
+    if (Object.keys(newModels).length === 0) return;
     // Merge rather than replace so hardcoded providers not returned by the
     // IPC (e.g. deepseek before main process restarts) survive.
     MODELS_BY_PROVIDER = { ...MODELS_BY_PROVIDER, ...newModels };
@@ -1576,7 +1809,7 @@ function flushNextQueuedMessage(): void {
  * Handle slash commands. Returns true if handled (no need to send to agent).
  *
  * Supported:
- *   /model <name>   — switch LLM model (e.g. /model sonnet, /model claude-opus-4-6)
+ *   /model <name>   — switch LLM model (e.g. /model sonnet, /model claude-opus-5)
  *   /help           — list slash commands
  */
 function formatArgsPreview(args: Record<string, unknown> | undefined): string | undefined {
@@ -1667,7 +1900,7 @@ function handleSlashCommand(text: string): boolean {
       chat.addUserMessage(text);
       chat.addErrorMessage(
         "Usage: /model <name>. Examples: /model sonnet, /model haiku, /model opus, " +
-          "or /model claude-sonnet-4-6 for an exact id.",
+          "or /model claude-opus-5 for an exact id.",
       );
       return true;
     }
@@ -2433,7 +2666,11 @@ window.orbit.onAgentEvent((event) => {
           chat.hideThinking();
           chat.finishAssistantMessage();
           if (msg.errorMessage) {
-            chat.addErrorMessage(humanizeAgentError(msg.errorMessage).text);
+            chat.addErrorMessage(
+              humanizeAgentError(msg.errorMessage, {
+                contextWindow: knownContextWindowFor(currentProvider, currentModel),
+              }).text,
+            );
           }
           streaming = false;
           stopTurnTimer();
@@ -2512,7 +2749,11 @@ window.orbit.onAgentEvent((event) => {
     case "error": {
       const rawMsg = (event as { message?: string }).message || "Unknown error";
       chat.hideThinking();
-      chat.addErrorMessage(humanizeAgentError(rawMsg).text);
+      chat.addErrorMessage(
+        humanizeAgentError(rawMsg, {
+          contextWindow: knownContextWindowFor(currentProvider, currentModel),
+        }).text,
+      );
       streaming = false;
       stopTurnTimer();
       setStatusBadge("error");
@@ -2531,6 +2772,7 @@ window.orbit.onAgentEvent((event) => {
 const extOverlay = document.getElementById("ext-overlay")!;
 const extTitleEl = document.getElementById("ext-title")!;
 const extMessageEl = document.getElementById("ext-message")!;
+const extDetailEl = document.getElementById("ext-detail")!;
 const extInputEl = document.getElementById("ext-input") as HTMLInputElement;
 const extOptionsEl = document.getElementById("ext-options")!;
 const extCancelBtn = document.getElementById("ext-cancel") as HTMLButtonElement;
@@ -2541,12 +2783,14 @@ const extDenyBtn = document.getElementById("ext-deny") as HTMLButtonElement;
 function hideExtModal(): void {
   extOverlay.classList.add("hidden");
   extMessageEl.classList.add("hidden");
+  extDetailEl.classList.add("hidden");
   extInputEl.classList.add("hidden");
   extOptionsEl.classList.add("hidden");
   extConfirmBtn.classList.add("hidden");
   extAcceptBtn.classList.add("hidden");
   extDenyBtn.classList.add("hidden");
   extOptionsEl.innerHTML = "";
+  extDetailEl.textContent = "";
   extInputEl.value = "";
 }
 
@@ -2587,7 +2831,15 @@ function openExtInput(id: string, title: string, placeholder?: string): void {
 }
 
 function openExtSelect(id: string, title: string, options: string[]): void {
-  extTitleEl.textContent = title;
+  // The brain has only the title string to work with, so anything below the
+  // first blank line is the thing being approved -- render it in the body,
+  // where it can scroll and keep its newlines. #399
+  const { heading, detail } = splitApprovalPrompt(title);
+  extTitleEl.textContent = heading;
+  // Assigned unconditionally so a detail-less prompt can never inherit the
+  // previous prompt's command, even if the modal was left un-reset.
+  extDetailEl.textContent = detail;
+  extDetailEl.classList.toggle("hidden", !detail);
   extOptionsEl.classList.remove("hidden");
   extOverlay.classList.remove("hidden");
 
@@ -2875,7 +3127,6 @@ void window.orbit.getAgentStatus().then(({ status, message }) => {
 // ── Draggable Divider ─────────────────────────────────────────────────────────
 
 const divider = document.getElementById("divider")!;
-const chatPane = document.getElementById("chat-pane")!;
 
 let dragging = false;
 
@@ -2958,12 +3209,16 @@ const prefsApiKeyRow = document.getElementById("prefs-api-key-row")!;
 const prefsApiKeyHintRow = document.getElementById("prefs-api-key-hint-row")!;
 const prefsOauthRow = document.getElementById("prefs-oauth-row")!;
 const prefsOauthHintRow = document.getElementById("prefs-oauth-hint-row")!;
+const prefsOauthHintText = document.getElementById("prefs-oauth-hint-text")!;
 const prefsOauthStatus = document.getElementById("prefs-oauth-status")!;
 const prefsOauthSignIn = document.getElementById("prefs-oauth-signin") as HTMLButtonElement;
 const prefsOauthSignOut = document.getElementById("prefs-oauth-signout") as HTMLButtonElement;
 const prefsBaseUrlRow = document.getElementById("prefs-base-url-row")!;
 const prefsBaseUrl = document.getElementById("prefs-base-url") as HTMLInputElement;
 const prefsJetstreamPreset = document.getElementById("prefs-jetstream-preset") as HTMLButtonElement;
+const prefsModelRefresh = document.getElementById("prefs-model-refresh") as HTMLButtonElement;
+const prefsModelStatusRow = document.getElementById("prefs-model-status-row")!;
+const prefsModelStatus = document.getElementById("prefs-model-status")!;
 
 // Model catalog by provider — labels include cost guidance
 // (in/out price per 1M tokens). Fallback only — populateDynamicModelData()
@@ -2975,20 +3230,19 @@ interface ModelChoice {
 }
 let MODELS_BY_PROVIDER: Record<string, ModelChoice[]> = {
   anthropic: [
-    { id: "claude-opus-4-8", label: "Opus 4.8 — $5/$25 (most capable)" },
-    { id: "claude-sonnet-4-6", label: "Sonnet 4.6 — $3/$15 (recommended)" },
+    { id: "claude-opus-5", label: "Opus 5 — $5/$25 (recommended)" },
+    { id: "claude-sonnet-5", label: "Sonnet 5 — $2/$10" },
     { id: "claude-haiku-4-5", label: "Haiku 4.5 — $1/$5 (cheapest)" },
+    { id: "claude-fable-5", label: "Fable 5 — $10/$50 (most capable)" },
+    { id: "claude-opus-4-8", label: "Opus 4.8 — $5/$25" },
+    { id: "claude-sonnet-4-6", label: "Sonnet 4.6 — $3/$15" },
     { id: "claude-opus-4-7", label: "Opus 4.7 — $5/$25" },
-    { id: "claude-opus-4-6", label: "Opus 4.6 — $5/$25" },
-    { id: "claude-sonnet-4-5", label: "Sonnet 4.5 — $3/$15" },
-    { id: "claude-opus-4-5", label: "Opus 4.5 — $5/$25" },
   ],
   openai: [
-    { id: "gpt-4o-mini", label: "GPT-4o mini — $0.15/$0.60 (cheapest)" },
-    { id: "gpt-4o", label: "GPT-4o — $2.50/$10" },
-    { id: "gpt-4-turbo", label: "GPT-4 Turbo — $10/$30" },
-    { id: "o1-mini", label: "o1-mini — $3/$12" },
-    { id: "o1", label: "o1 — $15/$60" },
+    { id: "gpt-5.4-mini", label: "GPT-5.4 mini — $0.75/$4.50 (cheapest)" },
+    { id: "gpt-5.4", label: "GPT-5.4 — $2.50/$15 (recommended)" },
+    { id: "gpt-5.2", label: "GPT-5.2 — $1.75/$14" },
+    { id: "gpt-5.5", label: "GPT-5.5 — $5/$30" },
   ],
   "openai-codex": [
     { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
@@ -2996,7 +3250,9 @@ let MODELS_BY_PROVIDER: Record<string, ModelChoice[]> = {
     { id: "gpt-5.4-mini", label: "GPT-5.4 mini" },
   ],
   google: [
-    { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash — $0.15/$0.60 (cheapest)" },
+    { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite — $0.25/$1.50 (cheapest)" },
+    { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro — $2/$12 (recommended)" },
+    { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash — $1.50/$9" },
     { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro — $1.25/$10" },
   ],
   mistral: [
@@ -3020,7 +3276,13 @@ let MODELS_BY_PROVIDER: Record<string, ModelChoice[]> = {
   "openai-compatible": [],
 };
 
-function populateModels(provider: string, selected?: string): void {
+function populateModels(provider: string, selected?: string, discovered?: readonly string[]): void {
+  // A custom endpoint has no static catalog -- what it serves is whatever
+  // /models last reported (#432).
+  if (discovered && discovered.length > 0) {
+    renderModelOptions(prefsModel, buildDiscoveredModelOptions(discovered, selected));
+    return;
+  }
   prefsModel.innerHTML = "";
   const models = MODELS_BY_PROVIDER[provider] || [];
   for (const m of models) {
@@ -3046,10 +3308,27 @@ prefsProvider.addEventListener("change", () => {
   prefsActiveProvider = prefsProvider.value;
   loadProviderFields(prefsActiveProvider);
   void updatePrefsAuthUi();
+  void refreshDiscoveredModels(prefsActiveProvider, false);
 });
-wireApiKeyValidation(prefsProvider, prefsApiKey, prefsApiKeyStatus, prefsBaseUrl, prefsModel);
+wireApiKeyValidation(
+  prefsProvider,
+  prefsApiKey,
+  prefsApiKeyStatus,
+  prefsBaseUrl,
+  prefsModel,
+  // Remember what typing a key discovered, so flipping providers and back
+  // inside one Preferences session doesn't lose the list.
+  (provider, models) => {
+    const target = prefsProviderStates[provider];
+    if (target) target.discoveredModels = models;
+  },
+);
 prefsJetstreamPreset.addEventListener("click", () => {
   prefsBaseUrl.value = JETSTREAM_BASE_URL;
+  // Announce the new URL before painting: the input handler resyncs the picker
+  // to whatever the field now says, so the preset's own list has to be written
+  // after it rather than be wiped by it.
+  prefsBaseUrl.dispatchEvent(new Event("input"));
   prefsModel.innerHTML = "";
   for (const id of JETSTREAM_MODELS) {
     const opt = document.createElement("option");
@@ -3057,11 +3336,45 @@ prefsJetstreamPreset.addEventListener("click", () => {
     opt.textContent = id;
     prefsModel.appendChild(opt);
   }
-  // Trigger validation/discovery if a key is already entered.
-  prefsBaseUrl.dispatchEvent(new Event("input"));
+});
+/**
+ * Whether the base URL field currently differs from the one in config. Kept as
+ * state rather than recomputed on the spot because what matters is the
+ * *transition*: an edit that leaves the effective URL where it was must not
+ * disturb a probe that is already about that URL.
+ */
+let prefsBaseUrlDiverged = false;
+
+// The saved URL is what main probes; the field is what the user is reading.
+// Once those disagree, an in-flight reply and anything already fetched both
+// describe some other endpoint -- and the dropdown has to lose them too, not
+// just the cache, or the user picks a stale id and saves it paired with a URL
+// that never listed it. Coming back to the saved URL re-probes, since
+// otherwise a typo and its undo leave the picker empty with nothing to explain
+// why.
+prefsBaseUrl.addEventListener("input", () => {
+  const state = prefsProviderStates[prefsActiveProvider];
+  const diverged = prefsBaseUrl.value.trim() !== (state?.savedBaseUrl.trim() ?? "");
+  if (diverged === prefsBaseUrlDiverged) return;
+  prefsBaseUrlDiverged = diverged;
+  retireModelDiscovery();
+  if (!diverged) {
+    void refreshDiscoveredModels(prefsActiveProvider, false);
+    return;
+  }
+  setModelStatus("", "");
+  // Only rebuild the picker when discovery is what filled it. A static or
+  // preset list wasn't tied to the saved URL in the first place.
+  if (state?.discoveredModels?.length) {
+    state.discoveredModels = undefined;
+    populateModels(prefsActiveProvider, prefsModel.value || state.model || undefined);
+  }
 });
 // Clear the "✓ Key stored" indicator as soon as the user starts typing.
 prefsApiKey.addEventListener("input", () => {
+  // A stored-key probe still in flight is about a key the user is replacing;
+  // let the typed-key validation own the dropdown from here.
+  retireModelDiscovery();
   if (prefsApiKeyStatus.classList.contains("stored")) {
     prefsApiKeyStatus.className = "api-key-status";
     prefsApiKeyStatus.textContent = "";
@@ -3069,18 +3382,25 @@ prefsApiKey.addEventListener("input", () => {
 });
 
 async function updatePrefsAuthUi(): Promise<void> {
-  const oauth = isOAuthProvider(prefsProvider.value);
+  await oauthProvidersReady;
+  const signIn = providerOffersSignIn(prefsProvider.value);
+  const oauthOnly = isOAuthOnlyProvider(prefsProvider.value);
   const custom = prefsProvider.value === "openai-compatible";
   prefsBaseUrlRow.classList.toggle("hidden", !custom);
-  prefsApiKeyRow.classList.toggle("hidden", oauth);
-  prefsApiKeyHintRow.classList.toggle("hidden", oauth);
-  prefsOauthRow.classList.toggle("hidden", !oauth);
-  prefsOauthHintRow.classList.toggle("hidden", !oauth);
-  if (oauth) {
+  // Model discovery is a custom-endpoint affordance only (#432).
+  prefsModelRefresh.classList.toggle("hidden", !custom);
+  prefsModelStatusRow.classList.toggle("hidden", !custom);
+  // Dual-auth providers get BOTH: a key field and a sign-in button.
+  prefsApiKeyRow.classList.toggle("hidden", oauthOnly);
+  prefsApiKeyHintRow.classList.toggle("hidden", oauthOnly);
+  prefsOauthRow.classList.toggle("hidden", !signIn);
+  prefsOauthHintRow.classList.toggle("hidden", !signIn);
+  if (signIn) {
+    prefsOauthHintText.textContent = oauthHintText(prefsProvider.value);
     const status = await window.orbit.oauthStatus(prefsProvider.value);
     prefsOauthStatus.textContent = formatOAuthStatus(status);
     prefsOauthStatus.classList.toggle("signed-in", status.signedIn);
-    prefsOauthSignIn.textContent = status.signedIn ? "Sign in again" : "Sign in with ChatGPT";
+    prefsOauthSignIn.textContent = oauthSignInLabel(prefsProvider.value, status.signedIn);
     prefsOauthSignOut.classList.toggle("hidden", !status.signedIn);
   }
 }
@@ -3105,13 +3425,18 @@ prefsOauthSignIn.addEventListener("click", async () => {
 });
 
 prefsOauthSignOut.addEventListener("click", async () => {
-  if (!confirm("Sign out of ChatGPT? You'll need to sign in again to use Codex models.")) return;
+  // Signing out of a dual-auth provider still leaves the API-key path open, so
+  // don't tell those users they've lost access to the models.
+  const consequence = isOAuthOnlyProvider(prefsProvider.value)
+    ? "You'll need to sign in again to use its models."
+    : "You'll need to sign in again, or use an API key instead.";
+  if (!confirm(`Sign out of ${oauthAccountLabel(prefsProvider.value)}? ${consequence}`)) return;
   prefsOauthSignOut.disabled = true;
   try {
     await window.orbit.oauthSignOut(prefsProvider.value);
     prefsOauthStatus.textContent = "Not signed in";
     prefsOauthStatus.classList.remove("signed-in");
-    prefsOauthSignIn.textContent = "Sign in with ChatGPT";
+    prefsOauthSignIn.textContent = oauthSignInLabel(prefsProvider.value, false);
     prefsOauthSignOut.classList.add("hidden");
   } finally {
     prefsOauthSignOut.disabled = false;
@@ -3229,13 +3554,6 @@ prefsSkillsRefreshBtn.addEventListener("click", async () => {
 
 /** Sentinel mirrors UNCHANGED_SECRET in main/ipc-handlers.ts. */
 const UNCHANGED_SECRET = "__loom_unchanged_secret__";
-/** Per-provider in-memory state while Preferences is open. */
-interface ProviderState {
-  hadKey: boolean;
-  typedKey: string;
-  model: string;
-  baseUrl: string;
-}
 let prefsProviderStates: Record<string, ProviderState> = {};
 let prefsActiveProvider = "anthropic";
 let prefsGalaxyHadKey = false;
@@ -3257,25 +3575,118 @@ prefsGalaxyKey.addEventListener("input", updatePrefsGalaxyValidity);
 
 /** Snapshot the currently-visible provider fields into prefsProviderStates. */
 function snapshotCurrentProvider(): void {
-  prefsProviderStates[prefsActiveProvider] = {
-    hadKey: prefsProviderStates[prefsActiveProvider]?.hadKey ?? false,
-    typedKey: prefsApiKey.value,
-    model: prefsModel.value,
-    baseUrl: prefsBaseUrl.value.trim(),
-  };
+  prefsProviderStates[prefsActiveProvider] = snapshotProviderState(
+    prefsProviderStates[prefsActiveProvider],
+    { typedKey: prefsApiKey.value, model: prefsModel.value, baseUrl: prefsBaseUrl.value },
+  );
 }
+
+/**
+ * Bumped whenever something newer takes ownership of the model dropdown, so a
+ * slow discovery reply can't overwrite it.
+ */
+let modelDiscoverySeq = 0;
+let modelDiscoveryInFlight = 0;
+
+function setModelStatus(cls: "" | "checking" | "valid" | "invalid", text: string): void {
+  prefsModelStatus.className = `api-key-status${cls ? " " + cls : ""}`;
+  prefsModelStatus.textContent = text;
+}
+
+/**
+ * Disown any in-flight discovery -- what it reports no longer describes what's
+ * on screen. The retired reply returns without touching the label, so drop its
+ * "Fetching…" here or it sits there forever.
+ */
+function retireModelDiscovery(): void {
+  modelDiscoverySeq++;
+  if (prefsModelStatus.classList.contains("checking")) setModelStatus("", "");
+}
+
+/**
+ * Re-list a custom endpoint's models through main, which holds the stored key
+ * -- the renderer never sees it, so it can't make the /models call itself.
+ * Without this the list only ever appeared while the key was being typed and
+ * vanished on the next Preferences open (#432).
+ *
+ * `manual` = the user pressed "Fetch models": probe even with no stored key
+ * (so main can say why) and don't reuse this session's cached list.
+ */
+async function refreshDiscoveredModels(provider: string, manual: boolean): Promise<void> {
+  const state = prefsProviderStates[provider];
+  const plan = planModelDiscovery({
+    manual,
+    savedBaseUrl: state?.savedBaseUrl ?? "",
+    typedBaseUrl: prefsBaseUrl.value,
+    typedKey: prefsApiKey.value,
+    hadKey: state?.hadKey ?? false,
+    alreadyDiscovered: Boolean(state?.discoveredModels?.length),
+  });
+  if (plan.action === "skip") return;
+  if (plan.action === "message") {
+    setModelStatus("invalid", `\u2717 ${plan.message}`);
+    return;
+  }
+  if (plan.action === "validate-typed-key") {
+    // Nudge the debounced validator so discovery uses the key on screen.
+    prefsApiKey.dispatchEvent(new Event("input"));
+    return;
+  }
+  const mySeq = ++modelDiscoverySeq;
+  // Only touch the DOM while this reply is both current and about the
+  // provider on screen.
+  const owns = () => mySeq === modelDiscoverySeq && provider === prefsActiveProvider;
+  if (owns()) setModelStatus("checking", "Fetching models…");
+  modelDiscoveryInFlight++;
+  prefsModelRefresh.disabled = true;
+  try {
+    const res = await window.orbit.discoverModels(provider);
+    if (mySeq !== modelDiscoverySeq) return;
+    if (!res.ok) {
+      if (owns()) setModelStatus("invalid", `\u2717 ${res.error}`);
+      return;
+    }
+    // Re-read: a provider switch replaces the state object mid-flight.
+    const target = prefsProviderStates[provider];
+    if (res.models.length === 0) {
+      // A successful probe that lists nothing still describes the endpoint, so
+      // an earlier fetch's ids can't stay in the picker under a label saying
+      // there are none.
+      if (target) target.discoveredModels = undefined;
+      if (owns()) {
+        populateModels(provider, prefsModel.value || target?.model || undefined);
+        setModelStatus("invalid", "\u2717 The endpoint listed no models.");
+      }
+      return;
+    }
+    if (target) target.discoveredModels = res.models;
+    if (owns()) {
+      populateModels(provider, prefsModel.value || target?.model || undefined, res.models);
+      const n = res.models.length;
+      setModelStatus("valid", `\u2713 ${n} model${n === 1 ? "" : "s"} available`);
+    }
+  } catch (err) {
+    if (owns()) {
+      setModelStatus("invalid", `\u2717 ${err instanceof Error ? err.message : String(err)}`);
+    }
+  } finally {
+    modelDiscoveryInFlight--;
+    if (modelDiscoveryInFlight === 0) prefsModelRefresh.disabled = false;
+  }
+}
+
+prefsModelRefresh.addEventListener("click", () => {
+  void refreshDiscoveredModels(prefsActiveProvider, true);
+});
 
 /** Load a provider's stored state into the visible fields. */
 function loadProviderFields(provider: string): void {
-  const state = prefsProviderStates[provider] ?? {
-    hadKey: false,
-    typedKey: "",
-    model: "",
-    baseUrl: "",
-  };
-  populateModels(provider, state.model || undefined);
+  const state = providerStateFor(prefsProviderStates, provider);
+  populateModels(provider, state.model || undefined, state.discoveredModels);
+  setModelStatus("", "");
   prefsApiKey.value = state.typedKey;
   prefsBaseUrl.value = state.baseUrl;
+  prefsBaseUrlDiverged = state.baseUrl.trim() !== state.savedBaseUrl.trim();
   prefsApiKey.placeholder = state.hadKey ? "leave blank to keep existing key" : "";
   if (state.hadKey && !state.typedKey) {
     prefsApiKeyStatus.className = "api-key-status stored";
@@ -3312,12 +3723,14 @@ async function openPreferences(): Promise<void> {
       typedKey: "",
       model: p.model ?? "",
       baseUrl: p.baseUrl ?? "",
+      savedBaseUrl: p.baseUrl ?? "",
     };
   }
   prefsActiveProvider = config.llm?.active || "anthropic";
   prefsProvider.value = prefsActiveProvider;
   loadProviderFields(prefsActiveProvider);
   await updatePrefsAuthUi();
+  void refreshDiscoveredModels(prefsActiveProvider, false);
 
   // Galaxy: use active profile
   const activeProfile = config.galaxy?.active
@@ -3402,17 +3815,18 @@ async function savePreferences(): Promise<void> {
   const activeProvider = prefsProvider.value;
   const selectedModel = prefsProviderStates[activeProvider]?.model || prefsModel.value || undefined;
 
-  // Build the full providers map from in-memory state. OAuth providers persist
-  // credentials in ~/.pi/agent/auth.json -- don't ship an apiKey field (sentinel
-  // or "") for them, or the reconciler would try to preserve/clear a
-  // config.json key that was never there.
+  // Build the full providers map from in-memory state. OAuth-ONLY providers
+  // persist credentials in ~/.pi/agent/auth.json -- don't ship an apiKey field
+  // (sentinel or "") for them, or the reconciler would try to preserve/clear a
+  // config.json key that was never there. Dual-auth providers do keep a
+  // config.json key, so they go down the normal sentinel path (#429).
   const providers: Record<string, { apiKey?: string; model?: string; baseUrl?: string }> = {};
   for (const [name, state] of Object.entries(prefsProviderStates)) {
     const entry: { apiKey?: string; model?: string; baseUrl?: string } = {
       model: state.model || undefined,
     };
     if (state.baseUrl) entry.baseUrl = state.baseUrl;
-    if (!isOAuthProvider(name)) {
+    if (!isOAuthOnlyProvider(name)) {
       entry.apiKey = state.typedKey.trim()
         ? state.typedKey.trim()
         : state.hadKey
@@ -3427,7 +3841,7 @@ async function savePreferences(): Promise<void> {
     model: selectedModel,
   };
   if (prefsBaseUrl.value.trim()) activeEntry.baseUrl = prefsBaseUrl.value.trim();
-  if (!isOAuthProvider(activeProvider)) activeEntry.apiKey = llmApiKey;
+  if (!isOAuthOnlyProvider(activeProvider)) activeEntry.apiKey = llmApiKey;
   providers[activeProvider] = activeEntry;
 
   const config: Record<string, unknown> = {
@@ -3698,22 +4112,8 @@ async function buildFeedbackPayload(): Promise<FeedbackPayload> {
   if (reportIncludeSysinfo.checked) {
     try {
       const info = await window.orbit.getReportSysinfo();
-      const cfg = (await window.orbit.getConfig()) as {
-        llm?: { active?: string; providers?: Record<string, { model?: string }> };
-        galaxy?: { active: string | null };
-      };
-      const active = cfg.llm?.active;
-      sysinfo = {
-        appVersion: info.appVersion,
-        platform: info.platform,
-        arch: info.arch,
-        electron: info.electronVersion,
-        chrome: info.chromeVersion,
-        node: info.nodeVersion,
-        llmProvider: active,
-        llmModel: active ? cfg.llm?.providers?.[active]?.model : undefined,
-        galaxyConfigured: Boolean(cfg.galaxy?.active),
-      };
+      const cfg = (await window.orbit.getConfig()) as FeedbackConfigView;
+      sysinfo = toFeedbackSysinfo(info, cfg);
     } catch {
       /* skip sysinfo on failure */
     }

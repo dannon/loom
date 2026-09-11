@@ -10,7 +10,7 @@ order: 2
 Agentic bioinformatics can produce useful work, but the familiar failure mode is
 that decisions happen in chat, parameters drift, provenance is reconstructed after
 the fact, and a plausible final answer hides weak intermediate validation. Loom's
-answer is to make the working record explicit *while* the analysis is happening.
+answer is to make the working record explicit _while_ the analysis is happening.
 
 ## The notebook is the project
 
@@ -21,7 +21,7 @@ writes that notebook directly — there is no parallel structured-state store to
 drift out of sync.
 
 Galaxy histories remain the computational truth. The notebook is the shareable,
-inspectable record of *how you got there*.
+inspectable record of _how you got there_.
 
 ## Plans and routing
 
@@ -44,6 +44,7 @@ before it can be marked done — all on indented sub-bullets:
 ## Plan A: chrM Variant Calling [hybrid]
 
 ### Steps
+
 - [x] 1. QC FASTQs {#plan-a-step-1} — fastp adapter trim + per-base QC
   - Routing: local
   - Tool: fastp

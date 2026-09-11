@@ -113,8 +113,7 @@ export function skillsCacheDir(repo: ConfiguredSkillRepo): string {
 }
 
 export type FetchSkillResult =
-  | { ok: true; text: string; cached: boolean }
-  | { ok: false; status?: number; error: string };
+  { ok: true; text: string; cached: boolean } | { ok: false; status?: number; error: string };
 
 /**
  * Fetch one file from a skills repo, reading/writing the same on-disk cache the
@@ -343,8 +342,7 @@ const MCP_REFERENCE_WHEN_TO_USE =
  * Offline / first-run fallback. Used only when a repo has no resolved-catalog
  * cache yet and the tree-walk can't run. Mirrors whatever is tagged on
  * galaxy-skills `main` at ship time (collection-manipulation, galaxy-integration,
- * udt-authoring; add workflow-reports when its branch merges). Keep these in sync
- * with the upstream frontmatter.
+ * udt-authoring, workflow-reports). Keep these in sync with the upstream frontmatter.
  */
 export const BUILTIN_CATALOG: Record<string, SkillEntry[]> = {
   "galaxy-skills": [
@@ -373,6 +371,16 @@ export const BUILTIN_CATALOG: Record<string, SkillEntry[]> = {
         "YAML definition that wraps a container and command into a tool a non-admin user " +
         "creates and runs (e.g. via Galaxy MCP create_user_tool / run_user_tool, or POST " +
         "/api/unprivileged_tools). Not for classic XML/ToolShed tool wrappers.",
+      surfaces: ["loom"],
+    },
+    {
+      path: "workflow-reports/SKILL.md",
+      name: "workflow-reports",
+      description:
+        "Use this skill when asked to create, draft, or write a Galaxy workflow report " +
+        "template for the Workflow Editor's Report tab. Triggers on requests like " +
+        '"create a report for this workflow", "draft a workflow report template", ' +
+        '"write a Galaxy report for workflow <id/url>".',
       surfaces: ["loom"],
     },
   ],

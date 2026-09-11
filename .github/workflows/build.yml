@@ -13,9 +13,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -23,6 +23,10 @@ jobs:
             package-lock.json
             app/package-lock.json
 
+      # The check sequence below (lockstep, both typechecks, tests, smoke) is
+      # mirrored by .github/workflows/pi-update.yml, which runs it to fill in
+      # the results table on the pull requests it opens. A check added here and
+      # not there makes that table quietly incomplete.
       - name: Install root deps
         run: npm ci
 
@@ -34,6 +38,13 @@ jobs:
       - name: Install app deps
         working-directory: app
         run: npm ci
+
+      # Runs after both installs so it can read app/package-lock.json. Cheap, and
+      # it catches a class of drift the typecheck cannot see: app/ resolving a pi
+      # package to a different version than the root tree, which duplicates the
+      # module and splits its state at runtime.
+      - name: Check version lockstep
+        run: npm run check:versions
 
       - name: Typecheck (root)
         run: npm run typecheck
@@ -49,6 +60,20 @@ jobs:
 
       - name: Test (root)
         run: npm test
+
+      # Packs the tarball and installs it WITHOUT the lockfile, so the runtime
+      # deps resolve the way a user's `npm i -g @galaxyproject/loom` resolves
+      # them rather than the way our pinned tree does. That gap is not
+      # theoretical: #395 was a published dependency adding an `exports` map,
+      # which every lockfile-pinned check here sailed past and every fresh
+      # install hit on the first line of startup.
+      #
+      # Deliberately not hermetic -- it reaches the network and can go red
+      # because a dependency published something broken, not because this PR
+      # did. That is the point of the step; read a failure here as "a user
+      # installing right now would hit this too".
+      - name: Smoke test packed tarball
+        run: npm run smoke:pack
 
       - name: Package Electron app
         working-directory: app

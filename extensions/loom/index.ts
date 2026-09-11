@@ -21,6 +21,7 @@ import { registerActivityHooks } from "./activity-hooks";
 import { registerExecutionCommands } from "./execution-commands";
 import { registerFeedbackCommand } from "./feedback-command";
 import { registerTesterIdCommand } from "./tester-id-command";
+import { registerInstructionsCommand } from "./instructions-command";
 import { registerTeamTools } from "./teams/tool";
 import { isTeamDispatchEnabled } from "./teams/is-enabled";
 import { registerSessionIndexTools } from "./session-index/tools";
@@ -28,11 +29,17 @@ import { isSessionIndexEnabled } from "./session-index/is-enabled";
 import { registerConfusablesHint } from "./confusables-hint";
 import { registerInvocationFailureHint } from "./invocation-failure-hint";
 import { registerEvidenceGate } from "./evidence-gate";
+import { registerEvidenceOverrideCommand } from "./evidence-override-command";
 import { registerExecGuard } from "./exec-guard";
 import { registerSandbox } from "./sandbox";
 import { isLocalExecDisabled } from "./local-exec";
 import { registerSecretRedaction } from "./secret-redaction";
-import { GALAXY_RECONNECT_NUDGE, transportNudgeDecision } from "./galaxy-transport-error";
+import {
+  ALL_NUDGES_ARMED,
+  transportNudgeDecision,
+  type TransportNudgeArmed,
+} from "./galaxy-transport-error";
+import { GALAXY_UVX_MISSING_NUDGE, isGalaxyLauncherError } from "./galaxy-launcher-error";
 import * as fs from "fs";
 import {
   getState,
@@ -89,9 +96,11 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerExecutionCommands(pi);
   registerFeedbackCommand(pi);
   registerTesterIdCommand(pi);
+  registerInstructionsCommand(pi);
   registerConfusablesHint(pi);
   registerInvocationFailureHint(pi);
   registerEvidenceGate(pi);
+  registerEvidenceOverrideCommand(pi);
   if (isTeamDispatchEnabled()) {
     registerTeamTools(pi);
   }
@@ -368,10 +377,16 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // ─────────────────────────────────────────────────────────────────────────────
   const toolStartTimes = new Map<string, number>();
 
-  // Armed = a reconnect nudge is allowed to fire. We fire once when the MCP
-  // transport drops, then disarm so a galaxy retry loop doesn't spam the user,
-  // and re-arm after any healthy galaxy result.
-  let transportNudgeArmed = true;
+  // Armed = that kind of nudge is allowed to fire. We fire once per outage,
+  // then disarm that kind so a galaxy retry loop doesn't spam the user, and
+  // re-arm after any healthy galaxy result. Per kind, so a timeout doesn't
+  // silence the reconnect advice for a drop that follows it.
+  let transportNudgeArmed: TransportNudgeArmed = { ...ALL_NUDGES_ARMED };
+  // Separate flag: a missing uvx is not transient, so unlike the transport
+  // nudge this one never re-arms. Saying it once per session is enough --
+  // repeating it every failed galaxy call would just be nagging about
+  // something the user cannot fix without leaving the app.
+  let uvxNudgeArmed = true;
 
   pi.on("tool_execution_start", async (event, ctx) => {
     if (event.toolName?.startsWith("galaxy_")) {
@@ -437,21 +452,34 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_result", async (event, ctx) => {
-    // Surface an actionable hint when a galaxy_* call fails because the MCP
-    // transport died mid-session (bare "Not connected" / -32000 / -32001) --
-    // the user can recover with /mcp reconnect galaxy, no restart needed. This
-    // is the deterministic backstop for the connection-liveness steer in
+    // Surface an actionable hint when a galaxy_* call fails at the transport
+    // layer. Two different failures with two different fixes: a dropped pipe
+    // ("Not connected" / -32000) is recovered with /mcp reconnect galaxy, while
+    // a timeout (-32001) means the call outran its budget and wants a smaller
+    // request first (#410). This is the deterministic backstop for the
+    // connection-liveness steer in
     // buildGalaxyContextBlock: even a model that ignores the steer produces the
     // recovery incantation for the user. hasUI-guard + try/catch mirror the
     // galaxy poller notifier -- a headless/stale ctx must not throw here.
     try {
       const firstContent = event.content?.[0];
       const resultText = firstContent && "text" in firstContent ? firstContent.text : undefined;
+
+      // A launcher failure (`spawn uvx ENOENT`) must win over the reconnect
+      // nudge and suppress it: the server never started, so there is nothing to
+      // reconnect to, and sending the user to /mcp reconnect wastes their time.
+      // Fire once per outage on the same armed flag, so a retry loop can't spam.
+      if (isGalaxyLauncherError(event.toolName, resultText)) {
+        if (uvxNudgeArmed && ctx.hasUI) {
+          uvxNudgeArmed = false;
+          ctx.ui.notify(GALAXY_UVX_MISSING_NUDGE, "warning");
+        }
+        return;
+      }
+
       const decision = transportNudgeDecision(transportNudgeArmed, event.toolName, resultText);
       transportNudgeArmed = decision.armed;
-      if (decision.showNudge && ctx.hasUI) {
-        ctx.ui.notify(GALAXY_RECONNECT_NUDGE, "warning");
-      }
+      if (decision.nudge && ctx.hasUI) ctx.ui.notify(decision.nudge, "warning");
     } catch {
       /* stale/headless context -- a dropped reconnect hint is fine */
     }

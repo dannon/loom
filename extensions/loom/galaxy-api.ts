@@ -130,12 +130,29 @@ export async function galaxyPut<T = unknown>(
 }
 
 /**
- * Fetch job details from Galaxy. Returns the full response; callers typically
- * only need `tool_version`.
+ * Fetch job details from Galaxy: `id`, `state`, `tool_id`, `tool_version`,
+ * and `params`. The invocation poller is the only caller today and reads
+ * only `state`.
  */
 export async function galaxyGetJobDetails(
   jobId: string,
   signal?: AbortSignal,
 ): Promise<GalaxyJobDetailsResponse> {
   return galaxyGet<GalaxyJobDetailsResponse>(`/jobs/${encodeURIComponent(jobId)}`, signal);
+}
+
+export interface GalaxyHistorySummary {
+  id: string;
+  name?: string;
+}
+
+/**
+ * The user's current (most-recently-used) history, resolved from just
+ * GALAXY_URL + GALAXY_API_KEY. Returns null when Galaxy reports none.
+ */
+export async function galaxyGetMostRecentHistory(
+  signal?: AbortSignal,
+): Promise<GalaxyHistorySummary | null> {
+  const res = await galaxyGet<GalaxyHistorySummary | null>("/histories/most_recently_used", signal);
+  return res && typeof res.id === "string" && res.id.length > 0 ? res : null;
 }

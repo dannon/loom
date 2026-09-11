@@ -274,8 +274,7 @@ export function registerGalaxyUploadTool(pi: ExtensionAPI): void {
     },
     renderResult: (result) => {
       const d = result.details as
-        | { error?: boolean; datasetId?: string; state?: string }
-        | undefined;
+        { error?: boolean; datasetId?: string; state?: string } | undefined;
       if (d?.error) return new Text("❌ Galaxy upload failed");
       if (d?.datasetId)
         return new Text(`⬆️ Uploaded to Galaxy (dataset ${d.datasetId}, ${d.state ?? "queued"})`);

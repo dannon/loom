@@ -14,8 +14,7 @@
 import { validateGalaxyUrl } from "./galaxy-url.js";
 
 export type GalaxyUserStatus =
-  | { ok: true; username?: string; email?: string }
-  | { ok: false; authFailed: boolean };
+  { ok: true; username?: string; email?: string } | { ok: false; authFailed: boolean };
 
 /** A non-empty string, or undefined -- Galaxy returns "" for unset fields. */
 function nonEmptyString(v: unknown): string | undefined {

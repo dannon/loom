@@ -29,8 +29,7 @@ describe("session-index db", () => {
   it("records and reads the schema version", () => {
     const db = openIndexDb(path.join(dir, "idx.db"));
     const row = db.prepare("SELECT value FROM meta WHERE key='schema_version'").get() as
-      | { value: string }
-      | undefined;
+      { value: string } | undefined;
     expect(row?.value).toBe(String(SCHEMA_VERSION));
     db.close();
   });

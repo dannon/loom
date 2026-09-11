@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { ModelRegistry, AuthStorage } from "@earendil-works/pi-coding-agent";
+import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   ACTIVE_LLM_API_KEY_ENV,
   isCustomProvider,
@@ -120,6 +120,16 @@ describe("syncCustomProviderModelsFile", () => {
   });
 });
 
+/** Minimal pi CredentialStore that holds nothing -- enough for ModelRegistry.create. */
+function emptyCredentialStore() {
+  return {
+    read: async () => undefined,
+    list: async () => [],
+    modify: async () => undefined,
+    delete: async () => {},
+  };
+}
+
 describe("synthesized models.json loads through pi's ModelRegistry", () => {
   let dir: string;
   beforeEach(() => {
@@ -133,7 +143,7 @@ describe("synthesized models.json loads through pi's ModelRegistry", () => {
   // provider that defines models without an apiKey and drops it, so the brain
   // couldn't resolve --provider/--model and never launched. The synthesized
   // entry must register cleanly while keeping the real key off disk.
-  it("registers the custom model without writing the secret to disk", () => {
+  it("registers the custom model without writing the secret to disk", async () => {
     const file = path.join(dir, "models.json");
     syncCustomProviderModelsFile(file, "openai-compatible", {
       baseUrl: "https://llm.jetstream-cloud.org/api",
@@ -144,8 +154,16 @@ describe("synthesized models.json loads through pi's ModelRegistry", () => {
     // the real key never lands on disk
     expect(fs.readFileSync(file, "utf-8")).not.toContain("super-secret");
 
-    // pi accepts the config (no load error) and the model resolves
-    const reg = ModelRegistry.create(AuthStorage.inMemory(), file);
+    // pi accepts the config (no load error) and the model resolves.
+    // pi 0.83 dropped AuthStorage from the package root and moved registry
+    // construction behind ModelRuntime.create(), so stand up a throwaway
+    // CredentialStore -- the store is incidental scaffolding here, and a local
+    // stub keeps this test off pi's private module paths.
+    const runtime = await ModelRuntime.create({
+      modelsPath: file,
+      credentials: emptyCredentialStore(),
+    });
+    const reg = new ModelRegistry(runtime);
     expect(reg.getError()).toBeUndefined();
     expect(reg.find("openai-compatible", "gpt-oss-120b")).toBeDefined();
   });

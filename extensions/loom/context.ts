@@ -24,12 +24,20 @@ import {
 import { findGalaxyPageBlocks } from "./galaxy-page-binding";
 import { isLocalShellDisabled } from "./local-exec.js";
 import { GALAXY_PAGE_MARKDOWN_GUIDANCE } from "./galaxy-page-markdown-guidance";
+import {
+  buildUserInstructionsBlock,
+  buildWorkspaceInstructionsContext,
+} from "./user-instructions.js";
 
 const NOTEBOOK_HEAD_MAX_CHARS = 2000;
 const NOTEBOOK_TAIL_MAX_CHARS = 4000;
 
 /** customType for the per-turn live notebook context message (E1/E2 cache fix). */
 const LOOM_NOTEBOOK_CONTEXT_TYPE = "loom-notebook-context";
+
+/** customType for workspace LOOM.md content. Kept out of the system prompt on
+ *  purpose -- see buildWorkspaceInstructionsContext. */
+const LOOM_WORKSPACE_INSTRUCTIONS_TYPE = "loom-workspace-instructions";
 
 /**
  * Read the user-curated notebook.md from disk and return a head + tail
@@ -380,11 +388,38 @@ connection, where a server-side fetch runs at datacenter bandwidth.
   genuinely local: a file the user created, or one that exists only on
   this machine with no URL Galaxy can reach itself.
 
+### Invoking a Galaxy workflow
+
+Call \`galaxy_get_workflow_input_template\` before \`galaxy_invoke_workflow\`.
+Take the \`inputs_template\` map out of what it returns — that field, not the
+whole wrapper — keep its keys, replace every placeholder (\`<value>\`,
+\`<dataset_id>\`, \`<collection_id>\`) with a real value, and pass that map as
+\`inputs\`:
+
+- Data **and** non-data slots both belong in \`inputs\`, keyed by step index:
+  a collection slot takes \`{"src":"hdca","id":"<collection_id>"}\`, an
+  integer/text/genome slot takes the bare scalar (\`5\`, \`"hg38"\`). Slots
+  the template marks \`optional\` may be left out.
+- Pass \`inputs_by="step_index|step_uuid"\` verbatim — the pipe-separated
+  form is one valid value, not a choice between two.
+- **Don't route workflow inputs through \`params\`.** It's the legacy
+  per-step tool-override map, typed \`dict[str, dict]\`, so a scalar value
+  fails with \`Input should be a valid dictionary in
+  ('body','parameters',<key>)\`. Re-keying by label, index, or uuid won't fix
+  that — the key was never the problem. Put the value in \`inputs\`.
+
 ### Executing a Galaxy step
 
 **Galaxy invocations run in the background by default — submit and hand
 control back to the user.** Do NOT block the turn polling a Galaxy job to
 completion; the user wants to keep working with you while it runs.
+
+This applies to single **tool** runs too, not just workflows — record those
+with \`galaxy_job_record({ jobId, notebookAnchor, label })\` right after
+\`galaxy_run_tool\` returns a job id. An unrecorded run is invisible to the
+poller: nothing advances it, nothing notices when it finishes, and the
+analysis stalls until the user asks. If you did not record it, you must not
+claim a poller is watching it.
 
 After invoking via Galaxy MCP and getting an \`invocationId\` back:
 1. Call \`galaxy_invocation_record({ invocationId, notebookAnchor, label })\`.
@@ -1182,6 +1217,12 @@ export function setupContextInjection(pi: ExtensionAPI): void {
       buildNoLocalShellBlock(),
       buildTeamDispatchContext(),
       buildSessionIndexContext(),
+      // Last on purpose: the user's OWN preferences read inside the frame of
+      // everything above, and last position in the cached prefix earns the most
+      // attention. Only the global file gets this slot -- a workspace LOOM.md
+      // travels with the directory and rides the lower-authority context
+      // channel below instead.
+      buildUserInstructionsBlock(),
     ]
       .filter(Boolean)
       .join("\n");
@@ -1199,23 +1240,28 @@ export function setupContextInjection(pi: ExtensionAPI): void {
   // text message, so the model still sees current project state each turn.
   pi.on("context", async (event) => {
     const messages = event.messages.filter(
-      (m) => !(m.role === "custom" && m.customType === LOOM_NOTEBOOK_CONTEXT_TYPE),
+      (m) =>
+        !(
+          m.role === "custom" &&
+          (m.customType === LOOM_NOTEBOOK_CONTEXT_TYPE ||
+            m.customType === LOOM_WORKSPACE_INSTRUCTIONS_TYPE)
+        ),
     );
-    const live = buildLiveNotebookContext();
-    if (live) {
+
+    // Insert project-data messages just BEFORE the current user turn rather
+    // than at the very end. This content is agent-writable or arrives with the
+    // project directory, so it must not occupy the final, highest-attention
+    // slot where a model is most prone to treat it as the operative
+    // instruction -- the user's actual request stays last. Falls back to
+    // appending when there's no user turn yet.
+    const insert = (customType: string, content: string) => {
       const msg = {
         role: "custom" as const,
-        customType: LOOM_NOTEBOOK_CONTEXT_TYPE,
-        content: live,
+        customType,
+        content,
         display: false,
         timestamp: Date.now(),
       };
-      // Insert the project-data message just BEFORE the current user turn rather
-      // than at the very end. The notebook is agent-writable (and can hold text
-      // fetched from external sources), so it must not occupy the final,
-      // highest-attention slot where a model is most prone to treat it as the
-      // operative instruction -- the user's actual request stays last. Falls
-      // back to appending when there's no user turn yet.
       let lastUser = -1;
       for (let i = messages.length - 1; i >= 0; i--) {
         if (messages[i].role === "user") {
@@ -1225,7 +1271,16 @@ export function setupContextInjection(pi: ExtensionAPI): void {
       }
       if (lastUser === -1) messages.push(msg);
       else messages.splice(lastUser, 0, msg);
-    }
+    };
+
+    // Workspace LOOM.md first, so the notebook -- and then the user's own turn
+    // -- sit closer to the end than anything a cloned folder shipped.
+    const workspace = buildWorkspaceInstructionsContext();
+    if (workspace) insert(LOOM_WORKSPACE_INSTRUCTIONS_TYPE, workspace);
+
+    const live = buildLiveNotebookContext();
+    if (live) insert(LOOM_NOTEBOOK_CONTEXT_TYPE, live);
+
     return { messages };
   });
 

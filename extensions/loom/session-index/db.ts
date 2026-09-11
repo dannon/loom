@@ -42,8 +42,7 @@ export function openIndexDb(filePath: string): Db {
 function isSchemaCurrent(db: Db): boolean {
   try {
     const row = db.prepare("SELECT value FROM meta WHERE key='schema_version'").get() as
-      | { value: string }
-      | undefined;
+      { value: string } | undefined;
     return row?.value === String(SCHEMA_VERSION);
   } catch {
     // meta table doesn't exist yet

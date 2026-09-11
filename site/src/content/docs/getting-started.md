@@ -60,7 +60,7 @@ lets any agent search and run tools, drive workflows, and manage histories.
    `notebook.md` is created on first launch and committed to git.
 2. **Chat.** Ask questions, drop file paths, request data lookups. None of this
    requires a "plan" — the conversation is just a conversation.
-3. **Ask for a plan.** The agent drafts it *in chat* as a markdown section and
+3. **Ask for a plan.** The agent drafts it _in chat_ as a markdown section and
    waits for your approval. Then it shows you the parameters and waits again.
 4. **Watch it run.** Once approved, the plan is written into `notebook.md` and
    executed. Galaxy steps are tracked with live `loom-invocation` blocks; the

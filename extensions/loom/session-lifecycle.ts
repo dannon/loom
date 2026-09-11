@@ -6,6 +6,8 @@ import {
   stopWatchingNotebook,
 } from "./state.js";
 import { startGalaxyPoller, stopGalaxyPoller } from "./galaxy-poller.js";
+import { isAutoResumeEnabled } from "./auto-resume.js";
+import { initGalaxyPageSync, flushNotebookToGalaxy } from "./galaxy-page-sync.js";
 import {
   upsertSessionSummaryBlock,
   readNotebook,
@@ -14,6 +16,7 @@ import {
   type SessionSummaryYaml,
 } from "./notebook-writer.js";
 import { activeGalaxyStatus, type ActiveGalaxyStatus } from "./profiles.js";
+import { isUvxAvailable, uvxMissingNotice } from "../../shared/uvx-runner.js";
 import { maybeNudgeGalaxyReconnect } from "./galaxy-cred-drift.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -33,6 +36,10 @@ export function registerSessionLifecycle(pi: ExtensionAPI): void {
 
     initSessionArtifacts(process.cwd());
 
+    // Resume the per-history Galaxy page and arm debounce auto-push (no-op
+    // unless LOOM_GALAXY_PAGE_SYNC=auto and Galaxy creds are present).
+    await initGalaxyPageSync();
+
     // Background poller for in-flight Galaxy invocations (#67 part 2).
     // Idempotent — start() stops any prior timer first. Pass the shell
     // notifier so a backgrounded invocation toasts the user on completion
@@ -41,13 +48,30 @@ export function registerSessionLifecycle(pi: ExtensionAPI): void {
     // ctx may be headless (rpc/--print/web) or stale after a session swap —
     // ctx.ui/hasUI assert an active context and can throw. Guard like the
     // compaction notifier (see registerCommand("compact") in index.ts).
+    // Auto-resume (opt-in) hands a finished run straight back to the agent as a
+    // queued follow-up, so it verifies outputs itself instead of the toast
+    // asking the user to relay (#413 part B). `followUp` is required, not
+    // cosmetic: a plain send to a brain that is mid-turn is rejected with
+    // "Agent is already processing".
+    const resumeFn = isAutoResumeEnabled()
+      ? (text: string) => {
+          // Fired from a 15s timer, so a rejected/throwing send must not take
+          // the tick down with it.
+          try {
+            void pi.sendUserMessage(text, { deliverAs: "followUp" });
+          } catch (err) {
+            console.error("[galaxy-poller] auto-resume send failed:", err);
+          }
+        }
+      : undefined;
+
     startGalaxyPoller((text, level) => {
       try {
         if (ctx.hasUI) ctx.ui.notify(text, level);
       } catch {
         /* stale/headless context — a dropped completion toast is fine */
       }
-    });
+    }, resumeFn);
 
     sessionStart = {
       id: ctx.sessionManager?.getSessionId?.() ?? `session-${Date.now()}`,
@@ -89,6 +113,8 @@ export function registerSessionLifecycle(pi: ExtensionAPI): void {
     stopWatchingNotebook();
     await writeSessionSummary();
     snapshotNotebook(pi);
+    // Best-effort final push (debounce already pushed recent changes).
+    await flushNotebookToGalaxy();
   });
 }
 
@@ -174,9 +200,8 @@ function syncSessionJsonlSymlink(ctx: ExtensionContext): void {
   }
 }
 
-type GreetingAction =
-  | { kind: "model"; message: string }
-  | { kind: "notify"; text: string; level: "info" | "warning" };
+type NotifyAction = { kind: "notify"; text: string; level: "info" | "warning" };
+type GreetingAction = { kind: "model"; message: string } | NotifyAction;
 
 /**
  * Decide the startup greeting from the active Galaxy credential status. Pure so
@@ -221,7 +246,41 @@ export function planStartupGreeting(status: ActiveGalaxyStatus, isOrbit: boolean
   };
 }
 
-export function sendStartupGreeting(pi: ExtensionAPI, ctx: ExtensionContext): void {
+/**
+ * Warn at startup when Galaxy is configured but the runner that launches
+ * galaxy-mcp is missing, so the gap is visible before the user asks for Galaxy
+ * work rather than as a failed tool call mid-analysis.
+ *
+ * The CLI already prints this (bin/loom.js), but it writes to stderr -- which
+ * in a GUI shell lands in a log file nobody reads. Returning a notify action
+ * puts the same text where Orbit renders it. Pure so it can be unit-tested.
+ */
+export function planUvxWarning(
+  status: ActiveGalaxyStatus,
+  uvxAvailable: boolean,
+): NotifyAction | null {
+  // "none" has no Galaxy to reach, so a missing runner is not yet a problem;
+  // "configured-unusable" already gets its own, more specific warning.
+  if (status !== "usable" || uvxAvailable) return null;
+  return { kind: "notify", level: "warning", text: uvxMissingNotice() };
+}
+
+export function sendStartupGreeting(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  uvxAvailable: boolean = isUvxAvailable(),
+): void {
+  // Surface the missing-runner warning before the greeting: the greeting tells
+  // the model to call galaxy_connect(), which is exactly what will fail.
+  const uvxWarning = planUvxWarning(activeGalaxyStatus(), uvxAvailable);
+  if (uvxWarning) {
+    try {
+      ctx.ui.notify(uvxWarning.text, uvxWarning.level);
+    } catch {
+      /* headless/stale ctx -- the CLI still prints this to stderr */
+    }
+  }
+
   const isOrbit = process.env.LOOM_SHELL_KIND === "orbit";
   const action = planStartupGreeting(activeGalaxyStatus(), isOrbit);
   if (action.kind === "model") {

@@ -15,6 +15,7 @@ import path from "node:path";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
 import { registerIpcHandlers, confirmCwdChange } from "./ipc-handlers.js";
+import { primeOAuthProviders } from "./oauth-handler.js";
 import { AgentManager } from "./agent.js";
 import { registerFilesIpc, startFilesWatcher, stopFilesWatcher } from "./files-handler.js";
 import { ProcMonitor } from "./proc-monitor.js";
@@ -284,6 +285,12 @@ function createWindow(cwd: string): void {
   }
 
   agentManager = new AgentManager(mainWindow, cwd);
+  // Which providers offer sign-in comes from pi's registry, and reading it is
+  // async. Kick it off here rather than awaiting: the seed list covers the
+  // provider that ships enabled, so a status check that lands first is still
+  // answered correctly and the full list is in place well before anyone opens
+  // Preferences.
+  void primeOAuthProviders().catch(() => {});
   registerIpcHandlers(agentManager);
   registerFilesIpc(() => agentManager?.getCwd() ?? cwd);
   startFilesWatcher(mainWindow, cwd);

@@ -136,8 +136,7 @@ describe("scanSessions", () => {
     const r2 = scanSessions(db, sessionsDir);
     expect(r2.entriesInserted).toBe(1);
     const row = db.prepare("SELECT entry_id FROM entries WHERE entry_id = 'partial'").get() as
-      | { entry_id?: string }
-      | undefined;
+      { entry_id?: string } | undefined;
     expect(row?.entry_id).toBe("partial");
     db.close();
   });
