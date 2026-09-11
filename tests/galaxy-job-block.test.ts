@@ -46,6 +46,16 @@ describe("job block round-trip", () => {
     const content = "```loom-invocation\ninvocation_id: inv1\nstatus: in_progress\n```\n";
     expect(findJobBlocks(content)).toEqual([]);
   });
+
+  // A terminal status the parser doesn't recognise reads back as in_progress,
+  // so the poller re-picks the job up, rewrites the same outcome, and toasts it
+  // again every tick. Every status has to survive the round trip.
+  it("round-trips every terminal status, so a finished job stays finished", () => {
+    for (const status of ["completed", "failed", "cancelled", "skipped"] as const) {
+      const parsed = findJobBlocks(renderJobYaml({ ...job, status }));
+      expect(parsed[0].status).toBe(status);
+    }
+  });
 });
 
 describe("upsertJobBlock", () => {
@@ -65,7 +75,11 @@ describe("upsertJobBlock", () => {
   });
 
   it("keeps other jobs untouched", () => {
-    const two = upsertJobBlock(upsertJobBlock("", job), { ...job, jobId: "def456", label: "fastp" });
+    const two = upsertJobBlock(upsertJobBlock("", job), {
+      ...job,
+      jobId: "def456",
+      label: "fastp",
+    });
     const updated = upsertJobBlock(two, { ...job, status: "failed" });
     const blocks = findJobBlocks(updated);
     expect(blocks).toHaveLength(2);
@@ -80,17 +94,72 @@ describe("Galaxy state mapping", () => {
     expect(jobStatusFromGalaxyState("ok")).toBe("completed");
   });
 
-  it("treats error and deleted as failed", () => {
-    for (const s of ["error", "deleted"]) {
+  it("treats error as failed", () => {
+    for (const s of ["error", "failed"]) {
       expect(isTerminalJobState(s)).toBe(true);
       expect(jobStatusFromGalaxyState(s)).toBe("failed");
     }
   });
 
   it("keeps running states in flight", () => {
-    for (const s of ["new", "queued", "running", "waiting"]) {
+    for (const s of ["new", "resubmitted", "upload", "queued", "running", "waiting"]) {
       expect(isTerminalJobState(s)).toBe(false);
       expect(jobStatusFromGalaxyState(s)).toBe("in_progress");
+    }
+  });
+
+  // Ending is not failing. A deleted or stopped job is the user cancelling
+  // their own work; calling it a failure sends the agent to investigate a
+  // malfunction that never happened.
+  it("calls a cancelled job cancelled, not failed", () => {
+    for (const s of ["deleted", "stopped"]) {
+      expect(isTerminalJobState(s)).toBe(true);
+      expect(jobStatusFromGalaxyState(s)).toBe("cancelled");
+    }
+  });
+
+  // Galaxy's own workflow UI counts skipped jobs alongside successful ones.
+  it("calls a conditionally skipped job skipped, not failed", () => {
+    expect(isTerminalJobState("skipped")).toBe(true);
+    expect(jobStatusFromGalaxyState("skipped")).toBe("skipped");
+  });
+
+  // `deleting` and `stop` (the wire value of STOPPING) are transitional --
+  // Galaxy's job handler advances them to `deleted` and `stopped`. Going
+  // terminal on them would freeze the block on a state the job has already
+  // left, and the poller only revisits in_progress blocks, so nothing would
+  // ever correct it.
+  it("keeps polling through the transitional states on the way out", () => {
+    for (const s of ["deleting", "stop"]) {
+      expect(isTerminalJobState(s)).toBe(false);
+      expect(jobStatusFromGalaxyState(s)).toBe("in_progress");
+    }
+  });
+
+  // Not a drift guard -- it cannot notice Galaxy adding a state, since the list
+  // is copied here. It pins that every state we know about today is classified
+  // deliberately rather than falling through to in_progress by accident.
+  it("classifies every currently known Galaxy job state", () => {
+    const expected: Record<string, string> = {
+      new: "in_progress",
+      resubmitted: "in_progress",
+      upload: "in_progress",
+      waiting: "in_progress",
+      queued: "in_progress",
+      running: "in_progress",
+      paused: "in_progress", // resumes when inputs land, or when the user says so
+      deleting: "in_progress", // transitional -> deleted
+      stop: "in_progress", // transitional -> stopped
+      ok: "completed",
+      error: "failed",
+      failed: "failed",
+      deleted: "cancelled",
+      stopped: "cancelled",
+      skipped: "skipped",
+    };
+    for (const [state, status] of Object.entries(expected)) {
+      expect(jobStatusFromGalaxyState(state)).toBe(status);
+      expect(isTerminalJobState(state)).toBe(status !== "in_progress");
     }
   });
 

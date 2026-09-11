@@ -6,6 +6,8 @@
  * JSON-lines stdin/stdout -- same RPC protocol, different pipe.
  */
 
+import { decodeEventPayload } from "./event-payload.js";
+
 type Callback<T extends unknown[]> = (...args: T) => void;
 
 interface PendingRequest {
@@ -112,7 +114,7 @@ function connect(): void {
     // Agent event forwarded from server
     const type = data._event as string | undefined;
     if (type) {
-      emit(type, data._payload);
+      emit(type, ...decodeEventPayload(data._payload));
       return;
     }
   };
@@ -199,10 +201,16 @@ async function fetchMode(): Promise<"remote" | "desktop"> {
     Promise.resolve({ ok: false, error: "session restore is unavailable in remote mode" }),
   listAllModels: () =>
     Promise.resolve({ ok: false, error: "model catalog is unavailable in remote mode" }),
+  // Empty map, not undefined: app.ts calls this at module load and three UI
+  // paths await the result, so a missing stub is a TypeError that takes the
+  // whole renderer down. Empty leaves the shared seed in place.
+  oauthProviders: () => Promise.resolve({}),
   oauthStatus: () => Promise.resolve({ signedIn: false }),
   oauthSignIn: () => Promise.resolve({ ok: false, error: "OAuth is unavailable in remote mode" }),
   oauthSignOut: () => Promise.resolve({ ok: true }),
   validateApiKey: () => Promise.resolve({ valid: false, error: "unavailable in remote mode" }),
+  discoverModels: () =>
+    Promise.resolve({ ok: false, error: "model discovery is unavailable in remote mode" }),
   setBypassPermissions: () => Promise.resolve({ ok: false, enabled: false }),
   getReportSysinfo: () =>
     Promise.resolve({
@@ -212,6 +220,9 @@ async function fetchMode(): Promise<"remote" | "desktop"> {
       chromeVersion: "",
       platform: "web",
       arch: "",
+      // The browser shell has no host to inspect; platform:"web" already says
+      // this isn't a real Linux box.
+      wsl: false,
     }),
   openIssueReport: () => Promise.resolve({ opened: false }),
   submitFeedback: () =>

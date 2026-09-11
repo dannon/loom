@@ -5,14 +5,14 @@ import { resolve, dirname, join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "fs";
 import { homedir } from "os";
-import {
-  loadConfig as loadLoomConfig,
-  saveConfig as saveLoomConfig,
-} from "../shared/loom-config.js";
+import { loadConfig as loadLoomConfig } from "../shared/loom-config.js";
 import { spawn } from "child_process";
 import { getLoomVersion, detectInstall } from "./update-check.js";
 import { isUvxAvailable, uvxMissingNotice } from "./uvx-check.js";
 import { resolveHideThinking, isInteractiveTerminal } from "./thinking-pref.js";
+import { hasStoredCredential, isProviderUsable, pickSignedInFallback } from "./provider-auth.js";
+import { SEED_OAUTH_ONLY_PROVIDERS } from "../shared/provider-auth-caps.js";
+import { EX_CONFIG } from "../shared/brain-exit.js";
 import { resolvePiExtensionDir } from "./pi-extension-path.js";
 import { pickChannel } from "../shared/version-compare.js";
 import {
@@ -173,8 +173,13 @@ const PROVIDER_ENV_MAP = {
   deepseek: "DEEPSEEK_API_KEY",
 };
 
-// Providers that authenticate via OAuth (~/.pi/agent/auth.json) instead of env vars.
-const OAUTH_PROVIDERS = new Set(["openai-codex"]);
+// Providers that authenticate ONLY by sign-in (~/.pi/agent/auth.json), with no
+// API-key path at all. Deliberately NOT "every provider that offers sign-in":
+// anthropic, xai, openrouter and friends carry both, and treating them as
+// sign-in-only is exactly the conflation that caused #429 on the Orbit side.
+// The CLI has no pi registry to read, so it answers from the same seed Orbit
+// falls back to before its own registry read lands.
+const OAUTH_ONLY_PROVIDERS = new Set(SEED_OAUTH_ONLY_PROVIDERS);
 
 function readAuthJson() {
   const authPath = join(agentDir, "auth.json");
@@ -186,43 +191,49 @@ function readAuthJson() {
   }
 }
 
-// Can this CLI actually authenticate the given provider? OAuth providers need a
-// credential in auth.json; everyone else needs a plaintext config key or the
-// provider's env var (encrypted config keys aren't decryptable outside Orbit).
+// Can this CLI actually authenticate the given provider? A stored auth.json
+// credential counts for any provider; otherwise it needs a plaintext config key
+// or its env var (encrypted config keys aren't decryptable outside Orbit).
+// Custom OpenAI-compatible providers resolve their key from the injected env var
+// (Orbit) or a plaintext config key (CLI) -- same logic as checkLLMProvider.
 function activeProviderUsable(provider, entry, auth) {
-  if (OAUTH_PROVIDERS.has(provider)) return Boolean(auth[provider]);
-  // Custom OpenAI-compatible providers resolve their key from the injected
-  // env var (Orbit) or a plaintext config key (CLI) -- same logic as
-  // checkLLMProvider. Without this, a keyless-on-disk custom provider looks
-  // unusable and the reconciler could silently switch llm.active away from it.
-  if (isCustomProvider(entry)) return Boolean(resolveActiveLlmApiKey(entry, process.env));
-  if (entry?.apiKey) return true;
-  const envVar = PROVIDER_ENV_MAP[provider];
-  return Boolean(envVar && process.env[envVar]);
+  return isProviderUsable(provider, entry, auth, {
+    env: process.env,
+    oauthOnlyProviders: OAUTH_ONLY_PROVIDERS,
+    providerEnvMap: PROVIDER_ENV_MAP,
+    customKeyResolved: isCustomProvider(entry)
+      ? resolveActiveLlmApiKey(entry, process.env)
+      : undefined,
+  });
 }
 
 // Pi's `/login` writes credentials to auth.json but never touches Loom's
 // llm.active, so signing into a new provider mid-session has no effect on the
-// next launch. Bridge that gap: if the configured active provider has no
-// credential this CLI can use, but the user has signed into an OAuth provider,
-// switch llm.active to it and persist so the choice sticks.
+// next launch. Bridge that gap for the standalone CLI: if the configured active
+// provider has no credential we can use, fall back to one that's signed in.
+//
+// In memory only. This used to persist, which made a subprocess the last writer
+// of a setting the user owns -- an Orbit prefs save could be silently undone by
+// the very restart it triggered (#429). Nothing is lost by not writing: the next
+// launch re-derives the same answer from the same two files.
 function reconcileActiveProviderWithAuth() {
+  // Shell-owned sessions (Orbit, web) choose the provider themselves and hand us
+  // credentials by env -- a child process must not overrule that. And an
+  // informational command must never touch provider state at all.
+  if (isRpcMode || isInformationalCommand) return;
   const llm = loomConfig.llm;
   if (!llm?.active) return;
   const auth = readAuthJson();
   if (activeProviderUsable(llm.active, llm.providers?.[llm.active], auth)) return;
-  const candidate = [...OAUTH_PROVIDERS].find((p) => auth[p]);
-  if (!candidate || candidate === llm.active) return;
+  const candidate = pickSignedInFallback(auth, OAUTH_ONLY_PROVIDERS, llm.active);
+  if (!candidate) return;
   const from = llm.active;
   llm.active = candidate;
   llm.providers = llm.providers || {};
   if (!llm.providers[candidate]) llm.providers[candidate] = {};
-  try {
-    saveLoomConfig(loomConfig);
-    console.error(
-      `loom: active provider "${from}" has no usable credential here; switched to "${candidate}" (signed in via ~/.pi/agent/auth.json).`,
-    );
-  } catch {}
+  console.error(
+    `loom: active provider "${from}" has no usable credential here; using "${candidate}" for this run (signed in via ~/.pi/agent/auth.json). Set it permanently in Orbit's Preferences, or add a key for "${from}".`,
+  );
 }
 reconcileActiveProviderWithAuth();
 
@@ -236,7 +247,7 @@ const activeLlmProvider = loomConfig.llm?.active;
 const activeLlmConfig = activeLlmProvider ? loomConfig.llm?.providers?.[activeLlmProvider] : null;
 if (
   activeLlmConfig?.apiKey &&
-  !OAUTH_PROVIDERS.has(activeLlmProvider) &&
+  !OAUTH_ONLY_PROVIDERS.has(activeLlmProvider) &&
   !isCustomProvider(activeLlmConfig)
 ) {
   const envVar = PROVIDER_ENV_MAP[activeLlmProvider] || "AI_GATEWAY_API_KEY";
@@ -265,9 +276,9 @@ if (!isInformationalCommand && activeLlmProvider && isCustomProvider(activeLlmCo
 const OAUTH_CONFLICT_ENV = {
   "openai-codex": ["OPENAI_API_KEY"],
 };
-if (activeLlmProvider && OAUTH_PROVIDERS.has(activeLlmProvider)) {
+if (activeLlmProvider && OAUTH_ONLY_PROVIDERS.has(activeLlmProvider)) {
   const auth = readAuthJson();
-  if (auth[activeLlmProvider]) {
+  if (hasStoredCredential(auth, activeLlmProvider)) {
     for (const v of OAUTH_CONFLICT_ENV[activeLlmProvider] || []) {
       if (process.env[v]) delete process.env[v];
     }
@@ -323,6 +334,13 @@ if (!isInformationalCommand) {
       command: "uvx",
       args: [GALAXY_MCP_SPEC],
       directTools: true,
+      // The MCP SDK defaults to a 60s request timeout, which a public Galaxy
+      // under load routinely outruns -- job submission and dataset detail
+      // lookups both come back as -32001. That reads to the user as a dropped
+      // connection and used to earn a "/mcp reconnect galaxy" nudge that cannot
+      // help: a fresh connection gets the same 60s. Give slow-but-alive calls
+      // room to finish, while still failing rather than hanging forever.
+      requestTimeoutMs: 300_000,
       // Local-path upload over MCP times out on large files (-32001); the
       // loom-native galaxy_upload_local_file tool handles those instead. URL
       // upload (upload_file_from_url) and the rest stay exposed.
@@ -398,29 +416,65 @@ if (!isInformationalCommand) {
 // Pre-flight: ensure at least one LLM provider is configured
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Where to go to fix a missing credential, phrased for the shell we're running
+ * under. The CLI wording ("Launch via Orbit and sign in from Preferences") is
+ * actively wrong inside Orbit -- it points at the app the user is already
+ * looking at, which is the half of #429 that survived the first fix. Route every
+ * exit below through here so a new one can't quietly regress to CLI-only advice.
+ */
+function credentialFixHint(provider, { canUseApiKey }) {
+  if (isRpcMode) {
+    return canUseApiKey
+      ? `Open Preferences, re-enter the API key for "${provider}" or sign in to it,
+then start a new session.`
+      : `Open Preferences, sign in to "${provider}", then start a new session.`;
+  }
+  if (!canUseApiKey) {
+    return `Launch via Orbit (\`cd app && npm start\`) and sign in from Preferences,
+or unset "llm.active" in ~/.loom/config.json.`;
+  }
+  const envVar = PROVIDER_ENV_MAP[provider] || "AI_GATEWAY_API_KEY";
+  return `Do one of the following:
+
+  * Export the key for this shell:
+      export ${envVar}=...
+
+  * Launch via Orbit (\`cd app && npm start\`), which decrypts the stored key
+    and injects ${envVar} into the brain.
+
+  * Unset "llm.active" in ~/.loom/config.json.`;
+}
+
+/**
+ * Every exit below is EX_CONFIG, not 1: each one has already diagnosed the
+ * problem and printed the fix for it, and none of them can come out differently
+ * on a second attempt. A shell reads that code as "show this, don't retry"
+ * (#439) -- under the old blanket 1, Orbit restarted three times and replaced
+ * these messages with a generic crash box.
+ */
 function checkLLMProvider() {
   const skipFlags = ["--version", "--help", "-h", "--api-key", "--list-models"];
   if (userArgs.some((a) => skipFlags.some((f) => a.startsWith(f)))) return;
   if (hasArg("--provider")) return;
 
-  // OAuth providers authenticate via ~/.pi/agent/auth.json, not config keys.
-  // Short-circuit on a present credential for the active provider; stale
-  // plaintext / encrypted fields on the entry are ignored entirely so they
-  // can't mask a missing OAuth login or falsely trigger the encrypted-key
-  // exit below.
-  if (activeLlmProvider && OAUTH_PROVIDERS.has(activeLlmProvider)) {
-    const authPath = join(agentDir, "auth.json");
-    if (existsSync(authPath)) {
-      try {
-        const auth = JSON.parse(readFileSync(authPath, "utf-8"));
-        if (auth && auth[activeLlmProvider]) return;
-      } catch {}
-    }
-    console.error(`loom: provider "${activeLlmProvider}" requires an OAuth sign-in.
-Launch via Orbit (\`cd app && npm start\`) and sign in from Preferences,
-or unset the active provider in ~/.loom/config.json.
+  // pi reads ~/.pi/agent/auth.json natively, so a stored login authenticates the
+  // active provider on its own. This has to come before every key path below:
+  // a dual-auth provider the user IS signed in to would otherwise hit the
+  // encrypted-key exit and die over a key it never needed (#429), which also
+  // contradicts what isProviderUsable() tells the reconciler.
+  if (activeLlmProvider && hasStoredCredential(readAuthJson(), activeLlmProvider)) return;
+
+  // Sign-in-only providers have no key path at all, so with no stored login
+  // there is nothing left to try. Stale plaintext / encrypted fields on the
+  // entry are ignored entirely so they can't mask the missing sign-in or
+  // falsely trigger the encrypted-key exit below.
+  if (activeLlmProvider && OAUTH_ONLY_PROVIDERS.has(activeLlmProvider)) {
+    console.error(`loom: provider "${activeLlmProvider}" requires a sign-in.
+
+${credentialFixHint(activeLlmProvider, { canUseApiKey: false })}
 `);
-    process.exit(1);
+    process.exit(EX_CONFIG);
   }
 
   // Custom OpenAI-compatible provider: usable when a key is resolvable from the
@@ -455,33 +509,22 @@ or unset the active provider in ~/.loom/config.json.
   ];
   if (providerEnvVars.some((v) => process.env[v])) return;
 
-  // Config has an encrypted key but this CLI can't decrypt it — Electron's
-  // safeStorage lives in the Orbit main process. Point the user at the two
-  // working paths instead of falling through to the generic error.
+  // Config has an encrypted key but this process can't decrypt it -- Electron's
+  // safeStorage lives in the Orbit main process. Say so instead of falling
+  // through to the generic error.
   if (activeLlmConfig?.apiKeyEncrypted) {
-    const envVar = PROVIDER_ENV_MAP[activeLlmProvider] || "AI_GATEWAY_API_KEY";
-    console.error(`loom: your ~/.loom/config.json has an encrypted API key
-(apiKeyEncrypted) for provider "${activeLlmProvider}", but the standalone
-CLI cannot decrypt it -- that only works inside Orbit.
+    console.error(`loom: the API key stored for provider "${activeLlmProvider}" could not be
+decrypted here, so no credential reached the agent. (apiKeyEncrypted in
+~/.loom/config.json only decrypts inside Orbit.)
 
-Do one of the following:
-
-  * Launch via Orbit (\`cd app && npm start\`), which decrypts and injects
-    ${envVar} into the brain.
-
-  * Export the key for this shell:
-      export ${envVar}=...
+${credentialFixHint(activeLlmProvider, { canUseApiKey: true })}
 `);
-    process.exit(1);
+    process.exit(EX_CONFIG);
   }
 
-  const authPath = join(agentDir, "auth.json");
-  if (existsSync(authPath)) {
-    try {
-      const auth = JSON.parse(readFileSync(authPath, "utf-8"));
-      if (Object.keys(auth).length > 0) return;
-    } catch {}
-  }
+  // Any stored pi login at all -- the user may have signed in via `--provider`
+  // without ever setting llm.active.
+  if (Object.keys(readAuthJson()).length > 0) return;
 
   const modelsPath = join(agentDir, "models.json");
   if (existsSync(modelsPath)) {
@@ -490,6 +533,15 @@ Do one of the following:
       const providers = models.providers || {};
       if (Object.values(providers).some((p) => p.apiKey)) return;
     } catch {}
+  }
+
+  if (isRpcMode) {
+    console.error(`loom: no LLM provider is configured, so the agent has no credential.
+
+Open Preferences, pick a provider and add its API key (or sign in to it),
+then start a new session.
+`);
+    process.exit(EX_CONFIG);
   }
 
   console.error(`loom requires an LLM provider to function.
@@ -519,7 +571,7 @@ Set up one of the following:
      Run with --provider anthropic (or openai, google, etc.)
      and follow the login prompts.
 `);
-  process.exit(1);
+  process.exit(EX_CONFIG);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

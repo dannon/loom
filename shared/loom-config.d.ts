@@ -102,6 +102,21 @@ export interface LoomConfig {
     showThinking?: boolean;
   };
   /**
+   * Evidence gate for plan-step completion. Watches writes to `notebook.md`
+   * for a plan step flipping `- [ ]` -> `- [x]` while the `loom-invocation`
+   * block bound to that step still reads `status: in_progress` -- a verified
+   * result claimed for a run Galaxy says has not finished.
+   *
+   * `warn` (default) allows the write and records the decision to
+   * `activity.jsonl`, so the real-world false-positive rate can be measured
+   * before anyone turns this into a hard failure. `deny` blocks the write and
+   * tells the agent to leave the step pending, mark it `- [!]`, or re-poll.
+   * `off` disables it. Also settable per-session via `LOOM_EVIDENCE_GATE`.
+   */
+  evidenceGate?: {
+    mode?: "off" | "warn" | "deny";
+  };
+  /**
    * Local-execution safety gate (exec-guard). Secure by default: the gate is
    * enabled, never bypassed, and trusts nothing until the user says otherwise.
    */

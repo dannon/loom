@@ -23,6 +23,18 @@ export function isAutoResumeEnabled(): boolean {
 }
 
 /**
+ * Whether a finished run is worth waking the agent for.
+ *
+ * Only a success or a failure is: one has outputs to verify, the other has a
+ * fault to investigate. A run the user cancelled, or a step a workflow
+ * conditional skipped, is a deliberate decision with nothing to follow up --
+ * resuming on those would spend tokens, unattended, second-guessing the user.
+ */
+export function isResumableOutcome(status: string): status is "completed" | "failed" {
+  return status === "completed" || status === "failed";
+}
+
+/**
  * The follow-up handed to the agent when a run finishes. Written as an
  * instruction rather than a notification, because it arrives as a user turn.
  *
@@ -48,7 +60,7 @@ export function buildResumePrompt(
         `and say plainly whether this is retryable or needs a human decision.`;
   return (
     `${what} ${task} ` +
-    `This message was generated automatically when the run reached a terminal state — no human is ` +
+    `This message was generated automatically when the run reached a terminal state -- no human is ` +
     `necessarily watching. Report what you found and STOP; do not start the next step of the plan ` +
     `unless the plan says it runs unattended.`
   );

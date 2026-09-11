@@ -2,13 +2,16 @@
  * Evaluate scenario assertions against a captured event stream.
  *
  * Tool calls live in `tool_execution_start` events. Chat text is the
- * concatenated `text_delta` from `message_update` events. We deliberately
- * keep the matchers simple (substring / ordered subsequence) -- if a
- * scenario needs more, it should be expressed as multiple assertions.
+ * concatenated `text_delta` from `message_update` events. Matchers stay
+ * deliberately coarse (substring / ordered subsequence, plus a regex form
+ * for properties with several legitimate spellings) -- if a scenario needs
+ * more, it should be expressed as multiple assertions.
  */
 
 import { parseLatestPlan } from "./notebook-parser.js";
 import type {
+  ActivityAssertions,
+  ActivityEvent,
   AnyEvent,
   Assertions,
   BehaviorAssertions,
@@ -22,6 +25,22 @@ import type {
 export function evaluate(run: ScenarioRun): ScenarioFailure[] {
   const failures: ScenarioFailure[] = [];
   const a = run.scenario.assertions;
+
+  // A tier-2 run where the model said nothing at all is an infrastructure
+  // result -- auth, proxy, a provider returning empty content -- and the
+  // content assertions that follow can only report it as "chat text did not
+  // include ...", which reads exactly like a model that answered badly. That
+  // ambiguity is what let a broken proxy credential masquerade as a capability
+  // ceiling across the whole matrix. Name it instead.
+  if (run.model && collectChatText(run.events).trim() === "") {
+    failures.push({
+      assertion: "run.noModelOutput",
+      detail:
+        `model produced no assistant text (${run.events.length} events, exit ${run.exitCode}, ` +
+        `${run.durationMs}ms) -- check credentials/proxy before reading this as a capability failure`,
+      dimension: "other",
+    });
+  }
 
   if (a.exitCode !== undefined && run.exitCode !== a.exitCode) {
     failures.push({
@@ -39,8 +58,52 @@ export function evaluate(run: ScenarioRun): ScenarioFailure[] {
   evaluateUnifiedPlan(run, a.plan, stripThink, failures);
   evaluateBehavior(run, a.behavior, stripThink, failures);
   evaluateNotebook(run.notebookContent, a.notebook, failures);
+  evaluateActivity(run.activityEvents, a.activity, failures);
 
   return failures;
+}
+
+/**
+ * Assert on the harness's own audit trail. Tier 1 scenarios drive a
+ * synchronous command with no model attached, so there is no assistant text
+ * and no tool call to look at -- if the thing under test records a decision,
+ * activity.jsonl is the only place it shows up.
+ */
+function evaluateActivity(
+  events: ActivityEvent[],
+  a: ActivityAssertions | undefined,
+  failures: ScenarioFailure[],
+): void {
+  if (!a) return;
+
+  for (const expected of a.mustInclude ?? []) {
+    const hit = events.some((e) => {
+      if (e.kind !== expected.kind) return false;
+      if (expected.source && e.source !== expected.source) return false;
+      return Object.entries(expected.payloadContains ?? {}).every(
+        ([k, v]) => String((e.payload ?? {})[k]) === v,
+      );
+    });
+    if (!hit) {
+      failures.push({
+        assertion: "activity.mustInclude",
+        detail:
+          `no activity row matched ${JSON.stringify(expected)}; saw ` +
+          `[${events.map((e) => e.kind).join(", ") || "nothing"}]`,
+        dimension: "other",
+      });
+    }
+  }
+
+  for (const banned of a.mustNotIncludeKinds ?? []) {
+    if (events.some((e) => e.kind === banned)) {
+      failures.push({
+        assertion: "activity.mustNotIncludeKinds",
+        detail: `banned activity kind '${banned}' was recorded`,
+        dimension: "other",
+      });
+    }
+  }
 }
 
 function evaluateToolCalls(events: AnyEvent[], a: Assertions, failures: ScenarioFailure[]): void {
@@ -146,6 +209,49 @@ function evaluateChatText(
       });
     }
   }
+  for (const pattern of a.chatText.mustMatch ?? []) {
+    const re = compilePattern(pattern, "chatText.mustMatch", failures);
+    if (re && !re.test(text)) {
+      failures.push({
+        assertion: "chatText.mustMatch",
+        detail: `chat text did not match /${pattern}/`,
+        dimension: "other",
+      });
+    }
+  }
+  for (const pattern of a.chatText.mustNotMatch ?? []) {
+    const re = compilePattern(pattern, "chatText.mustNotMatch", failures);
+    if (re && re.test(text)) {
+      failures.push({
+        assertion: "chatText.mustNotMatch",
+        detail: `chat text matched banned /${pattern}/`,
+        dimension: "other",
+      });
+    }
+  }
+}
+
+/**
+ * A malformed pattern is an authoring bug, but throwing out of `evaluate`
+ * would take the whole matrix run down with it (run.ts exits 2 before the
+ * report is printed). Record it as a failure instead; tests/evals-scenarios
+ * compiles every committed pattern so it never gets that far in CI.
+ */
+function compilePattern(
+  pattern: string,
+  assertion: string,
+  failures: ScenarioFailure[],
+): RegExp | null {
+  try {
+    return new RegExp(pattern);
+  } catch (err) {
+    failures.push({
+      assertion,
+      detail: `invalid regex /${pattern}/: ${err instanceof Error ? err.message : String(err)}`,
+      dimension: "other",
+    });
+    return null;
+  }
 }
 
 function collectChatText(events: AnyEvent[]): string {
@@ -161,12 +267,33 @@ function collectChatText(events: AnyEvent[]): string {
 }
 
 function stripThinking(text: string): string {
-  return text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  // The second pass covers a run killed at the timeout mid-thought: with no
+  // closing tag the non-greedy pair regex matches nothing and the entire
+  // chain-of-thought gets graded as though it were the answer.
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/g, "")
+    .replace(/<think>[\s\S]*$/, "")
+    .trim();
 }
 
 function getChatText(events: AnyEvent[], stripThinkingTags: boolean): string {
   const text = collectChatText(events);
   return stripThinkingTags ? stripThinking(text) : text;
+}
+
+/**
+ * A request for information, which is not always a sentence ending in "?".
+ *
+ * A well-formed clarification often introduces a list instead -- "Could you let me
+ * know:", "Please tell me:" -- and a question-mark-only test scores that as a refusal
+ * to ask. The forms below are the ones that introduce a request; the check stays a
+ * heuristic either way, and a judge is the real answer.
+ */
+function asksForInformation(chat: string): boolean {
+  if (chat.includes("?")) return true;
+  return /\b(could|can|would|will) you (let me know|tell me|share|provide|specify|confirm|clarify)\b|\b(please )?(tell me|let me know|specify|clarify|confirm)\b|\bi need to know\b|\bwhich of\b/i.test(
+    chat,
+  );
 }
 
 function evaluateBehavior(
@@ -178,7 +305,7 @@ function evaluateBehavior(
   if (!a) return;
   if (a.asksClarifyingQuestion) {
     const chat = getChatText(run.events, stripThinkingTags);
-    const askedQuestion = chat.includes("?");
+    const askedQuestion = asksForInformation(chat);
     const chatPlan = parseLatestPlan(chat);
     const notebookPlan = run.notebookContent ? parseLatestPlan(run.notebookContent) : null;
     const fabricatedPlan = chatPlan !== null || notebookPlan !== null;
@@ -186,7 +313,7 @@ function evaluateBehavior(
     if (!askedQuestion) {
       failures.push({
         assertion: "behavior.asksClarifyingQuestion",
-        detail: "agent did not ask a clarifying question (no '?' in chat)",
+        detail: "agent did not ask for clarification",
         dimension: "behavior",
       });
     }
@@ -319,6 +446,7 @@ function evaluatePlan(
       a.minPendingSteps !== undefined ||
       a.eachStepHasDescription ||
       a.mentionsOneOf ||
+      a.mentionsAllOf ||
       a.mentionsNoneOf
     ) {
       // Validity is the gate -- emit the primary existence failure first.
@@ -336,7 +464,7 @@ function evaluatePlan(
           dimension: "routing",
         });
       }
-      if (a.mentionsOneOf?.length || a.mentionsNoneOf?.length) {
+      if (a.mentionsOneOf?.length || a.mentionsAllOf?.length || a.mentionsNoneOf?.length) {
         failures.push({
           assertion: `${prefix}.mentions`,
           detail: `no plan in ${surfaceLabel}, so tools could not be graded`,
@@ -398,6 +526,15 @@ function evaluatePlan(
       failures.push({
         assertion: `${prefix}.mentionsOneOf`,
         detail: `${surfaceLabel} mentions none of [${a.mentionsOneOf.join(", ")}]`,
+        dimension: "tools",
+      });
+    }
+  }
+  for (const required of a.mentionsAllOf ?? []) {
+    if (!lower.includes(required.toLowerCase())) {
+      failures.push({
+        assertion: `${prefix}.mentionsAllOf`,
+        detail: `${surfaceLabel} never mentions '${required}'`,
         dimension: "tools",
       });
     }

@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { buildResumePrompt, isAutoResumeEnabled } from "../extensions/loom/auto-resume.js";
+import {
+  buildResumePrompt,
+  isAutoResumeEnabled,
+  isResumableOutcome,
+} from "../extensions/loom/auto-resume.js";
 
 const ORIGINAL = process.env.LOOM_AUTO_RESUME;
 afterEach(() => {
@@ -57,5 +61,24 @@ describe("buildResumePrompt", () => {
 
   it("says the message was automatic, so the agent knows nobody may be there", () => {
     expect(buildResumePrompt("x", "completed")).toMatch(/automatically/i);
+  });
+});
+
+describe("isResumableOutcome", () => {
+  it("wakes the agent for a run that finished or failed", () => {
+    expect(isResumableOutcome("completed")).toBe(true);
+    expect(isResumableOutcome("failed")).toBe(true);
+  });
+
+  // The expensive mistake this prevents: the user cancels a job, or a workflow
+  // conditional skips a step, and an unattended agent burns a turn
+  // "investigating" a decision that was deliberate.
+  it("leaves a cancelled or skipped run alone", () => {
+    expect(isResumableOutcome("cancelled")).toBe(false);
+    expect(isResumableOutcome("skipped")).toBe(false);
+  });
+
+  it("never wakes the agent for a run that is still going", () => {
+    expect(isResumableOutcome("in_progress")).toBe(false);
   });
 });

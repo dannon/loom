@@ -35,7 +35,7 @@ export interface JobYaml {
   label: string;
   toolId?: string;
   submittedAt: string;
-  status: "in_progress" | "completed" | "failed";
+  status: "in_progress" | "completed" | "failed" | "cancelled" | "skipped";
   summary?: string;
   /** Galaxy's raw job state at the last poll, kept for display and debugging. */
   galaxyState?: string;
@@ -46,28 +46,65 @@ const JOB_FENCE_OPEN = "```loom-job";
 const JOB_FENCE_CLOSE = "```";
 
 /**
- * Galaxy job states that mean "stop polling this". Everything else (new,
- * queued, running, waiting, ...) leaves the block in_progress.
+ * How each Galaxy job state (JobState in lib/galaxy/schema/schema.py) lands in
+ * the block. A state listed here stops the polling; anything absent -- known
+ * running states and any state Galaxy adds later -- leaves the block
+ * in_progress, which is the safe default: we keep watching rather than
+ * declaring an outcome we can't name.
  *
- * `paused` is deliberately NOT terminal: a paused job resumes when its input
- * arrives, and marking it failed would strand work that is merely waiting.
+ * Two distinctions this table exists to make, both of which cost us a bug:
+ *
+ * Ending is not the same as failing. `deleted` and `stopped` are the user
+ * cancelling their own job, and `skipped` is a workflow conditional choosing
+ * not to run a step. Reporting those as failures sends the agent off to
+ * investigate a malfunction that never happened -- Galaxy's own workflow UI
+ * counts skipped alongside successful jobs.
+ *
+ * Ending is also not the same as heading for the exit. `deleting` and `stop`
+ * (the wire value of STOPPING) are transitional: Galaxy's job handler advances
+ * them to `deleted` and `stopped`. Treating them as terminal freezes the block
+ * on a state the job has already left, and because the poller only revisits
+ * in_progress blocks, nothing ever corrects it.
+ *
+ * `paused` is likewise not terminal: it resumes when its inputs arrive, or when
+ * the user resumes it explicitly.
  */
-const TERMINAL_OK = new Set(["ok"]);
-const TERMINAL_BAD = new Set(["error", "deleted", "deleting", "failed"]);
+const JOB_STATE_OUTCOME: Readonly<Record<string, Exclude<JobYaml["status"], "in_progress">>> = {
+  ok: "completed",
+  error: "failed",
+  failed: "failed",
+  deleted: "cancelled",
+  stopped: "cancelled",
+  skipped: "skipped",
+};
+
+/**
+ * Every status the block may carry. Parsing has to recognise all of them: a
+ * terminal status it doesn't know reads back as in_progress, so the poller
+ * picks the job up again, rewrites the same outcome, and re-announces it on
+ * every tick.
+ */
+const JOB_STATUSES: readonly JobYaml["status"][] = [
+  "in_progress",
+  "completed",
+  "failed",
+  "cancelled",
+  "skipped",
+];
+
+function isJobStatus(value: string | undefined): value is JobYaml["status"] {
+  return !!value && (JOB_STATUSES as readonly string[]).includes(value);
+}
 
 export function isTerminalJobState(state: string | undefined): boolean {
   if (!state) return false;
-  const s = state.toLowerCase();
-  return TERMINAL_OK.has(s) || TERMINAL_BAD.has(s);
+  return state.toLowerCase() in JOB_STATE_OUTCOME;
 }
 
 /** Map a Galaxy job state onto the block's coarse status. */
 export function jobStatusFromGalaxyState(state: string | undefined): JobYaml["status"] {
   if (!state) return "in_progress";
-  const s = state.toLowerCase();
-  if (TERMINAL_OK.has(s)) return "completed";
-  if (TERMINAL_BAD.has(s)) return "failed";
-  return "in_progress";
+  return JOB_STATE_OUTCOME[state.toLowerCase()] ?? "in_progress";
 }
 
 function escapeYaml(value: string): string {
@@ -126,7 +163,7 @@ function parseJobBlock(blockLines: string[]): JobYaml | null {
     label: unescapeYaml(map.get("label") ?? ""),
     toolId: map.get("tool_id") || undefined,
     submittedAt: map.get("submitted_at") ?? "",
-    status: status === "completed" || status === "failed" ? status : "in_progress",
+    status: isJobStatus(status) ? status : "in_progress",
     summary: unescapeYaml(map.get("summary") ?? "") || undefined,
     galaxyState: map.get("galaxy_state") || undefined,
     lastPolledAt: map.get("last_polled_at") || undefined,

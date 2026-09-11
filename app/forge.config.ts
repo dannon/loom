@@ -2,7 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 import https from "node:https";
 import { pipeline } from "node:stream/promises";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import type { ForgeConfig } from "@electron-forge/shared-types";
 import { VitePlugin } from "@electron-forge/plugin-vite";
 
@@ -261,31 +261,98 @@ type PackagerOptions = NonNullable<ForgeConfig["packagerConfig"]>;
 // Apple-side setup.
 const ENTITLEMENTS_PLIST = path.join(APP_DIR, "build", "entitlements.mac.plist");
 
-const macCodesign: Partial<Pick<PackagerOptions, "osxSign" | "osxNotarize">> =
-  process.platform === "darwin" && process.env.APPLE_SIGNING_IDENTITY
+// @electron/osx-sign silently no-ops on Apple Silicon: it walks the bundle,
+// signs nothing, and resolves without error, so notarization then rejects a
+// still-adhoc app. Verified on osx-sign 1.3.3 and 2.6.0 -- the Intel leg signs
+// for ~4.5 minutes off the same certificate while arm64 "finishes" in seconds.
+// So we do the signing ourselves in postPackage (see signMacAppBundle) and
+// leave packager's osxSign/osxNotarize off entirely.
+const macCodesign: Partial<Pick<PackagerOptions, "osxSign" | "osxNotarize">> = {};
+
+const MAC_SIGNING_IDENTITY = process.env.APPLE_SIGNING_IDENTITY;
+
+const macNotarizeCreds =
+  process.env.APPLE_API_KEY_PATH && process.env.APPLE_API_KEY_ID && process.env.APPLE_API_ISSUER
     ? {
-        osxSign: {
-          identity: process.env.APPLE_SIGNING_IDENTITY,
-          // Same Hardened Runtime entitlements for every Mach-O in the bundle
-          // (app + helpers + bundled node/uv + native modules).
-          optionsForFile: () => ({
-            entitlements: ENTITLEMENTS_PLIST,
-            hardenedRuntime: true,
-          }),
-        },
-        ...(process.env.APPLE_API_KEY_PATH &&
-        process.env.APPLE_API_KEY_ID &&
-        process.env.APPLE_API_ISSUER
-          ? {
-              osxNotarize: {
-                appleApiKey: process.env.APPLE_API_KEY_PATH,
-                appleApiKeyId: process.env.APPLE_API_KEY_ID,
-                appleApiIssuer: process.env.APPLE_API_ISSUER,
-              },
-            }
-          : {}),
+        appleApiKey: process.env.APPLE_API_KEY_PATH,
+        appleApiKeyId: process.env.APPLE_API_KEY_ID,
+        appleApiIssuer: process.env.APPLE_API_ISSUER,
       }
-    : {};
+    : null;
+
+// Mach-O and universal-binary magic numbers, read big-endian.
+const MACH_O_MAGICS = new Set([
+  0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe, 0xcafebabe, 0xbebafeca,
+]);
+
+/**
+ * Whether a file is Mach-O, by its first four bytes. Sniffing the magic beats
+ * shelling out to `file` per entry -- an Electron bundle holds thousands of
+ * files, and the subprocess-per-file version both crawled and blew the
+ * spawnSync output buffer (ENOBUFS).
+ */
+function isMachO(file: string): boolean {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(file, "r");
+    const head = Buffer.alloc(4);
+    if (fs.readSync(fd, head, 0, 4, 0) < 4) return false;
+    return MACH_O_MAGICS.has(head.readUInt32BE(0));
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+/** Every entry under root, walked in-process (no `find`, no buffer ceiling). */
+function walk(root: string): { files: string[]; dirs: string[] } {
+  const files: string[] = [];
+  const dirs: string[] = [];
+  for (const entry of fs.readdirSync(root, { recursive: true, withFileTypes: true })) {
+    const full = path.join(entry.parentPath ?? entry.path, entry.name);
+    if (entry.isDirectory()) dirs.push(full);
+    else if (entry.isFile()) files.push(full);
+  }
+  return { files, dirs };
+}
+
+/** Deepest paths first -- codesign requires nested code signed before its container. */
+const deepestFirst = (paths: string[]) =>
+  [...paths].sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
+
+function signMacAppBundle(appPath: string, identity: string) {
+  const sign = (target: string) =>
+    execFileSync(
+      "codesign",
+      [
+        "--force",
+        "--timestamp",
+        "--options",
+        "runtime",
+        "--entitlements",
+        ENTITLEMENTS_PLIST,
+        "--sign",
+        identity,
+        target,
+      ],
+      { stdio: "inherit" },
+    );
+
+  const { files, dirs } = walk(appPath);
+
+  for (const file of deepestFirst(files.filter(isMachO))) sign(file);
+
+  const nestedBundles = dirs.filter((dir) => dir.endsWith(".app") || dir.endsWith(".framework"));
+  for (const bundle of deepestFirst(nestedBundles)) sign(bundle);
+
+  sign(appPath);
+
+  // Fail the build here rather than letting notarization reject it later.
+  execFileSync("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath], {
+    stdio: "inherit",
+  });
+}
 
 const config: ForgeConfig = {
   packagerConfig: {
@@ -316,6 +383,33 @@ const config: ForgeConfig = {
       stageLoomBundle(platform, arch);
       await stageNodeBundle(platform, arch);
       await stageUvBundle(platform, arch);
+    },
+    // Sign + notarize here rather than through packagerConfig.osxSign, which
+    // no-ops on Apple Silicon. postPackage runs once the .app exists and before
+    // the dmg/zip makers run, which is exactly the window we need.
+    postPackage: async (_forgeConfig, packageResult) => {
+      if (packageResult.platform !== "darwin" || !MAC_SIGNING_IDENTITY) return;
+
+      for (const outputPath of packageResult.outputPaths) {
+        const appPath = path.join(outputPath, "Orbit.app");
+        if (!fs.existsSync(appPath)) {
+          throw new Error(`Expected a packaged app at ${appPath}`);
+        }
+
+        console.log(`[mac-sign] signing ${appPath}`);
+        signMacAppBundle(appPath, MAC_SIGNING_IDENTITY);
+        console.log("[mac-sign] signed and verified");
+
+        if (!macNotarizeCreds) {
+          console.log("[mac-sign] no API key -- signed but not notarized");
+          continue;
+        }
+
+        console.log("[mac-sign] notarizing (this takes a few minutes)");
+        const { notarize } = await import("@electron/notarize");
+        await notarize({ appPath, ...macNotarizeCreds });
+        console.log("[mac-sign] notarized and stapled");
+      }
     },
   },
   makers: [
