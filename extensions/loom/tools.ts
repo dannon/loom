@@ -26,7 +26,12 @@ import {
   type InvocationYaml,
   type InvocationPollUpdate,
 } from "./notebook-writer";
-import { isTerminalJobState, upsertJobBlock, type JobYaml } from "./galaxy-job-block";
+import {
+  findJobBlocks,
+  isTerminalJobState,
+  upsertJobBlock,
+  type JobYaml,
+} from "./galaxy-job-block";
 import {
   ambiguousAnchorMessage,
   listNotebookAnchors,
@@ -493,12 +498,13 @@ exact file when it becomes relevant.`,
   pi.registerTool({
     name: "galaxy_invocation_record",
     label: "Record Galaxy Invocation",
-    description: `Record a Galaxy workflow invocation in the project notebook so its progress
-can be tracked. Call right after invoking a workflow via Galaxy MCP (galaxy_invoke_workflow).
-Writes a fenced \`loom-invocation\` YAML block at the end of the notebook. Polling later
-(galaxy_invocation_check_all / galaxy_invocation_check_one) updates the block in place.
-Both arguments are checked before anything is written: the anchor must resolve in
-notebook.md, and the invocation id must exist on the Galaxy server.`,
+    description: `Name the plan step a Galaxy workflow invocation belongs to. The harness
+records the run; you name the step it belongs to. Loom already wrote a \`loom-invocation\`
+block the moment galaxy_invoke_workflow returned, so this normally just sets \`label\` and
+\`notebook_anchor\` on the block already carrying that id -- the run is pollable either way.
+If no block carries the id (a submission Loom could not see, such as one made from inside
+code mode), this creates one. Both arguments are checked before anything is written: the
+anchor must resolve in notebook.md, and the invocation id must exist on the Galaxy server.`,
     parameters: Type.Object({
       invocationId: Type.String({
         description: "Galaxy invocation ID returned from galaxy_invoke_workflow",
@@ -547,18 +553,40 @@ notebook.md, and the invocation id must exist on the Galaxy server.`,
         // checked against the bytes we're about to rewrite rather than a copy
         // read earlier -- a block bound to a step that was renamed away is
         // exactly the silent-nothing the check exists to stop.
-        const inv = await withNotebookLock(notebookPath, () =>
+        const { inv, annotated } = await withNotebookLock(notebookPath, () =>
           withNotebookCas(notebookPath, (content) => {
-            const record: InvocationYaml = {
-              invocationId: params.invocationId,
-              galaxyServerUrl,
-              notebookAnchor: requireAnchor(content, params.notebookAnchor),
-              label: params.label,
-              submittedAt,
-              status: "in_progress",
-              serverVerified,
+            const notebookAnchor = requireAnchor(content, params.notebookAnchor);
+            // The harness writes a block the moment a submission answers, so
+            // the usual case here is a block that already exists. Annotating
+            // it means label and anchor only: the rest -- status, the poller's
+            // counters, the server it was submitted to, and its
+            // `server_verified` verdict -- belongs to whoever wrote it, and a
+            // fresh record object would reset a running invocation to
+            // `in_progress` and throw away the progress already polled.
+            const existing = findInvocationBlocks(content).find(
+              (b) => b.invocationId === params.invocationId,
+            );
+            const record: InvocationYaml = existing
+              ? { ...existing, notebookAnchor, label: params.label }
+              : {
+                  invocationId: params.invocationId,
+                  galaxyServerUrl,
+                  notebookAnchor,
+                  label: params.label,
+                  submittedAt,
+                  status: "in_progress",
+                  serverVerified,
+                };
+            // Only a block this call creates carries provenance, and it is the
+            // agent's: the harness did not see this submission happen.
+            return {
+              content: upsertInvocationBlock(
+                content,
+                record,
+                existing ? undefined : { submittedBy: "agent" },
+              ),
+              result: { inv: record, annotated: !!existing },
             };
-            return { content: upsertInvocationBlock(content, record), result: record };
           }),
         );
 
@@ -574,12 +602,16 @@ notebook.md, and the invocation id must exist on the Galaxy server.`,
                   notebookAnchor: inv.notebookAnchor,
                   label: inv.label,
                   status: inv.status,
-                  serverVerified,
-                  message: serverVerified
-                    ? `Recorded invocation ${where}.`
-                    : `Recorded invocation ${where}, but Galaxy could not confirm it ` +
-                      `(${check.detail}). The block says server_verified: false; the poller ` +
-                      `clears that on its first successful poll.`,
+                  annotated,
+                  serverVerified: inv.serverVerified,
+                  message: annotated
+                    ? `Bound invocation ${where}. Loom had already recorded the run; this ` +
+                      `named the step it belongs to.`
+                    : serverVerified
+                      ? `Recorded invocation ${where}.`
+                      : `Recorded invocation ${where}, but Galaxy could not confirm it ` +
+                        `(${check.detail}). The block says server_verified: false; the poller ` +
+                        `clears that on its first successful poll.`,
                 },
                 null,
                 2,
@@ -589,7 +621,8 @@ notebook.md, and the invocation id must exist on the Galaxy server.`,
           details: {
             invocationId: inv.invocationId,
             notebookAnchor: inv.notebookAnchor,
-            serverVerified,
+            serverVerified: inv.serverVerified,
+            annotated,
           } as Record<string, unknown>,
         };
       } catch (error) {
@@ -602,12 +635,16 @@ notebook.md, and the invocation id must exist on the Galaxy server.`,
             invocationId?: string;
             notebookAnchor?: string;
             serverVerified?: boolean;
+            annotated?: boolean;
             error?: boolean;
           }
         | undefined;
       if (d?.error) return new Text("❌ Failed to record invocation");
       const unconfirmed = d?.serverVerified === false ? " (unconfirmed)" : "";
-      return new Text(`🔗 Invocation ${d?.invocationId} → ${d?.notebookAnchor}${unconfirmed}`);
+      const verb = d?.annotated ? "Bound" : "Recorded";
+      return new Text(
+        `🔗 ${verb} invocation ${d?.invocationId} → ${d?.notebookAnchor}${unconfirmed}`,
+      );
     },
   });
 
@@ -617,13 +654,13 @@ notebook.md, and the invocation id must exist on the Galaxy server.`,
   pi.registerTool({
     name: "galaxy_job_record",
     label: "Record Galaxy Job",
-    description: `Record a Galaxy TOOL run in the project notebook so its progress is tracked in
-the background. Call right after submitting a tool via Galaxy MCP (galaxy_run_tool), the same way
-galaxy_invocation_record is called after invoking a workflow. Without this the run is invisible to
-the background poller: nothing advances its status and nothing notifies anyone when it finishes.
-Writes a fenced \`loom-job\` YAML block; the poller updates it in place. Both arguments are
-checked before anything is written: the anchor must resolve in notebook.md, and the job id must
-exist on the Galaxy server.`,
+    description: `Name the plan step a Galaxy TOOL run belongs to, the same way
+galaxy_invocation_record does for a workflow. The harness records the run; you name the step
+it belongs to. Loom already wrote a \`loom-job\` block the moment galaxy_run_tool returned, so
+this normally just sets \`label\` and \`notebook_anchor\` on the block already carrying that
+job id -- the poller is watching it either way. If no block carries the id, this creates one.
+Both arguments are checked before anything is written: the anchor must resolve in notebook.md,
+and the job id must exist on the Galaxy server. \`toolId\` is used only when creating.`,
     parameters: Type.Object({
       jobId: Type.String({ description: "Galaxy job ID returned from galaxy_run_tool" }),
       notebookAnchor: Type.String({
@@ -636,7 +673,11 @@ exist on the Galaxy server.`,
         description: "Human-readable description for status display, e.g. 'BWA alignment'",
       }),
       toolId: Type.Optional(
-        Type.String({ description: "Galaxy tool id, e.g. 'bwa_mem' — shown if no label fits" }),
+        Type.String({
+          description:
+            "Galaxy tool id, e.g. 'bwa_mem' — shown if no label fits. Only used when this " +
+            "call creates the block; an existing block keeps the tool id it was recorded with.",
+        }),
       ),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
@@ -659,19 +700,32 @@ exist on the Galaxy server.`,
         const serverVerified = check.outcome === "found";
 
         const submittedAt = new Date().toISOString();
-        const job = await withNotebookLock(notebookPath, () =>
+        const { job, annotated } = await withNotebookLock(notebookPath, () =>
           withNotebookCas(notebookPath, (content) => {
-            const record: JobYaml = {
-              jobId: params.jobId,
-              galaxyServerUrl: cfg?.url || "",
-              notebookAnchor: requireAnchor(content, params.notebookAnchor),
-              label: params.label,
-              toolId: params.toolId,
-              submittedAt,
-              status: "in_progress",
-              serverVerified,
+            const notebookAnchor = requireAnchor(content, params.notebookAnchor);
+            // Same rule as the invocation side: annotate means label and anchor
+            // only. See the comment there.
+            const existing = findJobBlocks(content).find((b) => b.jobId === params.jobId);
+            const record: JobYaml = existing
+              ? { ...existing, notebookAnchor, label: params.label }
+              : {
+                  jobId: params.jobId,
+                  galaxyServerUrl: cfg?.url || "",
+                  notebookAnchor,
+                  label: params.label,
+                  toolId: params.toolId,
+                  submittedAt,
+                  status: "in_progress",
+                  serverVerified,
+                };
+            return {
+              content: upsertJobBlock(
+                content,
+                record,
+                existing ? undefined : { submittedBy: "agent" },
+              ),
+              result: { job: record, annotated: !!existing },
             };
-            return { content: upsertJobBlock(content, record), result: record };
           }),
         );
 
@@ -687,12 +741,16 @@ exist on the Galaxy server.`,
                   notebookAnchor: job.notebookAnchor,
                   label: job.label,
                   status: job.status,
-                  serverVerified,
-                  message: serverVerified
-                    ? `Recorded job ${where}. The background poller will advance it and notify on completion.`
-                    : `Recorded job ${where}, but Galaxy could not confirm it (${check.detail}). ` +
-                      `The block says server_verified: false; the poller clears that on its ` +
-                      `first successful poll.`,
+                  annotated,
+                  serverVerified: job.serverVerified,
+                  message: annotated
+                    ? `Bound job ${where}. Loom had already recorded the run; this named the ` +
+                      `step it belongs to.`
+                    : serverVerified
+                      ? `Recorded job ${where}. The background poller will advance it and notify on completion.`
+                      : `Recorded job ${where}, but Galaxy could not confirm it (${check.detail}). ` +
+                        `The block says server_verified: false; the poller clears that on its ` +
+                        `first successful poll.`,
                 },
                 null,
                 2,
@@ -702,7 +760,8 @@ exist on the Galaxy server.`,
           details: {
             jobId: job.jobId,
             notebookAnchor: job.notebookAnchor,
-            serverVerified,
+            serverVerified: job.serverVerified,
+            annotated,
           } as Record<string, unknown>,
         };
       } catch (error) {
@@ -711,11 +770,18 @@ exist on the Galaxy server.`,
     },
     renderResult: (result) => {
       const d = result.details as
-        | { jobId?: string; notebookAnchor?: string; serverVerified?: boolean; error?: boolean }
+        | {
+            jobId?: string;
+            notebookAnchor?: string;
+            serverVerified?: boolean;
+            annotated?: boolean;
+            error?: boolean;
+          }
         | undefined;
       if (d?.error) return new Text("❌ Failed to record job");
       const unconfirmed = d?.serverVerified === false ? " (unconfirmed)" : "";
-      return new Text(`🔗 Job ${d?.jobId} → ${d?.notebookAnchor}${unconfirmed}`);
+      const verb = d?.annotated ? "Bound" : "Recorded";
+      return new Text(`🔗 ${verb} job ${d?.jobId} → ${d?.notebookAnchor}${unconfirmed}`);
     },
   });
 
