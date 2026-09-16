@@ -6,6 +6,7 @@ import {
 } from "../extensions/loom/exec-guard/sensitive-read";
 
 const HOME = "/home/alice";
+const AGENT_DIR = "/home/alice/.pi/agent";
 describe("isSensitivePath", () => {
   it("flags ssh, aws, gcloud, netrc, env, loom config", () => {
     for (const p of [
@@ -117,5 +118,42 @@ describe("isProtectedWritePath", () => {
   it("with no home, falls back to the absolute-path check", () => {
     expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/notebook.md")).toBe(true);
     expect(isProtectedWritePath("/home/alice/project/.git/config")).toBe(true);
+  });
+});
+
+describe("pi agent-dir credential stores", () => {
+  it("treats pi's own credential-bearing files as stores, denied for every tier", () => {
+    for (const f of ["auth.json", "mcp.json", "galaxy-profiles.json"]) {
+      const p = `${AGENT_DIR}/${f}`;
+      expect(isCredentialStore(p, HOME, AGENT_DIR), p).toBe(true);
+      expect(isSensitivePath(p, HOME, AGENT_DIR), p).toBe(true);
+    }
+  });
+
+  it("leaves the non-credential files in the same dir readable", () => {
+    // models.json carries the env var NAME, not the secret (shared/custom-provider.js);
+    // models-store.json is a refreshed provider catalog. Denying these would block
+    // ordinary "what models do I have" work for no gain.
+    for (const f of ["models.json", "models-store.json", "settings.json", "sessions/x.jsonl"]) {
+      const p = `${AGENT_DIR}/${f}`;
+      expect(isCredentialStore(p, HOME, AGENT_DIR), p).toBe(false);
+    }
+  });
+
+  it("follows PI_CODING_AGENT_DIR rather than assuming ~/.pi/agent", () => {
+    // The whole store relocates with that env var, so a home-relative rule would
+    // silently stop protecting it.
+    const relocated = "/opt/pidir";
+    expect(isCredentialStore(`${relocated}/auth.json`, HOME, relocated)).toBe(true);
+    expect(isCredentialStore(`${AGENT_DIR}/auth.json`, HOME, relocated)).toBe(false);
+  });
+
+  it("is case-folded, so macOS cannot dodge it by spelling", () => {
+    expect(isCredentialStore(`${AGENT_DIR}/AUTH.JSON`, HOME, AGENT_DIR)).toBe(true);
+    expect(isCredentialStore("/home/alice/.PI/agent/auth.json", HOME, AGENT_DIR)).toBe(true);
+  });
+
+  it("resolves . and .. segments before matching", () => {
+    expect(isCredentialStore(`${AGENT_DIR}/skills/../auth.json`, HOME, AGENT_DIR)).toBe(true);
   });
 });

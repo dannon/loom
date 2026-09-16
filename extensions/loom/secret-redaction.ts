@@ -11,9 +11,12 @@
  * vectors the guard can't (an `env` dump, a key pasted into some other file).
  */
 
+import * as fs from "fs";
+import * as path from "path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "../../shared/loom-config.js";
 import type { LoomConfig } from "../../shared/loom-config.js";
+import { piAgentDir } from "./agent-dir";
 
 export const REDACTED = "[redacted]";
 
@@ -48,6 +51,30 @@ const SECRET_ENV_VARS = [
   "LOOM_ACTIVE_LLM_API_KEY",
 ];
 
+// Keys in a stored pi credential that are metadata rather than secret. Every
+// other long-enough string in the entry gets collected, deliberately: pi-ai's
+// OAuthCredentials carries an open index signature (`[key: string]: unknown`),
+// so a provider can add a token-shaped field whenever it likes. The two failure
+// modes are not symmetric -- missing a field leaks a live token, over-matching
+// costs a `[redacted]` where an account id used to print -- so this errs toward
+// collecting.
+const AUTH_METADATA_KEYS = new Set(["type", "expires"]);
+
+/**
+ * Read pi's credential store (~/.pi/agent/auth.json, or wherever
+ * PI_CODING_AGENT_DIR points). Best-effort: absent, unreadable, or mid-write
+ * under pi's lock all yield null and simply contribute no secrets, exactly as
+ * an unconfigured provider does. Never throws -- a redaction pass that fails
+ * closed would drop every tool result.
+ */
+export function loadPiAuth(agentDir: string = piAgentDir()): unknown {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(agentDir, "auth.json"), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
 /** Minimal structural shape for a pi tool-result content item. */
 interface ContentItem {
   type: string;
@@ -60,10 +87,15 @@ interface ContentItem {
  * profiles) plus the known secret-valued env vars. Pure -- env is passed in so
  * it's testable. `testerId` is deliberately not a secret, so it survives (the
  * #189 path can read it without leaking keys).
+ *
+ * `auth` is pi's parsed auth.json. Its tokens are the one credential class Loom
+ * cannot encrypt at rest -- pi owns that file and refreshes it in place -- so
+ * value-redaction is the only backstop they get.
  */
 export function collectSecretValues(
   config: LoomConfig,
   env: Record<string, string | undefined>,
+  auth: unknown = null,
 ): string[] {
   const out = new Set<string>();
   const add = (v: unknown): void => {
@@ -78,6 +110,17 @@ export function collectSecretValues(
     add(p?.apiKeyEncrypted);
   }
   for (const name of SECRET_ENV_VARS) add(env[name]);
+  for (const cred of Object.values((auth ?? {}) as Record<string, unknown>)) {
+    if (!cred || typeof cred !== "object") continue;
+    for (const [key, value] of Object.entries(cred as Record<string, unknown>)) {
+      if (AUTH_METADATA_KEYS.has(key)) continue;
+      if (typeof value === "string") add(value);
+      // An api-key credential nests provider-scoped config under `env`
+      // (Cloudflare account/gateway ids and the like), which can itself be secret.
+      else if (value && typeof value === "object")
+        for (const nested of Object.values(value as Record<string, unknown>)) add(nested);
+    }
+  }
   return [...out];
 }
 
@@ -126,7 +169,7 @@ export function redactContent<T extends ContentItem>(content: T[], secrets: stri
  */
 export function registerSecretRedaction(pi: ExtensionAPI): void {
   pi.on("tool_result", async (event) => {
-    const secrets = collectSecretValues(loadConfig(), process.env);
+    const secrets = collectSecretValues(loadConfig(), process.env, loadPiAuth());
     const content = redactContent(event.content, secrets);
     if (content) return { content };
   });

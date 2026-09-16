@@ -1,4 +1,5 @@
 import * as path from "path";
+import { piAgentDir } from "../agent-dir";
 
 // Directories under $HOME that hold credentials/secrets.
 const SENSITIVE_HOME_DIRS = [
@@ -12,9 +13,27 @@ const SENSITIVE_HOME_DIRS = [
 ];
 // Exact files under $HOME.
 const SENSITIVE_HOME_FILES = [".netrc", ".loom/config.json", ".pgpass", ".npmrc"];
+// Files inside pi's agent dir that hold live credentials. auth.json is pi's
+// CredentialStore -- an api-key `key`, or an OAuth access+refresh pair; mcp.json
+// and galaxy-profiles.json carry Galaxy keys. These matter more than their
+// $HOME counterparts, not less: ~/.loom/config.json is a safeStorage blob, but
+// pi reads these directly and runs its own OAuth refresh against auth.json, so
+// Orbit cannot encrypt them (see app/src/main/oauth-handler.ts). This floor is
+// the only protection they have. models.json holds the env var NAME rather than
+// the secret and models-store.json is a provider catalog, so both stay readable.
+const AGENT_DIR_CREDENTIAL_FILES = ["auth.json", "mcp.json", "galaxy-profiles.json"];
 // Basename / extension patterns sensitive anywhere.
 const SENSITIVE_BASENAME =
   /^(\.env(\..+)?|id_rsa|id_ed25519|id_ecdsa|.*\.pem|.*\.key|.*\.keychain(-db)?|credentials)$/i;
+
+// Case-folded path equality, for the same reason hasSegment folds below: macOS
+// resolves ~/.PI/agent/AUTH.JSON to the same file and realpath does not
+// normalize case. Over-matching on a case-sensitive filesystem errs toward
+// protection. (The $HOME arms below still compare exactly -- a pre-existing gap
+// that wants its own change, since widening them touches every rule at once.)
+function samePath(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
 
 function within(abs: string, dir: string): boolean {
   const rel = path.relative(dir, abs);
@@ -27,15 +46,24 @@ function within(abs: string, dir: string): boolean {
 // to an ask). This is the floor that closes #183 -- ~/.loom/config.json is a
 // store. The basename patterns (.env, *.pem, *.key, ...) are deliberately NOT
 // stores: those can be project fixtures, so they keep the ask/deny-by-tier path.
-export function isCredentialStore(absPath: string, home: string): boolean {
+// `agentDir` is injected so the check follows PI_CODING_AGENT_DIR (tests and
+// custom setups relocate the whole store); the default resolves it the same way
+// the rest of Loom does.
+export function isCredentialStore(
+  absPath: string,
+  home: string,
+  agentDir: string = piAgentDir(),
+): boolean {
   const norm = path.normalize(absPath);
   for (const d of SENSITIVE_HOME_DIRS) if (within(norm, path.join(home, d))) return true;
   for (const f of SENSITIVE_HOME_FILES) if (norm === path.join(home, f)) return true;
+  for (const f of AGENT_DIR_CREDENTIAL_FILES)
+    if (samePath(norm, path.join(agentDir, f))) return true;
   return false;
 }
 
-export function isSensitivePath(absPath: string, home: string): boolean {
-  if (isCredentialStore(absPath, home)) return true;
+export function isSensitivePath(absPath: string, home: string, agentDir?: string): boolean {
+  if (isCredentialStore(absPath, home, agentDir)) return true;
   if (SENSITIVE_BASENAME.test(path.basename(path.normalize(absPath)))) return true;
   return false;
 }
