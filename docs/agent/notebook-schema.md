@@ -92,11 +92,11 @@ notebook_anchor: plan-a-step-3
 label: BWA alignment
 submitted_at: 2026-09-16T15:30:00Z
 status: in_progress
-summary: ""
+summary:
+server_verified: true
 attempt_id: 01K5CJ6XWQ8QK4S2M7E9V0TZ3B
 history_id: 0a248a1f62a0cc04
 submitted_by: harness
-server_verified: true
 enrichment: pending
 ```
 
