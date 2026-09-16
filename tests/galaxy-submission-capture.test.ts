@@ -493,6 +493,38 @@ describe("a replayed submission claims nothing about a server", () => {
     expect(row?.payload.submitted_by).toBe("replay");
   });
 
+  it("refuses to overwrite a block that is already there", async () => {
+    // Replay rebuilds a notebook from fixtures. A block already carrying that
+    // id was written by something that actually happened, and overwriting it
+    // would stamp a fixture's label and timestamp on a real run -- and the
+    // carry-forward would hand the replay the real block's `submitted_by:
+    // harness` on the way through, which is the one claim a replayed block is
+    // not allowed to make.
+    await handleSubmissionResult("live-0", "galaxy_invoke_workflow", mcpResult(INVOCATION), false, {
+      args: {},
+      stepAnchor: "plan-a-step-1",
+    });
+    const before = findInvocationBlocks(notebook())[0];
+
+    await handleSubmissionResult(
+      "replay-collide",
+      "galaxy_invoke_workflow",
+      mcpResult(INVOCATION),
+      false,
+      { args: {}, stepAnchor: "plan-a-step-9", replayed: true },
+    );
+
+    const blocks = findInvocationBlocks(notebook());
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].attemptId).toBe(before.attemptId);
+    expect(blocks[0].notebookAnchor).toBe("plan-a-step-1");
+    expect(blocks[0].submittedBy).toBe("harness");
+    expect(blocks[0].serverVerified).toBe(true);
+
+    const skipped = activity().find((e) => e.kind === "submission.replay_skipped");
+    expect(skipped?.payload.ids).toEqual(["ff1e2d3c4b5a6978"]);
+  });
+
   it("still claims both when the submission was really watched", async () => {
     await handleSubmissionResult("live-0", "galaxy_invoke_workflow", mcpResult(INVOCATION), false, {
       args: {},

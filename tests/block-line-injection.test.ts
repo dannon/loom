@@ -26,6 +26,7 @@ import {
   type JobYaml,
 } from "../extensions/loom/galaxy-job-block";
 import { UnrenderableBlockValue } from "../extensions/loom/harness-block-fields";
+import { parseInvocationBlocks } from "../app/src/renderer/galaxy-invocations.js";
 
 const INVOCATION: InvocationYaml = {
   invocationId: "f2db41e1fa331b3e",
@@ -150,5 +151,63 @@ describe("free-text quoting still round-trips the ordinary cases", () => {
       "```",
     ].join("\n");
     expect(findInvocationBlocks(legacy)[0].label).toBe("C:\\Users\\reads: raw");
+  });
+});
+
+describe("a fence that never closes is not a block", () => {
+  // The scanners used to run to EOF when no closing fence turned up and hand
+  // the upsert a range ending there, so rewriting that block deleted every
+  // line after it. A notebook is the durable record of someone's research; a
+  // missing backtick must not be able to take the rest of it.
+  const TAIL = "## Irreplaceable interpretation\n\nKEEP ME\n";
+
+  function unterminated(rendered: string): string {
+    return rendered
+      .split("\n")
+      .filter((line) => line !== "```")
+      .join("\n");
+  }
+
+  it("leaves the rest of the notebook alone on the invocation side", () => {
+    const content = `# Notes\n\n${unterminated(renderInvocationYaml(INVOCATION))}\n${TAIL}`;
+    const next = upsertInvocationBlock(content, { ...INVOCATION, label: "annotated" });
+    expect(next).toContain("KEEP ME");
+    expect(next).toContain("## Irreplaceable interpretation");
+  });
+
+  it("leaves the rest of the notebook alone on the job side", () => {
+    const content = `# Notes\n\n${unterminated(renderJobYaml(JOB))}\n${TAIL}`;
+    const next = upsertJobBlock(content, { ...JOB, label: "annotated" });
+    expect(next).toContain("KEEP ME");
+  });
+
+  it("is invisible to every reader, so nothing polls or renders it", () => {
+    const inv = `# Notes\n\n${unterminated(renderInvocationYaml(INVOCATION))}\n${TAIL}`;
+    expect(findInvocationBlocks(inv)).toHaveLength(0);
+    expect(parseInvocationBlocks(inv)).toHaveLength(0);
+    expect(findJobBlocks(`# Notes\n\n${unterminated(renderJobYaml(JOB))}\n${TAIL}`)).toHaveLength(
+      0,
+    );
+  });
+
+  it("still reads the block before an unterminated one", () => {
+    const content = `${renderInvocationYaml(INVOCATION)}\n${unterminated(
+      renderInvocationYaml({ ...INVOCATION, invocationId: "aa11bb22cc33dd44" }),
+    )}\n`;
+    const parsed = findInvocationBlocks(content);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].invocationId).toBe(INVOCATION.invocationId);
+  });
+});
+
+describe("the Activity panel decodes a label the way the notebook wrote it", () => {
+  const labels = ["C:\\reads\\sample", 'a "quoted" label', "step 3: align reads", "line\nbreak"];
+
+  it("matches the brain's parser on every quoted shape", () => {
+    for (const label of labels) {
+      const content = renderInvocationYaml({ ...INVOCATION, label });
+      expect(parseInvocationBlocks(content)[0].label).toBe(findInvocationBlocks(content)[0].label);
+      expect(parseInvocationBlocks(content)[0].label).toBe(label);
+    }
   });
 });

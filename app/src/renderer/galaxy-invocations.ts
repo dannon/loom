@@ -80,9 +80,22 @@ const LINGER_MS = 5000;
 
 let lingerTimer: ReturnType<typeof setTimeout> | null = null;
 
+/**
+ * Mirror of `unescapeYaml` in the brain's notebook-writer. The writer quotes
+ * free text with `JSON.stringify`, so a label carrying a backslash or a
+ * newline only reads back correctly through `JSON.parse`; stripping the outer
+ * quotes and unescaping `\"` by hand showed `C:\\reads` for `C:\reads` and a
+ * literal `\n` for a line break, so Activity named a run differently from the
+ * notebook it came out of. The fallback is for blocks written under the older
+ * rule, which escaped quotes and nothing else.
+ */
 function unescape(value: string): string {
   if (value.startsWith('"') && value.endsWith('"')) {
-    return value.slice(1, -1).replace(/\\"/g, '"');
+    try {
+      return JSON.parse(value) as string;
+    } catch {
+      return value.slice(1, -1).replace(/\\"/g, '"');
+    }
   }
   return value;
 }
@@ -96,6 +109,11 @@ export function parseInvocationBlocks(content: string): Invocation[] {
       const start = i + 1;
       let end = start;
       while (end < lines.length && lines[end].trim() !== FENCE_CLOSE) end++;
+      // A fence that never closes is not a block, same as the brain's parser.
+      if (end >= lines.length) {
+        i = end + 1;
+        continue;
+      }
       const body = lines.slice(start, end);
       const fields: Record<string, string> = {};
       // Raw (un-unescaped) copy for the harness fields, which are bare tokens

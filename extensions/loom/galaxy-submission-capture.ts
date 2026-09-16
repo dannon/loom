@@ -33,7 +33,7 @@ import * as path from "path";
 import { stringify as stringifyYaml } from "yaml";
 import { appendActivityEvent } from "./activity";
 import { getGalaxyConfig } from "./galaxy-api";
-import { upsertJobBlock, type JobYaml } from "./galaxy-job-block";
+import { locateJobBlock, upsertJobBlock, type JobYaml } from "./galaxy-job-block";
 import { upsertUdtBlock } from "./galaxy-udt-block";
 import {
   isSubmissionTool,
@@ -46,6 +46,7 @@ import {
 import type { HarnessBlockFields } from "./harness-block-fields";
 import {
   NotebookChangedError,
+  locateInvocationBlock,
   readNotebook,
   statNotebook,
   upsertInvocationBlock,
@@ -227,15 +228,44 @@ async function writeBlocks(
   notebookPath: string,
   submission: ParsedSubmission,
   dispatch: Dispatch,
-): Promise<{ udtDefinition?: string; udtPending: boolean }> {
+): Promise<{ udtDefinition?: string; udtPending: boolean; replayCollisions: string[] }> {
   const udtPending = submission.kind === "udt" && !!submission.udt;
   const galaxyServerUrl = getGalaxyConfig()?.url ?? "";
   const harness = harnessFields(dispatch, submission.historyId);
   let udtDefinition: string | undefined;
+  // Ids a replay declined to overwrite. Rebuilt on every attempt, because the
+  // CAS may run `applyBlocks` more than once against fresh content.
+  let replayCollisions: string[] = [];
+
+  /**
+   * A replay must not write over a block that is already there.
+   *
+   * Replay rebuilds a notebook from fixtures, and a block already carrying
+   * that id was written by something that actually happened -- overwriting it
+   * would put a fixture's label, anchor and timestamp on a real run, and the
+   * carry-forward would hand the replay the real block's `submitted_by:
+   * harness` on the way through, which is exactly the claim a replayed block
+   * is not allowed to make. Skipping is the only answer that leaves both
+   * records honest.
+   */
+  const replayWouldOverwrite = (
+    content: string,
+    id: string,
+    kind: "invocation" | "job",
+  ): boolean => {
+    if (!dispatch.replayed) return false;
+    const present =
+      kind === "invocation"
+        ? locateInvocationBlock(content, id).present
+        : locateJobBlock(content, id).present;
+    if (present) replayCollisions.push(id);
+    return present;
+  };
 
   /** Apply this submission's blocks to whatever the notebook currently says. */
   const applyBlocks = (content: string): string => {
     let next = content;
+    replayCollisions = [];
 
     if (submission.kind === "invocation" && submission.invocationId) {
       const inv: InvocationYaml = {
@@ -247,10 +277,13 @@ async function writeBlocks(
         status: "in_progress",
         ...(dispatch.replayed ? {} : { serverVerified: true }),
       };
-      next = upsertInvocationBlock(next, inv, harness);
+      if (!replayWouldOverwrite(next, submission.invocationId, "invocation")) {
+        next = upsertInvocationBlock(next, inv, harness);
+      }
     }
 
     for (const job of submission.jobs ?? []) {
+      if (replayWouldOverwrite(next, job.jobId, "job")) continue;
       const block: JobYaml = {
         jobId: job.jobId,
         galaxyServerUrl,
@@ -326,7 +359,7 @@ async function writeBlocks(
     }
   });
 
-  return { ...(udtDefinition ? { udtDefinition } : {}), udtPending };
+  return { ...(udtDefinition ? { udtDefinition } : {}), udtPending, replayCollisions };
 }
 
 /**
@@ -446,7 +479,7 @@ export async function handleSubmissionResult(
   }
 
   const submission = outcome.submission;
-  let written: { udtDefinition?: string; udtPending: boolean };
+  let written: { udtDefinition?: string; udtPending: boolean; replayCollisions: string[] };
   try {
     written = await writeBlocks(notebookPath, submission, dispatch);
   } catch (err) {
@@ -473,6 +506,18 @@ export async function handleSubmissionResult(
       reason: "could not store the tool definition, so the creation is unrecorded",
     });
     return;
+  }
+
+  // A replay that declined to overwrite every id it carried wrote nothing, so
+  // there is no registration to announce.
+  if (dispatch.replayed && written.replayCollisions.length > 0) {
+    record("submission.replay_skipped", {
+      tool: toolName,
+      attempt_id: dispatch.attemptId,
+      step_anchor: dispatch.stepAnchor,
+      ids: written.replayCollisions,
+      reason: "the notebook already has a block for these ids; a fixture must not overwrite one",
+    });
   }
 
   record("submission.registered", {

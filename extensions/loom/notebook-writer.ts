@@ -334,9 +334,14 @@ export function findInvocationBlocks(content: string): InvocationYaml[] {
       while (end < lines.length && lines[end].trim() !== INVOCATION_FENCE_CLOSE) {
         end++;
       }
-      const blockLines = lines.slice(start, end);
-      const parsed = parseInvocationBlock(blockLines);
-      if (parsed) result.push(parsed);
+      // A fence that never closes is not a block. Running to EOF instead would
+      // make every writer treat the rest of the notebook as this block's body
+      // -- see `findInvocationBlockRanges`, where that costs the user their
+      // prose.
+      if (end < lines.length) {
+        const parsed = parseInvocationBlock(lines.slice(start, end));
+        if (parsed) result.push(parsed);
+      }
       i = end + 1;
     } else {
       i++;
@@ -562,7 +567,12 @@ function findInvocationBlockRanges(content: string): InvocationBlockRange[] {
         if (m) invocationId = m[1].trim();
         end++;
       }
-      if (invocationId) {
+      // Only a fence that actually closes is a range. Without this, an opening
+      // fence with no close reports a range ending at EOF, and the upsert --
+      // which replaces `start` through `end` -- deletes everything after it.
+      // A notebook is the durable record of someone's research; a missing
+      // backtick must not be able to take the rest of it.
+      if (invocationId && end < lines.length) {
         result.push({ invocationId, start, end });
       }
       i = end + 1;
