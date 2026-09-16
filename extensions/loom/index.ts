@@ -19,6 +19,7 @@ import { registerSessionLifecycle } from "./session-lifecycle";
 import { recordGalaxyConnected } from "./galaxy-cred-drift";
 import { registerActivityHooks } from "./activity-hooks";
 import { registerSubmissionCapture } from "./galaxy-submission-capture";
+import { isSubmissionReplayEnabled, registerSubmissionReplay } from "./submission-replay";
 import { registerExecutionCommands } from "./execution-commands";
 import { registerFeedbackCommand } from "./feedback-command";
 import { registerTesterIdCommand } from "./tester-id-command";
@@ -94,6 +95,12 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // there too. Registered after the session lifecycle so the notebook path is
   // already set by the time anything can fire.
   registerSubmissionCapture(pi);
+  // Eval-only seam: replays recorded submission results through the hook above
+  // so the Tier-1 scenarios can pin capture behavior without a model. Off
+  // unless LOOM_SUBMISSION_REPLAY names a file inside the session directory.
+  if (isSubmissionReplayEnabled()) {
+    registerSubmissionReplay(pi);
+  }
 
   registerPlanTools(pi);
   registerGalaxyUploadTool(pi);

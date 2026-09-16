@@ -297,6 +297,37 @@ describe("harness block fields: hostile values", () => {
   });
 });
 
+describe("invocation blocks round-trip without a Galaxy server url", () => {
+  // Auto-registration writes a block whether or not GALAXY_URL happens to be
+  // in the environment. A block its own parser rejects is worse than no block:
+  // the poller never sees the run, and the notebook looks like it has a record.
+  it("parses a block whose galaxy_server_url is empty", () => {
+    const content = upsertInvocationBlock(
+      "",
+      { ...AGENT_INVOCATION, galaxyServerUrl: "" },
+      HARNESS,
+    );
+    const [parsed] = findInvocationBlocks(content);
+    expect(parsed).toBeDefined();
+    expect(parsed.invocationId).toBe(AGENT_INVOCATION.invocationId);
+    expect(parsed.galaxyServerUrl).toBe("");
+    expect(parsed.submittedBy).toBe("harness");
+  });
+
+  it("still refuses a block with no id", () => {
+    const content = [
+      "```loom-invocation",
+      "galaxy_server_url: https://usegalaxy.org",
+      "notebook_anchor: plan-a-step-3",
+      "label: BWA alignment",
+      "submitted_at: 2026-09-16T15:30:00Z",
+      "status: in_progress",
+      "```",
+    ].join("\n");
+    expect(findInvocationBlocks(content)).toHaveLength(0);
+  });
+});
+
 describe("harness block fields: merge helpers", () => {
   it("incoming wins per field and undefined means no change", () => {
     const merged = mergeHarnessFields(HARNESS, { enrichment: "complete" });

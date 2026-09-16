@@ -475,9 +475,14 @@ function parseInvocationBlock(blockLines: string[]): InvocationYaml | null {
     }
   }
   const status = fields.status as InvocationYaml["status"];
+  // `galaxy_server_url` is metadata, not identity, and it is deliberately not
+  // required: it comes from GALAXY_URL, which can be absent (or arrive later
+  // via /connect) while the submission itself is perfectly real. Requiring it
+  // meant a block written without it parsed back as null, so the poller never
+  // saw the run and the notebook looked like it had a record when nothing was
+  // watching. The job block has always tolerated an empty one; these now agree.
   if (
     !fields.invocation_id ||
-    !fields.galaxy_server_url ||
     !fields.notebook_anchor ||
     !fields.label ||
     !fields.submitted_at ||
@@ -493,7 +498,7 @@ function parseInvocationBlock(blockLines: string[]): InvocationYaml | null {
   };
   return {
     invocationId: fields.invocation_id,
-    galaxyServerUrl: fields.galaxy_server_url,
+    galaxyServerUrl: fields.galaxy_server_url ?? "",
     notebookAnchor: fields.notebook_anchor,
     label: fields.label,
     submittedAt: fields.submitted_at,

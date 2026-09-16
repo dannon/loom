@@ -101,15 +101,22 @@ function rememberDispatch(toolCallId: string, toolName: string, args: unknown): 
   return dispatch;
 }
 
+/** Supplied by a caller that knows the dispatch details but had no start event. */
+export interface DispatchOverride {
+  args?: Record<string, unknown>;
+  stepAnchor?: string | null;
+}
+
 /**
  * Recover the dispatch record, or synthesise one.
  *
- * A missing record means we never saw the start event, so we do NOT fall back
- * to the current step anchor: that is exactly the misattribution the
- * capture-at-dispatch design exists to avoid. Unattributed is the honest
- * answer.
+ * With no in-flight record and no override we never saw the dispatch, so we do
+ * NOT fall back to the current step anchor: that is exactly the misattribution
+ * the capture-at-dispatch design exists to avoid. Unattributed is the honest
+ * answer. An override is itself a dispatch record -- the replay seam passes
+ * one because it has no start event to pair with -- so it may name the step.
  */
-function takeDispatch(toolCallId: string, toolName: string): Dispatch {
+function takeDispatch(toolCallId: string, toolName: string, override?: DispatchOverride): Dispatch {
   const found = inFlight.get(toolCallId);
   if (found) {
     inFlight.delete(toolCallId);
@@ -118,8 +125,10 @@ function takeDispatch(toolCallId: string, toolName: string): Dispatch {
   return {
     attemptId: ulid(),
     toolName,
-    args: {},
-    stepAnchor: UNATTRIBUTED,
+    args: override?.args ?? {},
+    stepAnchor: override
+      ? (override.stepAnchor ?? getCurrentStepAnchor() ?? UNATTRIBUTED)
+      : UNATTRIBUTED,
     submittedAt: new Date().toISOString(),
   };
 }
@@ -189,7 +198,8 @@ async function writeBlocks(
   notebookPath: string,
   submission: ParsedSubmission,
   dispatch: Dispatch,
-): Promise<void> {
+): Promise<{ udtDefinition?: string }> {
+  let udtDefinition: string | undefined;
   const galaxyServerUrl = getGalaxyConfig()?.url ?? "";
   const harness = harnessFields(dispatch, submission.historyId);
 
@@ -241,6 +251,7 @@ async function writeBlocks(
         submission.udt.representation,
       );
       if (definition) {
+        udtDefinition = definition;
         content = upsertUdtBlock(content, {
           toolId: submission.udt.toolId,
           toolUuid: submission.udt.uuid,
@@ -254,6 +265,8 @@ async function writeBlocks(
 
     await writeNotebook(notebookPath, content);
   });
+
+  return udtDefinition ? { udtDefinition } : {};
 }
 
 /**
@@ -312,8 +325,9 @@ export async function handleSubmissionResult(
   toolName: string,
   result: unknown,
   isError: boolean,
+  dispatchOverride?: DispatchOverride,
 ): Promise<void> {
-  const dispatch = takeDispatch(toolCallId, toolName);
+  const dispatch = takeDispatch(toolCallId, toolName, dispatchOverride);
 
   // A failed submission is not a submission: galaxy-mcp raises rather than
   // returning success=false, and nothing was created.
@@ -340,8 +354,9 @@ export async function handleSubmissionResult(
   }
 
   const submission = outcome.submission;
+  let written: { udtDefinition?: string };
   try {
-    await writeBlocks(notebookPath, submission, dispatch);
+    written = await writeBlocks(notebookPath, submission, dispatch);
   } catch (err) {
     // The run is real and running whether or not we managed to write it down;
     // say so rather than claiming a registration that did not land.
@@ -365,6 +380,9 @@ export async function handleSubmissionResult(
     ...(submission.invocationId ? { invocation_id: submission.invocationId } : {}),
     ...(submission.jobs ? { job_ids: submission.jobs.map((j) => j.jobId) } : {}),
     ...(submission.udt ? { tool_id: submission.udt.toolId, tool_uuid: submission.udt.uuid } : {}),
+    // The path is reported from what was actually written, not from what we
+    // meant to write, so the row can't claim a definition that never landed.
+    ...(written.udtDefinition ? { definition: written.udtDefinition } : {}),
     ...(submission.partial ? { partial: true } : {}),
   });
 }
