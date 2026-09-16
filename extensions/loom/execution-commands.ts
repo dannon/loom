@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getNotebookPath } from "./state.js";
+import { getNotebookPath, setCurrentStepAnchor } from "./state.js";
 import { checkPreconditions, renderFailures } from "./init-gate.js";
 
 /**
@@ -12,6 +12,11 @@ import { checkPreconditions, renderFailures } from "./init-gate.js";
  * - soft failures (no plan; weak acceptance criteria; no history selected
  *   for a Galaxy plan) still prompt, but the prompt carries the failure
  *   list so the agent resolves with the user before invoking anything
+ *
+ * A passing gate also points `state.currentStepAnchor` at the step it found,
+ * so any Galaxy submission the agent makes in the run that follows is
+ * attributed to that step without the agent having to say so. The pointer is
+ * cleared when the run settles.
  */
 
 export function registerExecutionCommands(pi: ExtensionAPI): void {
@@ -25,6 +30,9 @@ export function registerExecutionCommands(pi: ExtensionAPI): void {
     }
 
     if (!gate.ok) {
+      // A soft-failed gate still sends the agent off, but it has no step worth
+      // binding to -- most soft failures ARE "there is no usable next step".
+      setCurrentStepAnchor(null);
       ctx.ui.notify(renderFailures(gate.failures), "info");
       pi.sendUserMessage(
         `The user typed /execute (or /run) but the precondition check did not pass:\n\n${renderFailures(
@@ -33,6 +41,8 @@ export function registerExecutionCommands(pi: ExtensionAPI): void {
       );
       return;
     }
+
+    setCurrentStepAnchor(gate.plan?.nextStep?.anchor ?? null);
 
     pi.sendUserMessage(
       `The user typed /execute (or /run). Read \`${nbPath}\`, locate the most ` +
@@ -59,6 +69,16 @@ export function registerExecutionCommands(pi: ExtensionAPI): void {
         `Stop on failure; do not auto-advance past errors or unverified results.`,
     );
   };
+
+  // Clear the pointer when the agent run settles, not on `turn_end`.
+  // pi's agentic loop emits turn_end after every model round trip inside one
+  // run (agent-loop.js emits turn_end at :131 and loops back to turn_start at
+  // :90), so clearing there would drop the anchor between the turn that reads
+  // the notebook and the turn that actually submits -- which is the normal
+  // shape of an /execute. `agent_end` fires once, when the run is over.
+  pi.on("agent_end", async () => {
+    setCurrentStepAnchor(null);
+  });
 
   pi.registerCommand("execute", {
     description: "Execute the next pending step in the latest plan section",

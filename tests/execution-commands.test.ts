@@ -3,7 +3,12 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { registerExecutionCommands } from "../extensions/loom/execution-commands";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+import {
+  getCurrentStepAnchor,
+  resetState,
+  setCurrentStepAnchor,
+  setNotebookPath,
+} from "../extensions/loom/state";
 
 let tmpDir: string;
 let nbPath: string;
@@ -35,20 +40,29 @@ function writeRunnableNotebook() {
   setNotebookPath(nbPath);
 }
 
+type Handler = (args: string | undefined, ctx: any) => void;
+
+function fakePi() {
+  const commands = new Map<string, { handler: Handler }>();
+  const handlers = new Map<string, (event: any, ctx: any) => unknown>();
+  const sendUserMessage = vi.fn();
+  const pi = {
+    registerCommand: vi.fn((name: string, command: { handler: Handler }) => {
+      commands.set(name, command);
+    }),
+    on: vi.fn((event: string, handler: (event: any, ctx: any) => unknown) => {
+      handlers.set(event, handler);
+    }),
+    sendUserMessage,
+  };
+  return { pi, commands, handlers, sendUserMessage };
+}
+
 describe("registerExecutionCommands", () => {
   it("instructs the agent to verify before marking a step complete", async () => {
     writeRunnableNotebook();
 
-    const commands = new Map<string, { handler: (args: string | undefined, ctx: any) => void }>();
-    const sendUserMessage = vi.fn();
-    const pi = {
-      registerCommand: vi.fn(
-        (name: string, command: { handler: (args: string | undefined, ctx: any) => void }) => {
-          commands.set(name, command);
-        },
-      ),
-      sendUserMessage,
-    };
+    const { pi, commands, sendUserMessage } = fakePi();
 
     registerExecutionCommands(pi as any);
     await commands.get("execute")!.handler(undefined, { ui: { notify: vi.fn() } });
@@ -65,5 +79,46 @@ describe("registerExecutionCommands", () => {
     expect(prompt).toContain("Only after verification succeeds");
     expect(prompt).toContain("created but not verified");
     expect(prompt).toContain("Do NOT claim the artifact or step is done");
+  });
+
+  it("points the step anchor at the step it is about to execute", async () => {
+    writeRunnableNotebook();
+    const { pi, commands } = fakePi();
+
+    registerExecutionCommands(pi as any);
+    await commands.get("execute")!.handler(undefined, { ui: { notify: vi.fn() } });
+
+    expect(getCurrentStepAnchor()).toBe("plan-a-step-1");
+  });
+
+  it("clears the anchor when the agent run settles, not between turns", async () => {
+    writeRunnableNotebook();
+    const { pi, commands, handlers } = fakePi();
+
+    registerExecutionCommands(pi as any);
+    await commands.get("execute")!.handler(undefined, { ui: { notify: vi.fn() } });
+
+    // A multi-turn /execute is the normal case: the model reads the notebook
+    // in one turn and submits in the next. Nothing is registered on turn_end,
+    // so the anchor is still there for the submitting turn.
+    expect(handlers.has("turn_end")).toBe(false);
+    expect(getCurrentStepAnchor()).toBe("plan-a-step-1");
+
+    await handlers.get("agent_end")!({ type: "agent_end" }, {});
+    expect(getCurrentStepAnchor()).toBeNull();
+  });
+
+  it("clears a stale anchor when the gate soft-fails", async () => {
+    // No plan at all: the gate soft-fails, the agent is still sent off, and
+    // whatever step was current before must not be attributed this work.
+    fs.writeFileSync(nbPath, "# Notes\n\nNothing to run here.\n", "utf-8");
+    setNotebookPath(nbPath);
+    setCurrentStepAnchor("plan-a-step-1");
+
+    const { pi, commands } = fakePi();
+    registerExecutionCommands(pi as any);
+    await commands.get("execute")!.handler(undefined, { ui: { notify: vi.fn() } });
+
+    expect(getCurrentStepAnchor()).toBeNull();
   });
 });
