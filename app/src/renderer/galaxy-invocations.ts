@@ -108,10 +108,13 @@ export function parseInvocationBlocks(content: string): Invocation[] {
     if (lines[i].trim() === FENCE_OPEN) {
       const start = i + 1;
       let end = start;
-      while (end < lines.length && lines[end].trim() !== FENCE_CLOSE) end++;
-      // A fence that never closes is not a block, same as the brain's parser.
-      if (end >= lines.length) {
-        i = end + 1;
+      // Same fence grammar as the brain's scanner (scanFencedBlocks): no fence
+      // line inside the body, and an exact ``` to close. Anything else -- a
+      // run of four backticks, another opener, end of file -- means the block
+      // never closed, and an unclosed block is not a block.
+      while (end < lines.length && !lines[end].trim().startsWith(FENCE_CLOSE)) end++;
+      if (end >= lines.length || lines[end].trim() !== FENCE_CLOSE) {
+        i = start;
         continue;
       }
       const body = lines.slice(start, end);

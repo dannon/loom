@@ -34,6 +34,7 @@ export interface UdtYaml {
 }
 
 import { appendBlock } from "./notebook-writer";
+import { scanFencedBlocks } from "./harness-block-fields";
 
 const UDT_FENCE_OPEN = "```loom-udt";
 const UDT_FENCE_CLOSE = "```";
@@ -92,26 +93,11 @@ function parseUdtBlock(blockLines: string[]): UdtYaml | null {
 }
 
 export function findUdtBlocks(content: string): UdtYaml[] {
-  const out: UdtYaml[] = [];
   const lines = content.split("\n");
-  let i = 0;
-  while (i < lines.length) {
-    if (lines[i].trim() === UDT_FENCE_OPEN) {
-      const start = i + 1;
-      let end = start;
-      while (end < lines.length && lines[end].trim() !== UDT_FENCE_CLOSE) end++;
-      // A fence that never closes is not a block -- the same rule the
-      // invocation and job scanners follow, and for the same reason: the
-      // upsert replaces what the scanner calls the block, and a range ending
-      // at EOF takes the rest of the notebook with it.
-      if (end < lines.length) {
-        const parsed = parseUdtBlock(lines.slice(start, end));
-        if (parsed) out.push(parsed);
-      }
-      i = end + 1;
-    } else {
-      i++;
-    }
+  const out: UdtYaml[] = [];
+  for (const range of scanFencedBlocks(lines, UDT_FENCE_OPEN)) {
+    const parsed = parseUdtBlock(lines.slice(range.start + 1, range.end));
+    if (parsed) out.push(parsed);
   }
   return out;
 }
@@ -126,21 +112,12 @@ export function upsertUdtBlock(content: string, udt: UdtYaml): string {
   const lines = content.split("\n");
   const newBlock = renderUdtYaml(udt).trimEnd().split("\n");
 
-  let i = 0;
-  while (i < lines.length) {
-    if (lines[i].trim() === UDT_FENCE_OPEN) {
-      const start = i;
-      let end = start + 1;
-      while (end < lines.length && lines[end].trim() !== UDT_FENCE_CLOSE) end++;
-      if (end < lines.length) {
-        const parsed = parseUdtBlock(lines.slice(start + 1, end));
-        if (parsed && parsed.toolUuid === udt.toolUuid) {
-          return [...lines.slice(0, start), ...newBlock, ...lines.slice(end + 1)].join("\n");
-        }
-      }
-      i = end + 1;
-    } else {
-      i++;
+  for (const range of scanFencedBlocks(lines, UDT_FENCE_OPEN)) {
+    const parsed = parseUdtBlock(lines.slice(range.start + 1, range.end));
+    if (parsed && parsed.toolUuid === udt.toolUuid) {
+      return [...lines.slice(0, range.start), ...newBlock, ...lines.slice(range.end + 1)].join(
+        "\n",
+      );
     }
   }
 

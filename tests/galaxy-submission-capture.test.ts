@@ -551,6 +551,27 @@ describe("a replayed submission claims nothing about a server", () => {
     );
   });
 
+  it("does not announce a registration when every id was skipped", async () => {
+    await handleSubmissionResult("live-2", "galaxy_invoke_workflow", mcpResult(INVOCATION), false, {
+      args: {},
+      stepAnchor: "plan-a-step-1",
+    });
+    const beforeCount = activity().filter((e) => e.kind === "submission.registered").length;
+
+    await handleSubmissionResult(
+      "replay-all-collide",
+      "galaxy_invoke_workflow",
+      mcpResult(INVOCATION),
+      false,
+      { args: {}, stepAnchor: "plan-a-step-9", replayed: true },
+    );
+
+    // Nothing landed, so nothing is claimed: a row saying otherwise would
+    // point at a block that is not there.
+    expect(activity().filter((e) => e.kind === "submission.registered")).toHaveLength(beforeCount);
+    expect(activity().some((e) => e.kind === "submission.replay_skipped")).toBe(true);
+  });
+
   it("still claims both when the submission was really watched", async () => {
     await handleSubmissionResult("live-0", "galaxy_invoke_workflow", mcpResult(INVOCATION), false, {
       args: {},

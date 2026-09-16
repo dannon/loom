@@ -187,8 +187,75 @@ function isOneLine(value: string): boolean {
  * because a colon in a human label is ordinary.
  */
 /**
- * Where a new block can be appended without landing inside a fence that never
- * closed.
+ * Every fenced block type Loom writes. The append locator needs the whole set:
+ * an unterminated `loom-job` opener swallows an appended `loom-invocation`
+ * just as well as another job block would.
+ */
+const LOOM_FENCE_OPENERS = [
+  "```loom-invocation",
+  "```loom-job",
+  "```loom-udt",
+  "```loom-session",
+  "```loom-galaxy-page",
+] as const;
+
+const FENCE_CLOSE = "```";
+
+/** One block's line span: the opener, its body, and the closing fence. */
+export interface FenceRange {
+  /** Index of the opening fence line. */
+  start: number;
+  /** Index of the closing fence line. */
+  end: number;
+}
+
+/**
+ * Find every properly closed block opened by `opener`.
+ *
+ * One grammar, used by every scanner and by the append locator, because the
+ * two going their own way is how a notebook loses content: whoever decides
+ * where a block *ends* has to be the same thing that decides where it is safe
+ * to write, or one of them hands the other a range that spans somebody else's
+ * prose.
+ *
+ * The rule: a block opens on an exact opener line, its body holds no fence
+ * line at all, and it closes on an exact ```. Anything else -- a run of four
+ * backticks where the close should be, another opener, end of file -- means
+ * the block never closed, and an unclosed block is not a block. Running to EOF
+ * instead would make every writer treat the rest of the notebook as this
+ * block's body and rewrite it away; stopping at the next opener is what keeps
+ * an orphan from swallowing the real block that follows it.
+ *
+ * The body can hold no fence line because these blocks are `key: value` lines
+ * and nothing else. A value that would look like one is refused by `blockLine`
+ * before it is ever written.
+ */
+export function scanFencedBlocks(lines: readonly string[], opener: string): FenceRange[] {
+  const ranges: FenceRange[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].trim() !== opener) {
+      i++;
+      continue;
+    }
+    const start = i;
+    let end = start + 1;
+    while (end < lines.length && !lines[end].trim().startsWith(FENCE_CLOSE)) end++;
+    if (end < lines.length && lines[end].trim() === FENCE_CLOSE) {
+      ranges.push({ start, end });
+      i = end + 1;
+    } else {
+      // Unclosed: skip only the opener, so a fence line that ended this one
+      // still gets its own chance to open a block.
+      i = start + 1;
+    }
+  }
+  return ranges;
+}
+
+/**
+ * Where a new block can be appended without landing after a Loom fence that
+ * never closed.
  *
  * Skipping an unterminated block is not enough on its own. Append after one
  * and the new block's own closing fence becomes the orphan's closing fence, so
@@ -202,17 +269,19 @@ function isOneLine(value: string): boolean {
  * refusing the write over a stray backtick would lose the record of something
  * that is actually running.
  *
- * Any ``` line counts, not just Loom's own openers -- a half-written Python
- * block swallows an appended record exactly as well as a half-written
- * `loom-job` one.
+ * Reads the notebook with `scanFencedBlocks`' grammar, not a second one of its
+ * own -- see that function.
  */
 export function appendIndexOutsideOpenFence(lines: readonly string[]): number {
-  let openedAt: number | null = null;
-  for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].trimStart().startsWith("```")) continue;
-    openedAt = openedAt === null ? i : null;
+  const closed = new Set<number>();
+  for (const opener of LOOM_FENCE_OPENERS) {
+    for (const range of scanFencedBlocks(lines, opener)) closed.add(range.start);
   }
-  return openedAt ?? lines.length;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if ((LOOM_FENCE_OPENERS as readonly string[]).includes(trimmed) && !closed.has(i)) return i;
+  }
+  return lines.length;
 }
 
 export function blockLine(key: string, value: string, field = key): string {

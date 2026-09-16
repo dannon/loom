@@ -13,6 +13,7 @@ import * as path from "path";
 import {
   appendIndexOutsideOpenFence,
   blockLine,
+  scanFencedBlocks,
   mergeHarnessFields,
   parseHarnessFields,
   renderHarnessFieldLines,
@@ -325,28 +326,11 @@ export function renderInvocationYaml(inv: InvocationYaml): string {
  * each into an InvocationYaml. Skips blocks that fail validation.
  */
 export function findInvocationBlocks(content: string): InvocationYaml[] {
-  const result: InvocationYaml[] = [];
   const lines = content.split("\n");
-  let i = 0;
-  while (i < lines.length) {
-    if (lines[i].trim() === INVOCATION_FENCE_OPEN) {
-      const start = i + 1;
-      let end = start;
-      while (end < lines.length && lines[end].trim() !== INVOCATION_FENCE_CLOSE) {
-        end++;
-      }
-      // A fence that never closes is not a block. Running to EOF instead would
-      // make every writer treat the rest of the notebook as this block's body
-      // -- see `findInvocationBlockRanges`, where that costs the user their
-      // prose.
-      if (end < lines.length) {
-        const parsed = parseInvocationBlock(lines.slice(start, end));
-        if (parsed) result.push(parsed);
-      }
-      i = end + 1;
-    } else {
-      i++;
-    }
+  const result: InvocationYaml[] = [];
+  for (const range of scanFencedBlocks(lines, INVOCATION_FENCE_OPEN)) {
+    const parsed = parseInvocationBlock(lines.slice(range.start + 1, range.end));
+    if (parsed) result.push(parsed);
   }
   return result;
 }
@@ -569,31 +553,15 @@ interface InvocationBlockRange {
 }
 
 function findInvocationBlockRanges(content: string): InvocationBlockRange[] {
-  const result: InvocationBlockRange[] = [];
   const lines = content.split("\n");
-  let i = 0;
-  while (i < lines.length) {
-    if (lines[i].trim() === INVOCATION_FENCE_OPEN) {
-      const start = i;
-      let end = start + 1;
-      let invocationId: string | null = null;
-      while (end < lines.length && lines[end].trim() !== INVOCATION_FENCE_CLOSE) {
-        const m = lines[end].match(/^invocation_id:\s*(.+)$/);
-        if (m) invocationId = m[1].trim();
-        end++;
-      }
-      // Only a fence that actually closes is a range. Without this, an opening
-      // fence with no close reports a range ending at EOF, and the upsert --
-      // which replaces `start` through `end` -- deletes everything after it.
-      // A notebook is the durable record of someone's research; a missing
-      // backtick must not be able to take the rest of it.
-      if (invocationId && end < lines.length) {
-        result.push({ invocationId, start, end });
-      }
-      i = end + 1;
-    } else {
-      i++;
+  const result: InvocationBlockRange[] = [];
+  for (const range of scanFencedBlocks(lines, INVOCATION_FENCE_OPEN)) {
+    let invocationId: string | null = null;
+    for (let i = range.start + 1; i < range.end; i++) {
+      const m = lines[i].match(/^invocation_id:\s*(.+)$/);
+      if (m) invocationId = m[1].trim();
     }
+    if (invocationId) result.push({ invocationId, start: range.start, end: range.end });
   }
   return result;
 }

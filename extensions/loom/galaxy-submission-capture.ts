@@ -64,6 +64,21 @@ export const UNATTRIBUTED = "unattributed";
 export const PROVENANCE_DIR = path.join(".loom", "provenance");
 export const UDT_PROVENANCE_DIR = path.join(PROVENANCE_DIR, "udt");
 
+/**
+ * What the winning write attempt did. The activity row is built from this
+ * rather than from the parsed submission, so a replay that declined to
+ * overwrite an id cannot be announced as having recorded it.
+ */
+interface WriteOutcome {
+  udtDefinition?: string;
+  udtPending: boolean;
+  /** Ids a replay left alone because a block already carried them. */
+  replayCollisions: string[];
+  wroteInvocation?: string;
+  wroteJobs: string[];
+  wroteUdt?: string;
+}
+
 interface Dispatch {
   attemptId: string;
   toolName: string;
@@ -228,14 +243,18 @@ async function writeBlocks(
   notebookPath: string,
   submission: ParsedSubmission,
   dispatch: Dispatch,
-): Promise<{ udtDefinition?: string; udtPending: boolean; replayCollisions: string[] }> {
+): Promise<WriteOutcome> {
   const udtPending = submission.kind === "udt" && !!submission.udt;
   const galaxyServerUrl = getGalaxyConfig()?.url ?? "";
   const harness = harnessFields(dispatch, submission.historyId);
   let udtDefinition: string | undefined;
-  // Ids a replay declined to overwrite. Rebuilt on every attempt, because the
-  // CAS may run `applyBlocks` more than once against fresh content.
+  // What the last (and therefore the winning) `applyBlocks` attempt actually
+  // did. Rebuilt on every attempt, because the CAS may run it more than once
+  // against fresh content, and only the attempt that lands is true.
   let replayCollisions: string[] = [];
+  let wroteInvocation: string | undefined;
+  let wroteJobs: string[] = [];
+  let wroteUdt: string | undefined;
 
   /**
    * A replay must not write over a block that is already there.
@@ -268,6 +287,9 @@ async function writeBlocks(
   const applyBlocks = (content: string): string => {
     let next = content;
     replayCollisions = [];
+    wroteInvocation = undefined;
+    wroteJobs = [];
+    wroteUdt = undefined;
 
     if (submission.kind === "invocation" && submission.invocationId) {
       const inv: InvocationYaml = {
@@ -281,6 +303,7 @@ async function writeBlocks(
       };
       if (!replayWouldOverwrite(next, submission.invocationId, "invocation")) {
         next = upsertInvocationBlock(next, inv, harness);
+        wroteInvocation = submission.invocationId;
       }
     }
 
@@ -299,6 +322,7 @@ async function writeBlocks(
       // tool_version is only ever in the submission response -- GET
       // /api/jobs/{id} drops it -- so seed the job summary with it now rather
       // than hoping enrichment can find it later.
+      wroteJobs.push(job.jobId);
       next = upsertJobBlock(next, block, {
         ...harness,
         ...(job.historyId && !submission.historyId ? { historyId: job.historyId } : {}),
@@ -317,6 +341,7 @@ async function writeBlocks(
       udtDefinition &&
       !replayWouldOverwrite(next, submission.udt.uuid, "udt")
     ) {
+      wroteUdt = submission.udt.uuid;
       next = upsertUdtBlock(next, {
         toolId: submission.udt.toolId,
         toolUuid: submission.udt.uuid,
@@ -365,7 +390,14 @@ async function writeBlocks(
     }
   });
 
-  return { ...(udtDefinition ? { udtDefinition } : {}), udtPending, replayCollisions };
+  return {
+    ...(udtDefinition ? { udtDefinition } : {}),
+    udtPending,
+    replayCollisions,
+    wroteInvocation,
+    wroteJobs,
+    wroteUdt,
+  };
 }
 
 /**
@@ -485,7 +517,7 @@ export async function handleSubmissionResult(
   }
 
   const submission = outcome.submission;
-  let written: { udtDefinition?: string; udtPending: boolean; replayCollisions: string[] };
+  let written: WriteOutcome;
   try {
     written = await writeBlocks(notebookPath, submission, dispatch);
   } catch (err) {
@@ -514,9 +546,7 @@ export async function handleSubmissionResult(
     return;
   }
 
-  // A replay that declined to overwrite every id it carried wrote nothing, so
-  // there is no registration to announce.
-  if (dispatch.replayed && written.replayCollisions.length > 0) {
+  if (written.replayCollisions.length > 0) {
     record("submission.replay_skipped", {
       tool: toolName,
       attempt_id: dispatch.attemptId,
@@ -526,6 +556,13 @@ export async function handleSubmissionResult(
     });
   }
 
+  // Nothing landed, so there is no registration to announce. Saying otherwise
+  // would put a row in the log claiming a block that is not there -- the same
+  // untruth `submission.unparsed` exists to avoid on the other side.
+  const wroteNothing =
+    !written.wroteInvocation && written.wroteJobs.length === 0 && !written.wroteUdt;
+  if (wroteNothing) return;
+
   record("submission.registered", {
     tool: toolName,
     attempt_id: dispatch.attemptId,
@@ -534,9 +571,13 @@ export async function handleSubmissionResult(
     label: submission.label,
     submitted_by: dispatch.replayed ? "replay" : "harness",
     ...(submission.historyId ? { history_id: submission.historyId } : {}),
-    ...(submission.invocationId ? { invocation_id: submission.invocationId } : {}),
-    ...(submission.jobs ? { job_ids: submission.jobs.map((j) => j.jobId) } : {}),
-    ...(submission.udt ? { tool_id: submission.udt.toolId, tool_uuid: submission.udt.uuid } : {}),
+    // The ids that were actually written, not the ids the result carried: a
+    // mapped-over replay can land some of its jobs and skip others.
+    ...(written.wroteInvocation ? { invocation_id: written.wroteInvocation } : {}),
+    ...(written.wroteJobs.length > 0 ? { job_ids: written.wroteJobs } : {}),
+    ...(written.wroteUdt && submission.udt
+      ? { tool_id: submission.udt.toolId, tool_uuid: written.wroteUdt }
+      : {}),
     // The path is reported from what was actually written, not from what we
     // meant to write, so the row can't claim a definition that never landed.
     ...(written.udtDefinition ? { definition: written.udtDefinition } : {}),

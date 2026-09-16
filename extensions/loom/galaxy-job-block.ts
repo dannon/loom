@@ -31,6 +31,7 @@
 import { appendBlock } from "./notebook-writer";
 import {
   blockLine,
+  scanFencedBlocks,
   mergeHarnessFields,
   parseHarnessFields,
   renderHarnessFieldLines,
@@ -218,48 +219,22 @@ interface BlockRange {
 }
 
 function findJobBlockRanges(content: string): BlockRange[] {
-  const ranges: BlockRange[] = [];
   const lines = content.split("\n");
-  let i = 0;
-  while (i < lines.length) {
-    if (lines[i].trim() === JOB_FENCE_OPEN) {
-      const start = i;
-      let end = i + 1;
-      while (end < lines.length && lines[end].trim() !== JOB_FENCE_CLOSE) end++;
-      // Only a fence that actually closes is a range: the upsert replaces
-      // `start` through `end`, so a range ending at EOF because the block was
-      // never closed would delete the rest of the notebook with it.
-      if (end < lines.length) {
-        const parsed = parseJobBlock(lines.slice(i + 1, end));
-        if (parsed) ranges.push({ jobId: parsed.jobId, start, end });
-      }
-      i = end + 1;
-    } else {
-      i++;
-    }
+  const ranges: BlockRange[] = [];
+  for (const range of scanFencedBlocks(lines, JOB_FENCE_OPEN)) {
+    const parsed = parseJobBlock(lines.slice(range.start + 1, range.end));
+    if (parsed) ranges.push({ jobId: parsed.jobId, start: range.start, end: range.end });
   }
   return ranges;
 }
 
 /** Every parseable `loom-job` block in the notebook. Invalid blocks are skipped. */
 export function findJobBlocks(content: string): JobYaml[] {
-  const result: JobYaml[] = [];
   const lines = content.split("\n");
-  let i = 0;
-  while (i < lines.length) {
-    if (lines[i].trim() === JOB_FENCE_OPEN) {
-      const start = i + 1;
-      let end = start;
-      while (end < lines.length && lines[end].trim() !== JOB_FENCE_CLOSE) end++;
-      // A fence that never closes is not a block -- see findJobBlockRanges.
-      if (end < lines.length) {
-        const parsed = parseJobBlock(lines.slice(start, end));
-        if (parsed) result.push(parsed);
-      }
-      i = end + 1;
-    } else {
-      i++;
-    }
+  const result: JobYaml[] = [];
+  for (const range of scanFencedBlocks(lines, JOB_FENCE_OPEN)) {
+    const parsed = parseJobBlock(lines.slice(range.start + 1, range.end));
+    if (parsed) result.push(parsed);
   }
   return result;
 }

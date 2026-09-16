@@ -222,14 +222,49 @@ describe("a fence that never closes is not a block", () => {
     expect(findJobBlocks(twice)).toHaveLength(1);
   });
 
-  it("does not append inside a half-written block of the user's own", () => {
-    // Not only Loom's fences: a Python block someone left open swallows an
-    // appended record just as well.
+  it("is not confused by a half-written block of the user's own", () => {
+    // Only Loom's own openers matter here: the scanners never start at a
+    // ```python line, so an unterminated one cannot make them mis-read a range.
+    // It is a rendering oddity in the user's file, not a hazard to the record.
     const content = "# Notes\n\n```python\nprint('still writing this')\n";
-    const next = upsertInvocationBlock(content, INVOCATION);
+    const once = upsertInvocationBlock(content, INVOCATION);
+    const twice = upsertInvocationBlock(once, { ...INVOCATION, label: "second" });
+    expect(twice).toContain("still writing this");
+    const parsed = findInvocationBlocks(twice);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].label).toBe("second");
+  });
+
+  it("treats a four-backtick close as no close at all", () => {
+    // The scanners close on an exact ```, so a longer run is not a close --
+    // and the append locator has to agree, or it happily appends after a block
+    // it thinks is closed and the next write swallows both.
+    const fourTick = renderInvocationYaml(INVOCATION).replace(/^```$/m, "````");
+    const content = `# Notes\n\n${fourTick}\n${TAIL}`;
+    expect(findInvocationBlocks(content)).toHaveLength(0);
+
+    const twice = upsertInvocationBlock(
+      upsertInvocationBlock(content, { ...INVOCATION, label: "first" }),
+      { ...INVOCATION, label: "second" },
+    );
+    expect(twice).toContain("KEEP ME");
+    expect(findInvocationBlocks(twice)).toHaveLength(1);
+  });
+
+  it("does not let an orphan swallow the valid block after it", () => {
+    // An orphan that runs into another opener is unterminated, not a block
+    // stretching to the next close. Without that, the orphan's range covered
+    // the real block and the prose between them, and a write to the real id
+    // replaced the lot.
+    const content = `${unterminated(renderInvocationYaml({ ...INVOCATION, invocationId: "aa11bb22cc33dd44" }))}\n${TAIL}\n${renderInvocationYaml(INVOCATION)}`;
+    const parsed = findInvocationBlocks(content);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].invocationId).toBe(INVOCATION.invocationId);
+
+    const next = upsertInvocationBlock(content, { ...INVOCATION, label: "annotated" });
+    expect(next).toContain("KEEP ME");
     expect(findInvocationBlocks(next)).toHaveLength(1);
-    expect(next).toContain("still writing this");
-    expect(next.indexOf("loom-invocation")).toBeLessThan(next.indexOf("```python"));
+    expect(findInvocationBlocks(next)[0].label).toBe("annotated");
   });
 
   it("covers the loom-udt block, which the first pass at this missed", () => {
