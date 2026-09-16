@@ -17,6 +17,7 @@ import {
   readNotebook,
   writeNotebook,
   withNotebookLock,
+  withNotebookCas,
   findInvocationBlocks,
   upsertInvocationBlock,
   applyInvocationUpdates,
@@ -26,7 +27,20 @@ import {
   type InvocationPollUpdate,
 } from "./notebook-writer";
 import { isTerminalJobState, upsertJobBlock, type JobYaml } from "./galaxy-job-block";
-import { getGalaxyConfig, galaxyGet, type GalaxyInvocationResponse } from "./galaxy-api";
+import {
+  ambiguousAnchorMessage,
+  listNotebookAnchors,
+  resolveNotebookAnchor,
+  unknownAnchorMessage,
+  UnknownAnchorError,
+} from "./notebook-anchors";
+import {
+  getGalaxyConfig,
+  galaxyGet,
+  sameGalaxyServer,
+  verifyGalaxyRun,
+  type GalaxyInvocationResponse,
+} from "./galaxy-api";
 import { listEnabledSkillRepos, findSkillRepo } from "./skills";
 import { fetchSkillFile, githubRawBase } from "./skills-discovery";
 import { VENDOR_REPO_NAME, readVendoredSkill } from "./vendor-skills";
@@ -69,6 +83,36 @@ function stripGtnHtml(html: string): string {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return text;
+}
+
+/**
+ * Resolve a caller-supplied anchor against the notebook, or refuse.
+ *
+ * The record tools wrote whatever they were handed, so an anchor the notebook
+ * has never heard of produced a block bound to nothing: the run still shows up
+ * and still polls, but every consumer that looks a step up by anchor -- the
+ * evidence gate first among them -- reads "no opinion" instead of "broken".
+ * Rejecting costs the model one retry and hands it the list to retry with.
+ */
+function requireAnchor(content: string, input: string): string {
+  const resolved = resolveNotebookAnchor(content, input);
+  if (resolved.kind === "resolved") return resolved.anchor;
+  throw new UnknownAnchorError(
+    resolved.kind === "ambiguous"
+      ? ambiguousAnchorMessage(input, resolved.candidates)
+      : unknownAnchorMessage(input, listNotebookAnchors(content)),
+  );
+}
+
+/** The refusal both record tools hand back: nothing written, reason named. */
+function recordFailure(message: string): {
+  content: { type: "text"; text: string }[];
+  details: Record<string, unknown>;
+} {
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: message }) }],
+    details: { error: true } as Record<string, unknown>,
+  };
 }
 
 export function registerPlanTools(pi: ExtensionAPI): void {
@@ -452,47 +496,73 @@ exact file when it becomes relevant.`,
     description: `Record a Galaxy workflow invocation in the project notebook so its progress
 can be tracked. Call right after invoking a workflow via Galaxy MCP (galaxy_invoke_workflow).
 Writes a fenced \`loom-invocation\` YAML block at the end of the notebook. Polling later
-(galaxy_invocation_check_all / galaxy_invocation_check_one) updates the block in place.`,
+(galaxy_invocation_check_all / galaxy_invocation_check_one) updates the block in place.
+Both arguments are checked before anything is written: the anchor must resolve in
+notebook.md, and the invocation id must exist on the Galaxy server.`,
     parameters: Type.Object({
       invocationId: Type.String({
         description: "Galaxy invocation ID returned from galaxy_invoke_workflow",
       }),
       notebookAnchor: Type.String({
-        description: "Stable anchor where this invocation lives, e.g. 'plan-1-step-3'",
+        description:
+          "Anchor of the plan step this run belongs to, e.g. 'plan-a-step-3'. It must " +
+          "already exist in notebook.md, either as a {#anchor} on the step or as a " +
+          "heading; an anchor nothing resolves to is rejected.",
       }),
       label: Type.String({
         description: "Human-readable description for status display, e.g. 'BWA alignment'",
       }),
     }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
       const notebookPath = getNotebookPath();
-      if (!notebookPath) {
-        return {
-          content: [
-            { type: "text", text: JSON.stringify({ success: false, error: "No notebook open." }) },
-          ],
-          details: { error: true } as Record<string, unknown>,
-        };
-      }
+      if (!notebookPath) return recordFailure("No notebook open.");
 
       const cfg = getGalaxyConfig();
       const galaxyServerUrl = cfg?.url || "";
 
       try {
-        const inv: InvocationYaml = {
-          invocationId: params.invocationId,
-          galaxyServerUrl,
-          notebookAnchor: params.notebookAnchor,
-          label: params.label,
-          submittedAt: new Date().toISOString(),
-          status: "in_progress",
-        };
-        await withNotebookLock(notebookPath, async () => {
-          const content = await readNotebook(notebookPath);
-          const updated = upsertInvocationBlock(content, inv);
-          await writeNotebook(notebookPath, updated);
-        });
+        // Ask Galaxy before writing anything down. An id Galaxy has never heard
+        // of records nothing: the poller 404s on it every tick, the Activity
+        // panel shows a run that doesn't exist, and whatever the model really
+        // submitted stays untracked.
+        const check = await verifyGalaxyRun("invocation", params.invocationId, signal);
+        if (check.outcome === "absent") {
+          return recordFailure(
+            `Galaxy has no invocation "${params.invocationId}" (${check.detail}). ` +
+              `Nothing was recorded -- re-read the id from the galaxy_invoke_workflow result.`,
+          );
+        }
+        // A failed check plus an aborted call is the user cancelling, not Galaxy
+        // being unreachable. Recording an unverified block for a turn they
+        // stopped would leave them a record of something nobody confirmed.
+        if (check.outcome === "unreachable" && signal?.aborted) {
+          return recordFailure("Cancelled before Galaxy could confirm the invocation.");
+        }
+        const serverVerified = check.outcome === "found";
 
+        const submittedAt = new Date().toISOString();
+        // Guarded write: the poller and the agent both write this file while we
+        // are talking to Galaxy, and an unguarded whole-file rewrite would drop
+        // whatever landed in between. Resolving the anchor inside means it is
+        // checked against the bytes we're about to rewrite rather than a copy
+        // read earlier -- a block bound to a step that was renamed away is
+        // exactly the silent-nothing the check exists to stop.
+        const inv = await withNotebookLock(notebookPath, () =>
+          withNotebookCas(notebookPath, (content) => {
+            const record: InvocationYaml = {
+              invocationId: params.invocationId,
+              galaxyServerUrl,
+              notebookAnchor: requireAnchor(content, params.notebookAnchor),
+              label: params.label,
+              submittedAt,
+              status: "in_progress",
+              serverVerified,
+            };
+            return { content: upsertInvocationBlock(content, record), result: record };
+          }),
+        );
+
+        const where = `${inv.invocationId} (${inv.label}) at ${inv.notebookAnchor}`;
         return {
           content: [
             {
@@ -504,31 +574,40 @@ Writes a fenced \`loom-invocation\` YAML block at the end of the notebook. Polli
                   notebookAnchor: inv.notebookAnchor,
                   label: inv.label,
                   status: inv.status,
-                  message: `Recorded invocation ${inv.invocationId} (${inv.label}) at ${inv.notebookAnchor}.`,
+                  serverVerified,
+                  message: serverVerified
+                    ? `Recorded invocation ${where}.`
+                    : `Recorded invocation ${where}, but Galaxy could not confirm it ` +
+                      `(${check.detail}). The block says server_verified: false; the poller ` +
+                      `clears that on its first successful poll.`,
                 },
                 null,
                 2,
               ),
             },
           ],
-          details: { invocationId: inv.invocationId, notebookAnchor: inv.notebookAnchor } as Record<
-            string,
-            unknown
-          >,
+          details: {
+            invocationId: inv.invocationId,
+            notebookAnchor: inv.notebookAnchor,
+            serverVerified,
+          } as Record<string, unknown>,
         };
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: msg }) }],
-          details: { error: true } as Record<string, unknown>,
-        };
+        return recordFailure(error instanceof Error ? error.message : String(error));
       }
     },
     renderResult: (result) => {
       const d = result.details as
-        { invocationId?: string; notebookAnchor?: string; error?: boolean } | undefined;
+        | {
+            invocationId?: string;
+            notebookAnchor?: string;
+            serverVerified?: boolean;
+            error?: boolean;
+          }
+        | undefined;
       if (d?.error) return new Text("❌ Failed to record invocation");
-      return new Text(`🔗 Invocation ${d?.invocationId} → ${d?.notebookAnchor}`);
+      const unconfirmed = d?.serverVerified === false ? " (unconfirmed)" : "";
+      return new Text(`🔗 Invocation ${d?.invocationId} → ${d?.notebookAnchor}${unconfirmed}`);
     },
   });
 
@@ -542,11 +621,16 @@ Writes a fenced \`loom-invocation\` YAML block at the end of the notebook. Polli
 the background. Call right after submitting a tool via Galaxy MCP (galaxy_run_tool), the same way
 galaxy_invocation_record is called after invoking a workflow. Without this the run is invisible to
 the background poller: nothing advances its status and nothing notifies anyone when it finishes.
-Writes a fenced \`loom-job\` YAML block; the poller updates it in place.`,
+Writes a fenced \`loom-job\` YAML block; the poller updates it in place. Both arguments are
+checked before anything is written: the anchor must resolve in notebook.md, and the job id must
+exist on the Galaxy server.`,
     parameters: Type.Object({
       jobId: Type.String({ description: "Galaxy job ID returned from galaxy_run_tool" }),
       notebookAnchor: Type.String({
-        description: "Stable anchor where this run lives, e.g. 'plan-1-step-3'",
+        description:
+          "Anchor of the plan step this run belongs to, e.g. 'plan-a-step-3'. It must " +
+          "already exist in notebook.md, either as a {#anchor} on the step or as a " +
+          "heading; an anchor nothing resolves to is rejected.",
       }),
       label: Type.String({
         description: "Human-readable description for status display, e.g. 'BWA alignment'",
@@ -555,33 +639,43 @@ Writes a fenced \`loom-job\` YAML block; the poller updates it in place.`,
         Type.String({ description: "Galaxy tool id, e.g. 'bwa_mem' — shown if no label fits" }),
       ),
     }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
       const notebookPath = getNotebookPath();
-      if (!notebookPath) {
-        return {
-          content: [
-            { type: "text", text: JSON.stringify({ success: false, error: "No notebook open." }) },
-          ],
-          details: { error: true } as Record<string, unknown>,
-        };
-      }
+      if (!notebookPath) return recordFailure("No notebook open.");
 
       const cfg = getGalaxyConfig();
       try {
-        const job: JobYaml = {
-          jobId: params.jobId,
-          galaxyServerUrl: cfg?.url || "",
-          notebookAnchor: params.notebookAnchor,
-          label: params.label,
-          toolId: params.toolId,
-          submittedAt: new Date().toISOString(),
-          status: "in_progress",
-        };
-        await withNotebookLock(notebookPath, async () => {
-          const content = await readNotebook(notebookPath);
-          await writeNotebook(notebookPath, upsertJobBlock(content, job));
-        });
+        const check = await verifyGalaxyRun("job", params.jobId, signal);
+        if (check.outcome === "absent") {
+          return recordFailure(
+            `Galaxy has no job "${params.jobId}" (${check.detail}). Nothing was recorded -- ` +
+              `re-read the id from the galaxy_run_tool result. A tool run returns a job id, ` +
+              `not a dataset id.`,
+          );
+        }
+        if (check.outcome === "unreachable" && signal?.aborted) {
+          return recordFailure("Cancelled before Galaxy could confirm the job.");
+        }
+        const serverVerified = check.outcome === "found";
 
+        const submittedAt = new Date().toISOString();
+        const job = await withNotebookLock(notebookPath, () =>
+          withNotebookCas(notebookPath, (content) => {
+            const record: JobYaml = {
+              jobId: params.jobId,
+              galaxyServerUrl: cfg?.url || "",
+              notebookAnchor: requireAnchor(content, params.notebookAnchor),
+              label: params.label,
+              toolId: params.toolId,
+              submittedAt,
+              status: "in_progress",
+              serverVerified,
+            };
+            return { content: upsertJobBlock(content, record), result: record };
+          }),
+        );
+
+        const where = `${job.jobId} (${job.label}) at ${job.notebookAnchor}`;
         return {
           content: [
             {
@@ -593,31 +687,35 @@ Writes a fenced \`loom-job\` YAML block; the poller updates it in place.`,
                   notebookAnchor: job.notebookAnchor,
                   label: job.label,
                   status: job.status,
-                  message: `Recorded job ${job.jobId} (${job.label}) at ${job.notebookAnchor}. The background poller will advance it and notify on completion.`,
+                  serverVerified,
+                  message: serverVerified
+                    ? `Recorded job ${where}. The background poller will advance it and notify on completion.`
+                    : `Recorded job ${where}, but Galaxy could not confirm it (${check.detail}). ` +
+                      `The block says server_verified: false; the poller clears that on its ` +
+                      `first successful poll.`,
                 },
                 null,
                 2,
               ),
             },
           ],
-          details: { jobId: job.jobId, notebookAnchor: job.notebookAnchor } as Record<
-            string,
-            unknown
-          >,
+          details: {
+            jobId: job.jobId,
+            notebookAnchor: job.notebookAnchor,
+            serverVerified,
+          } as Record<string, unknown>,
         };
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: msg }) }],
-          details: { error: true } as Record<string, unknown>,
-        };
+        return recordFailure(error instanceof Error ? error.message : String(error));
       }
     },
     renderResult: (result) => {
       const d = result.details as
-        { jobId?: string; notebookAnchor?: string; error?: boolean } | undefined;
+        | { jobId?: string; notebookAnchor?: string; serverVerified?: boolean; error?: boolean }
+        | undefined;
       if (d?.error) return new Text("❌ Failed to record job");
-      return new Text(`🔗 Job ${d?.jobId} → ${d?.notebookAnchor}`);
+      const unconfirmed = d?.serverVerified === false ? " (unconfirmed)" : "";
+      return new Text(`🔗 Job ${d?.jobId} → ${d?.notebookAnchor}${unconfirmed}`);
     },
   });
 
@@ -955,6 +1053,11 @@ export async function checkInvocations(
         completedJobs: summary.ok,
         failedJobs: summary.error,
         lastPolledAt,
+        // We just got an answer out of Galaxy for this id, which is the proof a
+        // block recorded `server_verified: false` is waiting for -- but only if
+        // the answer came from the server the block names. A profile switch
+        // must not let another server's `inv-1` certify this one.
+        serverVerified: sameGalaxyServer(block.galaxyServerUrl, getGalaxyConfig()?.url),
         transition,
       });
 

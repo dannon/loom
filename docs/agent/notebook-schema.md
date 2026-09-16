@@ -102,7 +102,10 @@ enrichment: pending
 
 The first block of fields is the record: `label` and `notebook_anchor` say
 what the run is and which plan step it belongs to, and those are yours to
-set. Everything from `attempt_id` down is **harness-only**:
+set. `server_verified` says whether Galaxy has confirmed the id -- `true`
+when it was read out of Galaxy's own response to the submission or a poll
+has since answered for it, `false` when a record call asked and Galaxy did
+not answer. Everything from `attempt_id` down is **harness-only**:
 
 - `attempt_id` -- ULID minted when the submission was dispatched. Joins the
   block to its full provenance record under `.loom/provenance/`.
@@ -110,8 +113,6 @@ set. Everything from `attempt_id` down is **harness-only**:
 - `submitted_by` -- `harness` when Loom watched the submission happen,
   `agent` when only a record call reported it, `unknown` when reconciliation
   found it on Galaxy with nothing here to match.
-- `server_verified` -- true only when the id was read out of Galaxy's own
-  response to the submission.
 - `enrichment` / `enrichment_attempts` -- whether per-job tool versions,
   parameters, inputs and outputs have been backfilled from Galaxy yet
   (`pending`, `complete`, `unavailable`).

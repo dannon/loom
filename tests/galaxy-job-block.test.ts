@@ -31,6 +31,16 @@ describe("job block round-trip", () => {
     });
   });
 
+  it("round-trips server_verified", () => {
+    for (const verified of [true, false]) {
+      const parsed = findJobBlocks(renderJobYaml({ ...job, serverVerified: verified }));
+      expect(parsed[0].serverVerified).toBe(verified);
+    }
+    // Absent stays absent: a block written before the field exists must not
+    // read back as a claim either way.
+    expect(findJobBlocks(renderJobYaml(job))[0].serverVerified).toBeUndefined();
+  });
+
   it("survives a label containing YAML punctuation", () => {
     const tricky = { ...job, label: "align: sample #2, rep 1" };
     const parsed = findJobBlocks(renderJobYaml(tricky));
@@ -189,6 +199,46 @@ describe("applyJobPollUpdate", () => {
     expect(block.status).toBe("completed");
     expect(block.galaxyState).toBe("ok");
     expect(block.notebookAnchor).toBe("plan-1-step-3");
+  });
+
+  it("clears server_verified: false once a poll gets an answer out of Galaxy", () => {
+    const content = upsertJobBlock("", { ...job, serverVerified: false });
+    expect(content).toContain("server_verified: false");
+    const polled = applyJobPollUpdate(content, {
+      jobId: "abc123",
+      status: "in_progress",
+      galaxyState: "running",
+      lastPolledAt: "2026-08-12T16:00:00Z",
+      serverVerified: true,
+    });
+    expect(findJobBlocks(polled)[0].serverVerified).toBe(true);
+  });
+
+  it("leaves the status alone when the update carries none", () => {
+    // The verification-only write knows nothing about the outcome. Passing the
+    // status the poller last saw would revert a transition another writer
+    // landed while we were talking to Galaxy.
+    const content = upsertJobBlock("", { ...job, status: "completed", serverVerified: false });
+    const polled = applyJobPollUpdate(content, {
+      jobId: "abc123",
+      lastPolledAt: "2026-08-12T16:00:00Z",
+      serverVerified: true,
+    });
+    const block = findJobBlocks(polled)[0];
+    expect(block.status).toBe("completed");
+    expect(block.serverVerified).toBe(true);
+  });
+
+  it("leaves a block that never carried the flag unstamped", () => {
+    const content = upsertJobBlock("", job);
+    const polled = applyJobPollUpdate(content, {
+      jobId: "abc123",
+      status: "completed",
+      lastPolledAt: "2026-08-12T16:00:00Z",
+      serverVerified: true,
+    });
+    expect(polled).not.toContain("server_verified");
+    expect(findJobBlocks(polled)[0].serverVerified).toBeUndefined();
   });
 
   it("is a no-op for a job id the notebook does not carry", () => {

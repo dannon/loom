@@ -182,3 +182,29 @@ describe("progress counters", () => {
     expect(parsed.completedJobs).toBeUndefined();
   });
 });
+
+describe("server_verified", () => {
+  it("round-trips true and false", () => {
+    for (const verified of [true, false]) {
+      const rendered = renderInvocationYaml(makeInvocation({ serverVerified: verified }));
+      expect(rendered).toContain(`server_verified: ${verified}`);
+      expect(findInvocationBlocks(rendered)[0].serverVerified).toBe(verified);
+    }
+  });
+
+  it("stays absent for a block that never carried it", () => {
+    // Every block written before this field existed. Absent has to read back as
+    // "nobody claimed either way", not as an unverified run.
+    const rendered = renderInvocationYaml(makeInvocation());
+    expect(rendered).not.toContain("server_verified");
+    expect(findInvocationBlocks(rendered)[0].serverVerified).toBeUndefined();
+  });
+
+  it("reads a hand-edited non-boolean value as no claim at all", () => {
+    const rendered = renderInvocationYaml(makeInvocation()).replace(
+      "status: in_progress",
+      "status: in_progress\nserver_verified: yes please",
+    );
+    expect(findInvocationBlocks(rendered)[0].serverVerified).toBeUndefined();
+  });
+});

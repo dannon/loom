@@ -4,6 +4,10 @@
 > **📖 See the docs & live demos → [galaxyproject.github.io/loom](https://galaxyproject.github.io/loom/)**
 > — _Agentic Science with Galaxy_: an overview of Orbit, Loom, and Galaxy MCP, an animated walkthrough of real analyses, and getting-started guides.
 
+> [!TIP]
+> **🛠️ Want to test or develop Loom? → [CONTRIBUTING.md](CONTRIBUTING.md)**
+> — setup, how to run each shell, the check loop, and how to validate a change for real.
+
 An AI research harness for [Galaxy](https://galaxyproject.org) bioinformatics, built on [Pi.dev](https://pi.dev).
 
 Loom turns a working directory into a co-scientist project: ad-hoc exploration, plans, executed steps, interpretations, and follow-up plans all accumulate as markdown in a single, durable, git-tracked `notebook.md`. The agent reads and writes that notebook directly; there is no parallel structured-state store. When Galaxy is configured the agent surveys the workflow registry and tool catalog while drafting plans and routes individual steps to Galaxy or local execution as appropriate.
@@ -283,7 +287,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ### Developer install (build from source)
 
-Clone the repo and install both workspaces:
+Clone the repo and install both workspaces -- there is no build step, so this is
+the whole setup:
 
 ```bash
 git clone https://github.com/galaxyproject/loom.git
@@ -292,85 +297,14 @@ npm install
 cd app && npm install
 ```
 
-Launch Orbit:
+Then `npm start` from `app/` for Orbit, or `node bin/loom.js` from the repo root
+for the CLI. Needs Node 22.19+ (matching [`.nvmrc`](.nvmrc)) and `uv` on `PATH`.
 
-```bash
-npm start                              # from app/
-```
-
-Or use the CLI:
-
-```bash
-node bin/loom.js                       # from repo root
-```
-
-For a browser-based dev loop with hot reload (the Orbit renderer served over
-the web, against the same brain), see [`web/README.md`](web/README.md).
-
-The developer install needs Node 22.19+ (matching [`.nvmrc`](.nvmrc)) and `uv` on `PATH`. Per-OS bootstrap below.
-
-#### Linux (Ubuntu/Debian)
-
-```bash
-sudo apt update
-sudo apt install -y git curl build-essential
-
-# Node.js via nvm (if not already installed)
-curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-source ~/.bashrc
-nvm install --lts
-
-# uv (for galaxy-mcp)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-Then the developer install steps above.
-
-#### macOS
-
-```bash
-# Homebrew, if not already installed
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-brew install node git uv
-```
-
-Then the developer install steps above.
-
-#### Windows
-
-Download the native Orbit installer (`Orbit-<version> Setup.exe`) from the
-[releases page](https://github.com/galaxyproject/loom/releases). It ships
-**remote-only**: all execution routes to Galaxy, and there is no local bash
-shell. The beta is unsigned, so SmartScreen shows "Unknown publisher" -- choose
-**More info -> Run anyway**. WSL2 (with WSLg) remains the path for _local_
-execution until a native local power mode lands.
-
-##### Windows local execution (WSL2)
-
-For local bash execution today, run Orbit inside WSL2. From an elevated PowerShell:
-
-```powershell
-wsl --install --web-download -d Ubuntu
-```
-
-Reboot, set up your Ubuntu user, then inside the Ubuntu terminal:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/galaxyproject/loom/main/scripts/setup-wsl.sh | bash
-source ~/.bashrc
-
-cd ~/loom/app && npm start
-```
-
-> **If the script fails with `Could not get lock /var/lib/dpkg/lock-frontend`**, Ubuntu's automatic updater is running in the background. Stop it first, then re-run:
->
-> ```bash
-> sudo systemctl stop unattended-upgrades
-> curl -fsSL https://raw.githubusercontent.com/galaxyproject/loom/main/scripts/setup-wsl.sh | bash
-> ```
-
-Keep your analysis data inside `~/` (the Linux filesystem) -- `/mnt/c/` paths are significantly slower across the filesystem boundary.
+[**CONTRIBUTING.md**](CONTRIBUTING.md) has the rest: per-OS bootstrap, the
+browser dev shell with hot reload, the test/typecheck loop, repo layout, and how
+to validate a change beyond "the tests pass". Windows developers wanting local
+execution should work inside WSL2 -- `curl -fsSL
+https://raw.githubusercontent.com/galaxyproject/loom/main/scripts/setup-wsl.sh | bash`.
 
 ### After installation
 

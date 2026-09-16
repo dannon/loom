@@ -41,28 +41,35 @@ const HARNESS: HarnessBlockFields = {
   attemptId: "01K5CJ6XWQ8QK4S2M7E9V0TZ3B",
   historyId: "0a248a1f62a0cc04",
   submittedBy: "harness",
-  serverVerified: true,
   enrichment: "pending",
   enrichmentAttempts: 0,
 };
 
+// `server_verified` is not a harness field -- it is the record tools' own
+// tri-state (see harness-block-fields.ts) and rides on the block object, so
+// the tests that care about it put it there.
+
 describe("harness block fields: round trip", () => {
   it("writes and reads every field on a loom-invocation block", () => {
-    const content = upsertInvocationBlock("", AGENT_INVOCATION, {
-      ...HARNESS,
-      enrichment: "complete",
-      enrichmentAttempts: 2,
-      jobs: [
-        {
-          jobId: "job1",
-          toolId: "bwa_mem",
-          toolVersion: "0.7.17",
-          state: "ok",
-          outputs: [{ id: "ds1", ext: "bam", dbkey: "hg38" }],
-        },
-      ],
-      drift: [{ toolId: "bwa_mem", from: "0.7.17", to: "0.7.18" }],
-    });
+    const content = upsertInvocationBlock(
+      "",
+      { ...AGENT_INVOCATION, serverVerified: true },
+      {
+        ...HARNESS,
+        enrichment: "complete",
+        enrichmentAttempts: 2,
+        jobs: [
+          {
+            jobId: "job1",
+            toolId: "bwa_mem",
+            toolVersion: "0.7.17",
+            state: "ok",
+            outputs: [{ id: "ds1", ext: "bam", dbkey: "hg38" }],
+          },
+        ],
+        drift: [{ toolId: "bwa_mem", from: "0.7.17", to: "0.7.18" }],
+      },
+    );
 
     const [parsed] = findInvocationBlocks(content);
     expect(parsed.attemptId).toBe("01K5CJ6XWQ8QK4S2M7E9V0TZ3B");
@@ -84,10 +91,14 @@ describe("harness block fields: round trip", () => {
   });
 
   it("writes and reads every field on a loom-job block", () => {
-    const content = upsertJobBlock("", AGENT_JOB, {
-      ...HARNESS,
-      jobs: [{ jobId: "aa11bb22cc33dd44", toolId: "bwa_mem", toolVersion: "0.7.17" }],
-    });
+    const content = upsertJobBlock(
+      "",
+      { ...AGENT_JOB, serverVerified: true },
+      {
+        ...HARNESS,
+        jobs: [{ jobId: "aa11bb22cc33dd44", toolId: "bwa_mem", toolVersion: "0.7.17" }],
+      },
+    );
 
     const [parsed] = findJobBlocks(content);
     expect(parsed.attemptId).toBe("01K5CJ6XWQ8QK4S2M7E9V0TZ3B");
@@ -137,24 +148,21 @@ describe("harness block fields: round trip", () => {
 });
 
 describe("harness block fields: the agent cannot write them", () => {
-  // The whole value of `submitted_by: harness` / `server_verified: true` is
-  // that only the harness can put them there.
+  // The whole value of `submitted_by: harness` is that only the harness can
+  // put it there.
   const forged = {
     ...AGENT_INVOCATION,
     ...HARNESS,
     submittedBy: "harness" as const,
-    serverVerified: true,
   };
 
   it("drops harness fields supplied on a brand-new block", () => {
     const content = upsertInvocationBlock("", forged);
     expect(content).not.toContain("submitted_by");
-    expect(content).not.toContain("server_verified");
     expect(content).not.toContain("attempt_id");
 
     const [parsed] = findInvocationBlocks(content);
     expect(parsed.submittedBy).toBeUndefined();
-    expect(parsed.serverVerified).toBeUndefined();
   });
 
   it("drops harness fields on a job block too", () => {
@@ -172,7 +180,6 @@ describe("harness block fields: the agent cannot write them", () => {
       label: "renamed by the agent",
       attemptId: "01FORGEDFORGEDFORGEDFORGED",
       submittedBy: "harness",
-      serverVerified: true,
       historyId: "deadbeefdeadbeef",
     });
 
@@ -183,7 +190,11 @@ describe("harness block fields: the agent cannot write them", () => {
   });
 
   it("carries harness fields through an ordinary agent rewrite", () => {
-    const recorded = upsertInvocationBlock("", AGENT_INVOCATION, HARNESS);
+    const recorded = upsertInvocationBlock(
+      "",
+      { ...AGENT_INVOCATION, serverVerified: true },
+      HARNESS,
+    );
     const rewritten = upsertInvocationBlock(recorded, {
       ...AGENT_INVOCATION,
       notebookAnchor: "plan-a-step-4",
@@ -192,8 +203,12 @@ describe("harness block fields: the agent cannot write them", () => {
     const [parsed] = findInvocationBlocks(rewritten);
     expect(parsed.notebookAnchor).toBe("plan-a-step-4");
     expect(parsed.submittedBy).toBe("harness");
-    expect(parsed.serverVerified).toBe(true);
     expect(parsed.enrichment).toBe("pending");
+    // `server_verified` is not carried: it is an ordinary block field, so a
+    // rewriter that means to keep it has to pass it. That is what makes the
+    // record tools' `false` and the poller's upgrade land at all, and it is
+    // why the annotate path reads the block before it rewrites it.
+    expect(parsed.serverVerified).toBeUndefined();
   });
 
   it("stripHarnessFields does not mutate its input", () => {
@@ -206,7 +221,11 @@ describe("harness block fields: the agent cannot write them", () => {
 
 describe("harness block fields: pollers preserve provenance", () => {
   it("an invocation poll update keeps the harness fields", () => {
-    const recorded = upsertInvocationBlock("", AGENT_INVOCATION, HARNESS);
+    const recorded = upsertInvocationBlock(
+      "",
+      { ...AGENT_INVOCATION, serverVerified: true },
+      HARNESS,
+    );
     const { content } = applyInvocationUpdates(recorded, [
       {
         invocationId: AGENT_INVOCATION.invocationId,
@@ -345,11 +364,15 @@ describe("harness block fields: merge helpers", () => {
 
 describe("harness block fields: the Orbit renderer reads the same block", () => {
   it("mirrors what the brain wrote", () => {
-    const content = upsertInvocationBlock("", AGENT_INVOCATION, {
-      ...HARNESS,
-      jobs: [{ jobId: "job1", toolId: "bwa_mem", toolVersion: "0.7.17", state: "ok" }],
-      drift: [{ toolId: "bwa_mem", from: "0.7.17", to: "0.7.18" }],
-    });
+    const content = upsertInvocationBlock(
+      "",
+      { ...AGENT_INVOCATION, serverVerified: true },
+      {
+        ...HARNESS,
+        jobs: [{ jobId: "job1", toolId: "bwa_mem", toolVersion: "0.7.17", state: "ok" }],
+        drift: [{ toolId: "bwa_mem", from: "0.7.17", to: "0.7.18" }],
+      },
+    );
 
     const [row] = parseInvocationBlocks(content);
     expect(row.attemptId).toBe(HARNESS.attemptId);

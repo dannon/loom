@@ -3,11 +3,19 @@
  *
  * Everything here is written by the harness from what Galaxy returned, never
  * by the agent. That distinction is the point: a block that says
- * `submitted_by: harness` and `server_verified: true` is a claim that the
- * harness watched the submission happen and read the id out of Galaxy's own
- * response. If the agent could set those, the claim would be worth nothing --
- * so `stripHarnessFields` runs on every agent-facing write and the values are
- * carried over from the block already on disk instead.
+ * `submitted_by: harness` is a claim that the harness watched the submission
+ * happen and read the id out of Galaxy's own response. If the agent could set
+ * that, the claim would be worth nothing -- so `stripHarnessFields` runs on
+ * every agent-facing write and the values are carried over from the block
+ * already on disk instead.
+ *
+ * `server_verified` is deliberately *not* here. It is the record tools' own
+ * tri-state field (galaxy-job-block.ts and notebook-writer.ts own it): a
+ * record call writes `false` when it asked Galaxy and got no answer, and the
+ * poller upgrades it on the first round trip that does. Stripping it would
+ * make both of those writes no-ops. The capture hook simply sets it `true` on
+ * the block it writes, which it has earned the same way -- by reading the id
+ * out of Galaxy's response.
  *
  * On-disk shape stays line-oriented and grep-friendly like the rest of the
  * block, one `key: value` per line. The two collection fields (`jobs`,
@@ -62,8 +70,6 @@ export interface HarnessBlockFields {
   attemptId?: string;
   historyId?: string;
   submittedBy?: SubmittedBy;
-  /** True only when the harness read the id out of Galaxy's own response. */
-  serverVerified?: boolean;
   enrichment?: EnrichmentState;
   enrichmentAttempts?: number;
   jobs?: BlockJobSummary[];
@@ -78,7 +84,6 @@ export const HARNESS_FIELD_KEYS = [
   "attemptId",
   "historyId",
   "submittedBy",
-  "serverVerified",
   "enrichment",
   "enrichmentAttempts",
   "jobs",
@@ -155,9 +160,6 @@ export function renderHarnessFieldLines(fields: HarnessBlockFields): string[] {
     lines.push(`history_id: ${fields.historyId}`);
   }
   if (fields.submittedBy) lines.push(`submitted_by: ${fields.submittedBy}`);
-  if (fields.serverVerified !== undefined) {
-    lines.push(`server_verified: ${fields.serverVerified ? "true" : "false"}`);
-  }
   if (fields.enrichment) lines.push(`enrichment: ${fields.enrichment}`);
   if (fields.enrichmentAttempts !== undefined) {
     lines.push(`enrichment_attempts: ${fields.enrichmentAttempts}`);
@@ -194,10 +196,6 @@ export function parseHarnessFields(get: (key: string) => string | undefined): Ha
   if (submittedBy && (SUBMITTED_BY as readonly string[]).includes(submittedBy)) {
     fields.submittedBy = submittedBy as SubmittedBy;
   }
-
-  const serverVerified = get("server_verified");
-  if (serverVerified === "true") fields.serverVerified = true;
-  else if (serverVerified === "false") fields.serverVerified = false;
 
   const enrichment = get("enrichment");
   if (enrichment && (ENRICHMENT_STATES as readonly string[]).includes(enrichment)) {

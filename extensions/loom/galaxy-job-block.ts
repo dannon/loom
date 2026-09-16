@@ -46,6 +46,13 @@ export interface JobYaml extends HarnessBlockFields {
   submittedAt: string;
   status: "in_progress" | "completed" | "failed" | "cancelled" | "skipped";
   summary?: string;
+  /**
+   * Whether Galaxy confirmed this job id exists at record time. `false` means
+   * the record tool asked and got no answer, not that the job is fake; the
+   * poller sets it true on its first successful poll. Absent means the block
+   * predates the field. Mirrors the same field on `InvocationYaml`.
+   */
+  serverVerified?: boolean;
   /** Galaxy's raw job state at the last poll, kept for display and debugging. */
   galaxyState?: string;
   lastPolledAt?: string;
@@ -149,11 +156,18 @@ export function renderJobYaml(job: JobYaml): string {
   lines.push(`submitted_at: ${job.submittedAt}`);
   lines.push(`status: ${job.status}`);
   lines.push(`summary: ${escapeYaml(job.summary ?? "")}`);
+  if (job.serverVerified !== undefined) lines.push(`server_verified: ${job.serverVerified}`);
   if (job.galaxyState) lines.push(`galaxy_state: ${job.galaxyState}`);
   if (job.lastPolledAt) lines.push(`last_polled_at: ${job.lastPolledAt}`);
   lines.push(...renderHarnessFieldLines(job));
   lines.push(JOB_FENCE_CLOSE);
   return lines.join("\n") + "\n";
+}
+
+function parseBooleanField(raw: string | undefined): boolean | undefined {
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  return undefined;
 }
 
 function parseJobBlock(blockLines: string[]): JobYaml | null {
@@ -175,6 +189,9 @@ function parseJobBlock(blockLines: string[]): JobYaml | null {
     submittedAt: map.get("submitted_at") ?? "",
     status: isJobStatus(status) ? status : "in_progress",
     summary: unescapeYaml(map.get("summary") ?? "") || undefined,
+    // Absent or unreadable both mean "nobody has claimed this", which is the
+    // honest default for a flag about a server round trip.
+    serverVerified: parseBooleanField(map.get("server_verified")),
     galaxyState: map.get("galaxy_state") || undefined,
     lastPolledAt: map.get("last_polled_at") || undefined,
     // `map` holds raw values (nothing here runs unescapeYaml), which is what
@@ -273,10 +290,23 @@ export function upsertJobBlock(
  */
 export interface JobPollUpdate {
   jobId: string;
-  status: JobYaml["status"];
+  /**
+   * The outcome this poll decided, or omitted for an update that isn't about
+   * the outcome at all -- a verification-only write, say. Omitting is not the
+   * same as passing the status the caller last saw: that copy predates whatever
+   * landed while we were talking to Galaxy, and writing it back would revert
+   * another writer's transition.
+   */
+  status?: JobYaml["status"];
   galaxyState?: string;
   lastPolledAt: string;
   summary?: string;
+  /**
+   * True when this update came from a Galaxy round trip that answered, which is
+   * proof the id exists. Same rule as the invocation side: it clears a block
+   * recorded `server_verified: false` and leaves an unstamped one alone.
+   */
+  serverVerified?: boolean;
 }
 
 /** Apply a poll result to whichever block carries that job id. No-op if absent. */
@@ -285,9 +315,11 @@ export function applyJobPollUpdate(content: string, update: JobPollUpdate): stri
   if (!current) return content;
   return upsertJobBlock(content, {
     ...current,
-    status: update.status,
+    status: update.status ?? current.status,
     galaxyState: update.galaxyState ?? current.galaxyState,
     lastPolledAt: update.lastPolledAt,
     summary: update.summary ?? current.summary,
+    serverVerified:
+      update.serverVerified && current.serverVerified === false ? true : current.serverVerified,
   });
 }

@@ -44,6 +44,7 @@ import {
   getGalaxyConfig,
   galaxyGet,
   galaxyGetJobDetails,
+  sameGalaxyServer,
   type GalaxyInvocationResponse,
 } from "./galaxy-api.js";
 import { buildResumePrompt } from "./auto-resume.js";
@@ -361,7 +362,8 @@ async function tickJobs(content: string): Promise<void> {
 
   const pending = findJobBlocks(content).filter((j) => j.status === "in_progress");
   if (pending.length === 0) return;
-  if (!getGalaxyConfig()) return;
+  const currentServer = getGalaxyConfig()?.url;
+  if (!currentServer) return;
 
   for (const job of pending) {
     let state: string | undefined;
@@ -372,7 +374,30 @@ async function tickJobs(content: string): Promise<void> {
       console.error(`[galaxy-poller] job ${job.jobId} poll failed:`, err);
       continue;
     }
-    if (!isTerminalJobState(state)) continue;
+    if (!isTerminalJobState(state)) {
+      // Still running, so there's no transition to record -- but the GET just
+      // answered, which is the proof a block the record tool could only write
+      // `server_verified: false` is waiting for. Without this the flag would
+      // sit false for the whole run and only clear when the job ends.
+      if (job.serverVerified === false && sameGalaxyServer(job.galaxyServerUrl, currentServer)) {
+        try {
+          await withNotebookLock(nbPath, () =>
+            // Only the flag and the timestamp: this write knows nothing about
+            // the outcome, and the snapshot's status is already older than
+            // whatever the fresh read inside persistJobUpdate will see.
+            persistJobUpdate(nbPath, {
+              jobId: job.jobId,
+              lastPolledAt: new Date().toISOString(),
+              serverVerified: true,
+            }),
+          );
+        } catch (err) {
+          // Nothing was announced, so a lost write costs only a retry next tick.
+          console.error(`[galaxy-poller] job ${job.jobId} verification update failed:`, err);
+        }
+      }
+      continue;
+    }
 
     const status = jobStatusFromGalaxyState(state);
     const polledAt = new Date().toISOString();
@@ -384,6 +409,8 @@ async function tickJobs(content: string): Promise<void> {
           status,
           galaxyState: state,
           lastPolledAt: polledAt,
+          // Only the server the block names can confirm the block's id.
+          serverVerified: sameGalaxyServer(job.galaxyServerUrl, currentServer),
         }),
       );
     } catch (err) {

@@ -10,6 +10,7 @@ import {
   applyInvocationUpdates,
   findInvocationBlocks,
   statNotebook,
+  withNotebookCas,
   NotebookChangedError,
   renderInvocationYaml,
   type InvocationYaml,
@@ -161,6 +162,71 @@ describe("writeNotebook staleness guard", () => {
   });
 });
 
+describe("withNotebookCas", () => {
+  let dir: string;
+  let nbPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "loom-cas-"));
+    nbPath = join(dir, "notebook.md");
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("applies and returns the caller's result", async () => {
+    await writeNotebook(nbPath, "one\n");
+    const result = await withNotebookCas(nbPath, (content) => ({
+      content: content + "two\n",
+      result: content.length,
+    }));
+    expect(result).toBe(4);
+    expect(readFileSync(nbPath, "utf-8")).toBe("one\ntwo\n");
+  });
+
+  it("retries against fresh content when a writer lands mid-update", async () => {
+    await writeNotebook(nbPath, "one\n");
+    let calls = 0;
+    const out = await withNotebookCas(nbPath, (content) => {
+      // The competing write lands after our read, before our rename.
+      if (calls++ === 0) appendFileSync(nbPath, "outsider\n", "utf-8");
+      return { content: content + "ours\n", result: calls };
+    });
+    expect(out).toBe(2);
+    const final = readFileSync(nbPath, "utf-8");
+    expect(final).toContain("outsider");
+    expect(final).toContain("ours");
+  });
+
+  it("gives up rather than clobbering a notebook that never settles", async () => {
+    await writeNotebook(nbPath, "one\n");
+    await expect(
+      withNotebookCas(nbPath, (content) => {
+        appendFileSync(nbPath, "outsider\n", "utf-8");
+        return { content: content + "ours\n", result: null };
+      }),
+    ).rejects.toBeInstanceOf(NotebookChangedError);
+    expect(readFileSync(nbPath, "utf-8")).not.toContain("ours");
+  });
+
+  it("lets the apply callback abandon the update by throwing", async () => {
+    await writeNotebook(nbPath, "one\n");
+    await expect(
+      withNotebookCas(nbPath, () => {
+        throw new Error("nope");
+      }),
+    ).rejects.toThrow("nope");
+    expect(readFileSync(nbPath, "utf-8")).toBe("one\n");
+  });
+
+  it("surfaces a missing notebook as its own ENOENT, not as a lost race", async () => {
+    await expect(
+      withNotebookCas(nbPath, (content) => ({ content, result: null })),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
+
 describe("applyInvocationUpdates", () => {
   const base: InvocationYaml = {
     invocationId: "inv-1",
@@ -183,6 +249,27 @@ describe("applyInvocationUpdates", () => {
       ...overrides,
     };
   }
+
+  it("clears server_verified: false once a poll gets an answer out of Galaxy", () => {
+    const content = `# Notes\n\n${renderInvocationYaml({ ...base, serverVerified: false })}`;
+    const { content: next } = applyInvocationUpdates(content, [poll({ serverVerified: true })]);
+    expect(findInvocationBlocks(next)[0].serverVerified).toBe(true);
+  });
+
+  it("leaves a block that never carried the flag unstamped", () => {
+    // Every pre-existing block in every notebook is in this state; stamping
+    // them on the next tick would churn the user's file for nothing.
+    const content = `# Notes\n\n${renderInvocationYaml(base)}`;
+    const { content: next } = applyInvocationUpdates(content, [poll({ serverVerified: true })]);
+    expect(next).not.toContain("server_verified");
+    expect(findInvocationBlocks(next)[0].serverVerified).toBeUndefined();
+  });
+
+  it("does not flip a verified block back to unverified", () => {
+    const content = `# Notes\n\n${renderInvocationYaml({ ...base, serverVerified: true })}`;
+    const { content: next } = applyInvocationUpdates(content, [poll()]);
+    expect(findInvocationBlocks(next)[0].serverVerified).toBe(true);
+  });
 
   it("applies an update in place against the supplied content", () => {
     const content = `# Notes\n\n${renderInvocationYaml(base)}`;

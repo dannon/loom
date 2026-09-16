@@ -180,12 +180,18 @@ export function safeProvenanceFilename(toolId: string): string | null {
 // Writing the record
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The provenance the upsert functions will not take from a caller's block
+ * object. `server_verified` is deliberately not one of them: it is the record
+ * tools' own tri-state field, so the hook sets it on the block like they do --
+ * with `true`, which it has earned, having read the id out of Galaxy's answer
+ * to this very submission.
+ */
 function harnessFields(dispatch: Dispatch, historyId?: string): HarnessBlockFields {
   return {
     attemptId: dispatch.attemptId,
     ...(historyId ? { historyId } : {}),
     submittedBy: "harness",
-    serverVerified: true,
     enrichment: "pending",
     enrichmentAttempts: 0,
   };
@@ -220,6 +226,7 @@ async function writeBlocks(
         label: submission.label,
         submittedAt: dispatch.submittedAt,
         status: "in_progress",
+        serverVerified: true,
       };
       next = upsertInvocationBlock(next, inv, harness);
     }
@@ -233,6 +240,7 @@ async function writeBlocks(
         ...(job.toolId ? { toolId: job.toolId } : {}),
         submittedAt: dispatch.submittedAt,
         status: "in_progress",
+        serverVerified: true,
       };
       // tool_version is only ever in the submission response -- GET
       // /api/jobs/{id} drops it -- so seed the job summary with it now rather

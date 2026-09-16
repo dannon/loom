@@ -145,6 +145,62 @@ export async function readNotebook(filePath: string): Promise<string> {
 }
 
 /**
+ * How many times a guarded update re-reads and retries before giving up. A
+ * write only loses the stamp check when someone else wrote in the microseconds
+ * between our read and our rename; three attempts is far more than convergence
+ * needs, and bounding it keeps a pathological writer from spinning us.
+ */
+const MAX_CAS_ATTEMPTS = 3;
+
+/**
+ * Read -> apply -> write as a compare-and-swap, retrying against fresh content
+ * when the notebook moved under us.
+ *
+ * This is the discipline the poller already writes under (#391), packaged for
+ * the callers that mutate a block from outside a poll. An unguarded whole-file
+ * write renders the file from content captured before whatever landed in
+ * between -- a poll advancing a block, an agent `edit`, a `bash` append -- and
+ * the in-process lock cannot help, because it only orders Loom's own writers.
+ *
+ * Call with the notebook lock held. The stamp is taken *before* the read on
+ * purpose: stamping afterwards would let a write that landed in between look
+ * unchanged, which is the exact clobber this prevents, while stamping first can
+ * only ever cost a spurious retry.
+ *
+ * `apply` runs against each attempt's fresh content and may throw to abandon
+ * the update outright -- a validation that depends on what the file says now
+ * belongs inside it, not before the loop.
+ */
+export async function withNotebookCas<T>(
+  filePath: string,
+  apply: (content: string) => { content: string; result: T },
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+    const stamp = await statNotebook(filePath);
+    // Read regardless of the stat, so a notebook that's actually gone or
+    // unreadable fails with its own ENOENT/EACCES instead of being dressed up
+    // as a race.
+    const fresh = await readNotebook(filePath);
+    // Readable but unstattable: without a stamp there's no compare-and-swap,
+    // and an unguarded whole-file write is the thing this exists to stop.
+    if (!stamp) {
+      lastError = new NotebookChangedError(filePath);
+      continue;
+    }
+    const { content, result } = apply(fresh);
+    try {
+      await writeNotebook(filePath, content, stamp);
+      return result;
+    } catch (error) {
+      if (!(error instanceof NotebookChangedError)) throw error;
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
+/**
  * Check if a file exists.
  */
 export async function fileExists(filePath: string): Promise<boolean> {
@@ -211,6 +267,16 @@ export interface InvocationYaml extends HarnessBlockFields {
   submittedAt: string;
   status: "in_progress" | "completed" | "failed";
   summary?: string;
+  /**
+   * Whether Galaxy confirmed this invocation id exists at record time.
+   *
+   * `false` means the record tool asked and didn't get an answer (Galaxy
+   * unreachable, credentials gone) — the run is written down anyway, because
+   * losing a real submission to a transient network is worse than an
+   * unconfirmed line, and the first successful poll upgrades it. Absent means
+   * the block predates the field and nothing has claimed either way.
+   */
+  serverVerified?: boolean;
   // Progress counters — populated by galaxy_invocation_check_*. Persisted
   // back to the YAML so the Orbit renderer can draw a live progress bar
   // without each side polling Galaxy independently. Optional so older
@@ -241,6 +307,7 @@ export function renderInvocationYaml(inv: InvocationYaml): string {
     `status: ${inv.status}`,
     `summary: ${escapeYaml(inv.summary ?? "")}`,
   ];
+  if (inv.serverVerified !== undefined) lines.push(`server_verified: ${inv.serverVerified}`);
   if (inv.totalSteps !== undefined) lines.push(`total_steps: ${inv.totalSteps}`);
   if (inv.completedSteps !== undefined) lines.push(`completed_steps: ${inv.completedSteps}`);
   if (inv.totalJobs !== undefined) lines.push(`total_jobs: ${inv.totalJobs}`);
@@ -288,8 +355,10 @@ export function findInvocationBlocks(content: string): InvocationYaml[] {
  * the block already on disk (so an agent or poller write carries them
  * forward untouched) or from the explicit `harness` argument, which only the
  * auto-registration and enrichment paths pass. A caller cannot set
- * `submitted_by: harness` or `server_verified: true` by spreading tool
- * arguments into the record, which is the whole point of those two fields.
+ * `submitted_by: harness` by spreading tool arguments into the record, which
+ * is the whole point of that field. `server_verified` is not one of them --
+ * see harness-block-fields.ts -- so the record tools' and the poller's writes
+ * of it pass straight through.
  */
 export function upsertInvocationBlock(
   content: string,
@@ -338,6 +407,12 @@ export interface InvocationPollUpdate {
   completedJobs: number;
   failedJobs: number;
   lastPolledAt: string;
+  /**
+   * True when this update came from a Galaxy round trip that answered — which
+   * is proof the id exists, and the only thing that clears a block recorded
+   * `server_verified: false`.
+   */
+  serverVerified?: boolean;
   /** Present only when this poll decided the invocation reached a terminal state. */
   transition?: { status: InvocationYaml["status"]; summary: string };
 }
@@ -394,6 +469,13 @@ export function applyInvocationUpdates(
       completedJobs: update.completedJobs,
       failedJobs: update.failedJobs,
       lastPolledAt: update.lastPolledAt,
+      // A poll Galaxy answered is proof the id exists, so it clears a block the
+      // record tool could only write unverified. A block with no flag at all
+      // predates the field; leave it alone rather than churn every old block in
+      // the notebook on the next tick.
+      ...(update.serverVerified && current.serverVerified === false
+        ? { serverVerified: true }
+        : {}),
       ...(update.transition ?? {}),
     };
     next = upsertInvocationBlock(next, merged);
@@ -460,6 +542,17 @@ function findInvocationBlockRanges(content: string): InvocationBlockRange[] {
   return result;
 }
 
+/**
+ * A YAML boolean, or undefined for anything else — including a hand-edited
+ * value we can't read. Absent and unreadable both mean "nobody has claimed
+ * this", which is the honest default for a flag about a server round trip.
+ */
+function parseBooleanField(raw: string | undefined): boolean | undefined {
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  return undefined;
+}
+
 function parseInvocationBlock(blockLines: string[]): InvocationYaml | null {
   const fields: Record<string, string> = {};
   // Harness fields are bare tokens or single-line JSON, so they are read from
@@ -504,6 +597,7 @@ function parseInvocationBlock(blockLines: string[]): InvocationYaml | null {
     submittedAt: fields.submitted_at,
     status,
     summary: fields.summary || undefined,
+    serverVerified: parseBooleanField(fields.server_verified),
     totalSteps: numField("total_steps"),
     completedSteps: numField("completed_steps"),
     totalJobs: numField("total_jobs"),
