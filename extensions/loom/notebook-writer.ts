@@ -14,7 +14,6 @@ import {
   blockLine,
   mergeHarnessFields,
   parseHarnessFields,
-  pickHarnessFields,
   renderHarnessFieldLines,
   stripHarnessFields,
   type HarnessBlockFields,
@@ -347,6 +346,31 @@ export function findInvocationBlocks(content: string): InvocationYaml[] {
 }
 
 /**
+ * Find the first `loom-invocation` block physically carrying this id, and what
+ * it parses to.
+ *
+ * Two lookups used to answer "is there a block for this id": the range finder,
+ * which matches an `invocation_id:` line inside a fence, and
+ * `findInvocationBlocks`, which additionally requires the block to be
+ * well-formed. They can disagree -- a block with an empty `label` is found by
+ * the first and rejected by the second -- and every caller that asked one
+ * question of one and one of the other was reading a different block than the
+ * one it was about to overwrite. This answers both from the same physical
+ * block, so they cannot drift apart. `present` with a null `record` means the
+ * block is there but unreadable, which is a refusal, not a licence to
+ * overwrite it.
+ */
+export function locateInvocationBlock(
+  content: string,
+  invocationId: string,
+): { present: boolean; record: InvocationYaml | null } {
+  const lines = content.split("\n");
+  const range = findInvocationBlockRanges(content).find((b) => b.invocationId === invocationId);
+  if (!range) return { present: false, record: null };
+  return { present: true, record: parseInvocationBlock(lines.slice(range.start + 1, range.end)) };
+}
+
+/**
  * Upsert a `loom-invocation` block in the notebook content keyed by
  * `invocation_id`. If a block with the same id exists, replace it in
  * place (preserving surrounding whitespace). Otherwise append at the
@@ -370,12 +394,18 @@ export function upsertInvocationBlock(
   const lines = content.split("\n");
 
   const existing = blocks.find((b) => b.invocationId === inv.invocationId);
-  const onDisk = existing
-    ? (findInvocationBlocks(content).find((b) => b.invocationId === inv.invocationId) ?? null)
-    : null;
+  // Provenance comes off the block this write is about to replace, read from
+  // its raw lines rather than from a second scan of the file. A scan can land
+  // on a different block with the same id, and it drops a block the strict
+  // parser rejects -- either way the carry-forward would be sourced from
+  // somewhere other than the bytes being overwritten.
+  const onDiskRaw = existing
+    ? rawInvocationFields(lines.slice(existing.start + 1, existing.end))
+    : {};
+  const onDisk = parseHarnessFields((key) => onDiskRaw[key]);
   const merged: InvocationYaml = {
     ...stripHarnessFields(inv),
-    ...mergeHarnessFields(onDisk ? pickHarnessFields(onDisk) : {}, harness ?? {}),
+    ...mergeHarnessFields(onDisk, harness ?? {}),
   };
   const newBlock = renderInvocationYaml(merged).trimEnd().split("\n");
 
@@ -554,20 +584,29 @@ function parseBooleanField(raw: string | undefined): boolean | undefined {
   return undefined;
 }
 
-function parseInvocationBlock(blockLines: string[]): InvocationYaml | null {
-  const fields: Record<string, string> = {};
-  // Harness fields are bare tokens or single-line JSON, so they are read from
-  // the raw text: running `unescapeYaml` over a JSON array would strip nothing
-  // today but would silently mangle the first value that starts and ends with
-  // a quote.
+/**
+ * The block's `key: value` lines, untouched.
+ *
+ * Harness fields are bare tokens or single-line JSON, so they are read from
+ * the raw text: running `unescapeYaml` over a JSON array would strip nothing
+ * today but would silently mangle the first value that starts and ends with a
+ * quote. The upsert reads carry-forward provenance through here too, which is
+ * why it is separate from `parseInvocationBlock` -- provenance has to survive
+ * a block the strict parser rejects.
+ */
+function rawInvocationFields(blockLines: string[]): Record<string, string> {
   const rawFields: Record<string, string> = {};
   for (const line of blockLines) {
     const m = line.match(/^([a-z_]+):\s*(.*)$/);
-    if (m) {
-      rawFields[m[1]] = m[2].trim();
-      fields[m[1]] = unescapeYaml(m[2].trim());
-    }
+    if (m) rawFields[m[1]] = m[2].trim();
   }
+  return rawFields;
+}
+
+function parseInvocationBlock(blockLines: string[]): InvocationYaml | null {
+  const rawFields = rawInvocationFields(blockLines);
+  const fields: Record<string, string> = {};
+  for (const [key, value] of Object.entries(rawFields)) fields[key] = unescapeYaml(value);
   const status = fields.status as InvocationYaml["status"];
   // `galaxy_server_url` is metadata, not identity, and it is deliberately not
   // required: it comes from GALAXY_URL, which can be absent (or arrive later

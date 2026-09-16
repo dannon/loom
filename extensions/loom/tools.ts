@@ -19,6 +19,7 @@ import {
   withNotebookLock,
   withNotebookCas,
   findInvocationBlocks,
+  locateInvocationBlock,
   upsertInvocationBlock,
   applyInvocationUpdates,
   statNotebook,
@@ -27,8 +28,8 @@ import {
   type InvocationPollUpdate,
 } from "./notebook-writer";
 import {
-  findJobBlocks,
   isTerminalJobState,
+  locateJobBlock,
   upsertJobBlock,
   type JobYaml,
 } from "./galaxy-job-block";
@@ -50,6 +51,25 @@ import { listEnabledSkillRepos, findSkillRepo } from "./skills";
 import { fetchSkillFile, githubRawBase } from "./skills-discovery";
 import { VENDOR_REPO_NAME, readVendoredSkill } from "./vendor-skills";
 import { parse as parseHtml } from "node-html-parser";
+
+/**
+ * A record call's label has to say something.
+ *
+ * Not politeness: `parseInvocationBlock` requires a label, so a block written
+ * with an empty one stops parsing, and then the next call to the same tool
+ * cannot find it and treats the run as unrecorded. Refusing here is what keeps
+ * the block readable by the same parser that has to find it again.
+ */
+function requireLabel(label: string): string {
+  const trimmed = label.trim();
+  if (!trimmed) {
+    throw new Error(
+      "label cannot be empty -- it is what the Activity panel and the notebook " +
+        "show for this run. Give it something like 'BWA alignment'.",
+    );
+  }
+  return trimmed;
+}
 
 /**
  * Strip a GTN tutorial HTML document down to readable plain text.
@@ -556,6 +576,7 @@ anchor must resolve in notebook.md, and the invocation id must exist on the Gala
         const { inv, annotated } = await withNotebookLock(notebookPath, () =>
           withNotebookCas(notebookPath, (content) => {
             const notebookAnchor = requireAnchor(content, params.notebookAnchor);
+            const label = requireLabel(params.label);
             // The harness writes a block the moment a submission answers, so
             // the usual case here is a block that already exists. Annotating
             // it means label and anchor only: the rest -- status, the poller's
@@ -563,16 +584,25 @@ anchor must resolve in notebook.md, and the invocation id must exist on the Gala
             // `server_verified` verdict -- belongs to whoever wrote it, and a
             // fresh record object would reset a running invocation to
             // `in_progress` and throw away the progress already polled.
-            const existing = findInvocationBlocks(content).find(
-              (b) => b.invocationId === params.invocationId,
-            );
-            const record: InvocationYaml = existing
-              ? { ...existing, notebookAnchor, label: params.label }
+            //
+            // Presence and contents come from one physical block, so this
+            // cannot decide "nothing carries this id" about a block the upsert
+            // is nonetheless going to overwrite.
+            const found = locateInvocationBlock(content, params.invocationId);
+            if (found.present && !found.record) {
+              throw new Error(
+                `A loom-invocation block for ${params.invocationId} is already in the notebook ` +
+                  `but cannot be read -- it is missing a required field or has been hand-edited. ` +
+                  `Nothing was changed; fix or remove that block first.`,
+              );
+            }
+            const record: InvocationYaml = found.record
+              ? { ...found.record, notebookAnchor, label }
               : {
                   invocationId: params.invocationId,
                   galaxyServerUrl,
                   notebookAnchor,
-                  label: params.label,
+                  label,
                   submittedAt,
                   status: "in_progress",
                   serverVerified,
@@ -583,9 +613,9 @@ anchor must resolve in notebook.md, and the invocation id must exist on the Gala
               content: upsertInvocationBlock(
                 content,
                 record,
-                existing ? undefined : { submittedBy: "agent" },
+                found.present ? undefined : { submittedBy: "agent" },
               ),
-              result: { inv: record, annotated: !!existing },
+              result: { inv: record, annotated: found.present },
             };
           }),
         );
@@ -703,16 +733,24 @@ and the job id must exist on the Galaxy server. \`toolId\` is used only when cre
         const { job, annotated } = await withNotebookLock(notebookPath, () =>
           withNotebookCas(notebookPath, (content) => {
             const notebookAnchor = requireAnchor(content, params.notebookAnchor);
-            // Same rule as the invocation side: annotate means label and anchor
-            // only. See the comment there.
-            const existing = findJobBlocks(content).find((b) => b.jobId === params.jobId);
-            const record: JobYaml = existing
-              ? { ...existing, notebookAnchor, label: params.label }
+            const label = requireLabel(params.label);
+            // Same rules as the invocation side: annotate means label and
+            // anchor only, and presence and contents come from one physical
+            // block. See the comments there.
+            const found = locateJobBlock(content, params.jobId);
+            if (found.present && !found.record) {
+              throw new Error(
+                `A loom-job block for ${params.jobId} is already in the notebook but cannot be ` +
+                  `read. Nothing was changed; fix or remove that block first.`,
+              );
+            }
+            const record: JobYaml = found.record
+              ? { ...found.record, notebookAnchor, label }
               : {
                   jobId: params.jobId,
                   galaxyServerUrl: cfg?.url || "",
                   notebookAnchor,
-                  label: params.label,
+                  label,
                   toolId: params.toolId,
                   submittedAt,
                   status: "in_progress",
@@ -722,9 +760,9 @@ and the job id must exist on the Galaxy server. \`toolId\` is used only when cre
               content: upsertJobBlock(
                 content,
                 record,
-                existing ? undefined : { submittedBy: "agent" },
+                found.present ? undefined : { submittedBy: "agent" },
               ),
-              result: { job: record, annotated: !!existing },
+              result: { job: record, annotated: found.present },
             };
           }),
         );

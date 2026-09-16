@@ -109,9 +109,12 @@ export function parseInvocationBlocks(content: string): Invocation[] {
         }
       }
       const status = fields.status as Invocation["status"];
+      // `galaxy_server_url` is not required, matching the brain's parser: the
+      // harness records a submission whether or not GALAXY_URL happened to be
+      // set, and a block the brain polls but this side drops is a run the user
+      // cannot see in Activity.
       if (
         fields.invocation_id &&
-        fields.galaxy_server_url &&
         fields.notebook_anchor &&
         fields.label &&
         fields.submitted_at &&
@@ -125,7 +128,7 @@ export function parseInvocationBlocks(content: string): Invocation[] {
         };
         out.push({
           invocationId: fields.invocation_id,
-          galaxyServerUrl: fields.galaxy_server_url,
+          galaxyServerUrl: fields.galaxy_server_url ?? "",
           notebookAnchor: fields.notebook_anchor,
           label: fields.label,
           submittedAt: fields.submitted_at,
@@ -191,6 +194,9 @@ function renderRow(inv: Invocation): string {
     host = inv.galaxyServerUrl;
   }
   const submitted = inv.submittedAt.replace("T", " ").replace(/\.\d+Z$/, "Z");
+  // A block written before a Galaxy server was configured names none; drop the
+  // segment rather than drawing an empty one between two separators.
+  const hostText = host ? ` · ${escapeHtml(host)}` : "";
   // A block Galaxy never confirmed is still a block: say so rather than drawing
   // it identically to a run we know exists.
   const unconfirmed = inv.serverVerified === false ? " · unconfirmed" : "";
@@ -217,7 +223,7 @@ function renderRow(inv: Invocation): string {
         <div class="galaxy-invocation-bar-fill" style="width: ${pct}%"></div>
       </div>
       <div class="galaxy-invocation-meta">
-        ${escapeHtml(inv.status)} · ${escapeHtml(host)} · submitted ${escapeHtml(submitted)}${escapeHtml(unconfirmed)}${provenanceText}
+        ${escapeHtml(inv.status)}${hostText} · submitted ${escapeHtml(submitted)}${escapeHtml(unconfirmed)}${provenanceText}
       </div>
     </div>
   `;

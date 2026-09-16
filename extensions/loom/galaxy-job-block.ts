@@ -32,7 +32,6 @@ import {
   blockLine,
   mergeHarnessFields,
   parseHarnessFields,
-  pickHarnessFields,
   renderHarnessFieldLines,
   stripHarnessFields,
   type HarnessBlockFields,
@@ -171,13 +170,23 @@ function parseBooleanField(raw: string | undefined): boolean | undefined {
   return undefined;
 }
 
-function parseJobBlock(blockLines: string[]): JobYaml | null {
+/**
+ * The block's `key: value` lines, untouched. The upsert reads carry-forward
+ * provenance through here as well as the parser, because provenance has to
+ * survive a block the parser rejects -- see `upsertJobBlock`.
+ */
+function rawJobFields(blockLines: string[]): Map<string, string> {
   const map = new Map<string, string>();
   for (const line of blockLines) {
     const idx = line.indexOf(":");
     if (idx === -1) continue;
     map.set(line.slice(0, idx).trim(), line.slice(idx + 1).trim());
   }
+  return map;
+}
+
+function parseJobBlock(blockLines: string[]): JobYaml | null {
+  const map = rawJobFields(blockLines);
   const jobId = map.get("job_id");
   if (!jobId) return null; // a block without an id is not pollable
   const status = map.get("status");
@@ -247,6 +256,21 @@ export function findJobBlocks(content: string): JobYaml[] {
 }
 
 /**
+ * Find the first `loom-job` block physically carrying this id, and what it
+ * parses to. The invocation side's twin -- see `locateInvocationBlock` for why
+ * one physical block has to answer both questions.
+ */
+export function locateJobBlock(
+  content: string,
+  jobId: string,
+): { present: boolean; record: JobYaml | null } {
+  const lines = content.split("\n");
+  const range = findJobBlockRanges(content).find((b) => b.jobId === jobId);
+  if (!range) return { present: false, record: null };
+  return { present: true, record: parseJobBlock(lines.slice(range.start + 1, range.end)) };
+}
+
+/**
  * Upsert a `loom-job` block keyed by `job_id`: replace in place when the id is
  * already present, otherwise append at the end.
  *
@@ -263,12 +287,13 @@ export function upsertJobBlock(
   const lines = content.split("\n");
 
   const existing = ranges.find((b) => b.jobId === job.jobId);
-  const onDisk = existing
-    ? (findJobBlocks(content).find((b) => b.jobId === job.jobId) ?? null)
-    : null;
+  // Read off the block this write replaces, not a second scan of the file --
+  // see the same comment in `upsertInvocationBlock`.
+  const onDiskRaw = existing ? rawJobFields(lines.slice(existing.start + 1, existing.end)) : null;
+  const onDisk = parseHarnessFields((key) => onDiskRaw?.get(key));
   const merged: JobYaml = {
     ...stripHarnessFields(job),
-    ...mergeHarnessFields(onDisk ? pickHarnessFields(onDisk) : {}, harness ?? {}),
+    ...mergeHarnessFields(onDisk, harness ?? {}),
   };
   const newBlock = renderJobYaml(merged).trimEnd().split("\n");
 

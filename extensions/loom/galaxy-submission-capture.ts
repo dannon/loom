@@ -69,6 +69,7 @@ interface Dispatch {
   args: Record<string, unknown>;
   stepAnchor: string;
   submittedAt: string;
+  replayed: boolean;
 }
 
 /**
@@ -96,6 +97,8 @@ function rememberDispatch(toolCallId: string, toolName: string, args: unknown): 
     args: (args && typeof args === "object" ? args : {}) as Record<string, unknown>,
     stepAnchor: getCurrentStepAnchor() ?? UNATTRIBUTED,
     submittedAt: new Date().toISOString(),
+    // A real tool call, watched from start to end.
+    replayed: false,
   };
   if (inFlight.size >= MAX_IN_FLIGHT) {
     const oldest = inFlight.keys().next();
@@ -109,6 +112,11 @@ function rememberDispatch(toolCallId: string, toolName: string, args: unknown): 
 export interface DispatchOverride {
   args?: Record<string, unknown>;
   stepAnchor?: string | null;
+  /**
+   * This submission was read out of a fixture, not out of Galaxy. The blocks
+   * it produces make no provenance claim: see `harnessFields`.
+   */
+  replayed?: boolean;
 }
 
 /**
@@ -134,6 +142,7 @@ function takeDispatch(toolCallId: string, toolName: string, override?: DispatchO
       ? (override.stepAnchor ?? getCurrentStepAnchor() ?? UNATTRIBUTED)
       : UNATTRIBUTED,
     submittedAt: new Date().toISOString(),
+    replayed: override?.replayed === true,
   };
 }
 
@@ -186,12 +195,22 @@ export function safeProvenanceFilename(toolId: string): string | null {
  * tools' own tri-state field, so the hook sets it on the block like they do --
  * with `true`, which it has earned, having read the id out of Galaxy's answer
  * to this very submission.
+ *
+ * A replayed submission claims neither. `submitted_by: harness` means Loom
+ * watched the submission happen and `server_verified: true` means it read the
+ * id out of the server's own answer, and under `LOOM_SUBMISSION_REPLAY` both
+ * came out of a file on disk -- no tool ran and no server was asked. The
+ * `submission.replay` activity row says so, but that row lives in a sidecar
+ * the analysis repo gitignores, and the notebook is the durable record: a
+ * block written from a fixture must not read like one written from a run. The
+ * rest still rides along, because `attempt_id` and `enrichment` are facts
+ * about the record rather than claims about a server.
  */
 function harnessFields(dispatch: Dispatch, historyId?: string): HarnessBlockFields {
   return {
     attemptId: dispatch.attemptId,
     ...(historyId ? { historyId } : {}),
-    submittedBy: "harness",
+    ...(dispatch.replayed ? {} : { submittedBy: "harness" as const }),
     enrichment: "pending",
     enrichmentAttempts: 0,
   };
@@ -226,7 +245,7 @@ async function writeBlocks(
         label: submission.label,
         submittedAt: dispatch.submittedAt,
         status: "in_progress",
-        serverVerified: true,
+        ...(dispatch.replayed ? {} : { serverVerified: true }),
       };
       next = upsertInvocationBlock(next, inv, harness);
     }
@@ -240,7 +259,7 @@ async function writeBlocks(
         ...(job.toolId ? { toolId: job.toolId } : {}),
         submittedAt: dispatch.submittedAt,
         status: "in_progress",
-        serverVerified: true,
+        ...(dispatch.replayed ? {} : { serverVerified: true }),
       };
       // tool_version is only ever in the submission response -- GET
       // /api/jobs/{id} drops it -- so seed the job summary with it now rather
@@ -462,7 +481,7 @@ export async function handleSubmissionResult(
     step_anchor: dispatch.stepAnchor,
     kind: submission.kind,
     label: submission.label,
-    submitted_by: "harness",
+    submitted_by: dispatch.replayed ? "replay" : "harness",
     ...(submission.historyId ? { history_id: submission.historyId } : {}),
     ...(submission.invocationId ? { invocation_id: submission.invocationId } : {}),
     ...(submission.jobs ? { job_ids: submission.jobs.map((j) => j.jobId) } : {}),

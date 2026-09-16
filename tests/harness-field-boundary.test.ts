@@ -296,6 +296,91 @@ describe("a record tool cannot write the harness set", () => {
     expect(notebook).not.toContain("submitted_by");
   });
 
+  it("survives two annotate calls where the first one empties the label", async () => {
+    // The strict parser requires a label, the range finder does not, so a
+    // block annotated with an empty label used to vanish from one lookup and
+    // not the other -- and the next call rewrote it as a fresh agent record,
+    // taking attempt_id, history_id and enrichment with it. The label is
+    // refused now, and carry-forward reads the physical block either way.
+    writeFileSync(
+      nbPath,
+      NOTEBOOK + "\n" + upsertInvocationBlock("", { ...INVOCATION, serverVerified: true }, HARNESS),
+      "utf-8",
+    );
+
+    const { invocation } = recordTools();
+    const first = await run(invocation, {
+      invocationId: INV_ID,
+      notebookAnchor: "plan-a-step-1",
+      label: "   ",
+    });
+    expect(first.success).toBe(false);
+    expect(String(first.error)).toContain("label");
+
+    const second = await run(invocation, {
+      invocationId: INV_ID,
+      notebookAnchor: "plan-a-step-2",
+      label: "restored",
+    });
+    expect(second.success).toBe(true);
+    expect(second.annotated).toBe(true);
+
+    const [parsed] = findInvocationBlocks(readFileSync(nbPath, "utf-8"));
+    expect(parsed.notebookAnchor).toBe("plan-a-step-2");
+    expect(parsed.submittedBy).toBe("harness");
+    expect(parsed.attemptId).toBe(ATTEMPT);
+    expect(parsed.historyId).toBe(HARNESS.historyId);
+    expect(parsed.enrichment).toBe("pending");
+  });
+
+  it("refuses to rewrite a block it cannot read rather than re-attributing it", async () => {
+    // Same disagreement from the other side: a hand-mangled block the range
+    // finder still matches. Overwriting it would file a harness-recorded run
+    // as an agent one.
+    const mangled = upsertInvocationBlock("", { ...INVOCATION, serverVerified: true }, HARNESS)
+      .split("\n")
+      .filter((line) => !line.startsWith("label:"))
+      .join("\n");
+    writeFileSync(nbPath, NOTEBOOK + "\n" + mangled, "utf-8");
+
+    const { invocation } = recordTools();
+    const res = await run(invocation, {
+      invocationId: INV_ID,
+      notebookAnchor: "plan-a-step-2",
+      label: "BWA alignment",
+    });
+
+    expect(res.success).toBe(false);
+    expect(String(res.error)).toContain("cannot be read");
+    const after = readFileSync(nbPath, "utf-8");
+    expect(after).toContain("submitted_by: harness");
+    expect(after).toContain(`attempt_id: ${ATTEMPT}`);
+  });
+
+  it("carries provenance from the block it replaces, not from a namesake", () => {
+    // Two blocks share an id: one the range finder matches first but the
+    // strict parser rejects, one it accepts. A second scan for the
+    // carry-forward reads the wrong one and copies its provenance across.
+    const malformed = upsertInvocationBlock("", { ...INVOCATION, serverVerified: true }, HARNESS)
+      .split("\n")
+      .filter((line) => !line.startsWith("label:"))
+      .join("\n");
+    const other = upsertInvocationBlock(
+      "",
+      { ...INVOCATION, label: "second", serverVerified: true },
+      { ...HARNESS, attemptId: "01OTHEROTHEROTHEROTHEROTHE", historyId: "ffffffffffffffff" },
+    );
+
+    const next = upsertInvocationBlock(`${malformed}\n${other}`, {
+      ...INVOCATION,
+      label: "annotated",
+    });
+
+    // The first block is the one rewritten, so it keeps its own attempt id.
+    expect(next).toContain(`attempt_id: ${ATTEMPT}`);
+    expect(next.indexOf("01OTHEROTHEROTHEROTHEROTHE")).toBeGreaterThan(next.indexOf(ATTEMPT));
+  });
+
   it("cannot claim submitted_by: harness on a block the harness never wrote", async () => {
     writeFileSync(nbPath, NOTEBOOK, "utf-8");
 

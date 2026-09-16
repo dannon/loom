@@ -441,3 +441,69 @@ describe("safeProvenanceFilename", () => {
     expect(safeProvenanceFilename("x".repeat(500))!.length).toBe(120);
   });
 });
+
+describe("a replayed submission claims nothing about a server", () => {
+  // LOOM_SUBMISSION_REPLAY feeds recorded fixtures through the same dispatch a
+  // live submission takes, which is how Tier-1 drives capture without a model.
+  // No tool ran and no server was asked, so the block it writes must not read
+  // like one that did: `submitted_by: harness` and `server_verified: true` are
+  // both claims about things that did not happen, and the `submission.replay`
+  // activity row that marks them lives in a sidecar the analysis repo
+  // gitignores while the notebook is the durable record.
+  it("writes the block without submitted_by or server_verified", async () => {
+    await handleSubmissionResult(
+      "replay-0",
+      "galaxy_invoke_workflow",
+      mcpResult(INVOCATION),
+      false,
+      {
+        args: {},
+        stepAnchor: "plan-a-step-1",
+        replayed: true,
+      },
+    );
+
+    const content = notebook();
+    expect(content).toContain("invocation_id: ff1e2d3c4b5a6978");
+    expect(content).not.toContain("submitted_by:");
+    expect(content).not.toContain("server_verified:");
+    const [block] = findInvocationBlocks(content);
+    expect(block.submittedBy).toBeUndefined();
+    expect(block.serverVerified).toBeUndefined();
+    // Still a record: the join key and the lifecycle ride along, because those
+    // are facts about the record rather than claims about a server.
+    expect(isUlid(block.attemptId ?? "")).toBe(true);
+    expect(block.enrichment).toBe("pending");
+    expect(block.notebookAnchor).toBe("plan-a-step-1");
+  });
+
+  it("says replay on the activity row rather than harness", async () => {
+    await handleSubmissionResult(
+      "replay-1",
+      "galaxy_invoke_workflow",
+      mcpResult(INVOCATION),
+      false,
+      {
+        args: {},
+        stepAnchor: "plan-a-step-1",
+        replayed: true,
+      },
+    );
+    const row = activity().find((e) => e.kind === "submission.registered");
+    expect(row?.payload.submitted_by).toBe("replay");
+  });
+
+  it("still claims both when the submission was really watched", async () => {
+    await handleSubmissionResult("live-0", "galaxy_invoke_workflow", mcpResult(INVOCATION), false, {
+      args: {},
+      stepAnchor: "plan-a-step-1",
+    });
+
+    const [block] = findInvocationBlocks(notebook());
+    expect(block.submittedBy).toBe("harness");
+    expect(block.serverVerified).toBe(true);
+    expect(activity().find((e) => e.kind === "submission.registered")?.payload.submitted_by).toBe(
+      "harness",
+    );
+  });
+});

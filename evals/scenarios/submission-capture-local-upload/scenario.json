@@ -30,11 +30,8 @@
       ]
     },
     "notebook": {
-      "contains": [
-        "job_id: upjob00000000002",
-        "label: Upload sample.fastq.gz",
-        "submitted_by: harness"
-      ]
+      "contains": ["job_id: upjob00000000002", "label: Upload sample.fastq.gz", "attempt_id: "],
+      "mustNotContain": ["submitted_by:", "server_verified:"]
     }
   }
 }

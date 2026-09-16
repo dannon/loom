@@ -25,7 +25,7 @@
             "kind": "invocation",
             "invocation_id": "ff1e2d3c4b5a6978",
             "history_id": "0a248a1f62a0cc04",
-            "submitted_by": "harness",
+            "submitted_by": "replay",
             "step_anchor": "plan-a-step-1"
           }
         },
@@ -73,13 +73,13 @@
         "job_id: udtjob0000000001",
         "job_id: upjob00000000001",
         "job_id: upjob00000000002",
-        "submitted_by: harness",
-        "server_verified: true",
+        "attempt_id: ",
         "enrichment: pending",
         "notebook_anchor: plan-a-step-1",
         "notebook_anchor: unattributed",
         "2.2.1+galaxy1"
-      ]
+      ],
+      "mustNotContain": ["submitted_by:", "server_verified:"]
     }
   }
 }
