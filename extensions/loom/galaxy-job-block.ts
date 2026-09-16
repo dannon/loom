@@ -29,6 +29,7 @@
  */
 
 import {
+  blockLine,
   mergeHarnessFields,
   parseHarnessFields,
   pickHarnessFields,
@@ -147,18 +148,18 @@ function unescapeYaml(value: string): string {
 export function renderJobYaml(job: JobYaml): string {
   const lines: string[] = [
     JOB_FENCE_OPEN,
-    `job_id: ${job.jobId}`,
-    `galaxy_server_url: ${job.galaxyServerUrl}`,
-    `notebook_anchor: ${job.notebookAnchor}`,
+    blockLine("job_id", job.jobId, "jobId"),
+    blockLine("galaxy_server_url", job.galaxyServerUrl),
+    blockLine("notebook_anchor", job.notebookAnchor, "notebookAnchor"),
     `label: ${escapeYaml(job.label)}`,
   ];
-  if (job.toolId) lines.push(`tool_id: ${job.toolId}`);
-  lines.push(`submitted_at: ${job.submittedAt}`);
+  if (job.toolId) lines.push(blockLine("tool_id", job.toolId, "toolId"));
+  lines.push(blockLine("submitted_at", job.submittedAt));
   lines.push(`status: ${job.status}`);
   lines.push(`summary: ${escapeYaml(job.summary ?? "")}`);
   if (job.serverVerified !== undefined) lines.push(`server_verified: ${job.serverVerified}`);
-  if (job.galaxyState) lines.push(`galaxy_state: ${job.galaxyState}`);
-  if (job.lastPolledAt) lines.push(`last_polled_at: ${job.lastPolledAt}`);
+  if (job.galaxyState) lines.push(blockLine("galaxy_state", job.galaxyState));
+  if (job.lastPolledAt) lines.push(blockLine("last_polled_at", job.lastPolledAt));
   lines.push(...renderHarnessFieldLines(job));
   lines.push(JOB_FENCE_CLOSE);
   return lines.join("\n") + "\n";

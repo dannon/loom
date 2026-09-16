@@ -145,6 +145,53 @@ function isBareScalar(value: string): boolean {
 }
 
 /**
+ * Thrown when a block field's value cannot be written as one `key: value`
+ * line. Carries the field name so the caller can say which argument to fix.
+ */
+export class UnrenderableBlockValue extends Error {
+  constructor(readonly field: string) {
+    super(
+      `${field} cannot contain a line break or a control character -- ` +
+        `a block field is one line, and a value that spans two writes a second field.`,
+    );
+    this.name = "UnrenderableBlockValue";
+  }
+}
+
+/**
+ * One line, no control characters. Deliberately looser than `isBareScalar`:
+ * an interior space is fine here, because `notebook_anchor` is matched against
+ * the notebook's own spelling and headings have spaces in them. What is not
+ * fine is anything that ends the line.
+ */
+function isOneLine(value: string): boolean {
+  return !/[\u0000-\u001f\u007f-\u009f]/.test(value);
+}
+
+/**
+ * Render one unquoted `key: value` block line, refusing a value that would
+ * not survive the round trip.
+ *
+ * Both block parsers read a block line by line and take the last value for a
+ * key, so a value carrying a newline does not come back mangled -- it comes
+ * back as *additional fields*. That is a forgery primitive wherever the value
+ * is agent-supplied: `tool_id` on `galaxy_job_record` is a plain tool
+ * argument, and rendering it raw let a call write `submitted_by: harness` and
+ * an `attempt_id` of its choosing into a block it was only meant to label.
+ *
+ * Refusing beats escaping for these fields: every value that legitimately
+ * reaches here is machine-generated or already token-checked upstream (see
+ * `idToken` in galaxy-submission.ts), so an unrepresentable one is a bug or
+ * an attempt, and either way half a block is worse than none. The free-text
+ * fields -- `label`, `summary` -- go through the block's own quoting instead,
+ * because a colon in a human label is ordinary.
+ */
+export function blockLine(key: string, value: string, field = key): string {
+  if (!isOneLine(value)) throw new UnrenderableBlockValue(field);
+  return `${key}: ${value}`;
+}
+
+/**
  * Render the harness fields as block lines. Only defined fields are emitted,
  * so a block written before these existed round-trips byte-identical. A scalar
  * that cannot be represented on one line is dropped rather than written: a

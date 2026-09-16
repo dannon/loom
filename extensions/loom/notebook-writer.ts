@@ -11,6 +11,7 @@ import { randomBytes } from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 import {
+  blockLine,
   mergeHarnessFields,
   parseHarnessFields,
   pickHarnessFields,
@@ -299,11 +300,11 @@ const INVOCATION_FENCE_CLOSE = "```";
 export function renderInvocationYaml(inv: InvocationYaml): string {
   const lines: string[] = [
     INVOCATION_FENCE_OPEN,
-    `invocation_id: ${inv.invocationId}`,
-    `galaxy_server_url: ${inv.galaxyServerUrl}`,
-    `notebook_anchor: ${inv.notebookAnchor}`,
+    blockLine("invocation_id", inv.invocationId, "invocationId"),
+    blockLine("galaxy_server_url", inv.galaxyServerUrl),
+    blockLine("notebook_anchor", inv.notebookAnchor, "notebookAnchor"),
     `label: ${escapeYaml(inv.label)}`,
-    `submitted_at: ${inv.submittedAt}`,
+    blockLine("submitted_at", inv.submittedAt),
     `status: ${inv.status}`,
     `summary: ${escapeYaml(inv.summary ?? "")}`,
   ];
@@ -313,7 +314,7 @@ export function renderInvocationYaml(inv: InvocationYaml): string {
   if (inv.totalJobs !== undefined) lines.push(`total_jobs: ${inv.totalJobs}`);
   if (inv.completedJobs !== undefined) lines.push(`completed_jobs: ${inv.completedJobs}`);
   if (inv.failedJobs !== undefined) lines.push(`failed_jobs: ${inv.failedJobs}`);
-  if (inv.lastPolledAt) lines.push(`last_polled_at: ${inv.lastPolledAt}`);
+  if (inv.lastPolledAt) lines.push(blockLine("last_polled_at", inv.lastPolledAt));
   lines.push(...renderHarnessFieldLines(inv));
   lines.push(INVOCATION_FENCE_CLOSE);
   return lines.join("\n") + "\n";
@@ -800,17 +801,33 @@ function parseSessionSummaryBlock(blockLines: string[]): SessionSummaryYaml | nu
   };
 }
 
+/**
+ * Quote a free-text value so it stays on one line.
+ *
+ * `JSON.stringify` rather than hand-rolled quoting: the old version escaped
+ * quotes but passed a newline straight through, so a label spanning two lines
+ * rendered as two block fields and the second one was read back as a field of
+ * the caller's choosing. A label is agent-supplied on both record tools, which
+ * made that a way to write provenance the writers refuse.
+ */
 function escapeYaml(value: string): string {
   // Quote if contains characters that would confuse the line parser.
-  if (/[:#\n]/.test(value)) {
-    return `"${value.replace(/"/g, '\\"')}"`;
+  if (/[:#"\\\u0000-\u001f\u007f-\u009f]/.test(value)) {
+    return JSON.stringify(value);
   }
   return value;
 }
 
 function unescapeYaml(value: string): string {
   if (value.startsWith('"') && value.endsWith('"')) {
-    return value.slice(1, -1).replace(/\\"/g, '"');
+    try {
+      return JSON.parse(value) as string;
+    } catch {
+      // Blocks written before escapeYaml used JSON quoting: quotes were
+      // escaped, a lone backslash was not, so JSON.parse can fail on a value
+      // that was perfectly readable under the old rule.
+      return value.slice(1, -1).replace(/\\"/g, '"');
+    }
   }
   return value;
 }
