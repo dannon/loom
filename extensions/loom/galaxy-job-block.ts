@@ -28,7 +28,16 @@
  * ```
  */
 
-export interface JobYaml {
+import {
+  mergeHarnessFields,
+  parseHarnessFields,
+  pickHarnessFields,
+  renderHarnessFieldLines,
+  stripHarnessFields,
+  type HarnessBlockFields,
+} from "./harness-block-fields";
+
+export interface JobYaml extends HarnessBlockFields {
   jobId: string;
   galaxyServerUrl: string;
   notebookAnchor: string;
@@ -142,6 +151,7 @@ export function renderJobYaml(job: JobYaml): string {
   lines.push(`summary: ${escapeYaml(job.summary ?? "")}`);
   if (job.galaxyState) lines.push(`galaxy_state: ${job.galaxyState}`);
   if (job.lastPolledAt) lines.push(`last_polled_at: ${job.lastPolledAt}`);
+  lines.push(...renderHarnessFieldLines(job));
   lines.push(JOB_FENCE_CLOSE);
   return lines.join("\n") + "\n";
 }
@@ -167,6 +177,9 @@ function parseJobBlock(blockLines: string[]): JobYaml | null {
     summary: unescapeYaml(map.get("summary") ?? "") || undefined,
     galaxyState: map.get("galaxy_state") || undefined,
     lastPolledAt: map.get("last_polled_at") || undefined,
+    // `map` holds raw values (nothing here runs unescapeYaml), which is what
+    // the harness fields want: bare tokens and single-line JSON.
+    ...parseHarnessFields((key) => map.get(key)),
   };
 }
 
@@ -218,13 +231,29 @@ export function findJobBlocks(content: string): JobYaml[] {
 /**
  * Upsert a `loom-job` block keyed by `job_id`: replace in place when the id is
  * already present, otherwise append at the end.
+ *
+ * Harness-only fields on `job` are discarded; see `upsertInvocationBlock` in
+ * notebook-writer.ts for why. They are carried over from the block on disk,
+ * or supplied explicitly through `harness` by the auto-registration path.
  */
-export function upsertJobBlock(content: string, job: JobYaml): string {
+export function upsertJobBlock(
+  content: string,
+  job: JobYaml,
+  harness?: HarnessBlockFields,
+): string {
   const ranges = findJobBlockRanges(content);
   const lines = content.split("\n");
-  const newBlock = renderJobYaml(job).trimEnd().split("\n");
 
   const existing = ranges.find((b) => b.jobId === job.jobId);
+  const onDisk = existing
+    ? (findJobBlocks(content).find((b) => b.jobId === job.jobId) ?? null)
+    : null;
+  const merged: JobYaml = {
+    ...stripHarnessFields(job),
+    ...mergeHarnessFields(onDisk ? pickHarnessFields(onDisk) : {}, harness ?? {}),
+  };
+  const newBlock = renderJobYaml(merged).trimEnd().split("\n");
+
   if (existing) {
     const before = lines.slice(0, existing.start);
     const after = lines.slice(existing.end + 1);

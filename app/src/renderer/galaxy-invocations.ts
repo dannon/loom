@@ -24,6 +24,49 @@ interface Invocation {
   completedJobs?: number;
   failedJobs?: number;
   lastPolledAt?: string;
+  // Harness-written provenance. The brain owns these (see
+  // extensions/loom/harness-block-fields.ts); this side only reads them, and
+  // mirrors the same drop-what-you-don't-recognise rule so a hand-edited
+  // block renders as unknown provenance rather than as a claim.
+  attemptId?: string;
+  historyId?: string;
+  submittedBy?: "harness" | "agent" | "unknown";
+  serverVerified?: boolean;
+  enrichment?: "pending" | "complete" | "unavailable";
+  enrichmentAttempts?: number;
+  jobs?: BlockJobSummary[];
+  drift?: BlockDriftNote[];
+}
+
+interface BlockJobSummary {
+  job_id: string;
+  tool_id?: string;
+  tool_version?: string;
+  state?: string;
+  outputs?: { id: string; ext?: string; dbkey?: string }[];
+}
+
+interface BlockDriftNote {
+  tool_id: string;
+  from: string;
+  to: string;
+}
+
+const SUBMITTED_BY = new Set(["harness", "agent", "unknown"]);
+const ENRICHMENT_STATES = new Set(["pending", "complete", "unavailable"]);
+
+/**
+ * Parse a single-line JSON array field (`jobs`, `drift`). Malformed values
+ * read back as absent -- the row still draws, it just shows no versions.
+ */
+function jsonArrayField<T>(raw: string | undefined): T[] | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 const FENCE_OPEN = "```loom-invocation";
@@ -54,9 +97,15 @@ export function parseInvocationBlocks(content: string): Invocation[] {
       while (end < lines.length && lines[end].trim() !== FENCE_CLOSE) end++;
       const body = lines.slice(start, end);
       const fields: Record<string, string> = {};
+      // Raw (un-unescaped) copy for the harness fields, which are bare tokens
+      // or single-line JSON. Mirrors parseInvocationBlock in the brain.
+      const rawFields: Record<string, string> = {};
       for (const line of body) {
         const m = line.match(/^([a-z_]+):\s*(.*)$/);
-        if (m) fields[m[1]] = unescape(m[2].trim());
+        if (m) {
+          rawFields[m[1]] = m[2].trim();
+          fields[m[1]] = unescape(m[2].trim());
+        }
       }
       const status = fields.status as Invocation["status"];
       if (
@@ -87,6 +136,23 @@ export function parseInvocationBlocks(content: string): Invocation[] {
           completedJobs: num("completed_jobs"),
           failedJobs: num("failed_jobs"),
           lastPolledAt: fields.last_polled_at || undefined,
+          attemptId: rawFields.attempt_id || undefined,
+          historyId: rawFields.history_id || undefined,
+          submittedBy: SUBMITTED_BY.has(rawFields.submitted_by)
+            ? (rawFields.submitted_by as Invocation["submittedBy"])
+            : undefined,
+          serverVerified:
+            rawFields.server_verified === "true"
+              ? true
+              : rawFields.server_verified === "false"
+                ? false
+                : undefined,
+          enrichment: ENRICHMENT_STATES.has(rawFields.enrichment)
+            ? (rawFields.enrichment as Invocation["enrichment"])
+            : undefined,
+          enrichmentAttempts: num("enrichment_attempts"),
+          jobs: jsonArrayField<BlockJobSummary>(rawFields.jobs),
+          drift: jsonArrayField<BlockDriftNote>(rawFields.drift),
         });
       }
       i = end + 1;
@@ -125,6 +191,18 @@ function renderRow(inv: Invocation): string {
   }
   const submitted = inv.submittedAt.replace("T", " ").replace(/\.\d+Z$/, "Z");
 
+  // Provenance, shown only when the block actually carries it. An unrecorded
+  // or agent-recorded run says so rather than borrowing the harness's word:
+  // "recorded by agent" and a missing marker are different claims.
+  const provenance: string[] = [];
+  if (inv.submittedBy === "harness" && inv.serverVerified) provenance.push("recorded by harness");
+  else if (inv.submittedBy === "agent") provenance.push("recorded by agent");
+  else if (inv.submittedBy === "unknown") provenance.push("found on Galaxy");
+  if (inv.enrichment === "pending") provenance.push("details pending");
+  else if (inv.enrichment === "unavailable") provenance.push("details unavailable");
+  if (inv.drift && inv.drift.length > 0) provenance.push(`${inv.drift.length} version drift`);
+  const provenanceText = provenance.length > 0 ? ` · ${escapeHtml(provenance.join(" · "))}` : "";
+
   return `
     <div class="galaxy-invocation-row ${inv.status}">
       <div class="galaxy-invocation-head">
@@ -135,7 +213,7 @@ function renderRow(inv: Invocation): string {
         <div class="galaxy-invocation-bar-fill" style="width: ${pct}%"></div>
       </div>
       <div class="galaxy-invocation-meta">
-        ${escapeHtml(inv.status)} · ${escapeHtml(host)} · submitted ${escapeHtml(submitted)}
+        ${escapeHtml(inv.status)} · ${escapeHtml(host)} · submitted ${escapeHtml(submitted)}${provenanceText}
       </div>
     </div>
   `;

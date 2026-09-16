@@ -10,6 +10,14 @@
 import { randomBytes } from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
+import {
+  mergeHarnessFields,
+  parseHarnessFields,
+  pickHarnessFields,
+  renderHarnessFieldLines,
+  stripHarnessFields,
+  type HarnessBlockFields,
+} from "./harness-block-fields";
 
 /**
  * Generate slug from title for default filename.
@@ -195,7 +203,7 @@ export function getDefaultNotebookPath(_title: string, directory: string): strin
  * the invocation polling tools (see tools.ts). The block is the source of
  * truth — there's no in-memory cache.
  */
-export interface InvocationYaml {
+export interface InvocationYaml extends HarnessBlockFields {
   invocationId: string;
   galaxyServerUrl: string;
   notebookAnchor: string;
@@ -239,6 +247,7 @@ export function renderInvocationYaml(inv: InvocationYaml): string {
   if (inv.completedJobs !== undefined) lines.push(`completed_jobs: ${inv.completedJobs}`);
   if (inv.failedJobs !== undefined) lines.push(`failed_jobs: ${inv.failedJobs}`);
   if (inv.lastPolledAt) lines.push(`last_polled_at: ${inv.lastPolledAt}`);
+  lines.push(...renderHarnessFieldLines(inv));
   lines.push(INVOCATION_FENCE_CLOSE);
   return lines.join("\n") + "\n";
 }
@@ -274,13 +283,32 @@ export function findInvocationBlocks(content: string): InvocationYaml[] {
  * `invocation_id`. If a block with the same id exists, replace it in
  * place (preserving surrounding whitespace). Otherwise append at the
  * end of the file with a leading blank line for readability.
+ *
+ * Harness-only fields on `inv` are always discarded. They come either from
+ * the block already on disk (so an agent or poller write carries them
+ * forward untouched) or from the explicit `harness` argument, which only the
+ * auto-registration and enrichment paths pass. A caller cannot set
+ * `submitted_by: harness` or `server_verified: true` by spreading tool
+ * arguments into the record, which is the whole point of those two fields.
  */
-export function upsertInvocationBlock(content: string, inv: InvocationYaml): string {
+export function upsertInvocationBlock(
+  content: string,
+  inv: InvocationYaml,
+  harness?: HarnessBlockFields,
+): string {
   const blocks = findInvocationBlockRanges(content);
   const lines = content.split("\n");
-  const newBlock = renderInvocationYaml(inv).trimEnd().split("\n");
 
   const existing = blocks.find((b) => b.invocationId === inv.invocationId);
+  const onDisk = existing
+    ? (findInvocationBlocks(content).find((b) => b.invocationId === inv.invocationId) ?? null)
+    : null;
+  const merged: InvocationYaml = {
+    ...stripHarnessFields(inv),
+    ...mergeHarnessFields(onDisk ? pickHarnessFields(onDisk) : {}, harness ?? {}),
+  };
+  const newBlock = renderInvocationYaml(merged).trimEnd().split("\n");
+
   if (existing) {
     const before = lines.slice(0, existing.start);
     const after = lines.slice(existing.end + 1);
@@ -434,9 +462,17 @@ function findInvocationBlockRanges(content: string): InvocationBlockRange[] {
 
 function parseInvocationBlock(blockLines: string[]): InvocationYaml | null {
   const fields: Record<string, string> = {};
+  // Harness fields are bare tokens or single-line JSON, so they are read from
+  // the raw text: running `unescapeYaml` over a JSON array would strip nothing
+  // today but would silently mangle the first value that starts and ends with
+  // a quote.
+  const rawFields: Record<string, string> = {};
   for (const line of blockLines) {
     const m = line.match(/^([a-z_]+):\s*(.*)$/);
-    if (m) fields[m[1]] = unescapeYaml(m[2].trim());
+    if (m) {
+      rawFields[m[1]] = m[2].trim();
+      fields[m[1]] = unescapeYaml(m[2].trim());
+    }
   }
   const status = fields.status as InvocationYaml["status"];
   if (
@@ -469,6 +505,7 @@ function parseInvocationBlock(blockLines: string[]): InvocationYaml | null {
     completedJobs: numField("completed_jobs"),
     failedJobs: numField("failed_jobs"),
     lastPolledAt: fields.last_polled_at || undefined,
+    ...parseHarnessFields((key) => rawFields[key]),
   };
 }
 
