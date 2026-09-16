@@ -81,13 +81,17 @@ describe("registerExecutionCommands", () => {
     expect(prompt).toContain("Do NOT claim the artifact or step is done");
   });
 
-  it("points the step anchor at the step it is about to execute", async () => {
+  it("arms the step anchor and goes live when the run starts", async () => {
     writeRunnableNotebook();
-    const { pi, commands } = fakePi();
+    const { pi, commands, handlers } = fakePi();
 
     registerExecutionCommands(pi as any);
     await commands.get("execute")!.handler(undefined, { ui: { notify: vi.fn() } });
 
+    // Armed, not live: nothing is attributed until a run actually begins.
+    expect(getCurrentStepAnchor()).toBeNull();
+
+    await handlers.get("agent_start")!({ type: "agent_start" }, {});
     expect(getCurrentStepAnchor()).toBe("plan-a-step-1");
   });
 
@@ -97,6 +101,7 @@ describe("registerExecutionCommands", () => {
 
     registerExecutionCommands(pi as any);
     await commands.get("execute")!.handler(undefined, { ui: { notify: vi.fn() } });
+    await handlers.get("agent_start")!({ type: "agent_start" }, {});
 
     // A multi-turn /execute is the normal case: the model reads the notebook
     // in one turn and submits in the next. Nothing is registered on turn_end,
@@ -108,16 +113,36 @@ describe("registerExecutionCommands", () => {
     expect(getCurrentStepAnchor()).toBeNull();
   });
 
-  it("clears a stale anchor when the gate soft-fails", async () => {
+  it("does not repoint a running run's anchor when /execute is rejected", async () => {
+    // pi dispatches the slash command mid-stream but rejects the message it
+    // sends, so no run for step 1 ever starts. The anchor belonging to the run
+    // that IS going must survive untouched.
+    writeRunnableNotebook();
+    const { pi, commands, handlers } = fakePi();
+
+    registerExecutionCommands(pi as any);
+    await handlers.get("agent_start")!({ type: "agent_start" }, {});
+    setCurrentStepAnchor("plan-z-step-9");
+
+    await commands.get("execute")!.handler(undefined, { ui: { notify: vi.fn() } });
+    expect(getCurrentStepAnchor()).toBe("plan-z-step-9");
+
+    // And the stranded arm must not be promoted by the next run either.
+    await handlers.get("agent_end")!({ type: "agent_end" }, {});
+    await handlers.get("agent_start")!({ type: "agent_start" }, {});
+    expect(getCurrentStepAnchor()).toBeNull();
+  });
+
+  it("drops the armed anchor when the gate soft-fails", async () => {
     // No plan at all: the gate soft-fails, the agent is still sent off, and
-    // whatever step was current before must not be attributed this work.
+    // no step should be attributed the work that follows.
     fs.writeFileSync(nbPath, "# Notes\n\nNothing to run here.\n", "utf-8");
     setNotebookPath(nbPath);
-    setCurrentStepAnchor("plan-a-step-1");
 
-    const { pi, commands } = fakePi();
+    const { pi, commands, handlers } = fakePi();
     registerExecutionCommands(pi as any);
     await commands.get("execute")!.handler(undefined, { ui: { notify: vi.fn() } });
+    await handlers.get("agent_start")!({ type: "agent_start" }, {});
 
     expect(getCurrentStepAnchor()).toBeNull();
   });

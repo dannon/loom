@@ -243,6 +243,33 @@ describe("submission capture: refusing to guess", () => {
   });
 });
 
+describe("submission capture: writing alongside other writers", () => {
+  it("does not overwrite an edit that lands while the block is being built", async () => {
+    // The notebook lock only serialises writers inside this process. The
+    // agent's own edit/write tools, an editor, and a second Loom process are
+    // all outside it, so the write is a compare-and-swap that rebuilds on the
+    // current bytes instead of renaming stale content over someone's edit.
+    const marker = "## Notes added while the tool was running";
+
+    // Fires during capture's stat/read awaits, i.e. after it has read and
+    // before it writes.
+    const competing = setTimeout(() => {
+      fs.appendFileSync(nbPath, `\n${marker}\n`, "utf-8");
+    }, 0);
+
+    await submit("galaxy_run_tool", { tool_id: "fastp" }, mcpResult(THREE_JOBS));
+    clearTimeout(competing);
+
+    const after = notebook();
+    expect(after).toContain(marker);
+    expect(findJobBlocks(after).map((b) => b.jobId)).toEqual([
+      "job000000000001",
+      "job000000000002",
+      "job000000000003",
+    ]);
+  });
+});
+
 describe("submission capture: attribution is captured at dispatch", () => {
   it("binds to the step that was current when the tool started, not when it answered", async () => {
     // The shape this exists for: a slow submission answers after the agent has
@@ -307,20 +334,65 @@ describe("submission capture: user-defined tools", () => {
       mcpResult(UDT),
     );
 
-    const written = path.join(tmpDir, UDT_PROVENANCE_DIR, "clean_table.yaml");
+    // Named by tool id AND uuid: the uuid is what identifies a definition, so
+    // recreating the same tool id cannot overwrite the earlier record.
+    const stem = `clean_table-${UDT.data.uuid}`;
+    const written = path.join(tmpDir, UDT_PROVENANCE_DIR, `${stem}.yaml`);
     expect(fs.existsSync(written)).toBe(true);
     expect(parseYaml(fs.readFileSync(written, "utf-8"))).toEqual(UDT.data.representation);
 
     const [block] = findUdtBlocks(notebook());
     expect(block.toolId).toBe("clean_table");
     expect(block.toolUuid).toBe("8d5f1c2e-9a0b-4c3d-8e7f-1a2b3c4d5e6f");
-    expect(block.definition).toBe(".loom/provenance/udt/clean_table.yaml");
+    expect(block.definition).toBe(`.loom/provenance/udt/${stem}.yaml`);
     expect(block.notebookAnchor).toBe("plan-a-step-2");
     expect(isUlid(block.attemptId!)).toBe(true);
 
     const [row] = activity().filter((r) => r.kind === "submission.registered");
     expect(row.payload.kind).toBe("udt");
     expect(row.payload.tool_uuid).toBe("8d5f1c2e-9a0b-4c3d-8e7f-1a2b3c4d5e6f");
+    expect(row.payload.definition).toBe(`.loom/provenance/udt/${stem}.yaml`);
+  });
+
+  it("recreating a tool id under a new uuid keeps both definitions", async () => {
+    await submit("galaxy_create_user_tool", {}, mcpResult(UDT));
+    const second = {
+      ...UDT,
+      data: {
+        ...UDT.data,
+        uuid: "11112222-3333-4444-5555-666677778888",
+        representation: { ...UDT.data.representation, version: "0.2.0" },
+      },
+    };
+    await submit("galaxy_create_user_tool", {}, mcpResult(second));
+
+    const dir = path.join(tmpDir, UDT_PROVENANCE_DIR);
+    expect(fs.readdirSync(dir).sort()).toEqual([
+      `clean_table-${second.data.uuid}.yaml`,
+      `clean_table-${UDT.data.uuid}.yaml`,
+    ]);
+
+    // Two blocks, each pointing at its own definition rather than both at the
+    // surviving file.
+    const blocks = findUdtBlocks(notebook());
+    expect(blocks).toHaveLength(2);
+    expect(new Set(blocks.map((b) => b.definition)).size).toBe(2);
+    const v = (p: string) =>
+      (parseYaml(fs.readFileSync(path.join(tmpDir, p), "utf-8")) as { version: string }).version;
+    expect(blocks.map((b) => v(b.definition)).sort()).toEqual(["0.1.0", "0.2.0"]);
+  });
+
+  it("records nothing when the definition cannot be stored", async () => {
+    // A uuid that sanitises away leaves nowhere to put the definition, and a
+    // UDT block pointing at a file that is not there is worse than no block.
+    await submit(
+      "galaxy_create_user_tool",
+      {},
+      mcpResult({ data: { ...UDT.data, uuid: "...", tool_id: "..." }, success: true }),
+    );
+    expect(findUdtBlocks(notebook())).toHaveLength(0);
+    expect(activity().filter((r) => r.kind === "submission.registered")).toHaveLength(0);
+    expect(activity().filter((r) => r.kind === "submission.unparsed")).toHaveLength(1);
   });
 
   it("keeps a hostile tool id inside the provenance directory", async () => {
@@ -337,7 +409,7 @@ describe("submission capture: user-defined tools", () => {
     expect(fs.existsSync(path.join(tmpDir, "..", "etc"))).toBe(false);
     const dir = path.join(tmpDir, UDT_PROVENANCE_DIR);
     const written = fs.readdirSync(dir);
-    expect(written).toEqual(["_.._.._.._etc_pwned.yaml"]);
+    expect(written).toEqual([`_.._.._.._etc_pwned-${UDT.data.uuid}.yaml`]);
     // No separator and no leading dot: it cannot escape and it is not hidden.
     expect(written[0]).not.toContain("/");
     expect(written[0].startsWith(".")).toBe(false);

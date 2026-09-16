@@ -200,10 +200,12 @@ export function parseGalaxyResultEnvelope(
   }
   const envelope = asRecord(value);
   if (!envelope) return null;
-  // `success` defaults to true on the model, so only an explicit false is a
-  // refusal. Every submission tool raises instead of returning false, but a
-  // future one might not.
-  if (envelope.success === false) return null;
+  // `success` defaults to true on the model and every submission tool raises
+  // rather than returning false, so the field is usually absent-or-true. Only
+  // those two are accepted: a `success` of `"false"`, `0` or `null` is not a
+  // GalaxyResult we recognise, and reading it as a success would register a
+  // run off a payload we do not understand.
+  if ("success" in envelope && envelope.success !== true) return null;
   if (!("data" in envelope)) return null;
   return envelope;
 }
@@ -214,6 +216,34 @@ export function parseGalaxyResultEnvelope(
 
 function str(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+/**
+ * Accept a value only if it is shaped like an id that can survive a block.
+ *
+ * The blocks are line-oriented `key: value`, and the id scalars are written
+ * unescaped, so an id containing a newline renders as a SECOND `job_id:` line
+ * and the parser -- last key wins -- reads back a different id than the one
+ * Galaxy returned. That is the precise failure this whole module exists to
+ * prevent, so it is rejected at the boundary rather than escaped downstream:
+ * a Galaxy id with a newline, a tab or a control character in it is not a
+ * Galaxy id, and refusing beats inventing an escaping scheme that the two
+ * block parsers would then have to agree on.
+ *
+ * Deliberately not `/^[0-9a-f]{16}$/`: ids are 16-char lowercase hex on the
+ * usual servers, but tool ids are toolshed paths, UDT ids are uuids, and a
+ * server with a different id encoding is still a server we should record.
+ */
+const MAX_ID_LENGTH = 512;
+
+export function idToken(value: unknown): string | undefined {
+  const raw = str(value);
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_ID_LENGTH) return undefined;
+  // No whitespace at all (newline, tab, space) and no C0/C1 control chars.
+  if (/[\s\u0000-\u001f\u007f-\u009f]/.test(trimmed)) return undefined;
+  return trimmed;
 }
 
 /** Trim a label to something a notebook row can show without wrapping. */
@@ -242,8 +272,8 @@ function parseInvokeWorkflow(data: unknown, args: Record<string, unknown>): Pars
   if (modelClass !== "WorkflowInvocation") {
     return fail(`invoke_workflow data.model_class is ${modelClass ?? "missing"}`);
   }
-  const invocationId = str(d.id);
-  if (!invocationId) return fail("invoke_workflow data.id is missing or not a string");
+  const invocationId = idToken(d.id);
+  if (!invocationId) return fail("invoke_workflow data.id is missing or not an id-shaped string");
 
   const workflowId = str(d.workflow_id) ?? str(args.workflow_id);
   return {
@@ -251,7 +281,7 @@ function parseInvokeWorkflow(data: unknown, args: Record<string, unknown>): Pars
     submission: {
       kind: "invocation",
       invocationId,
-      historyId: str(d.history_id) ?? str(args.history_id),
+      historyId: idToken(d.history_id) ?? idToken(args.history_id),
       label: label(workflowId ? `Workflow ${workflowId}` : "Galaxy workflow"),
     },
   };
@@ -276,15 +306,23 @@ function parseToolRun(
   const jobs: SubmittedJob[] = [];
   for (const entry of d.jobs) {
     const j = asRecord(entry);
-    const jobId = j ? str(j.id) : undefined;
+    const jobId = j ? idToken(j.id) : undefined;
     // One malformed entry means we do not know how many jobs really started,
     // so the whole submission is unparsed rather than partly recorded.
-    if (!jobId) return fail("tool run data.jobs has an entry with no string id");
+    if (!j || !jobId) return fail("tool run data.jobs has an entry with no id-shaped id");
+    // Galaxy's job dicts carry `model_class: "Job"`. When the field is there
+    // it has to say Job: an invocation id written into a job block sends the
+    // pollers to /api/jobs/<invocation id>, which fails quietly forever.
+    // Checked only when present, so a server that omits it still records.
+    const modelClass = str(j.model_class);
+    if (modelClass && modelClass !== "Job") {
+      return fail(`tool run data.jobs entry has model_class ${modelClass}, expected Job`);
+    }
     jobs.push({
       jobId,
-      toolId: str(j!.tool_id),
-      toolVersion: str(j!.tool_version),
-      historyId: str(j!.history_id),
+      toolId: idToken(j.tool_id),
+      toolVersion: idToken(j.tool_version),
+      historyId: idToken(j.history_id),
     });
   }
   if (jobs.length === 0) return fail("tool run data.jobs is empty");
@@ -300,7 +338,10 @@ function parseToolRun(
     submission: {
       kind: "jobs",
       jobs,
-      historyId: str(args.history_id) ?? jobs[0].historyId,
+      // Where Galaxy says the jobs landed beats where they were requested to
+      // land: the block claims server_verified, so every field on it should be
+      // the server's answer wherever the server gave one.
+      historyId: jobs[0].historyId ?? idToken(args.history_id),
       label: label(labelFor(jobs)),
       ...(partial ? { partial: true } : {}),
     },
@@ -314,27 +355,32 @@ function parseToolRun(
  * actually run. `tool_id` is nullable in the schema, so fall back to the
  * definition's own id before giving up.
  */
-function parseCreateUserTool(data: unknown, args: Record<string, unknown>): ParseOutcome {
+function parseCreateUserTool(data: unknown, _args: Record<string, unknown>): ParseOutcome {
   const d = asRecord(data);
   if (!d) return fail("create_user_tool result has no data object");
 
-  const uuid = str(d.uuid);
-  if (!uuid) return fail("create_user_tool data.uuid is missing or not a string");
+  const uuid = idToken(d.uuid);
+  if (!uuid) return fail("create_user_tool data.uuid is missing or not an id-shaped string");
 
-  const representation = d.representation ?? args.representation;
+  // Only what Galaxy stored. The agent's own `args.representation` is NOT a
+  // fallback: preserving it under a block that says the harness recorded this
+  // would file the agent's draft as the definition Galaxy will actually run,
+  // and those can differ (Galaxy lifts and validates the representation on the
+  // way in). With nothing server-side to preserve there is nothing to claim.
+  const representation = d.representation;
   const repr = asRecord(representation);
-  const toolId = str(d.tool_id) ?? (repr ? str(repr.id) : undefined);
-  if (!toolId) return fail("create_user_tool has neither data.tool_id nor a definition id");
-  if (representation === undefined) {
-    return fail("create_user_tool returned no representation to preserve");
+  if (representation === undefined || !repr) {
+    return fail("create_user_tool returned no stored representation to preserve");
   }
+  const toolId = idToken(d.tool_id) ?? idToken(repr.id);
+  if (!toolId) return fail("create_user_tool has no id-shaped tool id");
 
   return {
     ok: true,
     submission: {
       kind: "udt",
       udt: { toolId, uuid, representation },
-      label: label(`User tool ${str(repr?.name) ?? toolId}`),
+      label: label(`User tool ${str(repr.name) ?? toolId}`),
     },
   };
 }
@@ -354,8 +400,8 @@ function parseLocalUpload(
 
   const jobs: SubmittedJob[] = [];
   for (const entry of details.jobs) {
-    const jobId = str(entry);
-    if (!jobId) return fail("upload details.jobs has a non-string entry");
+    const jobId = idToken(entry);
+    if (!jobId) return fail("upload details.jobs has an entry that is not an id-shaped string");
     jobs.push({ jobId, toolId: "__DATA_FETCH__" });
   }
   if (jobs.length === 0) return fail("upload details.jobs is empty");
@@ -366,7 +412,7 @@ function parseLocalUpload(
     submission: {
       kind: "jobs",
       jobs,
-      historyId: str(details.historyId) ?? str(args.history_id),
+      historyId: idToken(details.historyId) ?? idToken(args.history_id),
       label: label(fileName ? `Upload ${fileName}` : "Upload to Galaxy"),
     },
   };

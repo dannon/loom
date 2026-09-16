@@ -20,6 +20,22 @@ import { checkPreconditions, renderFailures } from "./init-gate.js";
  */
 
 export function registerExecutionCommands(pi: ExtensionAPI): void {
+  // The anchor is ARMED by /execute and only goes live when a run actually
+  // starts. Setting it directly was wrong in two reachable ways.
+  //
+  // pi dispatches a slash command while a previous run is still streaming, but
+  // then rejects the `sendUserMessage` /execute makes (it passes no
+  // deliverAs), and that rejection is swallowed. So /execute during an active
+  // run repointed the anchor at a step whose run never began, and the RUNNING
+  // run's next Galaxy submission was filed under it. Separately, a send that
+  // fails for any other reason -- no model configured, auth -- left an anchor
+  // set with no agent_end coming to clear it.
+  //
+  // Arming means an anchor is only ever consumed by a run that really started,
+  // and every anchor that goes live has an agent_end to clear it.
+  let pendingAnchor: string | null = null;
+  let runActive = false;
+
   const executeHandler = async (_args: string | undefined, ctx: ExtensionContext) => {
     const nbPath = getNotebookPath();
     const gate = checkPreconditions();
@@ -32,7 +48,9 @@ export function registerExecutionCommands(pi: ExtensionAPI): void {
     if (!gate.ok) {
       // A soft-failed gate still sends the agent off, but it has no step worth
       // binding to -- most soft failures ARE "there is no usable next step".
-      setCurrentStepAnchor(null);
+      // Only the armed anchor is dropped; a live one belongs to a run that is
+      // already going and is not ours to clear.
+      pendingAnchor = null;
       ctx.ui.notify(renderFailures(gate.failures), "info");
       pi.sendUserMessage(
         `The user typed /execute (or /run) but the precondition check did not pass:\n\n${renderFailures(
@@ -42,7 +60,9 @@ export function registerExecutionCommands(pi: ExtensionAPI): void {
       return;
     }
 
-    setCurrentStepAnchor(gate.plan?.nextStep?.anchor ?? null);
+    // While a run is streaming pi rejects the message below, so there is no run
+    // to attribute and arming would only strand the anchor.
+    pendingAnchor = runActive ? null : (gate.plan?.nextStep?.anchor ?? null);
 
     pi.sendUserMessage(
       `The user typed /execute (or /run). Read \`${nbPath}\`, locate the most ` +
@@ -70,6 +90,15 @@ export function registerExecutionCommands(pi: ExtensionAPI): void {
     );
   };
 
+  // Promote the armed anchor when a run actually starts.
+  pi.on("agent_start", async () => {
+    runActive = true;
+    if (pendingAnchor !== null) {
+      setCurrentStepAnchor(pendingAnchor);
+      pendingAnchor = null;
+    }
+  });
+
   // Clear the pointer when the agent run settles, not on `turn_end`.
   // pi's agentic loop emits turn_end after every model round trip inside one
   // run (agent-loop.js emits turn_end at :131 and loops back to turn_start at
@@ -77,6 +106,7 @@ export function registerExecutionCommands(pi: ExtensionAPI): void {
   // the notebook and the turn that actually submits -- which is the normal
   // shape of an /execute. `agent_end` fires once, when the run is over.
   pi.on("agent_end", async () => {
+    runActive = false;
     setCurrentStepAnchor(null);
   });
 

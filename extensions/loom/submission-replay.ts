@@ -62,11 +62,26 @@ export function parseReplayFile(raw: string): ReplayEntry[] {
 /**
  * Resolve the replay file inside `sessionDir`, or null if it escapes.
  * Exported for the test that pins the containment.
+ *
+ * Both sides are realpath'd before comparing, so the check is about where the
+ * file actually is rather than how it is spelled: a lexical prefix test alone
+ * accepts `<session>/replay.jsonl` when that name is a symlink pointing
+ * somewhere else entirely. The session directory is realpath'd too, since on
+ * macOS a temp dir is reached through a `/var` -> `/private/var` symlink and
+ * comparing a resolved file against an unresolved root would reject every
+ * legitimate path.
  */
 export function resolveReplayPath(sessionDir: string, configured: string): string | null {
-  const resolved = path.resolve(sessionDir, configured);
-  const root = path.resolve(sessionDir) + path.sep;
-  return resolved.startsWith(root) ? resolved : null;
+  const real = (p: string): string => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const root = real(sessionDir);
+  const resolved = real(path.resolve(sessionDir, configured));
+  return resolved.startsWith(root + path.sep) ? resolved : null;
 }
 
 export function registerSubmissionReplay(pi: ExtensionAPI): void {
@@ -91,7 +106,10 @@ export function registerSubmissionReplay(pi: ExtensionAPI): void {
     });
 
     for (const [index, entry] of entries.entries()) {
-      if (entry.stepAnchor !== undefined) setCurrentStepAnchor(entry.stepAnchor);
+      // Set it for every entry, not just the ones that name one: leaving the
+      // previous entry's anchor in place made an entry with no `stepAnchor`
+      // inherit its predecessor's step instead of being unattributed.
+      setCurrentStepAnchor(entry.stepAnchor ?? null);
       await handleSubmissionResult(
         `replay-${index}`,
         entry.tool,
@@ -99,7 +117,7 @@ export function registerSubmissionReplay(pi: ExtensionAPI): void {
         entry.isError === true,
         // Replay has no start event, so hand the dispatch details straight in
         // rather than letting the hook fall back to "unattributed".
-        { args: entry.args ?? {} },
+        { args: entry.args ?? {}, stepAnchor: entry.stepAnchor ?? null },
       );
     }
 

@@ -37,6 +37,7 @@ import { upsertJobBlock, type JobYaml } from "./galaxy-job-block";
 import { upsertUdtBlock } from "./galaxy-udt-block";
 import {
   isSubmissionTool,
+  parseGalaxyResultEnvelope,
   parseSubmission,
   resolveResultPayload,
   type ParsedSubmission,
@@ -44,7 +45,9 @@ import {
 } from "./galaxy-submission";
 import type { HarnessBlockFields } from "./harness-block-fields";
 import {
+  NotebookChangedError,
   readNotebook,
+  statNotebook,
   upsertInvocationBlock,
   withNotebookLock,
   writeNotebook,
@@ -73,9 +76,10 @@ interface Dispatch {
  *
  * Bounded because a start without a matching end is possible -- an aborted
  * turn, a tool that never returns -- and an unbounded map in a long session
- * is a slow leak. The cap is far above any real concurrent tool count; when
- * it is hit the oldest entry goes, which at worst costs that submission its
- * dispatch-time anchor, not its registration.
+ * is a slow leak. The cap is far above any real concurrent tool count. When
+ * it is hit the oldest entry goes, and that submission loses its whole
+ * dispatch record: its result is still registered, but with a fresh attempt
+ * id, no arguments, and `unattributed`. It never gets someone else's.
  */
 const MAX_IN_FLIGHT = 256;
 const inFlight = new Map<string, Dispatch>();
@@ -198,13 +202,15 @@ async function writeBlocks(
   notebookPath: string,
   submission: ParsedSubmission,
   dispatch: Dispatch,
-): Promise<{ udtDefinition?: string }> {
-  let udtDefinition: string | undefined;
+): Promise<{ udtDefinition?: string; udtPending: boolean }> {
+  const udtPending = submission.kind === "udt" && !!submission.udt;
   const galaxyServerUrl = getGalaxyConfig()?.url ?? "";
   const harness = harnessFields(dispatch, submission.historyId);
+  let udtDefinition: string | undefined;
 
-  await withNotebookLock(notebookPath, async () => {
-    let content = await readNotebook(notebookPath);
+  /** Apply this submission's blocks to whatever the notebook currently says. */
+  const applyBlocks = (content: string): string => {
+    let next = content;
 
     if (submission.kind === "invocation" && submission.invocationId) {
       const inv: InvocationYaml = {
@@ -215,7 +221,7 @@ async function writeBlocks(
         submittedAt: dispatch.submittedAt,
         status: "in_progress",
       };
-      content = upsertInvocationBlock(content, inv, harness);
+      next = upsertInvocationBlock(next, inv, harness);
     }
 
     for (const job of submission.jobs ?? []) {
@@ -231,7 +237,7 @@ async function writeBlocks(
       // tool_version is only ever in the submission response -- GET
       // /api/jobs/{id} drops it -- so seed the job summary with it now rather
       // than hoping enrichment can find it later.
-      content = upsertJobBlock(content, block, {
+      next = upsertJobBlock(next, block, {
         ...harness,
         ...(job.historyId && !submission.historyId ? { historyId: job.historyId } : {}),
         jobs: [
@@ -244,29 +250,56 @@ async function writeBlocks(
       });
     }
 
-    if (submission.kind === "udt" && submission.udt) {
-      const definition = await writeUdtDefinition(
-        path.dirname(notebookPath),
-        submission.udt.toolId,
-        submission.udt.representation,
-      );
-      if (definition) {
-        udtDefinition = definition;
-        content = upsertUdtBlock(content, {
-          toolId: submission.udt.toolId,
-          toolUuid: submission.udt.uuid,
-          definition,
-          createdAt: dispatch.submittedAt,
-          notebookAnchor: dispatch.stepAnchor,
-          attemptId: dispatch.attemptId,
-        });
-      }
+    if (submission.udt && udtDefinition) {
+      next = upsertUdtBlock(next, {
+        toolId: submission.udt.toolId,
+        toolUuid: submission.udt.uuid,
+        definition: udtDefinition,
+        createdAt: dispatch.submittedAt,
+        notebookAnchor: dispatch.stepAnchor,
+        attemptId: dispatch.attemptId,
+      });
     }
 
-    await writeNotebook(notebookPath, content);
+    return next;
+  };
+
+  // The definition file is written once, outside the retry: it is keyed by
+  // uuid and created exclusively, so re-running applyBlocks must not re-write
+  // it.
+  if (submission.kind === "udt" && submission.udt) {
+    udtDefinition =
+      (await writeUdtDefinition(
+        path.dirname(notebookPath),
+        submission.udt.toolId,
+        submission.udt.uuid,
+        submission.udt.representation,
+      )) ?? undefined;
+  }
+
+  await withNotebookLock(notebookPath, async () => {
+    // Compare-and-swap, retried, rather than a blind write. The lock only
+    // serialises writers inside THIS process; the agent's own edit/write
+    // tools, a user's editor, and a second Loom process on the same notebook
+    // are all outside it, and a submission lands at an arbitrary moment
+    // relative to them. Without the stamp, capture renames content it read
+    // before someone else's edit straight over that edit (#391).
+    for (let attempt = 0; ; attempt++) {
+      const stamp = await statNotebook(notebookPath);
+      const content = await readNotebook(notebookPath);
+      try {
+        await writeNotebook(notebookPath, applyBlocks(content), stamp ?? undefined);
+        return;
+      } catch (err) {
+        // Rebuild on the current bytes and try again. After a few collisions
+        // give up and let the caller record the submission as unrecorded
+        // rather than claim a block that never landed.
+        if (!(err instanceof NotebookChangedError) || attempt >= 2) throw err;
+      }
+    }
   });
 
-  return udtDefinition ? { udtDefinition } : {};
+  return { ...(udtDefinition ? { udtDefinition } : {}), udtPending };
 }
 
 /**
@@ -277,15 +310,37 @@ async function writeBlocks(
 async function writeUdtDefinition(
   analysisDir: string,
   toolId: string,
+  uuid: string,
   representation: unknown,
 ): Promise<string | null> {
-  const safe = safeProvenanceFilename(toolId);
-  if (!safe) return null;
+  // The uuid is in the filename, not just the tool id, because the uuid is
+  // what identifies a definition: recreating `clean_table` yields a new uuid
+  // and a new (possibly different) definition, and naming by tool id alone
+  // meant the second write overwrote the first while both notebook blocks
+  // went on pointing at the surviving file. It also settles the case where
+  // two distinct tool ids sanitise to the same name.
+  const safeTool = safeProvenanceFilename(toolId);
+  const safeUuid = safeProvenanceFilename(uuid);
+  if (!safeUuid) return null;
+  const stem = safeTool ? `${safeTool}-${safeUuid}` : safeUuid;
 
-  const relative = path.join(UDT_PROVENANCE_DIR, `${safe}.yaml`);
+  const relative = path.join(UDT_PROVENANCE_DIR, `${stem}.yaml`);
   const absolute = path.join(analysisDir, relative);
   await fsp.mkdir(path.dirname(absolute), { recursive: true });
-  await fsp.writeFile(absolute, stringifyYaml(representation), "utf-8");
+  try {
+    // `wx` is O_CREAT | O_EXCL: create it or fail. That refuses to follow a
+    // symlink planted at the path (writing through it would land outside the
+    // provenance directory) and refuses to overwrite an existing definition.
+    await fsp.writeFile(absolute, stringifyYaml(representation), {
+      encoding: "utf-8",
+      flag: "wx",
+    });
+  } catch (err) {
+    // Already there: the uuid is in the name, so the same uuid means the same
+    // definition and the existing file is the record. Anything else is a real
+    // failure and the caller reports the submission as unrecorded.
+    if ((err as NodeJS.ErrnoException)?.code !== "EEXIST") throw err;
+  }
   // Always POSIX separators in the notebook: the block is read on whatever
   // platform opens the analysis next, not the one that wrote it.
   return relative.split(path.sep).join("/");
@@ -338,7 +393,17 @@ export async function handleSubmissionResult(
 
   let resolved = resolveResultPayload(result);
   let outcome = parseSubmission(toolName, dispatch.args, resolved);
-  if (!outcome.ok && resolved.truncatedPath) {
+  // Re-read the adapter's spill file ONLY when the inline payload was never a
+  // readable envelope -- that is the truncation case this exists for. If the
+  // envelope parsed and the tool-specific parse still said no, we understood
+  // the answer and it was "nothing to record"; going to the spill file then
+  // would let a different payload overturn a verdict we already reached.
+  if (
+    !outcome.ok &&
+    resolved.truncatedPath &&
+    parseGalaxyResultEnvelope(resolved) === null &&
+    toolName !== "galaxy_upload_local_file"
+  ) {
     resolved = rereadTruncated(resolved);
     outcome = parseSubmission(toolName, dispatch.args, resolved);
   }
@@ -354,7 +419,7 @@ export async function handleSubmissionResult(
   }
 
   const submission = outcome.submission;
-  let written: { udtDefinition?: string };
+  let written: { udtDefinition?: string; udtPending: boolean };
   try {
     written = await writeBlocks(notebookPath, submission, dispatch);
   } catch (err) {
@@ -365,6 +430,20 @@ export async function handleSubmissionResult(
       attempt_id: dispatch.attemptId,
       step_anchor: dispatch.stepAnchor,
       reason: `could not write the record: ${err instanceof Error ? err.message : String(err)}`,
+    });
+    return;
+  }
+
+  // A user-defined tool whose definition could not be stored is not recorded:
+  // the block would point at a file that is not there, and the whole reason
+  // the harness intercepts a UDT creation is to keep the definition. Say
+  // unparsed instead of claiming a registration.
+  if (written.udtPending && !written.udtDefinition) {
+    record("submission.unparsed", {
+      tool: toolName,
+      attempt_id: dispatch.attemptId,
+      step_anchor: dispatch.stepAnchor,
+      reason: "could not store the tool definition, so the creation is unrecorded",
     });
     return;
   }

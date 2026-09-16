@@ -10,6 +10,7 @@ import {
 } from "../extensions/loom/submission-replay";
 import { resetSubmissionCapture } from "../extensions/loom/galaxy-submission-capture";
 import { findInvocationBlocks } from "../extensions/loom/notebook-writer";
+import { findJobBlocks } from "../extensions/loom/galaxy-job-block";
 import { resetState, setNotebookPath } from "../extensions/loom/state";
 
 let tmpDir: string;
@@ -98,6 +99,25 @@ describe("submission replay: containment", () => {
     // The directory itself is not a file inside it.
     expect(resolveReplayPath("/work/analysis", ".")).toBeNull();
   });
+
+  it("refuses a path inside the session dir that is a symlink out of it", () => {
+    // A lexical prefix check alone accepts this: the NAME is inside, the file
+    // is not.
+    const outside = path.join(os.tmpdir(), `loom-replay-target-${Date.now()}.jsonl`);
+    fs.writeFileSync(outside, "{}\n", "utf-8");
+    const inside = path.join(tmpDir, "replay.jsonl");
+    fs.symlinkSync(outside, inside);
+
+    expect(resolveReplayPath(tmpDir, "replay.jsonl")).toBeNull();
+    fs.rmSync(outside, { force: true });
+  });
+
+  it("still accepts an ordinary file even when the session dir is itself a symlink", () => {
+    // macOS temp dirs are reached through /var -> /private/var, so resolving
+    // only one side of the comparison would reject every legitimate path.
+    fs.writeFileSync(path.join(tmpDir, "plain.jsonl"), "{}\n", "utf-8");
+    expect(resolveReplayPath(tmpDir, "plain.jsonl")).not.toBeNull();
+  });
 });
 
 describe("submission replay: parsing", () => {
@@ -155,5 +175,38 @@ describe("submission replay: driving the hook", () => {
   it("does nothing when the variable is unset", async () => {
     await runReplay();
     expect(activityKinds()).not.toContain("submission.replay");
+  });
+
+  it("does not let an entry inherit the previous entry's step anchor", async () => {
+    const jobs = (id: string) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ success: true, data: { jobs: [{ id, tool_id: "fastp" }] } }),
+        },
+      ],
+      details: {},
+    });
+    fs.writeFileSync(
+      path.join(tmpDir, "submissions.jsonl"),
+      [
+        JSON.stringify({
+          tool: "galaxy_run_tool",
+          stepAnchor: "plan-a-step-1",
+          result: jobs("j1"),
+        }),
+        // No stepAnchor: this one belongs to no step.
+        JSON.stringify({ tool: "galaxy_run_tool", result: jobs("j2") }),
+      ].join("\n") + "\n",
+      "utf-8",
+    );
+    process.env.LOOM_SUBMISSION_REPLAY = "submissions.jsonl";
+
+    await runReplay();
+
+    const blocks = findJobBlocks(fs.readFileSync(nbPath, "utf-8"));
+    const anchorOf = (id: string) => blocks.find((b) => b.jobId === id)?.notebookAnchor;
+    expect(anchorOf("j1")).toBe("plan-a-step-1");
+    expect(anchorOf("j2")).toBe("unattributed");
   });
 });

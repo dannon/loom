@@ -124,13 +124,36 @@ export function mergeHarnessFields(
 }
 
 /**
+ * True when a scalar can be written as a bare `key: value` line and read back
+ * unchanged.
+ *
+ * The bare scalars here (`attempt_id`, `history_id`) are written unescaped, so
+ * a value carrying a newline would render as a second block line and be read
+ * back as a different field entirely -- or, worse, shadow a real one. Callers
+ * are expected to have validated already (see `idToken` in
+ * galaxy-submission.ts); this is the last line of defence before the bytes
+ * land, because these fields will also be written by the reconcile and
+ * enrichment passes that don't exist yet.
+ */
+function isBareScalar(value: string): boolean {
+  return value.length > 0 && !/[\s\u0000-\u001f\u007f-\u009f]/.test(value);
+}
+
+/**
  * Render the harness fields as block lines. Only defined fields are emitted,
- * so a block written before these existed round-trips byte-identical.
+ * so a block written before these existed round-trips byte-identical. A scalar
+ * that cannot be represented on one line is dropped rather than written: a
+ * missing field reads as unknown provenance, while a broken one corrupts the
+ * block around it.
  */
 export function renderHarnessFieldLines(fields: HarnessBlockFields): string[] {
   const lines: string[] = [];
-  if (fields.attemptId) lines.push(`attempt_id: ${fields.attemptId}`);
-  if (fields.historyId) lines.push(`history_id: ${fields.historyId}`);
+  if (fields.attemptId && isBareScalar(fields.attemptId)) {
+    lines.push(`attempt_id: ${fields.attemptId}`);
+  }
+  if (fields.historyId && isBareScalar(fields.historyId)) {
+    lines.push(`history_id: ${fields.historyId}`);
+  }
   if (fields.submittedBy) lines.push(`submitted_by: ${fields.submittedBy}`);
   if (fields.serverVerified !== undefined) {
     lines.push(`server_verified: ${fields.serverVerified ? "true" : "false"}`);

@@ -461,3 +461,111 @@ describe("resolveResultPayload", () => {
     expect(out.reason).toContain("spill file");
   });
 });
+
+/**
+ * Every case here is one an adversarial review turned up against the first
+ * version of these parsers, and each one made the harness record something
+ * Galaxy had not said. They are the regression fence for "never guess an id".
+ */
+describe("parse: refusing ids the notebook cannot hold", () => {
+  it("rejects an id carrying a newline", () => {
+    // The blocks are `key: value` lines and ids are written unescaped, so this
+    // rendered a SECOND `job_id:` line and the parser -- last key wins -- read
+    // back "other", an id Galaxy never returned.
+    const out = parse(
+      "galaxy_run_tool",
+      {},
+      mcpResult({
+        data: { jobs: [{ id: "expected00000001\njob_id: other00000000002" }] },
+        success: true,
+      }),
+    );
+    expect(out.ok).toBe(false);
+  });
+
+  it("rejects an invocation id carrying a newline", () => {
+    const out = parse(
+      "galaxy_invoke_workflow",
+      {},
+      mcpResult({
+        data: {
+          id: "ff1e2d3c4b5a6978\ninvocation_id: 0000000000000000",
+          model_class: "WorkflowInvocation",
+        },
+        success: true,
+      }),
+    );
+    expect(out.ok).toBe(false);
+  });
+
+  it("rejects ids with tabs, control characters, or absurd length", () => {
+    for (const id of ["a\tb", "a\u0000b", "a b", "x".repeat(600)]) {
+      expect(parse("galaxy_run_tool", {}, mcpResult({ data: { jobs: [{ id }] } })).ok).toBe(false);
+    }
+  });
+
+  it("rejects a job entry whose model_class says it is not a job", () => {
+    // An invocation id in a job block sends the pollers to
+    // /api/jobs/<invocation id>, which fails quietly forever.
+    const out = parse(
+      "galaxy_run_tool",
+      {},
+      mcpResult({
+        data: { jobs: [{ id: "ff1e2d3c4b5a6978", model_class: "WorkflowInvocation" }] },
+        success: true,
+      }),
+    );
+    expect(out.ok).toBe(false);
+  });
+
+  it("still records a job entry that omits model_class", () => {
+    const out = parse("galaxy_run_tool", {}, mcpResult({ data: { jobs: [{ id: "j1" }] } }));
+    expect(out.ok).toBe(true);
+  });
+
+  it("accepts success only when it is absent or literally true", () => {
+    for (const success of ['"false"', "0", "null", '"true"', "1"]) {
+      const out = parse(
+        "galaxy_run_tool",
+        {},
+        mcpResult(JSON.parse(`{"success": ${success}, "data": {"jobs": [{"id": "j1"}]}}`)),
+      );
+      expect(out.ok, `success: ${success}`).toBe(false);
+    }
+    expect(parse("galaxy_run_tool", {}, mcpResult({ data: { jobs: [{ id: "j1" }] } })).ok).toBe(
+      true,
+    );
+    expect(
+      parse("galaxy_run_tool", {}, mcpResult({ success: true, data: { jobs: [{ id: "j1" }] } })).ok,
+    ).toBe(true);
+  });
+
+  it("records where Galaxy put the jobs, not where they were asked to go", () => {
+    const out = parse(
+      "galaxy_run_tool",
+      { history_id: "requested0000001" },
+      mcpResult({ data: { jobs: [{ id: "j1", history_id: "actual0000000001" }] } }),
+    );
+    expect(out.ok && out.submission.historyId).toBe("actual0000000001");
+  });
+
+  it("falls back to the requested history only when the jobs name none", () => {
+    const out = parse(
+      "galaxy_run_tool",
+      { history_id: "requested0000001" },
+      mcpResult({ data: { jobs: [{ id: "j1" }] } }),
+    );
+    expect(out.ok && out.submission.historyId).toBe("requested0000001");
+  });
+
+  it("will not preserve the agent's own definition as a created user tool", () => {
+    // With no stored representation there is nothing server-side to keep, and
+    // filing the agent's draft under a harness record would misattribute it.
+    const out = parse(
+      "galaxy_create_user_tool",
+      { representation: { id: "guessed", shell_command: "whatever" } },
+      mcpResult({ data: { uuid: "8d5f1c2e-9a0b-4c3d-8e7f-1a2b3c4d5e6f" }, success: true }),
+    );
+    expect(out.ok).toBe(false);
+  });
+});
