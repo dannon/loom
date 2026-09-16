@@ -28,6 +28,7 @@
  * ```
  */
 
+import { appendBlock } from "./notebook-writer";
 import {
   blockLine,
   mergeHarnessFields,
@@ -311,9 +312,7 @@ export function upsertJobBlock(
     return [...before, ...newBlock, ...after].join("\n");
   }
 
-  const trimmed = content.replace(/\s+$/, "");
-  const sep = trimmed.length > 0 ? "\n\n" : "";
-  return trimmed + sep + newBlock.join("\n") + "\n";
+  return appendBlock(content, newBlock);
 }
 
 /**

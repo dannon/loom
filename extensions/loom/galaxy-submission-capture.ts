@@ -34,7 +34,7 @@ import { stringify as stringifyYaml } from "yaml";
 import { appendActivityEvent } from "./activity";
 import { getGalaxyConfig } from "./galaxy-api";
 import { locateJobBlock, upsertJobBlock, type JobYaml } from "./galaxy-job-block";
-import { upsertUdtBlock } from "./galaxy-udt-block";
+import { hasUdtBlock, upsertUdtBlock } from "./galaxy-udt-block";
 import {
   isSubmissionTool,
   parseGalaxyResultEnvelope,
@@ -251,13 +251,15 @@ async function writeBlocks(
   const replayWouldOverwrite = (
     content: string,
     id: string,
-    kind: "invocation" | "job",
+    kind: "invocation" | "job" | "udt",
   ): boolean => {
     if (!dispatch.replayed) return false;
     const present =
       kind === "invocation"
         ? locateInvocationBlock(content, id).present
-        : locateJobBlock(content, id).present;
+        : kind === "job"
+          ? locateJobBlock(content, id).present
+          : hasUdtBlock(content, id);
     if (present) replayCollisions.push(id);
     return present;
   };
@@ -310,7 +312,11 @@ async function writeBlocks(
       });
     }
 
-    if (submission.udt && udtDefinition) {
+    if (
+      submission.udt &&
+      udtDefinition &&
+      !replayWouldOverwrite(next, submission.udt.uuid, "udt")
+    ) {
       next = upsertUdtBlock(next, {
         toolId: submission.udt.toolId,
         toolUuid: submission.udt.uuid,

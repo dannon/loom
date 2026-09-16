@@ -11,6 +11,7 @@ import { randomBytes } from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 import {
+  appendIndexOutsideOpenFence,
   blockLine,
   mergeHarnessFields,
   parseHarnessFields,
@@ -420,7 +421,21 @@ export function upsertInvocationBlock(
     return [...before, ...newBlock, ...after].join("\n");
   }
 
-  // Append at end with separator
+  return appendBlock(content, newBlock);
+}
+
+/**
+ * Append a rendered block, or slot it in ahead of an unclosed fence so its own
+ * closing line cannot become that fence's. See `appendIndexOutsideOpenFence`.
+ */
+export function appendBlock(content: string, newBlock: string[]): string {
+  const lines = content.split("\n");
+  const at = appendIndexOutsideOpenFence(lines);
+  if (at < lines.length) {
+    const before = lines.slice(0, at).join("\n").replace(/\s+$/, "");
+    const sep = before.length > 0 ? "\n\n" : "";
+    return `${before}${sep}${newBlock.join("\n")}\n\n${lines.slice(at).join("\n")}`;
+  }
   const trimmed = content.replace(/\s+$/, "");
   const sep = trimmed.length > 0 ? "\n\n" : "";
   return trimmed + sep + newBlock.join("\n") + "\n";

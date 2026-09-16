@@ -525,6 +525,32 @@ describe("a replayed submission claims nothing about a server", () => {
     expect(skipped?.payload.ids).toEqual(["ff1e2d3c4b5a6978"]);
   });
 
+  it("refuses to overwrite a user-defined tool block that is already there", async () => {
+    // The UDT block is keyed by uuid and was outside the first collision
+    // check: a replay of the same creation rewrote a real block's anchor,
+    // timestamp and attempt id with fixture values.
+    await handleSubmissionResult("live-udt", "galaxy_create_user_tool", mcpResult(UDT), false, {
+      args: {},
+      stepAnchor: "plan-a-step-2",
+    });
+    const before = findUdtBlocks(notebook())[0];
+
+    await handleSubmissionResult("replay-udt", "galaxy_create_user_tool", mcpResult(UDT), false, {
+      args: {},
+      stepAnchor: "plan-a-step-9",
+      replayed: true,
+    });
+
+    const blocks = findUdtBlocks(notebook());
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].notebookAnchor).toBe("plan-a-step-2");
+    expect(blocks[0].attemptId).toBe(before.attemptId);
+    expect(blocks[0].createdAt).toBe(before.createdAt);
+    expect(activity().find((e) => e.kind === "submission.replay_skipped")?.payload.ids).toContain(
+      "8d5f1c2e-9a0b-4c3d-8e7f-1a2b3c4d5e6f",
+    );
+  });
+
   it("still claims both when the submission was really watched", async () => {
     await handleSubmissionResult("live-0", "galaxy_invoke_workflow", mcpResult(INVOCATION), false, {
       args: {},

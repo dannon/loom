@@ -26,6 +26,12 @@ import {
   type JobYaml,
 } from "../extensions/loom/galaxy-job-block";
 import { UnrenderableBlockValue } from "../extensions/loom/harness-block-fields";
+import {
+  findUdtBlocks,
+  renderUdtYaml,
+  upsertUdtBlock,
+  type UdtYaml,
+} from "../extensions/loom/galaxy-udt-block";
 import { parseInvocationBlocks } from "../app/src/renderer/galaxy-invocations.js";
 
 const INVOCATION: InvocationYaml = {
@@ -188,6 +194,63 @@ describe("a fence that never closes is not a block", () => {
     expect(findJobBlocks(`# Notes\n\n${unterminated(renderJobYaml(JOB))}\n${TAIL}`)).toHaveLength(
       0,
     );
+  });
+
+  it("survives a second update, which is where the deletion used to reappear", () => {
+    // Skipping the orphan is not enough on its own: appending after it makes
+    // the new block's closing fence close the orphan, so the orphan, the prose
+    // and the new block read as one range -- and the next write replaces all
+    // of it. The new block goes in ahead of the orphan instead.
+    const content = `# Notes\n\n${unterminated(renderInvocationYaml(INVOCATION))}\n${TAIL}`;
+    const once = upsertInvocationBlock(content, { ...INVOCATION, label: "first" });
+    expect(once).toContain("KEEP ME");
+    const twice = upsertInvocationBlock(once, { ...INVOCATION, label: "second" });
+    expect(twice).toContain("KEEP ME");
+    expect(twice).toContain("## Irreplaceable interpretation");
+    const parsed = findInvocationBlocks(twice);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].label).toBe("second");
+  });
+
+  it("survives a second update on the job side too", () => {
+    const content = `# Notes\n\n${unterminated(renderJobYaml(JOB))}\n${TAIL}`;
+    const twice = upsertJobBlock(upsertJobBlock(content, { ...JOB, label: "first" }), {
+      ...JOB,
+      label: "second",
+    });
+    expect(twice).toContain("KEEP ME");
+    expect(findJobBlocks(twice)).toHaveLength(1);
+  });
+
+  it("does not append inside a half-written block of the user's own", () => {
+    // Not only Loom's fences: a Python block someone left open swallows an
+    // appended record just as well.
+    const content = "# Notes\n\n```python\nprint('still writing this')\n";
+    const next = upsertInvocationBlock(content, INVOCATION);
+    expect(findInvocationBlocks(next)).toHaveLength(1);
+    expect(next).toContain("still writing this");
+    expect(next.indexOf("loom-invocation")).toBeLessThan(next.indexOf("```python"));
+  });
+
+  it("covers the loom-udt block, which the first pass at this missed", () => {
+    const udt: UdtYaml = {
+      toolId: "my_tool",
+      toolUuid: "4f6d2a1e-0000-4000-8000-000000000001",
+      definition: ".loom/provenance/udt/my_tool.4f6d2a1e.yaml",
+      createdAt: "2026-09-16T15:30:00Z",
+      notebookAnchor: "plan-a-step-1",
+    };
+    const content = `# Notes\n\n${unterminated(renderUdtYaml(udt))}\n${TAIL}`;
+    expect(findUdtBlocks(content)).toHaveLength(0);
+
+    const twice = upsertUdtBlock(upsertUdtBlock(content, udt), {
+      ...udt,
+      notebookAnchor: "plan-a-step-2",
+    });
+    expect(twice).toContain("KEEP ME");
+    const parsed = findUdtBlocks(twice);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].notebookAnchor).toBe("plan-a-step-2");
   });
 
   it("still reads the block before an unterminated one", () => {

@@ -33,6 +33,8 @@ export interface UdtYaml {
   attemptId?: string;
 }
 
+import { appendBlock } from "./notebook-writer";
+
 const UDT_FENCE_OPEN = "```loom-udt";
 const UDT_FENCE_CLOSE = "```";
 
@@ -98,14 +100,25 @@ export function findUdtBlocks(content: string): UdtYaml[] {
       const start = i + 1;
       let end = start;
       while (end < lines.length && lines[end].trim() !== UDT_FENCE_CLOSE) end++;
-      const parsed = parseUdtBlock(lines.slice(start, end));
-      if (parsed) out.push(parsed);
+      // A fence that never closes is not a block -- the same rule the
+      // invocation and job scanners follow, and for the same reason: the
+      // upsert replaces what the scanner calls the block, and a range ending
+      // at EOF takes the rest of the notebook with it.
+      if (end < lines.length) {
+        const parsed = parseUdtBlock(lines.slice(start, end));
+        if (parsed) out.push(parsed);
+      }
       i = end + 1;
     } else {
       i++;
     }
   }
   return out;
+}
+
+/** True when a `loom-udt` block for this uuid is already in the notebook. */
+export function hasUdtBlock(content: string, toolUuid: string): boolean {
+  return findUdtBlocks(content).some((b) => b.toolUuid === toolUuid);
 }
 
 /** Upsert a `loom-udt` block keyed by `tool_uuid`. */
@@ -119,9 +132,11 @@ export function upsertUdtBlock(content: string, udt: UdtYaml): string {
       const start = i;
       let end = start + 1;
       while (end < lines.length && lines[end].trim() !== UDT_FENCE_CLOSE) end++;
-      const parsed = parseUdtBlock(lines.slice(start + 1, end));
-      if (parsed && parsed.toolUuid === udt.toolUuid) {
-        return [...lines.slice(0, start), ...newBlock, ...lines.slice(end + 1)].join("\n");
+      if (end < lines.length) {
+        const parsed = parseUdtBlock(lines.slice(start + 1, end));
+        if (parsed && parsed.toolUuid === udt.toolUuid) {
+          return [...lines.slice(0, start), ...newBlock, ...lines.slice(end + 1)].join("\n");
+        }
       }
       i = end + 1;
     } else {
@@ -129,7 +144,5 @@ export function upsertUdtBlock(content: string, udt: UdtYaml): string {
     }
   }
 
-  const trimmed = content.replace(/\s+$/, "");
-  const sep = trimmed.length > 0 ? "\n\n" : "";
-  return trimmed + sep + newBlock.join("\n") + "\n";
+  return appendBlock(content, newBlock);
 }

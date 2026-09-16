@@ -186,6 +186,35 @@ function isOneLine(value: string): boolean {
  * fields -- `label`, `summary` -- go through the block's own quoting instead,
  * because a colon in a human label is ordinary.
  */
+/**
+ * Where a new block can be appended without landing inside a fence that never
+ * closed.
+ *
+ * Skipping an unterminated block is not enough on its own. Append after one
+ * and the new block's own closing fence becomes the orphan's closing fence, so
+ * the orphan, whatever prose sits between them, and the new block all read as
+ * a single block -- and the *next* write replaces that whole range and takes
+ * the prose with it. Deletion deferred by one update is still deletion.
+ *
+ * So a block goes in before the orphan instead. The orphan stays orphaned and
+ * stays the user's problem to fix, the prose after it stays where they put it,
+ * and the run still gets recorded, which matters more than tidy placement:
+ * refusing the write over a stray backtick would lose the record of something
+ * that is actually running.
+ *
+ * Any ``` line counts, not just Loom's own openers -- a half-written Python
+ * block swallows an appended record exactly as well as a half-written
+ * `loom-job` one.
+ */
+export function appendIndexOutsideOpenFence(lines: readonly string[]): number {
+  let openedAt: number | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].trimStart().startsWith("```")) continue;
+    openedAt = openedAt === null ? i : null;
+  }
+  return openedAt ?? lines.length;
+}
+
 export function blockLine(key: string, value: string, field = key): string {
   if (!isOneLine(value)) throw new UnrenderableBlockValue(field);
   return `${key}: ${value}`;
