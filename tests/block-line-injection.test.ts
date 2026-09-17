@@ -267,6 +267,52 @@ describe("a fence that never closes is not a block", () => {
     expect(findInvocationBlocks(next)[0].label).toBe("annotated");
   });
 
+  it("will not let one type's orphan claim another type's closing fence", () => {
+    // The ambiguous shape: an unclosed loom-job, a loom-invocation opener, then
+    // a bare ``` that could belong to either. Reading it as the invocation's
+    // made the user's lines part of its body, and the next write replaced them.
+    // A real block's body is key/value lines, so this one is not a block.
+    const content = [
+      "# Notes",
+      "",
+      "```loom-job",
+      `job_id: ${JOB.jobId}`,
+      "```loom-invocation",
+      `invocation_id: ${INVOCATION.invocationId}`,
+      "## Irreplaceable interpretation",
+      "KEEP ME",
+      "```",
+      "",
+    ].join("\n");
+
+    const once = upsertInvocationBlock(content, { ...INVOCATION, label: "first" });
+    expect(once).toContain("KEEP ME");
+    const twice = upsertInvocationBlock(once, { ...INVOCATION, label: "second" });
+    expect(twice).toContain("KEEP ME");
+    expect(twice).toContain("## Irreplaceable interpretation");
+
+    const parsed = findInvocationBlocks(twice);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].label).toBe("second");
+    // and the new block went in ahead of the orphan, not after it
+    expect(twice.indexOf("label: second")).toBeLessThan(twice.indexOf("```loom-job"));
+  });
+
+  it("refuses a range whose body holds prose, on every block type", () => {
+    const body = (opener: string, idLine: string) =>
+      ["# Notes", "", opener, idLine, "not a field", "```", ""].join("\n");
+    expect(
+      findInvocationBlocks(body("```loom-invocation", `invocation_id: ${INVOCATION.invocationId}`)),
+    ).toHaveLength(0);
+    expect(findJobBlocks(body("```loom-job", `job_id: ${JOB.jobId}`))).toHaveLength(0);
+    expect(findUdtBlocks(body("```loom-udt", "tool_uuid: 4f6d2a1e"))).toHaveLength(0);
+    expect(
+      parseInvocationBlocks(
+        body("```loom-invocation", `invocation_id: ${INVOCATION.invocationId}`),
+      ),
+    ).toHaveLength(0);
+  });
+
   it("covers the loom-udt block, which the first pass at this missed", () => {
     const udt: UdtYaml = {
       toolId: "my_tool",

@@ -70,6 +70,12 @@ function jsonArrayField<T>(raw: string | undefined): T[] | undefined {
   }
 }
 
+/** Mirror of `isBlockBodyLine` in the brain's harness-block-fields. */
+function isBlockBodyLine(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed === "" || /^[A-Za-z0-9_]+:/.test(trimmed);
+}
+
 const FENCE_OPEN = "```loom-invocation";
 const FENCE_CLOSE = "```";
 const STATUSES = new Set(["in_progress", "completed", "failed"] as const);
@@ -108,11 +114,11 @@ export function parseInvocationBlocks(content: string): Invocation[] {
     if (lines[i].trim() === FENCE_OPEN) {
       const start = i + 1;
       let end = start;
-      // Same fence grammar as the brain's scanner (scanFencedBlocks): no fence
-      // line inside the body, and an exact ``` to close. Anything else -- a
-      // run of four backticks, another opener, end of file -- means the block
-      // never closed, and an unclosed block is not a block.
-      while (end < lines.length && !lines[end].trim().startsWith(FENCE_CLOSE)) end++;
+      // Same fence grammar as the brain's scanner (scanFencedBlocks): the body
+      // is `key: value` lines and nothing else, and the close is an exact ```.
+      // Anything else -- a run of four backticks, another opener, a line of
+      // prose, end of file -- means this is not a block.
+      while (end < lines.length && isBlockBodyLine(lines[end])) end++;
       if (end >= lines.length || lines[end].trim() !== FENCE_CLOSE) {
         i = start;
         continue;

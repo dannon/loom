@@ -201,6 +201,16 @@ const LOOM_FENCE_OPENERS = [
 
 const FENCE_CLOSE = "```";
 
+/**
+ * A line that can sit in a block body: blank, or `key: value`. Everything
+ * these blocks carry is written by `renderHarnessFieldLines` and the two block
+ * renderers, which emit nothing else.
+ */
+function isBlockBodyLine(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed === "" || /^[A-Za-z0-9_]+:/.test(trimmed);
+}
+
 /** One block's line span: the opener, its body, and the closing fence. */
 export interface FenceRange {
   /** Index of the opening fence line. */
@@ -218,17 +228,23 @@ export interface FenceRange {
  * to write, or one of them hands the other a range that spans somebody else's
  * prose.
  *
- * The rule: a block opens on an exact opener line, its body holds no fence
- * line at all, and it closes on an exact ```. Anything else -- a run of four
- * backticks where the close should be, another opener, end of file -- means
- * the block never closed, and an unclosed block is not a block. Running to EOF
- * instead would make every writer treat the rest of the notebook as this
- * block's body and rewrite it away; stopping at the next opener is what keeps
- * an orphan from swallowing the real block that follows it.
+ * The rule: a block opens on an exact opener line, its body is `key: value`
+ * lines and nothing else, and it closes on an exact ```. Anything else -- a
+ * run of four backticks where the close should be, another opener, a line of
+ * prose, end of file -- means this is not a block. Running to EOF instead
+ * would make every writer treat the rest of the notebook as this block's body
+ * and rewrite it away; stopping at the next fence line is what keeps an orphan
+ * from swallowing the real block that follows it.
  *
- * The body can hold no fence line because these blocks are `key: value` lines
- * and nothing else. A value that would look like one is refused by `blockLine`
- * before it is ever written.
+ * The body rule is what settles ownership when fences of two different types
+ * overlap. An unclosed `loom-job` followed by a `loom-invocation` opener and
+ * then a bare ``` is ambiguous -- the close could belong to either -- and
+ * reading it as the invocation's meant its "body" swallowed whatever the user
+ * had written in between, which the next write then replaced. A real block's
+ * body never contains prose, so requiring that is both true to what these
+ * blocks are and exactly the check that refuses the ambiguous case. The block
+ * is then invisible rather than rewritable: a fresh one is appended ahead of
+ * the orphan and the user's lines stay put.
  */
 export function scanFencedBlocks(lines: readonly string[], opener: string): FenceRange[] {
   const ranges: FenceRange[] = [];
@@ -240,13 +256,13 @@ export function scanFencedBlocks(lines: readonly string[], opener: string): Fenc
     }
     const start = i;
     let end = start + 1;
-    while (end < lines.length && !lines[end].trim().startsWith(FENCE_CLOSE)) end++;
+    while (end < lines.length && isBlockBodyLine(lines[end])) end++;
     if (end < lines.length && lines[end].trim() === FENCE_CLOSE) {
       ranges.push({ start, end });
       i = end + 1;
     } else {
-      // Unclosed: skip only the opener, so a fence line that ended this one
-      // still gets its own chance to open a block.
+      // Not a block: skip only the opener, so the line that ended this one
+      // still gets its own chance to open one.
       i = start + 1;
     }
   }
