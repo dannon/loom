@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  applyInvocationUpdates,
   findInvocationBlocks,
   renderInvocationYaml,
   upsertInvocationBlock,
@@ -298,6 +299,39 @@ describe("a fence that never closes is not a block", () => {
     const twice = upsertInvocationBlock(once, { ...INVOCATION, label: "second" });
     expect(twice).toContain("note: keep this interpretation");
     expect(twice).toContain("```loom-job");
+  });
+
+  it("duplicates once, not once per tick", () => {
+    // The cost of refusing to replace in the ambiguous region is one clean
+    // copy. It has to stay one: the poller rewrites the same id on every tick,
+    // and a block per tick would be its own kind of notebook damage.
+    const orphan = unterminated(
+      renderInvocationYaml({ ...INVOCATION, invocationId: "aa11bb22cc33dd44" }),
+    );
+    let content = `${orphan}\n${TAIL}\n${renderInvocationYaml(INVOCATION)}`;
+    const copies = () =>
+      findInvocationBlocks(content).filter((b) => b.invocationId === INVOCATION.invocationId)
+        .length;
+
+    for (let tick = 1; tick <= 6; tick++) {
+      content = applyInvocationUpdates(content, [
+        {
+          invocationId: INVOCATION.invocationId,
+          totalSteps: 3,
+          completedSteps: tick,
+          totalJobs: 3,
+          completedJobs: tick,
+          failedJobs: 0,
+          lastPolledAt: `2026-09-16T15:4${tick}:00Z`,
+        },
+      ]).content;
+      expect(copies()).toBeLessThanOrEqual(2);
+    }
+    for (let i = 0; i < 4; i++) {
+      content = upsertInvocationBlock(content, { ...INVOCATION, label: `rewrite ${i}` });
+      expect(copies()).toBeLessThanOrEqual(2);
+    }
+    expect(content).toContain("KEEP ME");
   });
 
   it("does not mistake prose with a colon in it for a field", () => {
