@@ -28,7 +28,7 @@
  * ```
  */
 
-import { appendBlock } from "./notebook-writer";
+import { appendBlock, isUnambiguousRange } from "./notebook-writer";
 import {
   blockLine,
   scanFencedBlocks,
@@ -270,7 +270,9 @@ export function upsertJobBlock(
   const ranges = findJobBlockRanges(content);
   const lines = content.split("\n");
 
-  const existing = ranges.find((b) => b.jobId === job.jobId);
+  // Only a range no unclosed fence precedes can be replaced -- see
+  // isUnambiguousRange.
+  const existing = ranges.find((b) => b.jobId === job.jobId && isUnambiguousRange(lines, b.start));
   // Read off the block this write replaces, not a second scan of the file --
   // see the same comment in `upsertInvocationBlock`.
   const onDiskRaw = existing ? rawJobFields(lines.slice(existing.start + 1, existing.end)) : null;

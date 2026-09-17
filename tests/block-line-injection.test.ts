@@ -251,27 +251,31 @@ describe("a fence that never closes is not a block", () => {
     expect(findInvocationBlocks(twice)).toHaveLength(1);
   });
 
-  it("does not let an orphan swallow the valid block after it", () => {
-    // An orphan that runs into another opener is unterminated, not a block
-    // stretching to the next close. Without that, the orphan's range covered
-    // the real block and the prose between them, and a write to the real id
-    // replaced the lot.
+  it("leaves a block in the ambiguous region alone and writes a clean one above", () => {
+    // Past an unclosed opener the scanners cannot tell whose closing fence is
+    // whose, so a block there is not replaced -- it is left exactly as it is
+    // and a clean copy goes in ahead of the orphan. One duplicate in an
+    // already-broken notebook, and the clean copy is unambiguous, so it is the
+    // one every write after this finds.
     const content = `${unterminated(renderInvocationYaml({ ...INVOCATION, invocationId: "aa11bb22cc33dd44" }))}\n${TAIL}\n${renderInvocationYaml(INVOCATION)}`;
-    const parsed = findInvocationBlocks(content);
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0].invocationId).toBe(INVOCATION.invocationId);
 
-    const next = upsertInvocationBlock(content, { ...INVOCATION, label: "annotated" });
-    expect(next).toContain("KEEP ME");
-    expect(findInvocationBlocks(next)).toHaveLength(1);
-    expect(findInvocationBlocks(next)[0].label).toBe("annotated");
+    const once = upsertInvocationBlock(content, { ...INVOCATION, label: "first" });
+    expect(once).toContain("KEEP ME");
+    expect(once.indexOf("label: first")).toBeLessThan(
+      once.indexOf("```loom-invocation\ninvocation_id: aa11bb22cc33dd44"),
+    );
+
+    // Second write finds the clean copy and rewrites it in place.
+    const twice = upsertInvocationBlock(once, { ...INVOCATION, label: "second" });
+    expect(twice).toContain("KEEP ME");
+    expect(twice.split("label: second")).toHaveLength(2);
+    expect(twice.split("label: first")).toHaveLength(1);
   });
 
-  it("will not let one type's orphan claim another type's closing fence", () => {
-    // The ambiguous shape: an unclosed loom-job, a loom-invocation opener, then
-    // a bare ``` that could belong to either. Reading it as the invocation's
-    // made the user's lines part of its body, and the next write replaced them.
-    // A real block's body is key/value lines, so this one is not a block.
+  it("will not replace field-shaped prose sitting in an ambiguous body", () => {
+    // The narrowest version of the cross-type case: the prose is lowercase and
+    // colon-terminated, so no body-shape rule can tell it from a field this
+    // version has simply never heard of. Refusing to replace is what keeps it.
     const content = [
       "# Notes",
       "",
@@ -279,38 +283,21 @@ describe("a fence that never closes is not a block", () => {
       `job_id: ${JOB.jobId}`,
       "```loom-invocation",
       `invocation_id: ${INVOCATION.invocationId}`,
-      "## Irreplaceable interpretation",
-      "KEEP ME",
+      "galaxy_server_url: https://usegalaxy.org",
+      "notebook_anchor: plan-a-step-1",
+      "label: captured",
+      "submitted_at: 2026-09-16T15:30:00Z",
+      "status: in_progress",
+      "note: keep this interpretation",
       "```",
       "",
     ].join("\n");
 
     const once = upsertInvocationBlock(content, { ...INVOCATION, label: "first" });
-    expect(once).toContain("KEEP ME");
+    expect(once).toContain("note: keep this interpretation");
     const twice = upsertInvocationBlock(once, { ...INVOCATION, label: "second" });
-    expect(twice).toContain("KEEP ME");
-    expect(twice).toContain("## Irreplaceable interpretation");
-
-    const parsed = findInvocationBlocks(twice);
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0].label).toBe("second");
-    // and the new block went in ahead of the orphan, not after it
-    expect(twice.indexOf("label: second")).toBeLessThan(twice.indexOf("```loom-job"));
-  });
-
-  it("refuses a range whose body holds prose, on every block type", () => {
-    const body = (opener: string, idLine: string) =>
-      ["# Notes", "", opener, idLine, "not a field", "```", ""].join("\n");
-    expect(
-      findInvocationBlocks(body("```loom-invocation", `invocation_id: ${INVOCATION.invocationId}`)),
-    ).toHaveLength(0);
-    expect(findJobBlocks(body("```loom-job", `job_id: ${JOB.jobId}`))).toHaveLength(0);
-    expect(findUdtBlocks(body("```loom-udt", "tool_uuid: 4f6d2a1e"))).toHaveLength(0);
-    expect(
-      parseInvocationBlocks(
-        body("```loom-invocation", `invocation_id: ${INVOCATION.invocationId}`),
-      ),
-    ).toHaveLength(0);
+    expect(twice).toContain("note: keep this interpretation");
+    expect(twice).toContain("```loom-job");
   });
 
   it("does not mistake prose with a colon in it for a field", () => {

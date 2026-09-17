@@ -383,7 +383,9 @@ export function upsertInvocationBlock(
   const blocks = findInvocationBlockRanges(content);
   const lines = content.split("\n");
 
-  const existing = blocks.find((b) => b.invocationId === inv.invocationId);
+  const existing = blocks.find(
+    (b) => b.invocationId === inv.invocationId && isUnambiguousRange(lines, b.start),
+  );
   // Provenance comes off the block this write is about to replace, read from
   // its raw lines rather than from a second scan of the file. A scan can land
   // on a different block with the same id, and it drops a block the strict
@@ -406,6 +408,28 @@ export function upsertInvocationBlock(
   }
 
   return appendBlock(content, newBlock);
+}
+
+/**
+ * Whether a block starting here can be replaced in place.
+ *
+ * Only when no Loom fence before it is still open. Past an unclosed opener the
+ * scanners cannot tell whose closing fence is whose: a bare ``` after an
+ * unterminated `loom-job` and a `loom-invocation` opener could end either one,
+ * and reading it as the invocation's means its "body" runs through whatever
+ * the user wrote in between. Field-shaped prose (`note: keep this`) sits
+ * inside that body and a replacement would take it with it.
+ *
+ * Refusing to replace is the answer rather than a stricter body rule, because
+ * "every line is a field this version knows" is not a property we can require:
+ * a notebook written by a newer Loom carries fields this one has never heard
+ * of, and the parsers ignore unknown keys on purpose. So a block in the
+ * ambiguous region is left exactly as it is and a clean one is written above
+ * the orphan. That costs one duplicate in an already-broken notebook, and the
+ * duplicate is unambiguous, so it is the one every write after this finds.
+ */
+export function isUnambiguousRange(lines: readonly string[], start: number): boolean {
+  return start < appendIndexOutsideOpenFence(lines);
 }
 
 /**
