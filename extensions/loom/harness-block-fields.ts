@@ -202,13 +202,21 @@ const LOOM_FENCE_OPENERS = [
 const FENCE_CLOSE = "```";
 
 /**
- * A line that can sit in a block body: blank, or `key: value`. Everything
- * these blocks carry is written by `renderHarnessFieldLines` and the two block
- * renderers, which emit nothing else.
+ * A line that can sit in a block body: blank, or a field.
+ *
+ * "Field" is the block parsers' own key grammar -- snake_case at the start of
+ * the line -- rather than anything with a colon in it. `Note: see below` is
+ * prose that would pass a looser check and is not a field to any reader here,
+ * and an indented key is not one either: `parseInvocationBlock` anchors its
+ * match at the line start, so a reader would skip it while a looser body rule
+ * counted it.
+ *
+ * Every line these blocks carry comes from `renderHarnessFieldLines`,
+ * `renderInvocationYaml`, `renderJobYaml` or `renderUdtYaml`, all of which
+ * emit exactly this shape.
  */
 function isBlockBodyLine(line: string): boolean {
-  const trimmed = line.trim();
-  return trimmed === "" || /^[A-Za-z0-9_]+:/.test(trimmed);
+  return line.trim() === "" || /^[a-z0-9_]+:/.test(line);
 }
 
 /** One block's line span: the opener, its body, and the closing fence. */

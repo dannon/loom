@@ -313,6 +313,71 @@ describe("a fence that never closes is not a block", () => {
     ).toHaveLength(0);
   });
 
+  it("does not mistake prose with a colon in it for a field", () => {
+    // A looser body rule -- anything with a colon -- would read `Note: ...` as
+    // a field and let the range swallow it. The rule is the parsers' own key
+    // grammar: snake_case, at the start of the line.
+    for (const line of ["Note: see below", "TODO: rerun this", "  indented_key: x", "- a step"]) {
+      const content = [
+        "```loom-invocation",
+        `invocation_id: ${INVOCATION.invocationId}`,
+        line,
+        "```",
+        "",
+      ].join("\n");
+      expect(findInvocationBlocks(content)).toHaveLength(0);
+      expect(parseInvocationBlocks(content)).toHaveLength(0);
+      expect(upsertInvocationBlock(content, INVOCATION)).toContain(line);
+    }
+  });
+
+  it("still reads every shape the renderers actually emit", () => {
+    // The body rule must not refuse a real block. These are the widest bodies
+    // the three renderers produce.
+    const inv = renderInvocationYaml({
+      ...INVOCATION,
+      summary: "",
+      serverVerified: false,
+      totalSteps: 4,
+      completedSteps: 2,
+      totalJobs: 9,
+      completedJobs: 5,
+      failedJobs: 1,
+      lastPolledAt: "2026-09-16T15:34:00Z",
+      attemptId: "01K5CJ6XWQ8QK4S2M7E9V0TZ3B",
+      historyId: "0a248a1f62a0cc04",
+      submittedBy: "harness",
+      enrichment: "complete",
+      enrichmentAttempts: 2,
+      jobs: [{ jobId: "job1", toolId: "bwa_mem", toolVersion: "0.7.17", state: "ok" }],
+      drift: [{ toolId: "bwa_mem", from: "0.7.17", to: "0.7.18" }],
+    });
+    expect(findInvocationBlocks(inv)).toHaveLength(1);
+    expect(parseInvocationBlocks(inv)).toHaveLength(1);
+
+    const job = renderJobYaml({
+      ...JOB,
+      toolId: "bwa_mem",
+      summary: "step 3: align reads",
+      serverVerified: true,
+      galaxyState: "running",
+      lastPolledAt: "2026-09-16T15:34:00Z",
+      attemptId: "01K5CJ6XWQ8QK4S2M7E9V0TZ3B",
+      submittedBy: "harness",
+    });
+    expect(findJobBlocks(job)).toHaveLength(1);
+
+    const udt = renderUdtYaml({
+      toolId: "my_tool",
+      toolUuid: "4f6d2a1e-0000-4000-8000-000000000001",
+      definition: ".loom/provenance/udt/my_tool.4f6d2a1e.yaml",
+      createdAt: "2026-09-16T15:30:00Z",
+      notebookAnchor: "plan-a-step-1",
+      attemptId: "01K5CJ6XWQ8QK4S2M7E9V0TZ3B",
+    });
+    expect(findUdtBlocks(udt)).toHaveLength(1);
+  });
+
   it("covers the loom-udt block, which the first pass at this missed", () => {
     const udt: UdtYaml = {
       toolId: "my_tool",

@@ -72,8 +72,7 @@ function jsonArrayField<T>(raw: string | undefined): T[] | undefined {
 
 /** Mirror of `isBlockBodyLine` in the brain's harness-block-fields. */
 function isBlockBodyLine(line: string): boolean {
-  const trimmed = line.trim();
-  return trimmed === "" || /^[A-Za-z0-9_]+:/.test(trimmed);
+  return line.trim() === "" || /^[a-z0-9_]+:/.test(line);
 }
 
 const FENCE_OPEN = "```loom-invocation";
