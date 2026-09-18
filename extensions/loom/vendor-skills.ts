@@ -17,6 +17,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { DEFAULT_SKILLS } from "../../shared/loom-config.js";
+import type { SkillEntry } from "./skills-discovery";
 
 /** Reserved repo name for `skills_fetch({ repo: "foundry" })`. */
 export const VENDOR_REPO_NAME = "foundry";
@@ -38,6 +40,60 @@ export interface VendorManifest {
   tag?: string | null;
   commitDate?: string;
   files: VendorManifestEntry[];
+}
+
+/**
+ * A configured repo reads from the package when it is one of the defaults and is
+ * still pointed at that default's URL and branch. Anything else -- another
+ * branch, another URL, a repo we do not ship -- is live, which is what the
+ * skill-author workflow of pointing Loom at a branch depends on.
+ *
+ * Deliberately not true for the bundled-reference name: that one is resolved
+ * before repo lookup, and a user who configures a real repo under the same name
+ * must still reach it.
+ */
+export function isBundledRepo(repo: { name: string; url: string; branch?: string }): boolean {
+  const preset = DEFAULT_SKILLS.find((d: { name: string }) => d.name === repo.name);
+  if (!preset) return false;
+  return sameRepoUrl(repo.url, preset.url) && (repo.branch || "main") === (preset.branch || "main");
+}
+
+function sameRepoUrl(a: string, b: string): boolean {
+  const norm = (u: string) =>
+    String(u ?? "")
+      .trim()
+      .replace(/\.git$/, "")
+      .replace(/\/+$/, "")
+      .toLowerCase();
+  return norm(a) === norm(b) && norm(a) !== "";
+}
+
+/** The generated router catalog, keyed by configured repo name. */
+export function readBundledCatalog(): Record<string, SkillEntry[]> | null {
+  try {
+    const raw = fs.readFileSync(path.join(vendorSkillsDir(), "_catalog.json"), "utf-8");
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== "object") return null;
+    const out: Record<string, SkillEntry[]> = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (key.startsWith("$")) continue;
+      if (Array.isArray(value)) out[key] = value as SkillEntry[];
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read one file for a bundled repo. Never touches the network, so a miss lists
+ * that repo's own skills rather than every file in the package.
+ */
+export function readBundledRepoFile(repo: { name: string }, rawPath: string): VendorReadResult {
+  const res = readVendoredSkill(rawPath);
+  if (res.ok) return res;
+  const skills = (readBundledCatalog()?.[repo.name] ?? []).map((s) => s.path);
+  return { ...res, available: skills.length ? skills : res.available };
 }
 
 /** Absolute path to the vendored skills directory (sibling of this module). */

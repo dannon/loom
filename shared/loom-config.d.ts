@@ -189,5 +189,7 @@ export function getConfigDir(): string;
 export function getConfigPath(): string;
 export function loadConfig(): LoomConfig;
 export function saveConfig(config: LoomConfig): void;
+/** The skills repos a fresh config is seeded with, and the definition of a bundled repo. */
+export const DEFAULT_SKILLS: ReadonlyArray<Required<SkillRepo>>;
 export const ALLOWED_SKILLS_PREFIX: string;
 export function isAllowedSkillUrl(url: string): boolean;

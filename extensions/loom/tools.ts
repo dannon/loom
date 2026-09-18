@@ -43,7 +43,12 @@ import {
 } from "./galaxy-api";
 import { listEnabledSkillRepos, findSkillRepo } from "./skills";
 import { fetchSkillFile, githubRawBase } from "./skills-discovery";
-import { VENDOR_REPO_NAME, readVendoredSkill } from "./vendor-skills";
+import {
+  VENDOR_REPO_NAME,
+  isBundledRepo,
+  readBundledRepoFile,
+  readVendoredSkill,
+} from "./vendor-skills";
 import { parse as parseHtml } from "node-html-parser";
 
 /**
@@ -436,6 +441,31 @@ exact file when it becomes relevant.`,
         return {
           content: [{ type: "text", text: `Error: Invalid skill path "${params.path}"` }],
           details: { error: true },
+        };
+      }
+
+      // A repo still on its shipped URL and branch is served from the package:
+      // the content was reviewed at a pinned commit and works with no network.
+      // Point it at another branch and it goes back to being fetched, which is
+      // how a skill author evaluates a change before it is merged.
+      if (isBundledRepo(repo)) {
+        const res = readBundledRepoFile(repo, cleanPath);
+        if (res.ok) {
+          return {
+            content: [{ type: "text", text: res.text }],
+            details: { repo: repo.name, path: cleanPath, length: res.text.length, bundled: true },
+          };
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `Error: ${res.error} in bundled ${repo.name}. ` +
+                `Skills in this repo: ${res.available.join(", ") || "(none)"}.`,
+            },
+          ],
+          details: { error: true, repo: repo.name, path: cleanPath },
         };
       }
 
