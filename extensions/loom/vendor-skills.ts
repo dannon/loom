@@ -75,16 +75,22 @@ export function readVendorManifest(): VendorManifest | null {
 
 /**
  * Bare names the vendor tree used before targets mirrored their upstream path.
- * A session resumed across that change still carries the old names in its
- * transcript, and these two were handed to the model by name in a failure hint,
- * so they keep resolving for one release. Delete them once 0.8.0 has shipped.
+ * A session resumed across that change still carries them in its transcript --
+ * two were named in a failure hint, and the third was listed to the model every
+ * time a fetch missed. They keep resolving for one release; delete them once
+ * 0.8.0 has shipped.
+ *
+ * Null prototype on purpose. `path` reaches here straight from the model, and a
+ * plain object answers "constructor" with a function, which is not a path.
  */
-const LEGACY_FLAT_PATHS: Record<string, string> = {
+const LEGACY_FLAT_PATHS: Record<string, string> = Object.assign(Object.create(null), {
+  "galaxy-collection-semantics.yml":
+    "debug-galaxy-workflow-output/references/notes/galaxy-collection-semantics.yml",
   "galaxy-tool-job-failure-reference.md":
     "debug-galaxy-workflow-output/references/notes/galaxy-tool-job-failure-reference.md",
   "galaxy-workflow-invocation-failure-reference.md":
     "debug-galaxy-workflow-output/references/notes/galaxy-workflow-invocation-failure-reference.md",
-};
+});
 
 export type VendorReadResult =
   { ok: true; text: string } | { ok: false; error: string; available: string[] };
@@ -94,6 +100,9 @@ export function readVendoredSkill(rawPath: string): VendorReadResult {
   const available = (readVendorManifest()?.files ?? [])
     .map((f) => f.target)
     .filter((t) => t !== "_manifest.json");
+  if (typeof rawPath !== "string") {
+    return { ok: false, error: `Invalid vendored skill path`, available };
+  }
   const abs = resolveVendorPath(LEGACY_FLAT_PATHS[rawPath] ?? rawPath);
   if (!abs) return { ok: false, error: `Invalid vendored skill path "${rawPath}"`, available };
   try {

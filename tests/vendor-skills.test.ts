@@ -37,17 +37,34 @@ describe("vendored skills", () => {
     if (res.ok) expect(res.text).toContain("Invocation Message Reasons");
   });
 
-  it("still resolves the two bare names a resumed session may be holding", () => {
-    // The tree was flat before targets mirrored their upstream path, and both
-    // of these were handed to the model by name in a failed-invocation hint.
+  it("still resolves the bare names a resumed session may be holding", () => {
+    // The tree was flat before targets mirrored their upstream path. Two of
+    // these were handed to the model by name in a failed-invocation hint; the
+    // third was listed to it every time a fetch missed.
     for (const [legacy, current] of [
       ["galaxy-workflow-invocation-failure-reference.md", INVOCATION_FAILURE_REFERENCE],
       ["galaxy-tool-job-failure-reference.md", JOB_FAILURE_REFERENCE],
+      [
+        "galaxy-collection-semantics.yml",
+        "debug-galaxy-workflow-output/references/notes/galaxy-collection-semantics.yml",
+      ],
     ]) {
       const viaLegacy = readVendoredSkill(legacy);
       const viaCurrent = readVendoredSkill(current);
+      expect(viaCurrent.ok).toBe(true);
       expect(viaLegacy.ok).toBe(true);
       if (viaLegacy.ok && viaCurrent.ok) expect(viaLegacy.text).toBe(viaCurrent.text);
+    }
+  });
+
+  it("answers a one-word path with the available list instead of throwing", () => {
+    // `path` comes from the model. A plain-object alias lookup answers
+    // "constructor" with a function, and the structured miss the caller expects
+    // turns into an exception out of the tool.
+    for (const guess of ["toString", "constructor", "hasOwnProperty", "__proto__"]) {
+      const res = readVendoredSkill(guess);
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.available.length).toBeGreaterThan(0);
     }
   });
 
@@ -59,12 +76,32 @@ describe("vendored skills", () => {
     }
   });
 
-  it("carries no local-checkout paths -- the sync rewrites them", () => {
+  it("names no path that only exists on the note author's machine", () => {
+    // Not just the tilde form the rewrite looks for: the expanded
+    // /Users/<someone>/ and /home/<someone>/ forms are the ones that also carry
+    // an account name into a published package.
+    for (const f of readVendorManifest()!.files) {
+      const text = fs.readFileSync(path.join(vendorSkillsDir(), f.target), "utf-8");
+      expect(text).not.toMatch(/~\/projects\/repositories/);
+      expect(text).not.toMatch(/\/(?:Users|home)\/[A-Za-z0-9._-]+\//);
+    }
+  });
+
+  it("leaves no wiki-link in prose, and no bracket pair inside a code fence", () => {
+    // Stated as the rule rather than as "no [[ anywhere": a fenced `[[a, b]]`
+    // is a 2D array literal the transform is required to leave alone, so the
+    // blanket assertion would go red the first time such a file is vendored.
     for (const f of readVendorManifest()!.files) {
       if (!f.target.endsWith(".md")) continue;
       const text = fs.readFileSync(path.join(vendorSkillsDir(), f.target), "utf-8");
-      expect(text).not.toContain("~/projects/repositories");
-      expect(text).not.toMatch(/\[\[/);
+      let fenced = false;
+      for (const line of text.split("\n")) {
+        if (/^ {0,3}(?:`{3,}|~{3,})/.test(line)) {
+          fenced = !fenced;
+          continue;
+        }
+        if (!fenced) expect(line).not.toMatch(/\[\[[^\]]+\]\]/);
+      }
     }
   });
 
