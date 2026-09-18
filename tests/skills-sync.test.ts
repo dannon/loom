@@ -11,12 +11,14 @@
 import { describe, it, expect } from "vitest";
 import {
   REPO_BLOB_BASE,
+  applyTransforms,
   checkVendored,
+  matchesPattern,
   rewriteLocalPaths,
+  selectFiles,
   sha256,
   stripWikiLinks,
-  transform,
-} from "../scripts/sync-foundry-skills.mjs";
+} from "../scripts/sync-skills.mjs";
 
 describe("sha256", () => {
   // The Windows CI leg checks out CRLF. Hashing the bytes on disk would fail
@@ -86,13 +88,17 @@ describe("rewriteLocalPaths", () => {
     ).toBe(`see ${REPO_BLOB_BASE.galaxy}lib/galaxy/jobs/__init__.py`);
   });
 
+  it("rewrites planemo too, because the Foundry notes leak both", () => {
+    expect(rewriteLocalPaths("see ~/projects/repositories/planemo/docs/writing_tests.rst")).toBe(
+      `see ${REPO_BLOB_BASE.planemo}docs/writing_tests.rst`,
+    );
+  });
+
   it("fails loudly on a repo it has no rewrite for", () => {
     // Shipping the raw path would point the agent at a directory that only
     // exists on the note author's machine, and Loom's read-jail blocks it, so
     // the turn is wasted rather than merely wrong.
-    expect(() => rewriteLocalPaths("see ~/projects/repositories/planemo/docs/writing.rst")).toThrow(
-      /planemo/,
-    );
+    expect(() => rewriteLocalPaths("see ~/projects/repositories/tpv/config.yml")).toThrow(/tpv/);
   });
 
   it("fails on a reference the trailing-slash pattern would otherwise skip", () => {
@@ -102,10 +108,100 @@ describe("rewriteLocalPaths", () => {
   });
 });
 
-describe("transform", () => {
+describe("applyTransforms", () => {
+  const both = ["rewrite-local-paths", "strip-wiki-links"];
+
   it("only touches markdown", () => {
     const yml = "note: ~/projects/repositories/nosuchrepo/x.py and [[a-link]]\n";
-    expect(transform(yml, "galaxy-collection-semantics.yml")).toBe(yml);
+    expect(applyTransforms(yml, "galaxy-collection-semantics.yml", both)).toBe(yml);
+  });
+
+  it("applies nothing when a plugin declares no transforms", () => {
+    // The wiki-link strip and the path rewrite correct how the Foundry authors
+    // its notes. Running them over content that never had the problem is how a
+    // sync quietly corrupts something, so they are opt-in per plugin.
+    const md = "keeps [[its-links]] and ~/projects/repositories/galaxy/x.py\n";
+    expect(applyTransforms(md, "a.md", [])).toBe(md);
+  });
+
+  it("refuses a transform name it does not know", () => {
+    expect(() => applyTransforms("x", "a.md", ["make-it-nice"])).toThrow(/make-it-nice/);
+  });
+});
+
+describe("matchesPattern", () => {
+  it("keeps a single star inside one path segment", () => {
+    expect(matchesPattern("notes/*.md", "notes/a.md")).toBe(true);
+    expect(matchesPattern("notes/*.md", "notes/deep/a.md")).toBe(false);
+  });
+
+  it("lets a double star cross segments", () => {
+    expect(matchesPattern("cast/**", "cast/references/notes/a.md")).toBe(true);
+    expect(matchesPattern("cast/**", "other/a.md")).toBe(false);
+  });
+
+  it("treats dots as literal", () => {
+    expect(matchesPattern("a.md", "axmd")).toBe(false);
+  });
+});
+
+const AVAILABLE = [
+  "cast/SKILL.md",
+  "cast/_feedback.md",
+  "cast/_provenance.json",
+  "cast/references/notes/one.md",
+  "other-cast/SKILL.md",
+];
+
+describe("selectFiles", () => {
+  it("mirrors a glob under the plugin prefix", () => {
+    const files = selectFiles(
+      { plugin: "p", as: "bundled", include: ["cast/**"], exclude: ["cast/_feedback.md"] },
+      AVAILABLE,
+    );
+    expect(files.map((f: { target: string }) => f.target)).toEqual([
+      "bundled/cast/SKILL.md",
+      "bundled/cast/_provenance.json",
+      "bundled/cast/references/notes/one.md",
+    ]);
+  });
+
+  it("honours an explicit target for one file", () => {
+    const files = selectFiles(
+      { plugin: "p", as: "", include: [{ source: "cast/SKILL.md", target: "flat.md" }] },
+      AVAILABLE,
+    );
+    expect(files).toEqual([{ source: "cast/SKILL.md", target: "flat.md", why: undefined }]);
+  });
+
+  it("fails when an include matches nothing", () => {
+    // A cast renamed upstream should stop the sync rather than quietly shrink
+    // what ships, which is invisible in a diff of generated files.
+    expect(() => selectFiles({ plugin: "p", as: "", include: ["gone/**"] }, AVAILABLE)).toThrow(
+      /matched nothing/,
+    );
+    expect(() =>
+      selectFiles(
+        { plugin: "p", as: "", include: [{ source: "gone.md", target: "x.md" }] },
+        AVAILABLE,
+      ),
+    ).toThrow(/does not exist upstream/);
+  });
+
+  it("fails when two sources land on the same target", () => {
+    expect(() =>
+      selectFiles(
+        {
+          plugin: "p",
+          as: "",
+          include: [
+            { source: "cast/SKILL.md", target: "x.md" },
+            { source: "other-cast/SKILL.md", target: "x.md" },
+          ],
+        },
+        AVAILABLE,
+      ),
+    ).toThrow(/both vendor as x.md/);
   });
 });
 
@@ -126,6 +222,18 @@ function check(overrides: Record<string, unknown> = {}) {
 describe("checkVendored", () => {
   it("passes when the pin, the manifest and the disk agree", () => {
     expect(check()).toEqual([]);
+  });
+
+  it("catches a manifest edited without a re-sync", () => {
+    // Which files a glob selects cannot be recomputed offline, so hashing the
+    // manifest is the only way the gate notices a changed selection.
+    const failures = check({
+      source: { ...PIN, manifestSha: "one" },
+      vendored: { ...PIN, manifestSha: "two" },
+    });
+    expect(failures).toEqual([
+      { kind: "moved-pin", message: "the manifest changed but files were not re-synced" },
+    ]);
   });
 
   it("catches a pin that moved without a re-sync", () => {

@@ -19,10 +19,12 @@ describe("vendored skills", () => {
     }
   });
 
-  it("pins the Foundry ref it was vendored from", () => {
+  it("pins the commit it was vendored from", () => {
+    // A tag would be a moving target; the commit is what makes "which version
+    // shipped" answerable after the fact.
     const manifest = readVendorManifest()!;
-    expect(manifest.repo).toBe("galaxyproject/foundry");
-    expect(manifest.ref).toMatch(/^[0-9a-f]{40}$/);
+    expect(manifest.repo).toBe("galaxyproject/agentic-plugins");
+    expect(manifest.commit).toMatch(/^[0-9a-f]{40}$/);
   });
 
   it("reads a vendored file", () => {

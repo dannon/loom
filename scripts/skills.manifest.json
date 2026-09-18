@@ -1,0 +1,33 @@
+{
+  "$comment": "Skill content vendored into Loom. The source is galaxyproject/agentic-plugins, which mirrors galaxy-skills and the Foundry casts at pins of its own; the pin recorded here is a commit because tags are mutable, and `tag` is a label that stays null while the pinned commit is ahead of the newest tag upstream. Regenerate with `npm run sync:skills`; verify with `npm run check:skills`. Do not hand-edit files under extensions/loom/vendor/skills/.",
+  "repo": "galaxyproject/agentic-plugins",
+  "commit": "aa4da4bd68eb00e360dfd5aa6e998feb5de0ac49",
+  "commitDate": "2026-09-17",
+  "tag": null,
+  "plugins": [
+    {
+      "plugin": "foundry-skills",
+      "as": "",
+      "router": "never",
+      "transforms": ["rewrite-local-paths", "strip-wiki-links"],
+      "include": [
+        {
+          "source": "debug-galaxy-workflow-output/references/notes/galaxy-tool-job-failure-reference.md",
+          "target": "galaxy-tool-job-failure-reference.md",
+          "why": "Interpreting a failed Galaxy job: job_messages vs exit_code vs tool_stderr vs job_stderr, which states are terminal, which job APIs preserve the evidence."
+        },
+        {
+          "source": "debug-galaxy-workflow-output/references/notes/galaxy-workflow-invocation-failure-reference.md",
+          "target": "galaxy-workflow-invocation-failure-reference.md",
+          "why": "Interpreting a failed workflow invocation: invocation states, the structured message-reason table, and which invocation APIs prove the failure mode."
+        },
+        {
+          "source": "debug-galaxy-workflow-output/references/notes/galaxy-collection-semantics.yml",
+          "target": "galaxy-collection-semantics.yml",
+          "why": "Formal spec of collection map-over/reduction semantics, vendored by the Foundry from Galaxy core. Complements galaxy-skills collection-manipulation, which covers how to manipulate rather than what the platform does to shapes."
+        }
+      ],
+      "exclude": []
+    }
+  ]
+}

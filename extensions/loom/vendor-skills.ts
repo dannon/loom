@@ -1,12 +1,12 @@
 /**
- * Bundled Foundry reference material.
+ * Bundled skill content.
  *
- * Files under `vendor/skills/` are vendored at a pinned Foundry ref by
- * `scripts/sync-foundry-skills.mjs` and ship inside the package -- both the npm
- * CLI (`files: ["extensions/", ...]`) and the Orbit installers (forge's
- * `LOOM_BUNDLE_FILES` includes `extensions`) pick them up with no packaging
- * change. That is deliberate: the guidance has to be available offline, at a
- * version we reviewed, with no runtime dependency on GitHub.
+ * Files under `vendor/skills/` are vendored from `galaxyproject/agentic-plugins`
+ * at a pinned commit by `scripts/sync-skills.mjs` and ship inside the package --
+ * both the npm CLI (`files: ["extensions/", ...]`) and the Orbit installers
+ * (forge's `LOOM_BUNDLE_FILES` includes `extensions`) pick them up with no
+ * packaging change. That is deliberate: the guidance has to be available
+ * offline, at a version we reviewed, with no runtime dependency on GitHub.
  *
  * This is a read-only source for `skills_fetch`, not a configured skills repo.
  * It never appears in the system-prompt skills router -- nothing here is
@@ -23,16 +23,20 @@ export const VENDOR_REPO_NAME = "foundry";
 
 export interface VendorManifestEntry {
   target: string;
+  plugin: string;
   source: string;
   bytes: number;
   sha256: string;
-  why: string;
+  why?: string;
 }
 
 export interface VendorManifest {
   repo: string;
-  ref: string;
-  refDate?: string;
+  /** Commit, not tag: tags move, and "what did we ship" has to stay answerable. */
+  commit: string;
+  /** A label for the commit, null while the pin is ahead of the newest tag. */
+  tag?: string | null;
+  commitDate?: string;
   files: VendorManifestEntry[];
 }
 
@@ -70,8 +74,7 @@ export function readVendorManifest(): VendorManifest | null {
 }
 
 export type VendorReadResult =
-  | { ok: true; text: string }
-  | { ok: false; error: string; available: string[] };
+  { ok: true; text: string } | { ok: false; error: string; available: string[] };
 
 /** Read one vendored file. Never touches the network. */
 export function readVendoredSkill(rawPath: string): VendorReadResult {
