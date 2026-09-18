@@ -17,7 +17,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_SKILLS } from "../../shared/loom-config.js";
+import { isBundledSkillRepo } from "../../shared/loom-config.js";
 import type { SkillEntry } from "./skills-discovery";
 
 /** Reserved repo name for `skills_fetch({ repo: "foundry" })`. */
@@ -51,31 +51,8 @@ export interface VendorManifest {
   files: VendorManifestEntry[];
 }
 
-/**
- * A configured repo reads from the package when it is one of the defaults and is
- * still pointed at that default's URL and branch. Anything else -- another
- * branch, another URL, a repo we do not ship -- is live, which is what the
- * skill-author workflow of pointing Loom at a branch depends on.
- *
- * Deliberately not true for the bundled-reference name: that one is resolved
- * before repo lookup, and a user who configures a real repo under the same name
- * must still reach it.
- */
-export function isBundledRepo(repo: { name: string; url: string; branch?: string }): boolean {
-  const preset = DEFAULT_SKILLS.find((d: { name: string }) => d.name === repo.name);
-  if (!preset) return false;
-  return sameRepoUrl(repo.url, preset.url) && (repo.branch || "main") === (preset.branch || "main");
-}
-
-function sameRepoUrl(a: string, b: string): boolean {
-  const norm = (u: string) =>
-    String(u ?? "")
-      .trim()
-      .replace(/\.git$/, "")
-      .replace(/\/+$/, "")
-      .toLowerCase();
-  return norm(a) === norm(b) && norm(a) !== "";
-}
+/** Re-exported so brain-side callers do not reach across into shared/ directly. */
+export { isBundledSkillRepo as isBundledRepo };
 
 /** The generated router catalog, keyed by configured repo name. */
 export function readBundledCatalog(): Record<string, SkillEntry[]> | null {

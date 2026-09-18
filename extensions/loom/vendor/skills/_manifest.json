@@ -4,7 +4,7 @@
   "commit": "aa4da4bd68eb00e360dfd5aa6e998feb5de0ac49",
   "commitDate": "2026-09-17",
   "tag": null,
-  "manifestSha256": "1bd4ec8476124e5e28fd67306c52145a0a0406f05aeea1f6d8b592a5e059e87c",
+  "manifestSha256": "c47a1ae799ea583229b861d4b0dca13b4d822c3b8a46554bc102ee4e445ae727",
   "catalogSha256": "f1c6b85851ca03a868168e41cac949c307abf65f7b27e11b79136813cb0c5def",
   "plugins": [
     {
@@ -29,7 +29,7 @@
         "rewrite-local-paths",
         "strip-wiki-links"
       ],
-      "why": "Failure triage for a Galaxy run: what an invocation state and message reason mean, what a job's exit code and streams prove, and the collection shape rules behind a map-over that went wrong.",
+      "why": "Workflow construction cast bundles: finding and reading a community workflow, adapting one through the update-interview phases, and triaging a run that failed.",
       "upstream": {
         "repository": "https://github.com/galaxyproject/foundry",
         "ref": "main",
@@ -39,6 +39,293 @@
     }
   ],
   "files": [
+    {
+      "target": "advance-galaxy-draft-step/SKILL.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/SKILL.md",
+      "bytes": 15559,
+      "sha256": "e9918382021c3d1e368c62a8fdaee408b1f84844e216df63a269415dd04c52ad"
+    },
+    {
+      "target": "advance-galaxy-draft-step/_provenance.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/_provenance.json",
+      "bytes": 11864,
+      "sha256": "025fba768d7b21872187d13eccb871ba60ea2f832f016083fd2982af6bc6d318"
+    },
+    {
+      "target": "advance-galaxy-draft-step/_required_tools.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/_required_tools.json",
+      "bytes": 1062,
+      "sha256": "f1af17fd6733039db99eacc377e5c7232af1c9a8339a2eaee6adde20ad5f778f"
+    },
+    {
+      "target": "advance-galaxy-draft-step/_verify.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/_verify.json",
+      "bytes": 50,
+      "sha256": "729e17c5228a1b038450d3b4ef3da84adfbc914c1266339722d4f126e8ed4e34"
+    },
+    {
+      "target": "advance-galaxy-draft-step/references/cli/add.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/references/cli/add.json",
+      "bytes": 4101,
+      "sha256": "85e3bb884171beb69631186ca6f0f7552e6c6d0721383ab6653e7a32c84a1b71"
+    },
+    {
+      "target": "advance-galaxy-draft-step/references/cli/draft-extract.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/references/cli/draft-extract.json",
+      "bytes": 4595,
+      "sha256": "c59fbafbe6cf53cd7bcdd867d73b69d078c949c0dfa83abdc084f309793a60aa"
+    },
+    {
+      "target": "advance-galaxy-draft-step/references/cli/draft-next-step.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/references/cli/draft-next-step.json",
+      "bytes": 3971,
+      "sha256": "8638645f5974d8072dc3c63e522b7ab25d562f8d6217ea93b61f0a29f371d6f7"
+    },
+    {
+      "target": "advance-galaxy-draft-step/references/cli/draft-validate.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/references/cli/draft-validate.json",
+      "bytes": 8831,
+      "sha256": "afa59b0815308a340780247df0548909518564d58352a0c695ceca37a07eee5b"
+    },
+    {
+      "target": "advance-galaxy-draft-step/references/cli/list.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/references/cli/list.json",
+      "bytes": 2693,
+      "sha256": "92d336667531c34180db6f75b9fdf87261923c1e85567dce3b21a6d87d9543bd"
+    },
+    {
+      "target": "advance-galaxy-draft-step/references/notes/galaxy-tool-job-failure-reference.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/references/notes/galaxy-tool-job-failure-reference.md",
+      "bytes": 7502,
+      "sha256": "551d30f31e1d90f7bbc59601cde2f00d80d600f96e6b6b4411b6a1deb3ec1732"
+    },
+    {
+      "target": "advance-galaxy-draft-step/references/notes/open-requirements-ledger.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/references/notes/open-requirements-ledger.md",
+      "bytes": 15778,
+      "sha256": "5722c6d3e36ccb46567bca68d2548ac86f4975e5b2b9a3adccf9d65231721db5"
+    },
+    {
+      "target": "advance-galaxy-draft-step/references/schemas/galaxy-tool-summary.schema.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/references/schemas/galaxy-tool-summary.schema.json",
+      "bytes": 7780,
+      "sha256": "bf77d0735410fa0028bc9bea08edaff3016580508bf27851fdcae65d038f2d94"
+    },
+    {
+      "target": "advance-galaxy-draft-step/references/schemas/galaxy-workflow-draft.schema.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/references/schemas/galaxy-workflow-draft.schema.json",
+      "bytes": 60027,
+      "sha256": "86822b6bf4c11ba1d9eaa12d9e442db7f7d28b2734a2daddf62b5cdd2f1f75aa"
+    },
+    {
+      "target": "apply-galaxy-workflow-changeset/SKILL.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/apply-galaxy-workflow-changeset/SKILL.md",
+      "bytes": 9163,
+      "sha256": "0838177862ccee4cfcab23c0b474431f6f1e02409abe84224f7cf201bed3b905"
+    },
+    {
+      "target": "apply-galaxy-workflow-changeset/_provenance.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/apply-galaxy-workflow-changeset/_provenance.json",
+      "bytes": 6700,
+      "sha256": "c2dc844060784518c3050a84d9c2b100529b771a59a5d4884d4024b77dd38b7c"
+    },
+    {
+      "target": "apply-galaxy-workflow-changeset/_required_tools.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/apply-galaxy-workflow-changeset/_required_tools.json",
+      "bytes": 463,
+      "sha256": "2abdd5031c691d75003425153cccddba2ae36d5977e8999c007af61909a016c7"
+    },
+    {
+      "target": "apply-galaxy-workflow-changeset/_verify.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/apply-galaxy-workflow-changeset/_verify.json",
+      "bytes": 50,
+      "sha256": "729e17c5228a1b038450d3b4ef3da84adfbc914c1266339722d4f126e8ed4e34"
+    },
+    {
+      "target": "apply-galaxy-workflow-changeset/references/cli/draft-validate.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/apply-galaxy-workflow-changeset/references/cli/draft-validate.json",
+      "bytes": 8831,
+      "sha256": "afa59b0815308a340780247df0548909518564d58352a0c695ceca37a07eee5b"
+    },
+    {
+      "target": "apply-galaxy-workflow-changeset/references/notes/galaxy-workflow-draft-format.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/apply-galaxy-workflow-changeset/references/notes/galaxy-workflow-draft-format.md",
+      "bytes": 12776,
+      "sha256": "3a874ead4ccc901c15a16a9b2389267f22ab129bcee772323e6309523e7dde68"
+    },
+    {
+      "target": "apply-galaxy-workflow-changeset/references/notes/open-requirements-ledger.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/apply-galaxy-workflow-changeset/references/notes/open-requirements-ledger.md",
+      "bytes": 15778,
+      "sha256": "5722c6d3e36ccb46567bca68d2548ac86f4975e5b2b9a3adccf9d65231721db5"
+    },
+    {
+      "target": "apply-galaxy-workflow-changeset/references/schemas/galaxy-workflow-draft.schema.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/apply-galaxy-workflow-changeset/references/schemas/galaxy-workflow-draft.schema.json",
+      "bytes": 60027,
+      "sha256": "86822b6bf4c11ba1d9eaa12d9e442db7f7d28b2734a2daddf62b5cdd2f1f75aa"
+    },
+    {
+      "target": "changeset-to-galaxy-test-plan/SKILL.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/changeset-to-galaxy-test-plan/SKILL.md",
+      "bytes": 10948,
+      "sha256": "7ebda60cd1289810a2335f4b203df8c85145a507c1172116368d4bdceddedecd"
+    },
+    {
+      "target": "changeset-to-galaxy-test-plan/_provenance.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/changeset-to-galaxy-test-plan/_provenance.json",
+      "bytes": 8723,
+      "sha256": "195b3f02bf75d9dc1db0008a08a359e7a35a42313889e22a25d600575b353b17"
+    },
+    {
+      "target": "changeset-to-galaxy-test-plan/_verify.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/changeset-to-galaxy-test-plan/_verify.json",
+      "bytes": 730,
+      "sha256": "7c96d85314c1db990542031de3cfa5d4ca97dc9b61c4d5ce83ce775bd329d1a4"
+    },
+    {
+      "target": "changeset-to-galaxy-test-plan/references/notes/galaxy-workflow-testability-design.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/changeset-to-galaxy-test-plan/references/notes/galaxy-workflow-testability-design.md",
+      "bytes": 11556,
+      "sha256": "ea80dcd10bf9f599de904ce2b23f6e859eba0395fa42b2c985898c1f9c29f172"
+    },
+    {
+      "target": "changeset-to-galaxy-test-plan/references/notes/iwc-shortcuts-anti-patterns.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/changeset-to-galaxy-test-plan/references/notes/iwc-shortcuts-anti-patterns.md",
+      "bytes": 24370,
+      "sha256": "6aeb8c2f21b44e9a8346f15b4dcf7273bb8ef00fb5d5c61ea0d50172031c5f5a"
+    },
+    {
+      "target": "changeset-to-galaxy-test-plan/references/notes/iwc-test-data-conventions.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/changeset-to-galaxy-test-plan/references/notes/iwc-test-data-conventions.md",
+      "bytes": 21542,
+      "sha256": "4dba173548446bd3239d9e46bee1f0d53b2ad8f0865f90623b79296b8d6a517e"
+    },
+    {
+      "target": "changeset-to-galaxy-test-plan/references/notes/planemo-asserts-idioms.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/changeset-to-galaxy-test-plan/references/notes/planemo-asserts-idioms.md",
+      "bytes": 16521,
+      "sha256": "5fd1330c1b46cfeaa116d3dd53f2fda51bf104552f0cce600606e0a59f1c22c3"
+    },
+    {
+      "target": "changeset-to-galaxy-test-plan/references/notes/planemo-workflow-test-architecture.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/changeset-to-galaxy-test-plan/references/notes/planemo-workflow-test-architecture.md",
+      "bytes": 8359,
+      "sha256": "328432e17a8ceebbff67c42e4d851eccb0d4c59799da88ffb2c5b8acf4d3bff6"
+    },
+    {
+      "target": "changeset-to-galaxy-test-plan/references/schemas/galaxy-workflow-test-plan.schema.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/changeset-to-galaxy-test-plan/references/schemas/galaxy-workflow-test-plan.schema.json",
+      "bytes": 18419,
+      "sha256": "325e9cf1bb5e075fa818dc68868647de95389ca8df8581ee8cf1e2be61196e37"
+    },
+    {
+      "target": "changeset-to-galaxy-test-plan/references/schemas/summary-galaxy-workflow.schema.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/changeset-to-galaxy-test-plan/references/schemas/summary-galaxy-workflow.schema.json",
+      "bytes": 17043,
+      "sha256": "55831dd043243e137cae595badc7f1ecc9a84a44936c0e036c7c3f5d33978bb3"
+    },
+    {
+      "target": "changeset-to-galaxy-test-plan/references/schemas/tests-format.schema.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/changeset-to-galaxy-test-plan/references/schemas/tests-format.schema.json",
+      "bytes": 205957,
+      "sha256": "ff0de5041f4c3de0ab7abe9e7555c5a7120665b077f42661461301b0fb26f372"
+    },
+    {
+      "target": "compare-against-iwc-exemplar/SKILL.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/compare-against-iwc-exemplar/SKILL.md",
+      "bytes": 11823,
+      "sha256": "23ca3bd474142b5ac1acf8688a930f85df2bef09b7d6ae921d6895f2d0b7f60e"
+    },
+    {
+      "target": "compare-against-iwc-exemplar/_provenance.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/compare-against-iwc-exemplar/_provenance.json",
+      "bytes": 9285,
+      "sha256": "0de8e5d89510807500e0611dd3d9fd7d4d448c3a23abdd8911b125ade41764b3"
+    },
+    {
+      "target": "compare-against-iwc-exemplar/_required_tools.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/compare-against-iwc-exemplar/_required_tools.json",
+      "bytes": 456,
+      "sha256": "44123da96b2a50dc3933edcfe435f7bccbd0ded925663d8cafed4d5af5087fca"
+    },
+    {
+      "target": "compare-against-iwc-exemplar/_verify.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/compare-against-iwc-exemplar/_verify.json",
+      "bytes": 50,
+      "sha256": "729e17c5228a1b038450d3b4ef3da84adfbc914c1266339722d4f126e8ed4e34"
+    },
+    {
+      "target": "compare-against-iwc-exemplar/references/cli/convert.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/compare-against-iwc-exemplar/references/cli/convert.json",
+      "bytes": 4448,
+      "sha256": "1cdf49f10f77039af6efc5b82fe79720bb18e50d1f57d653670697f7262c7640"
+    },
+    {
+      "target": "compare-against-iwc-exemplar/references/notes/galaxy-data-flow-draft-contract.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/compare-against-iwc-exemplar/references/notes/galaxy-data-flow-draft-contract.md",
+      "bytes": 7384,
+      "sha256": "057e2e9aafe8d21e8680d37d385a52630a222f9e2c252c09aab5f638cbe5e044"
+    },
+    {
+      "target": "compare-against-iwc-exemplar/references/notes/iwc-shortcuts-anti-patterns.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/compare-against-iwc-exemplar/references/notes/iwc-shortcuts-anti-patterns.md",
+      "bytes": 24370,
+      "sha256": "6aeb8c2f21b44e9a8346f15b4dcf7273bb8ef00fb5d5c61ea0d50172031c5f5a"
+    },
+    {
+      "target": "compare-against-iwc-exemplar/references/notes/iwc-test-data-conventions.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/compare-against-iwc-exemplar/references/notes/iwc-test-data-conventions.md",
+      "bytes": 21542,
+      "sha256": "4dba173548446bd3239d9e46bee1f0d53b2ad8f0865f90623b79296b8d6a517e"
+    },
+    {
+      "target": "compare-against-iwc-exemplar/references/notes/open-requirements-ledger.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/compare-against-iwc-exemplar/references/notes/open-requirements-ledger.md",
+      "bytes": 15778,
+      "sha256": "5722c6d3e36ccb46567bca68d2548ac86f4975e5b2b9a3adccf9d65231721db5"
+    },
     {
       "target": "debug-galaxy-workflow-output/SKILL.md",
       "plugin": "foundry-skills",
@@ -115,6 +402,279 @@
       "source": "plugins/foundry-skills/skills/debug-galaxy-workflow-output/references/notes/planemo-workflow-test-architecture.md",
       "bytes": 8359,
       "sha256": "328432e17a8ceebbff67c42e4d851eccb0d4c59799da88ffb2c5b8acf4d3bff6"
+    },
+    {
+      "target": "discover-shed-tool/SKILL.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/discover-shed-tool/SKILL.md",
+      "bytes": 11954,
+      "sha256": "8c11bf353590928430f8d686deb2cfb25f817f20c7faf5010a4de30d75368028"
+    },
+    {
+      "target": "discover-shed-tool/_provenance.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/discover-shed-tool/_provenance.json",
+      "bytes": 4992,
+      "sha256": "36e6f6ca13502380dfce4dd1e39faaf6b6cadec582b550df363644a75f0bfc97"
+    },
+    {
+      "target": "discover-shed-tool/_required_tools.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/discover-shed-tool/_required_tools.json",
+      "bytes": 517,
+      "sha256": "a3c96fda37de4f7c95db71eb916958bbe23fc591f095b6e1cc32af0562047491"
+    },
+    {
+      "target": "discover-shed-tool/_verify.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/discover-shed-tool/_verify.json",
+      "bytes": 377,
+      "sha256": "249fbf69e89b698252b631f03fcf93a3922c7db639551616d6efa6aa9b3ccf4c"
+    },
+    {
+      "target": "discover-shed-tool/references/cli/tool-revisions.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/discover-shed-tool/references/cli/tool-revisions.json",
+      "bytes": 4434,
+      "sha256": "db0b13f2b92593c9cd3bf5a80276a31e537c07caff76786167ebe9f7feac5938"
+    },
+    {
+      "target": "discover-shed-tool/references/cli/tool-search.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/discover-shed-tool/references/cli/tool-search.json",
+      "bytes": 5902,
+      "sha256": "72f5f7cc0cd5ed40038af89e6041c7916d65c51ba1c7bc7b2c46ba64c51d9359"
+    },
+    {
+      "target": "discover-shed-tool/references/cli/tool-versions.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/discover-shed-tool/references/cli/tool-versions.json",
+      "bytes": 3678,
+      "sha256": "90f35a407af778a1a1c714f79ceb8dc3559523964175e734b565eed8b9aeb6a5"
+    },
+    {
+      "target": "discover-shed-tool/references/notes/component-tool-shed-search.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/discover-shed-tool/references/notes/component-tool-shed-search.md",
+      "bytes": 27699,
+      "sha256": "d9337e659414d4faabf36c9c9f7528e6a71ad447d9fabd647258f552dd9f61c6"
+    },
+    {
+      "target": "discover-shed-tool/references/schemas/galaxy-tool-discovery.schema.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/discover-shed-tool/references/schemas/galaxy-tool-discovery.schema.json",
+      "bytes": 7679,
+      "sha256": "c0940fc0265e8fd25955f4380f03e088b62d25155fe98e7f051a5a3957d2840c"
+    },
+    {
+      "target": "implement-galaxy-workflow-test/SKILL.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/implement-galaxy-workflow-test/SKILL.md",
+      "bytes": 11847,
+      "sha256": "5f34d2c16c7a8bd2bc9f6f01c3c142f9813e8964abaeee054e67b285ee384f42"
+    },
+    {
+      "target": "implement-galaxy-workflow-test/_provenance.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/implement-galaxy-workflow-test/_provenance.json",
+      "bytes": 9672,
+      "sha256": "0d2643f87789f44c92f69f1e8b4dffe2044e0879bade8e15490f3e68ab5011e1"
+    },
+    {
+      "target": "implement-galaxy-workflow-test/_required_tools.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/implement-galaxy-workflow-test/_required_tools.json",
+      "bytes": 835,
+      "sha256": "018ddd6235a7676eff8f6e11b6ffe8a207458e7c02a9a362c6efe049742de2ab"
+    },
+    {
+      "target": "implement-galaxy-workflow-test/_verify.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/implement-galaxy-workflow-test/_verify.json",
+      "bytes": 385,
+      "sha256": "b6afe79966463f8e7712456b0ee1fde20e95b36b5f24c8b804c9c4f490ee1c49"
+    },
+    {
+      "target": "implement-galaxy-workflow-test/references/cli/planemo.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/implement-galaxy-workflow-test/references/cli/planemo.md",
+      "bytes": 2726,
+      "sha256": "634e86d05d2ce95dfa996f9fe2c7926da496462467174b83c3f438a4493bee84"
+    },
+    {
+      "target": "implement-galaxy-workflow-test/references/cli/validate-tests.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/implement-galaxy-workflow-test/references/cli/validate-tests.json",
+      "bytes": 2613,
+      "sha256": "973184698733ffb86bb5a15781902846afec311047f5684f779f8ad023e5d24c"
+    },
+    {
+      "target": "implement-galaxy-workflow-test/references/notes/galaxy-workflow-testability-design.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/implement-galaxy-workflow-test/references/notes/galaxy-workflow-testability-design.md",
+      "bytes": 11556,
+      "sha256": "ea80dcd10bf9f599de904ce2b23f6e859eba0395fa42b2c985898c1f9c29f172"
+    },
+    {
+      "target": "implement-galaxy-workflow-test/references/notes/iwc-shortcuts-anti-patterns.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/implement-galaxy-workflow-test/references/notes/iwc-shortcuts-anti-patterns.md",
+      "bytes": 24370,
+      "sha256": "6aeb8c2f21b44e9a8346f15b4dcf7273bb8ef00fb5d5c61ea0d50172031c5f5a"
+    },
+    {
+      "target": "implement-galaxy-workflow-test/references/notes/iwc-test-data-conventions.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/implement-galaxy-workflow-test/references/notes/iwc-test-data-conventions.md",
+      "bytes": 21542,
+      "sha256": "4dba173548446bd3239d9e46bee1f0d53b2ad8f0865f90623b79296b8d6a517e"
+    },
+    {
+      "target": "implement-galaxy-workflow-test/references/notes/planemo-asserts-idioms.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/implement-galaxy-workflow-test/references/notes/planemo-asserts-idioms.md",
+      "bytes": 16521,
+      "sha256": "5fd1330c1b46cfeaa116d3dd53f2fda51bf104552f0cce600606e0a59f1c22c3"
+    },
+    {
+      "target": "implement-galaxy-workflow-test/references/notes/planemo-workflow-test-architecture.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/implement-galaxy-workflow-test/references/notes/planemo-workflow-test-architecture.md",
+      "bytes": 8359,
+      "sha256": "328432e17a8ceebbff67c42e4d851eccb0d4c59799da88ffb2c5b8acf4d3bff6"
+    },
+    {
+      "target": "implement-galaxy-workflow-test/references/schemas/galaxy-workflow-test-plan.schema.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/implement-galaxy-workflow-test/references/schemas/galaxy-workflow-test-plan.schema.json",
+      "bytes": 18419,
+      "sha256": "325e9cf1bb5e075fa818dc68868647de95389ca8df8581ee8cf1e2be61196e37"
+    },
+    {
+      "target": "implement-galaxy-workflow-test/references/schemas/tests-format.schema.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/implement-galaxy-workflow-test/references/schemas/tests-format.schema.json",
+      "bytes": 205957,
+      "sha256": "ff0de5041f4c3de0ab7abe9e7555c5a7120665b077f42661461301b0fb26f372"
+    },
+    {
+      "target": "interview-to-galaxy-workflow-changeset/SKILL.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/interview-to-galaxy-workflow-changeset/SKILL.md",
+      "bytes": 7495,
+      "sha256": "4edddbf19399747069ffc3d4aa651c2fbc4042dbe976d2e04213391dbbba1e5e"
+    },
+    {
+      "target": "interview-to-galaxy-workflow-changeset/_provenance.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/interview-to-galaxy-workflow-changeset/_provenance.json",
+      "bytes": 4329,
+      "sha256": "30434f161dfb3ee194663d88f64b212f8a6c0310c5417315ed16539e5bf4b6dd"
+    },
+    {
+      "target": "interview-to-galaxy-workflow-changeset/_verify.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/interview-to-galaxy-workflow-changeset/_verify.json",
+      "bytes": 396,
+      "sha256": "095ff7c0a75907a513fa716319431215cb636efba079b7148f68ec7d7d2a1413"
+    },
+    {
+      "target": "interview-to-galaxy-workflow-changeset/references/notes/open-requirements-ledger.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/interview-to-galaxy-workflow-changeset/references/notes/open-requirements-ledger.md",
+      "bytes": 15778,
+      "sha256": "5722c6d3e36ccb46567bca68d2548ac86f4975e5b2b9a3adccf9d65231721db5"
+    },
+    {
+      "target": "interview-to-galaxy-workflow-changeset/references/schemas/summary-galaxy-workflow.schema.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/interview-to-galaxy-workflow-changeset/references/schemas/summary-galaxy-workflow.schema.json",
+      "bytes": 17043,
+      "sha256": "55831dd043243e137cae595badc7f1ecc9a84a44936c0e036c7c3f5d33978bb3"
+    },
+    {
+      "target": "pipeline-update-interview-to-galaxy/SKILL.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/pipeline-update-interview-to-galaxy/SKILL.md",
+      "bytes": 9947,
+      "sha256": "1d024e82f1e6fb0af0bcf3822ae3dffa72c95d910b88832977b78d46dc6c4aff"
+    },
+    {
+      "target": "pipeline-update-interview-to-galaxy/_assembly.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/pipeline-update-interview-to-galaxy/_assembly.json",
+      "bytes": 2883,
+      "sha256": "dbea0b2f670ef0a1f3a68eeabf5561ce53ee44415698676f982642ba2dde5fdd"
+    },
+    {
+      "target": "run-workflow-test/SKILL.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/run-workflow-test/SKILL.md",
+      "bytes": 8803,
+      "sha256": "92e6e16d6094993e6301ff00c0f0d7a519629aba4087805701e2dda229ef657c"
+    },
+    {
+      "target": "run-workflow-test/_provenance.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/run-workflow-test/_provenance.json",
+      "bytes": 5645,
+      "sha256": "6c329709b6516123e1263789dbef6b9cc452ad2fb103719ef0243e22cc6a1182"
+    },
+    {
+      "target": "run-workflow-test/_required_tools.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/run-workflow-test/_required_tools.json",
+      "bytes": 835,
+      "sha256": "018ddd6235a7676eff8f6e11b6ffe8a207458e7c02a9a362c6efe049742de2ab"
+    },
+    {
+      "target": "run-workflow-test/_verify.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/run-workflow-test/_verify.json",
+      "bytes": 50,
+      "sha256": "729e17c5228a1b038450d3b4ef3da84adfbc914c1266339722d4f126e8ed4e34"
+    },
+    {
+      "target": "run-workflow-test/references/cli/planemo.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/run-workflow-test/references/cli/planemo.md",
+      "bytes": 2726,
+      "sha256": "634e86d05d2ce95dfa996f9fe2c7926da496462467174b83c3f438a4493bee84"
+    },
+    {
+      "target": "run-workflow-test/references/cli/validate-tests.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/run-workflow-test/references/cli/validate-tests.json",
+      "bytes": 2613,
+      "sha256": "973184698733ffb86bb5a15781902846afec311047f5684f779f8ad023e5d24c"
+    },
+    {
+      "target": "run-workflow-test/references/notes/galaxy-workflow-invocation-failure-reference.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/run-workflow-test/references/notes/galaxy-workflow-invocation-failure-reference.md",
+      "bytes": 7883,
+      "sha256": "3721662dcabebf5524a1d02329b23ea0c9df9fae66425ca52ba6106501fc481f"
+    },
+    {
+      "target": "run-workflow-test/references/notes/planemo-asserts-idioms.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/run-workflow-test/references/notes/planemo-asserts-idioms.md",
+      "bytes": 16521,
+      "sha256": "5fd1330c1b46cfeaa116d3dd53f2fda51bf104552f0cce600606e0a59f1c22c3"
+    },
+    {
+      "target": "run-workflow-test/references/notes/planemo-workflow-test-architecture.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/run-workflow-test/references/notes/planemo-workflow-test-architecture.md",
+      "bytes": 8359,
+      "sha256": "328432e17a8ceebbff67c42e4d851eccb0d4c59799da88ffb2c5b8acf4d3bff6"
+    },
+    {
+      "target": "run-workflow-test/references/schemas/tests-format.schema.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/run-workflow-test/references/schemas/tests-format.schema.json",
+      "bytes": 205957,
+      "sha256": "ff0de5041f4c3de0ab7abe9e7555c5a7120665b077f42661461301b0fb26f372"
     },
     {
       "target": "skills/LICENSE",
@@ -416,6 +976,111 @@
       "source": "plugins/galaxy-skills/skills/workflow-reports/references/directives.md",
       "bytes": 28913,
       "sha256": "1b2fe9814c3c10beca510f9e7956173433044c016fba9b21a0e71ef7637bb8bb"
+    },
+    {
+      "target": "summarize-galaxy-workflow/SKILL.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/summarize-galaxy-workflow/SKILL.md",
+      "bytes": 10167,
+      "sha256": "096332c91272020b0fcbf6257da625dfc90299903fa39cd654a65d7cbb560e3d"
+    },
+    {
+      "target": "summarize-galaxy-workflow/_provenance.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/summarize-galaxy-workflow/_provenance.json",
+      "bytes": 4354,
+      "sha256": "c9ab4090855d4741cd00dc5bd517d9888f8d4289b85950ce8c68ec7c6384a2d3"
+    },
+    {
+      "target": "summarize-galaxy-workflow/_required_tools.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/summarize-galaxy-workflow/_required_tools.json",
+      "bytes": 900,
+      "sha256": "78aded73a10fb7797cd509d3448845fee1f38363c4882a64b92903f8ed7be7c6"
+    },
+    {
+      "target": "summarize-galaxy-workflow/_verify.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/summarize-galaxy-workflow/_verify.json",
+      "bytes": 397,
+      "sha256": "dd39b87ef6d86f7351e7e8b4af9250464251b2d01253917a3eb512f329566304"
+    },
+    {
+      "target": "summarize-galaxy-workflow/references/cli/convert.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/summarize-galaxy-workflow/references/cli/convert.json",
+      "bytes": 4448,
+      "sha256": "1cdf49f10f77039af6efc5b82fe79720bb18e50d1f57d653670697f7262c7640"
+    },
+    {
+      "target": "summarize-galaxy-workflow/references/cli/foundry.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/summarize-galaxy-workflow/references/cli/foundry.md",
+      "bytes": 937,
+      "sha256": "85505b02785fea8bfb0429ac78224dfef0dce63c933140f087f7257a04e52a86"
+    },
+    {
+      "target": "summarize-galaxy-workflow/references/cli/validate.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/summarize-galaxy-workflow/references/cli/validate.json",
+      "bytes": 5609,
+      "sha256": "ff10c49819b0f7af13f247ea03e4dd24ba2e5144da3beaa6b1ab96698c7e03b7"
+    },
+    {
+      "target": "summarize-galaxy-workflow/references/schemas/summary-galaxy-workflow.schema.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/summarize-galaxy-workflow/references/schemas/summary-galaxy-workflow.schema.json",
+      "bytes": 17043,
+      "sha256": "55831dd043243e137cae595badc7f1ecc9a84a44936c0e036c7c3f5d33978bb3"
+    },
+    {
+      "target": "validate-galaxy-workflow/SKILL.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/validate-galaxy-workflow/SKILL.md",
+      "bytes": 5121,
+      "sha256": "b604d4f41dae5ed1c07e087b3de938894b1cdcd3b2672377236ac142062cf445"
+    },
+    {
+      "target": "validate-galaxy-workflow/_provenance.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/validate-galaxy-workflow/_provenance.json",
+      "bytes": 3418,
+      "sha256": "bdf0c28e0ec770dad3354e5dacb68164400f404f48d66db9d0d1a1b31db25101"
+    },
+    {
+      "target": "validate-galaxy-workflow/_required_tools.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/validate-galaxy-workflow/_required_tools.json",
+      "bytes": 457,
+      "sha256": "b745f0faa1d381d1dbe7b2c900f7b51b2155b9833a43a25b1f5fbddaa9b004a1"
+    },
+    {
+      "target": "validate-galaxy-workflow/_verify.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/validate-galaxy-workflow/_verify.json",
+      "bytes": 50,
+      "sha256": "729e17c5228a1b038450d3b4ef3da84adfbc914c1266339722d4f126e8ed4e34"
+    },
+    {
+      "target": "validate-galaxy-workflow/references/cli/validate.json",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/validate-galaxy-workflow/references/cli/validate.json",
+      "bytes": 5609,
+      "sha256": "ff10c49819b0f7af13f247ea03e4dd24ba2e5144da3beaa6b1ab96698c7e03b7"
+    },
+    {
+      "target": "validate-galaxy-workflow/references/notes/galaxy-workflow-invocation-failure-reference.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/validate-galaxy-workflow/references/notes/galaxy-workflow-invocation-failure-reference.md",
+      "bytes": 7883,
+      "sha256": "3721662dcabebf5524a1d02329b23ea0c9df9fae66425ca52ba6106501fc481f"
+    },
+    {
+      "target": "validate-galaxy-workflow/references/notes/galaxy-workflow-testability-design.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/validate-galaxy-workflow/references/notes/galaxy-workflow-testability-design.md",
+      "bytes": 11556,
+      "sha256": "ea80dcd10bf9f599de904ce2b23f6e859eba0395fa42b2c985898c1f9c29f172"
     }
   ]
 }

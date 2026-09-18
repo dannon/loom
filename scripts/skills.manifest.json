@@ -20,9 +20,22 @@
       "as": "",
       "router": "never",
       "transforms": ["rewrite-local-paths", "strip-wiki-links"],
-      "why": "Failure triage for a Galaxy run: what an invocation state and message reason mean, what a job's exit code and streams prove, and the collection shape rules behind a map-over that went wrong.",
-      "include": ["debug-galaxy-workflow-output/**"],
-      "exclude": ["debug-galaxy-workflow-output/_feedback.md"]
+      "why": "Workflow construction cast bundles: finding and reading a community workflow, adapting one through the update-interview phases, and triaging a run that failed.",
+      "include": [
+        "advance-galaxy-draft-step/**",
+        "apply-galaxy-workflow-changeset/**",
+        "changeset-to-galaxy-test-plan/**",
+        "compare-against-iwc-exemplar/**",
+        "debug-galaxy-workflow-output/**",
+        "discover-shed-tool/**",
+        "implement-galaxy-workflow-test/**",
+        "interview-to-galaxy-workflow-changeset/**",
+        "pipeline-update-interview-to-galaxy/**",
+        "run-workflow-test/**",
+        "summarize-galaxy-workflow/**",
+        "validate-galaxy-workflow/**"
+      ],
+      "exclude": ["**/_feedback.md"]
     }
   ]
 }
