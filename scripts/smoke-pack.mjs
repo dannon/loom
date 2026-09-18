@@ -43,13 +43,23 @@ try {
   // catalog and no reference material behind its own hints.
   const VENDOR = "extensions/loom/vendor/skills";
   const manifest = JSON.parse(readFileSync(join(pkgDir, VENDOR, "_manifest.json"), "utf8"));
+  // Matched by suffix rather than imported, because this script runs under plain
+  // node and the constants are TypeScript. So the count is asserted too: a
+  // rename upstream would otherwise make the filter empty and the check vacuous.
+  const hintTargets = manifest.files
+    .filter((f) => f.target.endsWith("failure-reference.md"))
+    .map((f) => `${VENDOR}/${f.target}`);
+  if (hintTargets.length < 2) {
+    throw new Error(
+      `expected at least the two invocation-failure hint targets, found ${hintTargets.length}`,
+    );
+  }
   const required = [
     `${VENDOR}/_manifest.json`,
     `${VENDOR}/_catalog.json`,
     "shared/skills-pin.js",
-    ...manifest.files
-      .filter((f) => f.target.endsWith("failure-reference.md"))
-      .map((f) => `${VENDOR}/${f.target}`),
+    "shared/skills-pin.d.ts",
+    ...hintTargets,
   ];
   const routerSkills = Object.entries(
     JSON.parse(readFileSync(join(pkgDir, VENDOR, "_catalog.json"), "utf8")),

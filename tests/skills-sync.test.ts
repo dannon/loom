@@ -182,9 +182,11 @@ describe("rewriteLocalPaths", () => {
     expect(() => rewriteLocalPaths("see ~/projects/repositories/tpv/config.yml")).toThrow(/tpv/);
   });
 
-  it("fails on a reference the trailing-slash pattern would otherwise skip", () => {
-    expect(() => rewriteLocalPaths("cloned into ~/projects/repositories/galaxy")).toThrow(
-      /survived the rewrite/,
+  it("leaves a slashless reference for the residue check to catch", () => {
+    // The rewrite only recognises a trailing slash; the assertion that nothing
+    // slipped through runs once, over every vendored file, in applyTransforms.
+    expect(rewriteLocalPaths("cloned into ~/projects/repositories/galaxy")).toBe(
+      "cloned into ~/projects/repositories/galaxy",
     );
   });
 });
@@ -192,18 +194,52 @@ describe("rewriteLocalPaths", () => {
 describe("applyTransforms", () => {
   const both = ["rewrite-local-paths", "strip-wiki-links"];
 
-  it("only touches markdown, whatever the case of the extension", () => {
-    const yml = "note: ~/projects/repositories/nosuchrepo/x.py and [[a-link]]\n";
+  it("rewrites markdown whatever the case of the extension, and leaves yaml alone", () => {
+    const yml = "note: some/relative/path.py and [[a-link]]\n";
     expect(applyTransforms(yml, "galaxy-collection-semantics.yml", both)).toBe(yml);
     expect(applyTransforms("[[a-link]]", "SHOUTING.MD", both)).toBe("a-link");
   });
 
-  it("applies nothing when a plugin declares no transforms", () => {
+  it("applies no rewrite when a plugin declares no transforms", () => {
     // The wiki-link strip and the path rewrite correct how the Foundry authors
     // its notes. Running them over content that never had the problem is how a
     // sync quietly corrupts something, so they are opt-in per plugin.
-    const md = "keeps [[its-links]] and ~/projects/repositories/galaxy/x.py\n";
+    const md = "keeps [[its-links]] verbatim\n";
     expect(applyTransforms(md, "a.md", [])).toBe(md);
+  });
+
+  it("refuses a local-checkout path in any file type, transforms or not", () => {
+    // The rewrite is markdown-only, but the leak check is an assertion. A
+    // sidecar naming the author's home directory would otherwise ship, with
+    // their account name, to npm and into every installer.
+    for (const [target, transforms] of [
+      ["notes.md", both],
+      ["notes.md", []],
+      ["semantics.yml", both],
+      ["_provenance.json", both],
+    ] as [string, string[]][]) {
+      // Markdown with the rewrite on refuses at the unmapped repo; everything
+      // else refuses at the residue assertion. Either way it does not ship.
+      expect(() =>
+        applyTransforms("cited at /Users/someone/projects/repositories/x/y.py", target, transforms),
+      ).toThrow(/no GitHub base|survived the rewrite/);
+    }
+  });
+
+  it("strips wiki-links from the prose a cli reference carries in its body", () => {
+    // A cast's references/cli/*.json holds a whole markdown document in `body`,
+    // and its SKILL.md tells the agent to read the file. Everywhere else in
+    // these files a [[name]] is an identifier, so only that field is touched.
+    const doc = JSON.stringify({
+      tool: "gxwf",
+      ref: "[[an-identifier]]",
+      body: "see [[validate]]",
+    });
+    const out = applyTransforms(doc, "references/cli/x.json", both);
+    const parsed = JSON.parse(out);
+    expect(parsed.body).toBe("see validate");
+    expect(parsed.ref).toBe("[[an-identifier]]");
+    expect(parsed.tool).toBe("gxwf");
   });
 
   it("refuses a transform name it does not know", () => {

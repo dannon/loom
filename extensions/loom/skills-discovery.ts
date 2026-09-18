@@ -290,14 +290,22 @@ export interface CatalogRefreshResult {
   ok: boolean;
   error?: string;
   cached?: boolean;
+  /** Ships in the package; there was nothing to fetch. */
+  bundled?: boolean;
 }
 
 /** Force-refresh every enabled repo (the manual path). Per-repo errors are reported, not thrown. */
 export async function refreshAllCatalogs(): Promise<CatalogRefreshResult[]> {
   // Repos are independent (separate trees + cache dirs) -- refresh concurrently.
-  // Per-repo try/catch so one failure doesn't sink the rest.
+  // Per-repo try/catch so one failure doesn't sink the rest. A bundled repo has
+  // nothing to refresh: walking it would report a count the router does not use,
+  // and offline it would report a failure for a repo that works.
   return Promise.all(
     listEnabledSkillRepos().map(async (repo): Promise<CatalogRefreshResult> => {
+      if (isBundledRepo(repo)) {
+        const entries = readBundledCatalog()?.[repo.name];
+        return { repo: repo.name, count: entries?.length ?? 0, ok: true, bundled: true };
+      }
       try {
         const skills = await refreshCatalog(repo, { force: true });
         return { repo: repo.name, count: skills.length, ok: true };
@@ -330,7 +338,7 @@ export function catalogSummary(): CatalogRefreshResult[] {
   return listEnabledSkillRepos().map((repo) => {
     if (isBundledRepo(repo)) {
       const entries = readBundledCatalog()?.[repo.name];
-      return { repo: repo.name, count: entries?.length ?? 0, ok: true, cached: true };
+      return { repo: repo.name, count: entries?.length ?? 0, ok: true, bundled: true };
     }
     const cat = readCatalog(repo);
     return { repo: repo.name, count: cat?.skills.length ?? 0, ok: true, cached: cat !== null };

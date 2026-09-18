@@ -8,10 +8,12 @@
  * packaging change. That is deliberate: the guidance has to be available
  * offline, at a version we reviewed, with no runtime dependency on GitHub.
  *
- * This is a read-only source for `skills_fetch`, not a configured skills repo.
- * It never appears in the system-prompt skills router -- nothing here is
- * ambient guidance the model needs to know exists up front. Hints point at it
- * at the moment it becomes relevant (see `invocation-failure-hint.ts`).
+ * Two kinds of content live here. The galaxy-skills mirror backs the configured
+ * repo of the same name: its generated `_catalog.json` is what the system-prompt
+ * router renders, and `skills_fetch` reads it from disk. The Foundry casts back
+ * nothing configured and never enter the router -- nothing in them is ambient
+ * guidance the model needs to know exists up front, so a hint names the exact
+ * file at the moment it becomes relevant (see `invocation-failure-hint.ts`).
  */
 
 import fs from "node:fs";
@@ -72,14 +74,36 @@ export function readBundledCatalog(): Record<string, SkillEntry[]> | null {
 }
 
 /**
+ * Where in the vendor tree a configured repo's content lives. Reading is scoped
+ * to it so a bundled repo answers for its own files and nothing else: the casts
+ * are reachable only through their own repo name, and the same path has to mean
+ * the same thing whether the repo is bundled or fetched.
+ */
+function bundledPrefix(repoName: string): string | null {
+  const plugin = readVendorManifest()?.plugins?.find((p) => p.repo === repoName);
+  if (!plugin) return null;
+  return plugin.as ? `${plugin.as}/` : "";
+}
+
+/**
  * Read one file for a bundled repo. Never touches the network, so a miss lists
  * that repo's own skills rather than every file in the package.
  */
 export function readBundledRepoFile(repo: { name: string }, rawPath: string): VendorReadResult {
-  const res = readVendoredSkill(rawPath);
-  if (res.ok) return res;
   const skills = (readBundledCatalog()?.[repo.name] ?? []).map((s) => s.path);
+  const prefix = bundledPrefix(repo.name);
+  const clean = rawPath.replace(/^\/+/, "").replace(/\\/g, "/");
+  if (prefix === null || !clean.startsWith(prefix)) {
+    return { ok: false, error: `No file "${rawPath}"`, available: skills };
+  }
+  const res = readVendoredSkill(clean);
+  if (res.ok) return res;
   return { ...res, available: skills.length ? skills : res.available };
+}
+
+/** True when the package actually holds this bundled repo's content. */
+export function hasBundledContent(repoName: string): boolean {
+  return (readBundledCatalog()?.[repoName]?.length ?? 0) > 0;
 }
 
 /** Absolute path to the vendored skills directory (sibling of this module). */
@@ -89,9 +113,10 @@ export function vendorSkillsDir(): string {
 
 /**
  * Resolve a vendored file path to an absolute path inside the vendor dir, or
- * null if it escapes. The vendor set is flat, but a caller-supplied path still
- * gets the same containment check the GitHub path takes -- `..`, absolute
- * paths, and backslash separators are all rejected rather than normalized.
+ * null if it escapes. A leading slash is stripped and a backslash is read as a
+ * separator, the way the GitHub path does it; a literal `..` anywhere is
+ * rejected outright rather than resolved, so percent-encoded traversal never
+ * gets a chance to become one.
  */
 export function resolveVendorPath(rawPath: string): string | null {
   const clean = rawPath.replace(/^\/+/, "").replace(/\\/g, "/");
@@ -139,17 +164,20 @@ export type VendorReadResult =
 
 /** Read one vendored file. Never touches the network. */
 export function readVendoredSkill(rawPath: string): VendorReadResult {
-  const available = (readVendorManifest()?.files ?? [])
-    .map((f) => f.target)
-    .filter((t) => t !== "_manifest.json");
+  // Only built on the failure paths: the manifest is ~50 KB of JSON and every
+  // successful read would otherwise parse it just to throw the result away.
+  const available = () =>
+    (readVendorManifest()?.files ?? []).map((f) => f.target).filter((t) => t !== "_manifest.json");
   if (typeof rawPath !== "string") {
-    return { ok: false, error: `Invalid vendored skill path`, available };
+    return { ok: false, error: `Invalid vendored skill path`, available: available() };
   }
   const abs = resolveVendorPath(LEGACY_FLAT_PATHS[rawPath] ?? rawPath);
-  if (!abs) return { ok: false, error: `Invalid vendored skill path "${rawPath}"`, available };
+  if (!abs) {
+    return { ok: false, error: `Invalid vendored skill path "${rawPath}"`, available: available() };
+  }
   try {
     return { ok: true, text: fs.readFileSync(abs, "utf-8") };
   } catch {
-    return { ok: false, error: `No vendored file "${rawPath}"`, available };
+    return { ok: false, error: `No vendored file "${rawPath}"`, available: available() };
   }
 }

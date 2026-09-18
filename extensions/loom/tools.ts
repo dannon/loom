@@ -45,6 +45,7 @@ import { listEnabledSkillRepos, findSkillRepo } from "./skills";
 import { fetchSkillFile, githubRawBase } from "./skills-discovery";
 import {
   VENDOR_REPO_NAME,
+  hasBundledContent,
   isBundledRepo,
   readBundledRepoFile,
   readVendoredSkill,
@@ -380,8 +381,9 @@ exact file when it becomes relevant.`,
       ),
       path: Type.String({
         description:
-          "Relative path inside the repo, e.g. 'collection-manipulation/SKILL.md', " +
-          "'galaxy-integration/mcp-reference/gotchas.md'.",
+          "Relative path inside the repo, exactly as the skills router prints it, " +
+          "e.g. 'skills/collection-manipulation/SKILL.md', " +
+          "'skills/galaxy-mcp-reference/gotchas.md'.",
       }),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
@@ -448,7 +450,11 @@ exact file when it becomes relevant.`,
       // the content was reviewed at a pinned commit and works with no network.
       // Point it at another branch and it goes back to being fetched, which is
       // how a skill author evaluates a change before it is merged.
-      if (isBundledRepo(repo)) {
+      //
+      // Gated on the content actually being there. If the vendor tree is missing
+      // -- a packaging regression, a half-finished install -- falling through to
+      // the network is a worse day than usual, not a session with no skills.
+      if (isBundledRepo(repo) && hasBundledContent(repo.name)) {
         const res = readBundledRepoFile(repo, cleanPath);
         if (res.ok) {
           return {
@@ -509,10 +515,17 @@ exact file when it becomes relevant.`,
     },
     renderResult: (result) => {
       const d = result.details as
-        | { repo?: string; path?: string; length?: number; cached?: boolean; error?: boolean }
+        | {
+            repo?: string;
+            path?: string;
+            length?: number;
+            cached?: boolean;
+            bundled?: boolean;
+            error?: boolean;
+          }
         | undefined;
       if (d?.error) return new Text("❌ Skill fetch failed");
-      const tag = d?.cached ? "(cached)" : "(fetched)";
+      const tag = d?.bundled ? "(bundled)" : d?.cached ? "(cached)" : "(fetched)";
       return new Text(`📘 ${d?.repo}/${d?.path} ${tag} (${d?.length || 0} chars)`);
     },
   });

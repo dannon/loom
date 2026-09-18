@@ -10,6 +10,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { DEFAULT_SKILLS } from "../shared/loom-config.js";
 import {
+  hasBundledContent,
   isBundledRepo,
   readBundledCatalog,
   readBundledRepoFile,
@@ -56,6 +57,29 @@ describe("readBundledRepoFile", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("answers only for its own content, not for anything else in the package", () => {
+    // A bundled path has to mean what a live fetch of the same string would
+    // mean. These all exist in the package and none of them is in this repo, so
+    // a repo pointed at a branch would 404 on every one -- and so must this.
+    for (const outside of [
+      "advance-galaxy-draft-step/SKILL.md",
+      "debug-galaxy-workflow-output/references/notes/galaxy-tool-job-failure-reference.md",
+      "galaxy-tool-job-failure-reference.md",
+      "_manifest.json",
+      "_catalog.json",
+    ]) {
+      expect(readBundledRepoFile(DEFAULT, outside).ok).toBe(false);
+    }
+  });
+
+  it("knows whether the package actually holds the content", () => {
+    // What gates the disk read: config alone says a repo is bundled, and a
+    // missing vendor tree must send the fetch to the network, not report zero
+    // skills.
+    expect(hasBundledContent(DEFAULT.name)).toBe(true);
+    expect(hasBundledContent("not-a-bundled-repo")).toBe(false);
+  });
+
   it("lists that repo's own skills on a miss, not every bundled file", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const res = readBundledRepoFile(DEFAULT, "skills/no-such-skill/SKILL.md");
@@ -76,8 +100,12 @@ describe("the generated catalog", () => {
     expect(entries.length).toBeGreaterThan(0);
     const tagged = entries.filter((e) => e.surfaces.includes("loom")).map((e) => e.name);
     // reproduciblify is the one the hand-written catalog had lost track of.
+    // Asserted by name, not by count: upstream tagging another skill is a
+    // routine event and should not read as a Loom regression.
     expect(tagged).toContain("reproduciblify");
-    expect(tagged.length).toBe(5);
+    expect(tagged).toContain("udt-authoring");
+    expect(tagged.length).toBeGreaterThanOrEqual(5);
+    expect(tagged.length).toBeLessThan(entries.length);
   });
 
   it("names paths that actually resolve, at the same string a live fetch would use", () => {

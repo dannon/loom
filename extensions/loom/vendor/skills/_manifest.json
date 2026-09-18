@@ -71,36 +71,36 @@
       "target": "advance-galaxy-draft-step/references/cli/add.json",
       "plugin": "foundry-skills",
       "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/references/cli/add.json",
-      "bytes": 4101,
-      "sha256": "85e3bb884171beb69631186ca6f0f7552e6c6d0721383ab6653e7a32c84a1b71"
+      "bytes": 4089,
+      "sha256": "ba20cf23ba6db0f63ba4889e92c5ef5ee0b614b1c0c277f4d768dfc8408901cb"
     },
     {
       "target": "advance-galaxy-draft-step/references/cli/draft-extract.json",
       "plugin": "foundry-skills",
       "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/references/cli/draft-extract.json",
-      "bytes": 4595,
-      "sha256": "c59fbafbe6cf53cd7bcdd867d73b69d078c949c0dfa83abdc084f309793a60aa"
+      "bytes": 4587,
+      "sha256": "bd3229f7ed25502cced1eb2bef1641254b7aa1e76bcbede3ddd576ded6e29b56"
     },
     {
       "target": "advance-galaxy-draft-step/references/cli/draft-next-step.json",
       "plugin": "foundry-skills",
       "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/references/cli/draft-next-step.json",
-      "bytes": 3971,
-      "sha256": "8638645f5974d8072dc3c63e522b7ab25d562f8d6217ea93b61f0a29f371d6f7"
+      "bytes": 3959,
+      "sha256": "711d9126b75c97008b62e0a685f6cf795bdbfc434c2a87807a9d41bb0aa1273a"
     },
     {
       "target": "advance-galaxy-draft-step/references/cli/draft-validate.json",
       "plugin": "foundry-skills",
       "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/references/cli/draft-validate.json",
-      "bytes": 8831,
-      "sha256": "afa59b0815308a340780247df0548909518564d58352a0c695ceca37a07eee5b"
+      "bytes": 8811,
+      "sha256": "5b65ea32a912acb7bec3ee53c084ad8fba9db1f05dd2c0e04a7ac07b5ef23045"
     },
     {
       "target": "advance-galaxy-draft-step/references/cli/list.json",
       "plugin": "foundry-skills",
       "source": "plugins/foundry-skills/skills/advance-galaxy-draft-step/references/cli/list.json",
-      "bytes": 2693,
-      "sha256": "92d336667531c34180db6f75b9fdf87261923c1e85567dce3b21a6d87d9543bd"
+      "bytes": 2689,
+      "sha256": "ab6d0a682243b72a9bf58bc76aabb4c052eb7bbb94e1c54966ab0a6a0e29a2c8"
     },
     {
       "target": "advance-galaxy-draft-step/references/notes/galaxy-tool-job-failure-reference.md",
@@ -162,8 +162,8 @@
       "target": "apply-galaxy-workflow-changeset/references/cli/draft-validate.json",
       "plugin": "foundry-skills",
       "source": "plugins/foundry-skills/skills/apply-galaxy-workflow-changeset/references/cli/draft-validate.json",
-      "bytes": 8831,
-      "sha256": "afa59b0815308a340780247df0548909518564d58352a0c695ceca37a07eee5b"
+      "bytes": 8811,
+      "sha256": "5b65ea32a912acb7bec3ee53c084ad8fba9db1f05dd2c0e04a7ac07b5ef23045"
     },
     {
       "target": "apply-galaxy-workflow-changeset/references/notes/galaxy-workflow-draft-format.md",
@@ -435,22 +435,22 @@
       "target": "discover-shed-tool/references/cli/tool-revisions.json",
       "plugin": "foundry-skills",
       "source": "plugins/foundry-skills/skills/discover-shed-tool/references/cli/tool-revisions.json",
-      "bytes": 4434,
-      "sha256": "db0b13f2b92593c9cd3bf5a80276a31e537c07caff76786167ebe9f7feac5938"
+      "bytes": 4418,
+      "sha256": "6057a4c49659a1729a32f383cbf4f7fc5b611905693b2b67def520c349eb21fb"
     },
     {
       "target": "discover-shed-tool/references/cli/tool-search.json",
       "plugin": "foundry-skills",
       "source": "plugins/foundry-skills/skills/discover-shed-tool/references/cli/tool-search.json",
-      "bytes": 5902,
-      "sha256": "72f5f7cc0cd5ed40038af89e6041c7916d65c51ba1c7bc7b2c46ba64c51d9359"
+      "bytes": 5882,
+      "sha256": "8e9aab9733af57bf233bad0e944b52b37c3c2fc1546f55e8ab92abce32163e5a"
     },
     {
       "target": "discover-shed-tool/references/cli/tool-versions.json",
       "plugin": "foundry-skills",
       "source": "plugins/foundry-skills/skills/discover-shed-tool/references/cli/tool-versions.json",
-      "bytes": 3678,
-      "sha256": "90f35a407af778a1a1c714f79ceb8dc3559523964175e734b565eed8b9aeb6a5"
+      "bytes": 3654,
+      "sha256": "c39bb0ed539febdf4015adf691f7958bdf689dcca3dd985c14d4c123882b83d6"
     },
     {
       "target": "discover-shed-tool/references/notes/component-tool-shed-search.md",
@@ -505,8 +505,8 @@
       "target": "implement-galaxy-workflow-test/references/cli/validate-tests.json",
       "plugin": "foundry-skills",
       "source": "plugins/foundry-skills/skills/implement-galaxy-workflow-test/references/cli/validate-tests.json",
-      "bytes": 2613,
-      "sha256": "973184698733ffb86bb5a15781902846afec311047f5684f779f8ad023e5d24c"
+      "bytes": 2605,
+      "sha256": "8a211aa1a451cba76e338f718ed25c6bde24592d0cdee0b33c498058a912e65b"
     },
     {
       "target": "implement-galaxy-workflow-test/references/notes/galaxy-workflow-testability-design.md",
@@ -645,8 +645,8 @@
       "target": "run-workflow-test/references/cli/validate-tests.json",
       "plugin": "foundry-skills",
       "source": "plugins/foundry-skills/skills/run-workflow-test/references/cli/validate-tests.json",
-      "bytes": 2613,
-      "sha256": "973184698733ffb86bb5a15781902846afec311047f5684f779f8ad023e5d24c"
+      "bytes": 2605,
+      "sha256": "8a211aa1a451cba76e338f718ed25c6bde24592d0cdee0b33c498058a912e65b"
     },
     {
       "target": "run-workflow-test/references/notes/galaxy-workflow-invocation-failure-reference.md",

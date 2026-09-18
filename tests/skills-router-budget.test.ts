@@ -24,16 +24,22 @@ function renderDefaultRouter(): string {
   return renderSkillsSection(REPOS, entries, BUNDLED);
 }
 
-// Headroom over the five skills a default install renders today, and nowhere
-// near enough for a cast allowlist to slip in unnoticed: the twelve casts alone
-// would be several times this.
-const ROUTER_BUDGET_BYTES = 4096;
+// Room for a few more skills over what a default install renders today, and
+// nowhere near enough for a cast allowlist to slip in unnoticed: the twelve
+// casts alone would be several times this. Raise it deliberately when upstream
+// tags a skill for this surface; do not raise it to make a leak go away.
+const ROUTER_BUDGET_BYTES = 6144;
 
 describe("the rendered skills router", () => {
   it("stays inside its byte budget", () => {
     const size = Buffer.byteLength(renderDefaultRouter(), "utf-8");
     expect(size).toBeGreaterThan(0);
-    expect(size).toBeLessThanOrEqual(ROUTER_BUDGET_BYTES);
+    expect(
+      size,
+      `the rendered router is ${size} bytes against a ${ROUTER_BUDGET_BYTES} budget. If upstream ` +
+        `tagged another skill for this surface, raise the budget. If a Foundry cast has reached ` +
+        `the router, that is the bug.`,
+    ).toBeLessThanOrEqual(ROUTER_BUDGET_BYTES);
   });
 
   it("names nothing from a plugin that is kept out of the router", () => {

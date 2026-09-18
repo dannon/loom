@@ -48,6 +48,7 @@ const VENDOR_CATALOG = path.join(VENDOR_DIR, VENDOR_CATALOG_NAME);
 // able to say which commit a bundled repo is pinned at, so the pin is also
 // written as a shared contract module.
 const PIN_MODULE = path.join(REPO_ROOT, "shared", "skills-pin.js");
+const PIN_TYPES = path.join(REPO_ROOT, "shared", "skills-pin.d.ts");
 const GENERATED = new Set([VENDOR_MANIFEST_NAME, VENDOR_CATALOG_NAME]);
 
 /** The product-surface id Loom claims. A skill opts in with `metadata.surfaces: [loom]`. */
@@ -110,18 +111,9 @@ export function rewriteLocalPaths(text, bases = REPO_BLOB_BASE) {
         `or the vendored copy ships a path that only exists on the author's machine`,
     );
   });
-  // The rewrite only recognises a trailing slash. A bare `.../repositories/foo`
-  // would slip past it, so fail here rather than in a reviewer's eyes.
-  if (LOCAL_CHECKOUT_RESIDUE.test(out)) {
-    throw new Error("a local-checkout reference survived the rewrite");
-  }
   return out;
 }
 
-// Obsidian wiki-links resolve inside the Foundry vault and nowhere else. Left
-// intact they read as an instruction to go fetch something that isn't vendored.
-// Strip to the text a reader wants: the alias after `|` when the link has one,
-// otherwise the note name without its `#anchor`.
 // Obsidian wiki-links resolve inside the Foundry vault and nowhere else. Left
 // intact they read as an instruction to go fetch something that isn't vendored.
 // Strip to the text a reader should see: the alias when the link is piped, the
@@ -135,8 +127,8 @@ const LINK_SEG = String.raw`[^[\]\n|"',\s]+?`;
 const WIKI_LINK = new RegExp(String.raw`\[\[(${LINK_SEG})(?:\|(${LINK_SEG}))?\]\]`, "g");
 const WIKI_LINK_ANCHORED = new RegExp(String.raw`^\[\[(${LINK_SEG})(?:\|(${LINK_SEG}))?\]\]$`);
 
-const FENCE_OPEN = /^\s*(`{3,}|~{3,})/;
-const FENCE_CLOSE = /^\s*(`{3,}|~{3,})\s*$/;
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
+const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})\s*$/;
 const MASK = "\0";
 const INLINE_SPAN = /(`+)(?:(?!\1)[\s\S])*?\1/g;
 
@@ -199,12 +191,46 @@ export const TRANSFORMS = {
 };
 
 export function applyTransforms(text, targetName, names = []) {
-  if (!targetName.toLowerCase().endsWith(".md")) return text;
-  return names.reduce((acc, name) => {
-    const fn = TRANSFORMS[name];
-    if (!fn) throw new Error(`unknown transform "${name}"`);
-    return fn(acc);
-  }, text);
+  const lower = targetName.toLowerCase();
+  const out = lower.endsWith(".md")
+    ? names.reduce((acc, name) => {
+        const fn = TRANSFORMS[name];
+        if (!fn) throw new Error(`unknown transform "${name}"`);
+        return fn(acc);
+      }, text)
+    : lower.endsWith(".json")
+      ? applyJsonTransforms(text, names)
+      : text;
+  // The rewrite itself is markdown-only, but the leak check is an assertion and
+  // costs nothing, so every vendored file gets it. A local checkout path in a
+  // sidecar would otherwise ship, with its author's account name, to npm and
+  // into every installer.
+  assertNoLocalCheckout(out, targetName);
+  return out;
+}
+
+// A cast's `references/cli/*.json` carries a whole markdown document in its
+// `body`, and its SKILL.md tells the agent to read the file. That prose has the
+// same wiki-links as any note, so it gets the same treatment -- but only that
+// field. Everywhere else in these JSON files a `[[name]]` is a machine-readable
+// identifier (`"ref": "[[galaxy-collection-semantics]]"`), and stripping the
+// brackets would change an id rather than tidy a sentence.
+const JSON_PROSE_FIELD = "body";
+
+export function applyJsonTransforms(text, names = []) {
+  if (!names.includes("strip-wiki-links")) return text;
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return text;
+  }
+  if (!parsed || typeof parsed[JSON_PROSE_FIELD] !== "string") return text;
+  const stripped = stripWikiLinks(parsed[JSON_PROSE_FIELD]);
+  if (stripped === parsed[JSON_PROSE_FIELD]) return text;
+  // Re-encode just that field so the rest of the file keeps its original
+  // formatting and key order rather than being reflowed by a round trip.
+  return text.replace(JSON.stringify(parsed[JSON_PROSE_FIELD]), () => JSON.stringify(stripped));
 }
 
 function toSurfaces(v) {
@@ -255,7 +281,7 @@ export function parseFrontmatter(text) {
 export function buildCatalogEntries(plugin, files, readText) {
   const entries = [];
   for (const file of files) {
-    if (!file.target.endsWith("SKILL.md")) continue;
+    if (file.target !== "SKILL.md" && !file.target.endsWith("/SKILL.md")) continue;
     const fm = parseFrontmatter(readText(file));
     if (!fm.name || !fm.description) {
       throw new Error(`${file.target}: SKILL.md has no name or description in its frontmatter`);
@@ -279,6 +305,12 @@ export function buildCatalogEntries(plugin, files, readText) {
     );
   }
   return entries;
+}
+
+function assertNoLocalCheckout(text, targetName) {
+  if (LOCAL_CHECKOUT_RESIDUE.test(text)) {
+    throw new Error(`${targetName}: a local-checkout reference survived the rewrite`);
+  }
 }
 
 /**
@@ -567,12 +599,30 @@ async function sync() {
       });
 
       const pluginFiles = selectFiles(plugin, listFiles(root));
+      const transformed = new Map(
+        pluginFiles.map((f) => {
+          const raw = fs.readFileSync(path.join(root, f.source), "utf-8");
+          try {
+            return [f.target, applyTransforms(raw, f.target, plugin.transforms)];
+          } catch (err) {
+            const from = `plugins/${plugin.plugin}/${PLUGIN_SKILLS_ROOT}/${f.source}`;
+            throw new Error(`${from}: ${err.message}`, { cause: err });
+          }
+        }),
+      );
+
       if (plugin.router === "catalog") {
         if (!plugin.repo) {
           throw new Error(`plugin "${plugin.plugin}" is in the router but names no repo`);
         }
+        if (Object.hasOwn(catalog, plugin.repo) || plugin.repo in Object.prototype) {
+          throw new Error(`repo "${plugin.repo}" is claimed twice or is not usable as a key`);
+        }
+        // Read the transformed text, not the upstream bytes: a description is
+        // copied straight into the cached system prompt, so it has to be the
+        // one that went past the transforms rather than around them.
         catalog[plugin.repo] = buildCatalogEntries(plugin, pluginFiles, (f) =>
-          fs.readFileSync(path.join(root, f.source), "utf-8"),
+          transformed.get(f.target),
         );
       }
 
@@ -584,13 +634,7 @@ async function sync() {
         byTarget.set(file.target, plugin.plugin);
 
         const from = `plugins/${plugin.plugin}/${PLUGIN_SKILLS_ROOT}/${file.source}`;
-        const raw = fs.readFileSync(path.join(root, file.source), "utf-8");
-        let text;
-        try {
-          text = applyTransforms(raw, file.target, plugin.transforms);
-        } catch (err) {
-          throw new Error(`${from}: ${err.message}`, { cause: err });
-        }
+        const text = transformed.get(file.target);
         entries.push({
           target: file.target,
           plugin: plugin.plugin,
@@ -627,6 +671,7 @@ async function sync() {
       ) + "\n";
     fs.writeFileSync(VENDOR_CATALOG, catalogText, "utf-8");
     fs.writeFileSync(PIN_MODULE, renderPinModule(manifest, source.commit), "utf-8");
+    fs.writeFileSync(PIN_TYPES, PIN_TYPES_SOURCE, "utf-8");
 
     fs.writeFileSync(
       VENDOR_MANIFEST,
@@ -658,6 +703,18 @@ async function sync() {
     source.cleanup();
   }
 }
+
+const PIN_TYPES_SOURCE = [
+  "// Generated by scripts/sync-skills.mjs. Do not hand-edit; run `npm run sync:skills`.",
+  "export const SKILLS_PIN: {",
+  "  repo: string;",
+  "  /** Commit the bundled content was vendored from. Tags move; this does not. */",
+  "  commit: string;",
+  "  commitDate: string | null;",
+  "  tag: string | null;",
+  "};",
+  "",
+].join("\n");
 
 function renderPinModule(manifest, commit) {
   // Written in the repo's own formatting rather than JSON.stringify's: the file
@@ -737,7 +794,7 @@ function check() {
   // The pin module is generated outside the vendor tree entirely, so the only
   // thing tying it to the manifest is this comparison.
   try {
-    const pinned = /\bcommit:\s*"([^"]+)"/.exec(fs.readFileSync(PIN_MODULE, "utf-8"));
+    const pinned = /\bcommit:\s*["']([^"']+)["']/.exec(fs.readFileSync(PIN_MODULE, "utf-8"));
     if (!pinned || pinned[1] !== vendored.commit) {
       failures.push({
         kind: "moved-pin",

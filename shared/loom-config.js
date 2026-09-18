@@ -19,6 +19,8 @@ export const DEFAULT_SKILLS = [
  * auditable. To relax, edit this constant or replace
  * isAllowedSkillUrl() with a more permissive predicate.
  */
+export const ALLOWED_SKILLS_PREFIX = "https://github.com/galaxyproject/";
+
 /**
  * A configured repo reads from the package when it is one of the defaults and is
  * still pointed at that default's URL and branch. Anything else -- another
@@ -37,10 +39,10 @@ export function isBundledSkillRepo(repo) {
       .replace(/\/+$/, "")
       .toLowerCase();
   if (!norm(repo.url) || norm(repo.url) !== norm(preset.url)) return false;
-  return (repo.branch || "main") === (preset.branch || "main");
+  const branch = (repo.branch ?? "").trim() || "main";
+  return branch === (preset.branch || "main");
 }
 
-export const ALLOWED_SKILLS_PREFIX = "https://github.com/galaxyproject/";
 const VALID_UI_THEMES = new Set(["light", "dark"]);
 
 export function isAllowedSkillUrl(url) {
