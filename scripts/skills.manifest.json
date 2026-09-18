@@ -1,5 +1,5 @@
 {
-  "$comment": "Skill content vendored into Loom. The source is galaxyproject/agentic-plugins, which mirrors galaxy-skills and the Foundry casts at pins of its own; the pin recorded here is a commit because tags are mutable, and `tag` is a label that stays null while the pinned commit is ahead of the newest tag upstream. Regenerate with `npm run sync:skills`; verify with `npm run check:skills`. Do not hand-edit files under extensions/loom/vendor/skills/.",
+  "$comment": "Skill content vendored into Loom. The source is galaxyproject/agentic-plugins, which mirrors galaxy-skills and the Foundry casts at pins of its own; the pin recorded here is a commit because tags are mutable, and `tag` is a label that stays null while the pinned commit is ahead of the newest tag upstream. Regenerate with `npm run sync:skills`; verify with `npm run check:skills`. Do not hand-edit files under extensions/loom/vendor/skills/. An exclude is either content Loom has no use for, like a cast's feedback ledger, or a file the transforms refuse: the IWC shortcuts note cites two private repositories by absolute path under their author's home directory, which no rewrite can resolve and which we should not publish.",
   "repo": "galaxyproject/agentic-plugins",
   "commit": "aa4da4bd68eb00e360dfd5aa6e998feb5de0ac49",
   "commitDate": "2026-09-17",
@@ -12,7 +12,10 @@
       "transforms": ["rewrite-local-paths", "strip-wiki-links"],
       "why": "Failure triage for a Galaxy run: what an invocation state and message reason mean, what a job's exit code and streams prove, and the collection shape rules behind a map-over that went wrong.",
       "include": ["debug-galaxy-workflow-output/**"],
-      "exclude": ["debug-galaxy-workflow-output/_feedback.md"]
+      "exclude": [
+        "debug-galaxy-workflow-output/_feedback.md",
+        "debug-galaxy-workflow-output/references/notes/iwc-shortcuts-anti-patterns.md"
+      ]
     }
   ]
 }

@@ -22,8 +22,10 @@
  * Transforms are declared per plugin and applied to markdown on the way in, so
  * the vendored copy is deliberately not byte-identical to upstream and `--check`
  * compares recorded hashes rather than re-fetching. They are exported as pure
- * functions because the CI gate proves only that nobody hand-edited the tree:
- * a transform that mangles content re-syncs, writes a fresh hash, and passes.
+ * functions because of what the CI gate cannot see. It catches an accidental
+ * edit, a stale sync and a moved pin -- not a transform that mangles content,
+ * which re-syncs, writes a fresh hash and passes, and not a deliberate edit
+ * that updates `_manifest.json` in the same diff.
  */
 
 import crypto from "node:crypto";
@@ -57,24 +59,31 @@ export const REPO_BLOB_BASE = {
   planemo: "https://github.com/galaxyproject/planemo/blob/master/",
 };
 
-const LOCAL_CHECKOUT = /~\/projects\/repositories\/([A-Za-z0-9._-]+)\//g;
+// The notes write the checkout root three ways: `~/`, and the expanded
+// `/Users/<someone>/` or `/home/<someone>/`. The expanded forms also carry the
+// author's account name, which we would otherwise publish to npm and into every
+// installer, so all three have to be caught.
+const CHECKOUT_ROOT = String.raw`(?:~|/(?:Users|home)/[A-Za-z0-9._-]+)`;
+const LOCAL_CHECKOUT = new RegExp(`${CHECKOUT_ROOT}/projects/repositories/([A-Za-z0-9._-]+)/`, "g");
+const LOCAL_CHECKOUT_RESIDUE = new RegExp(`${CHECKOUT_ROOT}/projects/repositories`);
 
-/** Rewrite `~/projects/repositories/<repo>/` to that repo's GitHub blob base. */
+/** Rewrite a local checkout of `<repo>` to that repo's GitHub blob base. */
 export function rewriteLocalPaths(text, bases = REPO_BLOB_BASE) {
   const out = text.replace(LOCAL_CHECKOUT, (match, repo) => {
-    const base = bases[repo];
-    if (!base) {
+    // Own-property only: `bases["constructor"]` is truthy and would splice a
+    // native-code stringification into shipped guidance.
+    if (!Object.hasOwn(bases, repo)) {
       throw new Error(
         `no GitHub base for "${match}" -- add "${repo}" to REPO_BLOB_BASE, ` +
           `or the vendored copy ships a path that only exists on the author's machine`,
       );
     }
-    return base;
+    return bases[repo];
   });
-  // The rewrite only recognises a trailing slash. A bare `~/projects/repositories/foo`
+  // The rewrite only recognises a trailing slash. A bare `.../repositories/foo`
   // would slip past it, so fail here rather than in a reviewer's eyes.
-  if (out.includes("~/projects/repositories")) {
-    throw new Error("a `~/projects/repositories` reference survived the rewrite");
+  if (LOCAL_CHECKOUT_RESIDUE.test(out)) {
+    throw new Error("a local-checkout reference survived the rewrite");
   }
   return out;
 }
@@ -84,26 +93,45 @@ export function rewriteLocalPaths(text, bases = REPO_BLOB_BASE) {
 // Strip to the text a reader wants: the alias after `|` when the link has one,
 // otherwise the note name without its `#anchor`.
 const WIKI_LINK = /\[\[([^\]]+)\]\]/g;
-const FENCE = /^\s*(?:```|~~~)/;
+// Up to three spaces of indent, three or more backticks or tildes. A fence is
+// closed only by the same character at least as long, per CommonMark, so a
+// `~~~` line in the middle of a ``` block does not end it.
+const FENCE = /^ {0,3}(`{3,}|~{3,})\s*(.*)$/;
 
 /**
  * `[[...]]` is also how a 2D array literal opens, and galaxy-skills' apply-rules
- * reference is full of them (`data: [[cell values]]`, `[["a", "b", "c"]]`). Both
- * live inside code fences, so fenced lines are left alone; a candidate carrying
- * a quote, comma or bracket is skipped as well, since no note name has one.
+ * reference is full of them (`data: [[cell values]]`, `[["a", "b", "c"]]`).
+ *
+ * Two rules keep those intact. Fenced lines are never rewritten, which is where
+ * every one of them lives. And a candidate is only treated as a link when it
+ * looks like a note name: no whitespace, quote, comma or bracket. Every one of
+ * the 150 links in the vendored casts is a kebab-case file stem, so the second
+ * rule costs nothing and covers an array literal that is not in a fence.
+ *
+ * Known limits, neither of which occurs in what is vendored today: an indented
+ * (four-space) code block is not tracked, and neither are inline code spans.
  */
 export function stripWikiLinks(text) {
-  let inFence = false;
+  let fence = null;
   return text
     .split("\n")
     .map((line) => {
-      if (FENCE.test(line)) {
-        inFence = !inFence;
+      const marker = FENCE.exec(line);
+      if (marker) {
+        const [, ticks, rest] = marker;
+        if (fence === null) {
+          fence = ticks;
+          return line;
+        }
+        // A closing fence is the same character, no shorter, and nothing else.
+        if (ticks[0] === fence[0] && ticks.length >= fence.length && rest.trim() === "") {
+          fence = null;
+        }
         return line;
       }
-      if (inFence) return line;
+      if (fence !== null) return line;
       return line.replace(WIKI_LINK, (match, target) =>
-        /["',[\]]/.test(target) ? match : wikiLinkText(target),
+        /[\s"',[\]]/.test(target) ? match : wikiLinkText(target),
       );
     })
     .join("\n");
@@ -111,9 +139,13 @@ export function stripWikiLinks(text) {
 
 function wikiLinkText(target) {
   const pipe = target.lastIndexOf("|");
-  if (pipe !== -1) return target.slice(pipe + 1).trim();
-  const hash = target.indexOf("#");
-  return (hash === -1 ? target : target.slice(0, hash)).trim();
+  const alias = pipe === -1 ? "" : target.slice(pipe + 1).trim();
+  if (alias) return alias;
+  const head = (pipe === -1 ? target : target.slice(0, pipe)).trim();
+  const hash = head.indexOf("#");
+  // A same-note link is all anchor. Dropping it would delete the sentence's
+  // subject, so keep what is there rather than leaving a hole.
+  return head.slice(0, hash === -1 ? undefined : hash).trim() || head;
 }
 
 /**
@@ -128,7 +160,7 @@ export const TRANSFORMS = {
 };
 
 export function applyTransforms(text, targetName, names = []) {
-  if (!targetName.endsWith(".md")) return text;
+  if (!targetName.toLowerCase().endsWith(".md")) return text;
   return names.reduce((acc, name) => {
     const fn = TRANSFORMS[name];
     if (!fn) throw new Error(`unknown transform "${name}"`);
@@ -180,6 +212,9 @@ export function selectFiles(entry, available) {
   const selected = new Map();
 
   const add = (file) => {
+    if (file.target.startsWith("/") || file.target.split("/").includes("..")) {
+      throw new Error(`plugin "${entry.plugin}": target "${file.target}" leaves the vendor tree`);
+    }
     const clash = selected.get(file.target);
     if (clash && clash.source !== file.source) {
       throw new Error(
@@ -195,7 +230,7 @@ export function selectFiles(entry, available) {
       if (hits.length === 0) {
         throw new Error(`plugin "${entry.plugin}": include "${item}" matched nothing`);
       }
-      for (const p of hits) add({ source: p, target: prefix(p), why: entry.why });
+      for (const p of hits) add({ source: p, target: prefix(p) });
       continue;
     }
     if (!available.includes(item.source)) {
@@ -206,6 +241,23 @@ export function selectFiles(entry, available) {
   }
 
   return [...selected.values()].sort((a, b) => byTargetName(a.target, b.target));
+}
+
+/**
+ * The targets the manifest names outright, or null when any plugin selects by
+ * pattern -- a glob cannot be re-evaluated without the source tree, so offline
+ * there is nothing to compare against. An explicit include that an exclude also
+ * matches is not vendored, so it is not declared either; counting it would make
+ * `sync` and `check` disagree on a manifest that is perfectly consistent.
+ */
+export function declaredTargets(manifest) {
+  const plugins = manifest.plugins ?? [];
+  if (!plugins.flatMap((p) => p.include).every((i) => typeof i === "object")) return null;
+  return plugins.flatMap((p) =>
+    p.include
+      .filter((i) => !(p.exclude ?? []).some((pattern) => matchesPattern(pattern, i.source)))
+      .map((i) => (p.as ? `${p.as}/${i.target}` : i.target)),
+  );
 }
 
 /**
@@ -329,15 +381,35 @@ function materializeSource(manifest) {
     if (!fs.existsSync(path.join(dir, "plugins"))) {
       throw new Error(`LOOM_AGENTIC_PLUGINS_DIR is set but ${dir} has no plugins/ directory`);
     }
-    console.log(`Reading ${dir} (LOOM_AGENTIC_PLUGINS_DIR); the pinned commit is not enforced.`);
-    return { dir, cleanup: () => {} };
+    // Record what the checkout actually is, not what the manifest asked for.
+    // Otherwise a sync from a side branch writes a provenance record naming a
+    // commit whose content it does not contain, and the gate certifies it.
+    const commit = localCheckoutCommit(dir);
+    console.log(`Reading ${dir} (LOOM_AGENTIC_PLUGINS_DIR) at ${commit}.`);
+    if (commit !== manifest.commit) {
+      console.log("That is not the pinned commit, so `check:skills` will reject the result.");
+    }
+    return { dir, commit, cleanup: () => {} };
   }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-skills-sync-"));
   git(["init", "-q"], dir);
   git(["remote", "add", "origin", `https://github.com/${manifest.repo}.git`], dir);
   git(["fetch", "-q", "--depth", "1", "origin", manifest.commit], dir);
   git(["checkout", "-q", "FETCH_HEAD"], dir);
-  return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+  return {
+    dir,
+    commit: git(["rev-parse", "HEAD"], dir).trim(),
+    cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
+  };
+}
+
+function localCheckoutCommit(dir) {
+  try {
+    const head = git(["rev-parse", "HEAD"], dir).trim();
+    return git(["status", "--porcelain"], dir).trim() ? `${head}+dirty` : head;
+  } catch {
+    return "local-checkout-not-a-git-repo";
+  }
 }
 
 function readUpstreamPin(sourceDir, plugin) {
@@ -346,6 +418,7 @@ function readUpstreamPin(sourceDir, plugin) {
     const { repository, ref, commit, path: subPath } = JSON.parse(raw);
     return { repository, ref, commit, path: subPath };
   } catch {
+    console.warn(`  (no readable UPSTREAM.json for ${plugin}; provenance chain not recorded)`);
     return null;
   }
 }
@@ -360,45 +433,62 @@ async function sync() {
     const plugins = [];
     const byTarget = new Map();
 
+    // Read and transform everything before writing anything. A transform that
+    // refuses a file is the normal way this fails, and half a tree on disk with
+    // a stale manifest beside it reports as four hash mismatches rather than as
+    // "the last sync did not finish".
     for (const plugin of manifest.plugins) {
       const root = path.join(source.dir, "plugins", plugin.plugin, PLUGIN_SKILLS_ROOT);
       if (!fs.existsSync(root)) {
         throw new Error(`plugin "${plugin.plugin}" has no ${PLUGIN_SKILLS_ROOT}/ directory`);
       }
-      const files = selectFiles(plugin, listFiles(root));
       plugins.push({
         plugin: plugin.plugin,
         as: plugin.as ?? "",
         router: plugin.router ?? "never",
         transforms: plugin.transforms ?? [],
+        why: plugin.why,
         upstream: readUpstreamPin(source.dir, plugin.plugin),
       });
 
-      for (const file of files) {
+      for (const file of selectFiles(plugin, listFiles(root))) {
         const owner = byTarget.get(file.target);
         if (owner) {
           throw new Error(`plugins "${owner}" and "${plugin.plugin}" both vendor ${file.target}`);
         }
         byTarget.set(file.target, plugin.plugin);
 
+        const from = `plugins/${plugin.plugin}/${PLUGIN_SKILLS_ROOT}/${file.source}`;
         const raw = fs.readFileSync(path.join(root, file.source), "utf-8");
-        const out = applyTransforms(raw, file.target, plugin.transforms);
-        const abs = path.join(VENDOR_DIR, file.target);
-        fs.mkdirSync(path.dirname(abs), { recursive: true });
-        fs.writeFileSync(abs, out, "utf-8");
+        let text;
+        try {
+          text = applyTransforms(raw, file.target, plugin.transforms);
+        } catch (err) {
+          throw new Error(`${from}: ${err.message}`, { cause: err });
+        }
         entries.push({
           target: file.target,
           plugin: plugin.plugin,
-          source: `plugins/${plugin.plugin}/${PLUGIN_SKILLS_ROOT}/${file.source}`,
-          bytes: Buffer.byteLength(out, "utf-8"),
-          sha256: sha256(out),
+          source: from,
+          // Byte count of what the hash covers, so a CRLF checkout upstream
+          // does not make the generated manifest differ by platform.
+          bytes: Buffer.byteLength(text.replace(/\r\n/g, "\n"), "utf-8"),
+          sha256: sha256(text),
           why: file.why,
+          text,
         });
-        console.log(`  ${file.target}  (${Buffer.byteLength(out, "utf-8")} bytes)`);
       }
     }
 
     entries.sort((a, b) => byTargetName(a.target, b.target));
+    for (const entry of entries) {
+      const abs = path.join(VENDOR_DIR, entry.target);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, entry.text, "utf-8");
+      console.log(`  ${entry.target}  (${entry.bytes} bytes)`);
+      delete entry.text;
+    }
+
     fs.writeFileSync(
       VENDOR_MANIFEST,
       JSON.stringify(
@@ -407,7 +497,7 @@ async function sync() {
             "Generated by scripts/sync-skills.mjs. Do not hand-edit; " +
             "run `npm run sync:skills` instead.",
           repo: manifest.repo,
-          commit: manifest.commit,
+          commit: source.commit,
           commitDate: manifest.commitDate,
           tag: manifest.tag ?? null,
           manifestSha256: sha256(manifestText),
@@ -422,7 +512,7 @@ async function sync() {
 
     pruneStale(new Set(entries.map((e) => e.target)));
     console.log(
-      `Vendored ${entries.length} file(s) from ${manifest.repo}@${manifest.commit.slice(0, 7)}`,
+      `Vendored ${entries.length} file(s) from ${manifest.repo}@${source.commit.slice(0, 7)}`,
     );
   } finally {
     source.cleanup();
@@ -435,6 +525,7 @@ async function sync() {
  * as an orphan on every run until someone deletes it by hand.
  */
 function pruneStale(keep) {
+  if (!fs.existsSync(VENDOR_DIR)) return;
   for (const rel of listFiles(VENDOR_DIR)) {
     if (rel === VENDOR_MANIFEST_NAME || keep.has(rel)) continue;
     fs.rmSync(path.join(VENDOR_DIR, rel));
@@ -465,13 +556,6 @@ function check() {
   const manifestText = readManifestText();
   const manifest = JSON.parse(manifestText);
 
-  const includes = manifest.plugins.flatMap((p) => p.include);
-  const declared = includes.every((i) => typeof i === "object")
-    ? manifest.plugins.flatMap((p) =>
-        p.include.map((i) => (p.as ? `${p.as}/${i.target}` : i.target)),
-      )
-    : null;
-
   const failures = checkVendored({
     source: { repo: manifest.repo, commit: manifest.commit, manifestSha: sha256(manifestText) },
     vendored: {
@@ -479,7 +563,7 @@ function check() {
       commit: vendored.commit,
       manifestSha: vendored.manifestSha256,
     },
-    declared,
+    declared: declaredTargets(manifest),
     recorded: vendored.files,
     present: listFiles(VENDOR_DIR).filter((f) => f !== VENDOR_MANIFEST_NAME),
     hashOf: (target) => {
@@ -510,7 +594,12 @@ function isDirectInvocation() {
 }
 
 if (isDirectInvocation()) {
-  if (process.argv[2] === "--check") {
+  const args = process.argv.slice(2);
+  if (args.length > 1 || (args.length === 1 && args[0] !== "--check")) {
+    console.error(`usage: sync-skills.mjs [--check] (got ${args.join(" ")})`);
+    process.exit(2);
+  }
+  if (args[0] === "--check") {
     check();
   } else {
     await sync();

@@ -13,6 +13,7 @@ import {
   REPO_BLOB_BASE,
   applyTransforms,
   checkVendored,
+  declaredTargets,
   matchesPattern,
   rewriteLocalPaths,
   selectFiles,
@@ -73,6 +74,25 @@ describe("stripWikiLinks", () => {
     expect(stripWikiLinks('Output: [["foo", "oo"]]')).toBe('Output: [["foo", "oo"]]');
   });
 
+  it("leaves an unfenced array literal alone, because a note name has no space", () => {
+    // Every wiki-link in the vendored casts is a kebab-case file stem. `[[cell
+    // values]]` is indistinguishable from a link by brackets alone, so the note
+    // name is what tells them apart.
+    expect(stripWikiLinks("data: [[cell values]]")).toBe("data: [[cell values]]");
+  });
+
+  it("does not let a tilde fence close a backtick one", () => {
+    // CommonMark closes a fence only with the same character. Toggling on any
+    // fence line would start rewriting the rest of a code block as prose.
+    const doc = ["```", "[[a]]", "~~~", "[[b]]", "```", "[[c]]"].join("\n");
+    expect(stripWikiLinks(doc)).toBe(["```", "[[a]]", "~~~", "[[b]]", "```", "c"].join("\n"));
+  });
+
+  it("keeps the text of a same-note anchor link rather than emptying it", () => {
+    expect(stripWikiLinks("See [[#Requirements]] above.")).toBe("See #Requirements above.");
+    expect(stripWikiLinks("See [[note|]] above.")).toBe("See note above.");
+  });
+
   it("resumes stripping after the fence closes", () => {
     const doc = ["```yaml", "data: [[cell values]]", "```", "Back to [[prose-note]]."].join("\n");
     expect(stripWikiLinks(doc)).toBe(
@@ -94,6 +114,26 @@ describe("rewriteLocalPaths", () => {
     );
   });
 
+  it("rewrites the expanded home-directory form too", () => {
+    // The notes write the checkout root as `~/` in some places and as the
+    // expanded `/Users/<someone>/` in others. The expanded form also carries
+    // the author's account name, which must not reach the published package.
+    expect(rewriteLocalPaths("see /Users/someone/projects/repositories/galaxy/lib/x.py")).toBe(
+      `see ${REPO_BLOB_BASE.galaxy}lib/x.py`,
+    );
+    expect(() =>
+      rewriteLocalPaths("see /Users/someone/projects/repositories/private-vault/notes.md"),
+    ).toThrow(/private-vault/);
+  });
+
+  it("does not mistake an inherited property for a rewrite rule", () => {
+    // `bases["constructor"]` is truthy, so a plain truthiness check would
+    // splice a native-code stringification into shipped guidance.
+    expect(() => rewriteLocalPaths("see ~/projects/repositories/constructor/x.py")).toThrow(
+      /constructor/,
+    );
+  });
+
   it("fails loudly on a repo it has no rewrite for", () => {
     // Shipping the raw path would point the agent at a directory that only
     // exists on the note author's machine, and Loom's read-jail blocks it, so
@@ -111,9 +151,10 @@ describe("rewriteLocalPaths", () => {
 describe("applyTransforms", () => {
   const both = ["rewrite-local-paths", "strip-wiki-links"];
 
-  it("only touches markdown", () => {
+  it("only touches markdown, whatever the case of the extension", () => {
     const yml = "note: ~/projects/repositories/nosuchrepo/x.py and [[a-link]]\n";
     expect(applyTransforms(yml, "galaxy-collection-semantics.yml", both)).toBe(yml);
+    expect(applyTransforms("[[a-link]]", "SHOUTING.MD", both)).toBe("a-link");
   });
 
   it("applies nothing when a plugin declares no transforms", () => {
@@ -186,6 +227,15 @@ describe("selectFiles", () => {
         AVAILABLE,
       ),
     ).toThrow(/does not exist upstream/);
+  });
+
+  it("refuses a target that would be written outside the vendor tree", () => {
+    for (const entry of [
+      { plugin: "p", as: "", include: [{ source: "cast/SKILL.md", target: "../../pwned.md" }] },
+      { plugin: "p", as: "../..", include: ["cast/SKILL.md"] },
+    ]) {
+      expect(() => selectFiles(entry, AVAILABLE)).toThrow(/leaves the vendor tree/);
+    }
   });
 
   it("fails when two sources land on the same target", () => {
@@ -274,5 +324,36 @@ describe("checkVendored", () => {
     // A glob cannot be re-evaluated offline, so the gate falls back to
     // comparing the recorded manifest against what is on disk.
     expect(check({ declared: null })).toEqual([]);
+  });
+});
+
+describe("declaredTargets", () => {
+  const manifest = (over: Record<string, unknown> = {}) => ({
+    plugins: [
+      {
+        plugin: "p",
+        as: "bundled",
+        include: [
+          { source: "a.md", target: "a.md" },
+          { source: "b.md", target: "b.md" },
+        ],
+        exclude: [],
+        ...over,
+      },
+    ],
+  });
+
+  it("prefixes explicit targets with the plugin's prefix", () => {
+    expect(declaredTargets(manifest())).toEqual(["bundled/a.md", "bundled/b.md"]);
+  });
+
+  it("does not declare an explicit include that an exclude also matches", () => {
+    // sync skips it, so counting it here would make `sync && check` fail on a
+    // manifest that is perfectly consistent.
+    expect(declaredTargets(manifest({ exclude: ["b.md"] }))).toEqual(["bundled/a.md"]);
+  });
+
+  it("gives up entirely once anything is selected by pattern", () => {
+    expect(declaredTargets(manifest({ include: ["a*.md"] }))).toBeNull();
   });
 });
