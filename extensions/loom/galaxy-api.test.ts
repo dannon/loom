@@ -51,6 +51,7 @@ describe("galaxy API redirect handling", () => {
   let targetOrigin: string;
   let configuredOrigin: string;
   let keysSeenByTarget: (string | null)[] = [];
+  let keysSeenByConfigured: (string | null)[] = [];
   let mode: "cross" | "same" | "plain" = "cross";
 
   beforeAll(async () => {
@@ -63,6 +64,7 @@ describe("galaxy API redirect handling", () => {
     targetOrigin = `http://127.0.0.1:${(target.address() as AddressInfo).port}`;
 
     configured = http.createServer((req, res) => {
+      keysSeenByConfigured.push((req.headers["x-api-key"] as string | undefined) ?? null);
       if (mode === "plain" || req.url?.endsWith("/settled")) {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ id: "h1" }));
@@ -84,8 +86,14 @@ describe("galaxy API redirect handling", () => {
 
   beforeEach(() => {
     keysSeenByTarget = [];
+    keysSeenByConfigured = [];
     process.env.GALAXY_URL = configuredOrigin;
     process.env.GALAXY_API_KEY = KEY;
+  });
+
+  afterEach(() => {
+    delete process.env.GALAXY_URL;
+    delete process.env.GALAXY_API_KEY;
   });
 
   it("does not hand the API key to a host the configured server redirects to", async () => {
@@ -107,6 +115,8 @@ describe("galaxy API redirect handling", () => {
   it("still follows a redirect that stays on the configured server", async () => {
     mode = "same";
     await expect(galaxyGet("/histories/most_recently_used")).resolves.toEqual({ id: "h1" });
+    // Both hops went to the configured server, both carrying the key.
+    expect(keysSeenByConfigured).toEqual([KEY, KEY]);
     expect(keysSeenByTarget).toEqual([]);
   });
 });

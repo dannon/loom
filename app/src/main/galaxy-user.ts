@@ -12,7 +12,7 @@
  *   - { ok: false, authFailed: false } offline / timeout / 5xx / no creds
  */
 import { validateGalaxyUrl } from "./galaxy-url.js";
-import { fetchSameOriginOnly } from "../../../shared/redirect-guard.js";
+import { fetchSameOriginOnly, RedirectRefusedError } from "../../../shared/redirect-guard.js";
 
 export type GalaxyUserStatus =
   { ok: true; username?: string; email?: string } | { ok: false; authFailed: boolean };
@@ -55,7 +55,12 @@ export async function fetchGalaxyCurrentUser(
     // the timeout bounds wall time, so a pathological huge body is low risk.
     const body = (await res.json()) as { username?: unknown; email?: unknown };
     return { ok: true, username: nonEmptyString(body.username), email: nonEmptyString(body.email) };
-  } catch {
+  } catch (err) {
+    // A refused redirect is a misconfiguration, not the transient blip the
+    // silent branch exists for, and the status tooltip has no third state to
+    // show it in. Log it so the reason is somewhere findable rather than
+    // nowhere; the returned shape is deliberately unchanged.
+    if (err instanceof RedirectRefusedError) console.warn(`[galaxy] ${err.message}`);
     return { ok: false, authFailed: false };
   } finally {
     clearTimeout(timer);
