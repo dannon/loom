@@ -2,6 +2,10 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  INVOCATION_FAILURE_REFERENCE,
+  JOB_FAILURE_REFERENCE,
+} from "../extensions/loom/invocation-failure-hint";
+import {
   VENDOR_REPO_NAME,
   readVendorManifest,
   readVendoredSkill,
@@ -27,17 +31,31 @@ describe("vendored skills", () => {
     expect(manifest.commit).toMatch(/^[0-9a-f]{40}$/);
   });
 
-  it("reads a vendored file", () => {
-    const res = readVendoredSkill("galaxy-workflow-invocation-failure-reference.md");
+  it("reads a vendored file at the path its cast uses upstream", () => {
+    const res = readVendoredSkill(INVOCATION_FAILURE_REFERENCE);
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.text).toContain("Invocation Message Reasons");
+  });
+
+  it("still resolves the two bare names a resumed session may be holding", () => {
+    // The tree was flat before targets mirrored their upstream path, and both
+    // of these were handed to the model by name in a failed-invocation hint.
+    for (const [legacy, current] of [
+      ["galaxy-workflow-invocation-failure-reference.md", INVOCATION_FAILURE_REFERENCE],
+      ["galaxy-tool-job-failure-reference.md", JOB_FAILURE_REFERENCE],
+    ]) {
+      const viaLegacy = readVendoredSkill(legacy);
+      const viaCurrent = readVendoredSkill(current);
+      expect(viaLegacy.ok).toBe(true);
+      if (viaLegacy.ok && viaCurrent.ok) expect(viaLegacy.text).toBe(viaCurrent.text);
+    }
   });
 
   it("lists what is available when a path misses", () => {
     const res = readVendoredSkill("nope.md");
     expect(res.ok).toBe(false);
     if (!res.ok) {
-      expect(res.available).toContain("galaxy-tool-job-failure-reference.md");
+      expect(res.available).toContain(JOB_FAILURE_REFERENCE);
     }
   });
 
@@ -51,11 +69,30 @@ describe("vendored skills", () => {
   });
 
   it("rewrote Galaxy source citations to resolvable URLs", () => {
-    const res = readVendoredSkill("galaxy-tool-job-failure-reference.md");
+    const res = readVendoredSkill(JOB_FAILURE_REFERENCE);
     expect(res.ok).toBe(true);
     if (res.ok) {
       expect(res.text).toContain("https://github.com/galaxyproject/galaxy/blob/dev/lib/galaxy/");
     }
+  });
+
+  it("rewrote Planemo source citations too", () => {
+    const res = readVendoredSkill(
+      "debug-galaxy-workflow-output/references/notes/planemo-workflow-test-architecture.md",
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.text).toContain("https://github.com/galaxyproject/planemo/blob/master/planemo/");
+    }
+  });
+
+  it("leaves the cast's feedback ledger behind", () => {
+    // `_feedback.md` belongs to a review loop the Foundry runs and Loom does
+    // not, so shipping it would be guidance pointing at a process we have no
+    // part in.
+    const targets = readVendorManifest()!.files.map((f) => f.target);
+    expect(targets.some((t) => t.endsWith("_feedback.md"))).toBe(false);
+    expect(targets).toContain("debug-galaxy-workflow-output/SKILL.md");
   });
 
   it("reserves a repo name that cannot collide with a configured repo", () => {

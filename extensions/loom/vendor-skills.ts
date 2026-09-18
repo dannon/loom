@@ -73,6 +73,19 @@ export function readVendorManifest(): VendorManifest | null {
   }
 }
 
+/**
+ * Bare names the vendor tree used before targets mirrored their upstream path.
+ * A session resumed across that change still carries the old names in its
+ * transcript, and these two were handed to the model by name in a failure hint,
+ * so they keep resolving for one release. Delete them once 0.8.0 has shipped.
+ */
+const LEGACY_FLAT_PATHS: Record<string, string> = {
+  "galaxy-tool-job-failure-reference.md":
+    "debug-galaxy-workflow-output/references/notes/galaxy-tool-job-failure-reference.md",
+  "galaxy-workflow-invocation-failure-reference.md":
+    "debug-galaxy-workflow-output/references/notes/galaxy-workflow-invocation-failure-reference.md",
+};
+
 export type VendorReadResult =
   { ok: true; text: string } | { ok: false; error: string; available: string[] };
 
@@ -81,7 +94,7 @@ export function readVendoredSkill(rawPath: string): VendorReadResult {
   const available = (readVendorManifest()?.files ?? [])
     .map((f) => f.target)
     .filter((t) => t !== "_manifest.json");
-  const abs = resolveVendorPath(rawPath);
+  const abs = resolveVendorPath(LEGACY_FLAT_PATHS[rawPath] ?? rawPath);
   if (!abs) return { ok: false, error: `Invalid vendored skill path "${rawPath}"`, available };
   try {
     return { ok: true, text: fs.readFileSync(abs, "utf-8") };

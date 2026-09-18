@@ -1,0 +1,5 @@
+# The vendored tree is hash-gated with line endings normalised, but the files
+# still have to be checked out the same way everywhere: a CRLF checkout turns
+# any diff of them into every line, and the copy under review stops matching
+# the copy a Windows contributor sees.
+extensions/loom/vendor/** text eol=lf

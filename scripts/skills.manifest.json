@@ -10,24 +10,9 @@
       "as": "",
       "router": "never",
       "transforms": ["rewrite-local-paths", "strip-wiki-links"],
-      "include": [
-        {
-          "source": "debug-galaxy-workflow-output/references/notes/galaxy-tool-job-failure-reference.md",
-          "target": "galaxy-tool-job-failure-reference.md",
-          "why": "Interpreting a failed Galaxy job: job_messages vs exit_code vs tool_stderr vs job_stderr, which states are terminal, which job APIs preserve the evidence."
-        },
-        {
-          "source": "debug-galaxy-workflow-output/references/notes/galaxy-workflow-invocation-failure-reference.md",
-          "target": "galaxy-workflow-invocation-failure-reference.md",
-          "why": "Interpreting a failed workflow invocation: invocation states, the structured message-reason table, and which invocation APIs prove the failure mode."
-        },
-        {
-          "source": "debug-galaxy-workflow-output/references/notes/galaxy-collection-semantics.yml",
-          "target": "galaxy-collection-semantics.yml",
-          "why": "Formal spec of collection map-over/reduction semantics, vendored by the Foundry from Galaxy core. Complements galaxy-skills collection-manipulation, which covers how to manipulate rather than what the platform does to shapes."
-        }
-      ],
-      "exclude": []
+      "why": "Failure triage for a Galaxy run: what an invocation state and message reason mean, what a job's exit code and streams prove, and the collection shape rules behind a map-over that went wrong.",
+      "include": ["debug-galaxy-workflow-output/**"],
+      "exclude": ["debug-galaxy-workflow-output/_feedback.md"]
     }
   ]
 }
