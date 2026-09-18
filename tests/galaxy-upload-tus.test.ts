@@ -72,6 +72,7 @@ const { FakeUpload, FakeFileUrlStorage } = vi.hoisted(() => {
     resumedFrom: unknown | undefined;
     opts: Record<string, unknown>;
     abortCalled = false;
+    abortTerminated = false;
     startCalled = false;
 
     constructor(_stream: unknown, opts: Record<string, unknown>) {
@@ -92,8 +93,9 @@ const { FakeUpload, FakeFileUrlStorage } = vi.hoisted(() => {
       this.resumedFrom = prev;
     }
 
-    abort(): Promise<void> {
+    abort(shouldTerminate?: boolean): Promise<void> {
       this.abortCalled = true;
+      this.abortTerminated = shouldTerminate === true;
       return Promise.resolve();
     }
 
@@ -103,6 +105,11 @@ const { FakeUpload, FakeFileUrlStorage } = vi.hoisted(() => {
 
     triggerError(err: Error) {
       (this.opts.onError as (e: Error) => void)(err);
+    }
+
+    triggerUploadUrlAvailable(url: string | undefined) {
+      this.url = url;
+      (this.opts.onUploadUrlAvailable as (() => void) | undefined)?.();
     }
 
     getEndpoint(): string {
@@ -287,6 +294,52 @@ describe("tusUpload", () => {
 
     const inst = FakeUpload.lastInstance!;
     // resumeFromPreviousUpload must NOT be called at all (not even with undefined).
+    expect(FakeUpload.resumeCalls).toBe(0);
+    expect(inst.startCalled).toBe(true);
+
+    inst.url = "https://galaxy.test/api/upload/resumable_upload/NEW";
+    inst.triggerSuccess();
+    await expect(uploadPromise).resolves.toEqual({ sessionId: "NEW" });
+  });
+
+  it("refuses an upload URL on another origin and never sends the key there", async () => {
+    const uploadPromise = tusUpload(baseOpts);
+    await new Promise((r) => setTimeout(r, 0));
+
+    const inst = FakeUpload.lastInstance!;
+    inst.triggerUploadUrlAvailable("https://evil.test/api/upload/resumable_upload/SID-42");
+
+    const err = await uploadPromise.catch((e: Error) => e);
+    expect(err.message).toContain("https://evil.test");
+    expect(err.message).toContain("GALAXY_URL");
+    // Origin only -- the upload URL's last segment is a session token.
+    expect(err.message).not.toContain("SID-42");
+    expect(inst.abortCalled).toBe(true);
+    // Terminating would send a DELETE (with the key) to the origin we refused.
+    expect(inst.abortTerminated).toBe(false);
+  });
+
+  it("accepts an upload URL that stays on the configured origin", async () => {
+    const uploadPromise = tusUpload(baseOpts);
+    await new Promise((r) => setTimeout(r, 0));
+
+    const inst = FakeUpload.lastInstance!;
+    inst.triggerUploadUrlAvailable("https://galaxy.test/api/upload/resumable_upload/SID-7");
+    expect(inst.abortCalled).toBe(false);
+
+    inst.triggerSuccess();
+    await expect(uploadPromise).resolves.toEqual({ sessionId: "SID-7" });
+  });
+
+  it("ignores a stored partial that points at another origin and starts fresh", async () => {
+    FakeUpload.previousUploads = [
+      { uploadUrl: "https://evil.test/api/upload/resumable_upload/OLD", urlStorageKey: "k" },
+    ];
+
+    const uploadPromise = tusUpload(baseOpts);
+    await new Promise((r) => setTimeout(r, 0));
+
+    const inst = FakeUpload.lastInstance!;
     expect(FakeUpload.resumeCalls).toBe(0);
     expect(inst.startCalled).toBe(true);
 

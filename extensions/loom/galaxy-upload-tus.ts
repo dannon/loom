@@ -75,8 +75,22 @@ export interface TusUploadResult {
 // memory bounded while still being large enough to avoid excessive round-trips.
 const DEFAULT_CHUNK = 10 * 1024 * 1024;
 
+/** Scheme + host + port, or null when the URL will not parse. */
+function originOf(url: string | null | undefined): string | null {
+  try {
+    return new URL(String(url)).origin;
+  } catch {
+    return null;
+  }
+}
+
 export function tusUpload(opts: TusUploadOpts): Promise<TusUploadResult> {
   return new Promise<TusUploadResult>((resolve, reject) => {
+    // TUS hands back the upload URL in a Location header, and every later PATCH
+    // carries `x-api-key`. A Location pointing at another host would therefore
+    // send the key there, which is the same exposure an HTTP redirect would
+    // give us -- so the upload URL has to stay on the configured origin.
+    const expectedOrigin = originOf(opts.baseUrl);
     // Stream and finish() are created unconditionally so cleanup is always
     // the same code path regardless of when abort is detected.
     const stream = createReadStream(opts.filePath);
@@ -106,6 +120,14 @@ export function tusUpload(opts: TusUploadOpts): Promise<TusUploadResult> {
       storeFingerprintForResuming: true,
       removeFingerprintOnSuccess: true,
       onProgress: opts.onProgress,
+      onUploadUrlAvailable: () => {
+        if (sameOriginAsGalaxy(upload.url)) return;
+        // abort() without terminate: a DELETE would send the key to the very
+        // origin we are refusing to talk to. tus checks the aborted flag before
+        // the next PATCH, so nothing further goes out.
+        void upload.abort();
+        finish(() => reject(new Error(foreignUploadUrlMessage(upload.url))));
+      },
       onError: (err: Error | tusClient.DetailedError) => finish(() => reject(err)),
       onSuccess: () => {
         // Use the URL constructor to parse the upload URL so trailing slashes
@@ -124,6 +146,22 @@ export function tusUpload(opts: TusUploadOpts): Promise<TusUploadResult> {
         );
       },
     });
+
+    function sameOriginAsGalaxy(url: string | null | undefined): boolean {
+      const actual = originOf(url);
+      return actual !== null && actual === expectedOrigin;
+    }
+
+    function foreignUploadUrlMessage(url: string | null | undefined): string {
+      // The origin only: an upload URL's path is a session token.
+      const target = originOf(url) ?? "an address that could not be read";
+      return (
+        `Galaxy directed the upload to ${target}, which is a different origin than the ` +
+        `configured ${expectedOrigin ?? opts.baseUrl}. The upload was refused and the API key ` +
+        `was not sent to it. Check that GALAXY_URL points at the Galaxy server itself rather ` +
+        `than a proxy or a sign-in page.`
+      );
+    }
 
     function onAbort() {
       // No shouldTerminate: true -- leaving the partial TUS session on the server
@@ -146,7 +184,16 @@ export function tusUpload(opts: TusUploadOpts): Promise<TusUploadResult> {
       .findPreviousUploads()
       .then((previous) => {
         if (settled) return; // aborted while the resume lookup was in flight
-        if (previous.length > 0) upload.resumeFromPreviousUpload(previous[0]);
+        // A stored URL on another origin is not resumed -- and not an error
+        // either: starting fresh re-runs creation, which either succeeds on the
+        // right origin or refuses with the message above, and overwrites the
+        // stale entry either way.
+        // `uploadUrl` is written on every stored entry at runtime and read back
+        // by resumeFromPreviousUpload, but the type defs omit it.
+        const storedUrl = (previous[0] as { uploadUrl?: string | null } | undefined)?.uploadUrl;
+        if (previous.length > 0 && sameOriginAsGalaxy(storedUrl)) {
+          upload.resumeFromPreviousUpload(previous[0]);
+        }
         upload.start();
       })
       .catch(() => {
