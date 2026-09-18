@@ -4,7 +4,7 @@
   "commit": "aa4da4bd68eb00e360dfd5aa6e998feb5de0ac49",
   "commitDate": "2026-09-17",
   "tag": null,
-  "manifestSha256": "1e9935c50cd617530078c418402badc838aaca41e97ca48fd474388c6b8944e6",
+  "manifestSha256": "9760a1d14a52ed21edc889e4b6d322794e52658a6c2f9c2b11769b53998b4825",
   "plugins": [
     {
       "plugin": "foundry-skills",
@@ -72,6 +72,13 @@
       "source": "plugins/foundry-skills/skills/debug-galaxy-workflow-output/references/notes/galaxy-workflow-invocation-failure-reference.md",
       "bytes": 7883,
       "sha256": "3721662dcabebf5524a1d02329b23ea0c9df9fae66425ca52ba6106501fc481f"
+    },
+    {
+      "target": "debug-galaxy-workflow-output/references/notes/iwc-shortcuts-anti-patterns.md",
+      "plugin": "foundry-skills",
+      "source": "plugins/foundry-skills/skills/debug-galaxy-workflow-output/references/notes/iwc-shortcuts-anti-patterns.md",
+      "bytes": 24370,
+      "sha256": "6aeb8c2f21b44e9a8346f15b4dcf7273bb8ef00fb5d5c61ea0d50172031c5f5a"
     },
     {
       "target": "debug-galaxy-workflow-output/references/notes/nextflow-operators-to-galaxy-collection-recipes.md",

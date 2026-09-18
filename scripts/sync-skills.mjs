@@ -56,7 +56,16 @@ const PLUGIN_SKILLS_ROOT = "skills";
 // leaking a dead local path.
 export const REPO_BLOB_BASE = {
   galaxy: "https://github.com/galaxyproject/galaxy/blob/dev/",
+  // Planemo's default branch is master. Assuming main or dev here produces 404s.
   planemo: "https://github.com/galaxyproject/planemo/blob/master/",
+  "galaxy-brain": "https://github.com/jmchilton/galaxy-brain/blob/main/",
+  // workflow-fixtures is the note author's scratch corpus holding clones of more
+  // than one project, so it is keyed on the subdirectory rather than the name.
+  // The notes state this mapping themselves ("mirror of galaxyproject/iwc").
+  // The sibling pipelines/nf-core__* clones have no established upstream, and a
+  // name-keyed rule would silently point them at the wrong repository, so they
+  // fall through to the throw.
+  "workflow-fixtures/iwc-src": "https://github.com/galaxyproject/iwc/blob/main/",
 };
 
 // The notes write the checkout root three ways: `~/`, and the expanded
@@ -64,21 +73,31 @@ export const REPO_BLOB_BASE = {
 // author's account name, which we would otherwise publish to npm and into every
 // installer, so all three have to be caught.
 const CHECKOUT_ROOT = String.raw`(?:~|/(?:Users|home)/[A-Za-z0-9._-]+)`;
-const LOCAL_CHECKOUT = new RegExp(`${CHECKOUT_ROOT}/projects/repositories/([A-Za-z0-9._-]+)/`, "g");
+const SEG = String.raw`[A-Za-z0-9._-]+`;
+const LOCAL_CHECKOUT = new RegExp(
+  `${CHECKOUT_ROOT}/projects/repositories/(${SEG})(/${SEG})?/`,
+  "g",
+);
 const LOCAL_CHECKOUT_RESIDUE = new RegExp(`${CHECKOUT_ROOT}/projects/repositories`);
 
-/** Rewrite a local checkout of `<repo>` to that repo's GitHub blob base. */
+/**
+ * Rewrite a local checkout of `<repo>` to that repo's GitHub blob base. A
+ * two-segment key wins over a one-segment one, because one of these checkouts
+ * holds clones of several projects and only some of them have a known upstream.
+ */
 export function rewriteLocalPaths(text, bases = REPO_BLOB_BASE) {
-  const out = text.replace(LOCAL_CHECKOUT, (match, repo) => {
+  const out = text.replace(LOCAL_CHECKOUT, (match, repo, sub) => {
     // Own-property only: `bases["constructor"]` is truthy and would splice a
     // native-code stringification into shipped guidance.
-    if (!Object.hasOwn(bases, repo)) {
-      throw new Error(
-        `no GitHub base for "${match}" -- add "${repo}" to REPO_BLOB_BASE, ` +
-          `or the vendored copy ships a path that only exists on the author's machine`,
-      );
+    const two = sub ? `${repo}${sub}` : null;
+    if (two && Object.hasOwn(bases, two)) return bases[two];
+    if (Object.hasOwn(bases, repo)) {
+      return bases[repo] + (sub ? `${sub.slice(1)}/` : "");
     }
-    return bases[repo];
+    throw new Error(
+      `no GitHub base for "${match}" -- add "${two ?? repo}" to REPO_BLOB_BASE, ` +
+        `or the vendored copy ships a path that only exists on the author's machine`,
+    );
   });
   // The rewrite only recognises a trailing slash. A bare `.../repositories/foo`
   // would slip past it, so fail here rather than in a reviewer's eyes.
@@ -92,60 +111,69 @@ export function rewriteLocalPaths(text, bases = REPO_BLOB_BASE) {
 // intact they read as an instruction to go fetch something that isn't vendored.
 // Strip to the text a reader wants: the alias after `|` when the link has one,
 // otherwise the note name without its `#anchor`.
-const WIKI_LINK = /\[\[([^\]]+)\]\]/g;
-// Up to three spaces of indent, three or more backticks or tildes. A fence is
-// closed only by the same character at least as long, per CommonMark, so a
-// `~~~` line in the middle of a ``` block does not end it.
-const FENCE = /^ {0,3}(`{3,}|~{3,})\s*(.*)$/;
+// Obsidian wiki-links resolve inside the Foundry vault and nowhere else. Left
+// intact they read as an instruction to go fetch something that isn't vendored.
+// Strip to the text a reader should see: the alias when the link is piped, the
+// body otherwise, anchor included because `tests-format#has_size_model` says
+// where to look and `tests-format` does not.
+//
+// The character class is the first of two guards. A 2D array literal opens the
+// same way (`[["a", "b", "c"]]`), and a note name never contains a quote,
+// comma, bracket, pipe or space, so excluding those leaves every literal alone.
+const LINK_SEG = String.raw`[^[\]\n|"',\s]+?`;
+const WIKI_LINK = new RegExp(String.raw`\[\[(${LINK_SEG})(?:\|(${LINK_SEG}))?\]\]`, "g");
+const WIKI_LINK_ANCHORED = new RegExp(String.raw`^\[\[(${LINK_SEG})(?:\|(${LINK_SEG}))?\]\]$`);
+
+const FENCE_OPEN = /^\s*(`{3,}|~{3,})/;
+const FENCE_CLOSE = /^\s*(`{3,}|~{3,})\s*$/;
+const MASK = "\0";
+const INLINE_SPAN = /(`+)(?:(?!\1)[\s\S])*?\1/g;
 
 /**
- * `[[...]]` is also how a 2D array literal opens, and galaxy-skills' apply-rules
- * reference is full of them (`data: [[cell values]]`, `[["a", "b", "c"]]`).
+ * Blank out fenced blocks and inline code spans, preserving length so an offset
+ * into the result indexes the original text. This is the second guard, and the
+ * only one that catches a placeholder like `data: [[cell values]]`, whose body
+ * is a plausible note name.
  *
- * Two rules keep those intact. Fenced lines are never rewritten, which is where
- * every one of them lives. And a candidate is only treated as a link when it
- * looks like a note name: no whitespace, quote, comma or bracket. Every one of
- * the 150 links in the vendored casts is a kebab-case file stem, so the second
- * rule costs nothing and covers an array literal that is not in a fence.
- *
- * Known limits, neither of which occurs in what is vendored today: an indented
- * (four-space) code block is not tracked, and neither are inline code spans.
+ * Known gap: a four-space indented code block is not a fence and is not
+ * tracked. Masking every indented line instead would swallow list
+ * continuations, and no vendored file has a bracket pair in one.
  */
-export function stripWikiLinks(text) {
+export function maskCode(text) {
+  const out = [];
   let fence = null;
-  return text
-    .split("\n")
-    .map((line) => {
-      const marker = FENCE.exec(line);
-      if (marker) {
-        const [, ticks, rest] = marker;
-        if (fence === null) {
-          fence = ticks;
-          return line;
-        }
-        // A closing fence is the same character, no shorter, and nothing else.
-        if (ticks[0] === fence[0] && ticks.length >= fence.length && rest.trim() === "") {
-          fence = null;
-        }
-        return line;
-      }
-      if (fence !== null) return line;
-      return line.replace(WIKI_LINK, (match, target) =>
-        /[\s"',[\]]/.test(target) ? match : wikiLinkText(target),
-      );
-    })
-    .join("\n");
+  for (const line of text.split("\n")) {
+    const open = FENCE_OPEN.exec(line);
+    if (fence === null) {
+      if (open) fence = open[1];
+      // Inline spans only matter outside a fence; inside one the whole line goes.
+      out.push(open ? line : line.replace(INLINE_SPAN, (m) => MASK.repeat(m.length)));
+      continue;
+    }
+    out.push(MASK.repeat(line.length));
+    const close = FENCE_CLOSE.exec(line);
+    // CommonMark closes a fence only with the same character, at least as long.
+    if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
+  }
+  return out.join("\n");
 }
 
-function wikiLinkText(target) {
-  const pipe = target.lastIndexOf("|");
-  const alias = pipe === -1 ? "" : target.slice(pipe + 1).trim();
-  if (alias) return alias;
-  const head = (pipe === -1 ? target : target.slice(0, pipe)).trim();
-  const hash = head.indexOf("#");
-  // A same-note link is all anchor. Dropping it would delete the sentence's
-  // subject, so keep what is there rather than leaving a hole.
-  return head.slice(0, hash === -1 ? undefined : hash).trim() || head;
+export function stripWikiLinks(text) {
+  const masked = maskCode(text);
+  let out = "";
+  let last = 0;
+  let m;
+  WIKI_LINK.lastIndex = 0;
+  while ((m = WIKI_LINK.exec(masked)) !== null) {
+    // Re-read the original bytes at this offset. Taking the capture from the
+    // masked copy would carry mask characters into the output for a link that
+    // happens to sit beside a code span.
+    const original = text.slice(m.index, m.index + m[0].length);
+    const parsed = WIKI_LINK_ANCHORED.exec(original);
+    out += text.slice(last, m.index) + (parsed ? (parsed[2] ?? parsed[1]).trim() : original);
+    last = m.index + m[0].length;
+  }
+  return out + text.slice(last);
 }
 
 /**

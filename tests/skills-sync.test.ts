@@ -41,13 +41,29 @@ describe("stripWikiLinks", () => {
     );
   });
 
-  it("keeps the alias when the link has one, and drops the anchor when it does not", () => {
-    // The Foundry's planemo notes are full of `[[tests-format#has_size_model|has_size]]`.
-    // Rendering that as `tests-format#has_size_model|has_size` reads as noise.
+  it("keeps the alias when the link has one, and the whole body when it does not", () => {
+    // The planemo notes are full of `[[tests-format#has_size_model|has_size]]`,
+    // inside a table. Rendering that as `tests-format#has_size_model|has_size`
+    // is noise, and the raw pipe breaks the table row it sits in.
     expect(stripWikiLinks("use [[tests-format#has_size_model|has_size]] here")).toBe(
       "use has_size here",
     );
-    expect(stripWikiLinks("see [[tests-format#has_text_model]]")).toBe("see tests-format");
+    // The anchor stays on an unpiped link: it says where in the page to look.
+    expect(stripWikiLinks("see [[tests-format#has_text_model]]")).toBe(
+      "see tests-format#has_text_model",
+    );
+  });
+
+  it("leaves a link alone inside an inline code span", () => {
+    expect(stripWikiLinks("use `[[literal]]` verbatim")).toBe("use `[[literal]]` verbatim");
+  });
+
+  it("carries no mask character into the output", () => {
+    // The fence and span mask is length-preserving so offsets still index the
+    // original; reading the capture off the masked copy instead would ship it.
+    const out = stripWikiLinks("a [[one]] b `c` d [[two|2]] e");
+    expect(out).toBe("a one b `c` d 2 e");
+    expect(out).not.toMatch(/\u0000/);
   });
 
   it("leaves 2D array literals inside a code fence alone", () => {
@@ -90,7 +106,13 @@ describe("stripWikiLinks", () => {
 
   it("keeps the text of a same-note anchor link rather than emptying it", () => {
     expect(stripWikiLinks("See [[#Requirements]] above.")).toBe("See #Requirements above.");
-    expect(stripWikiLinks("See [[note|]] above.")).toBe("See note above.");
+  });
+
+  it("leaves a degenerate link alone rather than guessing", () => {
+    // Neither form appears anywhere in the vendored corpus, and both are
+    // ambiguous enough that passing them through reads better than a guess.
+    expect(stripWikiLinks("See [[note|]] above.")).toBe("See [[note|]] above.");
+    expect(stripWikiLinks("See [[a|b|c]] above.")).toBe("See [[a|b|c]] above.");
   });
 
   it("resumes stripping after the fence closes", () => {
@@ -106,6 +128,19 @@ describe("rewriteLocalPaths", () => {
     expect(
       rewriteLocalPaths("see ~/projects/repositories/galaxy/lib/galaxy/jobs/__init__.py"),
     ).toBe(`see ${REPO_BLOB_BASE.galaxy}lib/galaxy/jobs/__init__.py`);
+  });
+
+  it("keys a multi-project checkout on its subdirectory", () => {
+    // One cited checkout holds clones of several projects. The notes name the
+    // iwc-src mapping themselves; the sibling nf-core clones have no
+    // established upstream, so a name-keyed rule would point them at the wrong
+    // repository and must fail instead.
+    expect(
+      rewriteLocalPaths("see ~/projects/repositories/workflow-fixtures/iwc-src/workflows/"),
+    ).toBe("see https://github.com/galaxyproject/iwc/blob/main/workflows/");
+    expect(() =>
+      rewriteLocalPaths("see ~/projects/repositories/workflow-fixtures/pipelines/nf-core__sarek/"),
+    ).toThrow(/workflow-fixtures\/pipelines/);
   });
 
   it("rewrites planemo too, because the Foundry notes leak both", () => {
