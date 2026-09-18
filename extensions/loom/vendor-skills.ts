@@ -74,15 +74,18 @@ export function readBundledCatalog(): Record<string, SkillEntry[]> | null {
 }
 
 /**
- * Where in the vendor tree a configured repo's content lives. Reading is scoped
- * to it so a bundled repo answers for its own files and nothing else: the casts
- * are reachable only through their own repo name, and the same path has to mean
- * the same thing whether the repo is bundled or fetched.
+ * Whether the manifest says this exact target belongs to the plugin backing
+ * `repoName`. Ownership, not a path prefix: two plugins can share a prefix, and
+ * one of them writes at the root. Reading is scoped by it so a repo answers for
+ * its own files and nothing else -- the same path has to mean the same thing
+ * whether the repo is read from the package or fetched from GitHub, and a path
+ * that 404s live must not quietly resolve here.
  */
-function bundledPrefix(repoName: string): string | null {
-  const plugin = readVendorManifest()?.plugins?.find((p) => p.repo === repoName);
-  if (!plugin) return null;
-  return plugin.as ? `${plugin.as}/` : "";
+function ownsTarget(repoName: string, target: string): boolean {
+  const manifest = readVendorManifest();
+  const plugin = manifest?.plugins?.find((p) => p.repo === repoName)?.plugin;
+  if (!plugin) return false;
+  return manifest?.files.some((f) => f.target === target && f.plugin === plugin) ?? false;
 }
 
 /**
@@ -90,20 +93,25 @@ function bundledPrefix(repoName: string): string | null {
  * that repo's own skills rather than every file in the package.
  */
 export function readBundledRepoFile(repo: { name: string }, rawPath: string): VendorReadResult {
-  const skills = (readBundledCatalog()?.[repo.name] ?? []).map((s) => s.path);
-  const prefix = bundledPrefix(repo.name);
-  const clean = rawPath.replace(/^\/+/, "").replace(/\\/g, "/");
-  if (prefix === null || !clean.startsWith(prefix)) {
-    return { ok: false, error: `No file "${rawPath}"`, available: skills };
+  const catalog = (readBundledCatalog()?.[repo.name] ?? []).map((s) => s.path);
+  const clean = (typeof rawPath === "string" ? rawPath : "")
+    .replace(/^\/+/, "")
+    .replace(/\\/g, "/");
+  const target = LEGACY_FLAT_PATHS[clean] ?? clean;
+  if (!ownsTarget(repo.name, target)) {
+    return { ok: false, error: `No file "${rawPath}" in ${repo.name}`, available: catalog };
   }
-  const res = readVendoredSkill(clean);
+  const res = readVendoredSkill(target);
   if (res.ok) return res;
-  return { ...res, available: skills.length ? skills : res.available };
+  return { ...res, available: catalog.length ? catalog : res.available };
 }
 
-/** True when the package actually holds this bundled repo's content. */
+/** True when the package actually holds any content for this repo name. */
 export function hasBundledContent(repoName: string): boolean {
-  return (readBundledCatalog()?.[repoName]?.length ?? 0) > 0;
+  const manifest = readVendorManifest();
+  const plugin = manifest?.plugins?.find((p) => p.repo === repoName)?.plugin;
+  if (!plugin) return false;
+  return manifest?.files.some((f) => f.plugin === plugin) ?? false;
 }
 
 /** Absolute path to the vendored skills directory (sibling of this module). */
@@ -176,6 +184,12 @@ export function readVendoredSkill(rawPath: string): VendorReadResult {
     return { ok: false, error: `Invalid vendored skill path "${rawPath}"`, available: available() };
   }
   try {
+    // lstat, not stat: the containment check above is about the path string, and
+    // a symlink planted in the package would read straight past it. Nothing we
+    // vendor is a link, and the sync refuses to write one.
+    if (!fs.lstatSync(abs).isFile()) {
+      return { ok: false, error: `Not a vendored file "${rawPath}"`, available: available() };
+    }
     return { ok: true, text: fs.readFileSync(abs, "utf-8") };
   } catch {
     return { ok: false, error: `No vendored file "${rawPath}"`, available: available() };

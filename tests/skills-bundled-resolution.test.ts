@@ -8,12 +8,16 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { symlinkSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import { DEFAULT_SKILLS } from "../shared/loom-config.js";
 import {
   hasBundledContent,
   isBundledRepo,
   readBundledCatalog,
   readBundledRepoFile,
+  readVendoredSkill,
+  vendorSkillsDir,
 } from "../extensions/loom/vendor-skills";
 
 const DEFAULT = DEFAULT_SKILLS[0];
@@ -117,5 +121,25 @@ describe("the generated catalog", () => {
 
   it("holds nothing from a repo that is kept out of the router", () => {
     expect(Object.keys(readBundledCatalog()!)).toEqual([DEFAULT.name]);
+  });
+});
+
+describe("what the read side refuses", () => {
+  it("will not read through a symlink planted in the vendor tree", () => {
+    // The containment check reasons about the path string. A link inside the
+    // package would satisfy it and then read whatever it points at.
+    const dir = vendorSkillsDir();
+    const link = join(dir, "planted-link.md");
+    try {
+      symlinkSync("/etc/hosts", link);
+      const res = readVendoredSkill("planted-link.md");
+      expect(res.ok).toBe(false);
+    } finally {
+      try {
+        unlinkSync(link);
+      } catch {
+        /* never created */
+      }
+    }
   });
 });

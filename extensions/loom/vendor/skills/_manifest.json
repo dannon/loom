@@ -4,8 +4,9 @@
   "commit": "aa4da4bd68eb00e360dfd5aa6e998feb5de0ac49",
   "commitDate": "2026-09-17",
   "tag": null,
-  "manifestSha256": "c47a1ae799ea583229b861d4b0dca13b4d822c3b8a46554bc102ee4e445ae727",
+  "manifestSha256": "8bb1a48e6d9542ef5448899a12e20bfc6a2c04af52d6c83ff1af43848fda8ffd",
   "catalogSha256": "f1c6b85851ca03a868168e41cac949c307abf65f7b27e11b79136813cb0c5def",
+  "syncSha256": "79c6e7e23e8eba676bc02c2a6a9582a4286b1f94ecd615d02760e97950199329",
   "plugins": [
     {
       "plugin": "galaxy-skills",
@@ -24,6 +25,7 @@
     {
       "plugin": "foundry-skills",
       "as": "",
+      "repo": "foundry",
       "router": "never",
       "transforms": [
         "rewrite-local-paths",

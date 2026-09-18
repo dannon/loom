@@ -7,10 +7,12 @@
  * nothing about them belongs here, whatever the manifest grows to hold.
  */
 
-import { describe, it, expect } from "vitest";
-import { renderSkillsSection } from "../extensions/loom/context";
-import { selectSkills } from "../extensions/loom/skills-discovery";
-import { readBundledCatalog, readVendorManifest } from "../extensions/loom/vendor-skills";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { buildSkillsContext, renderSkillsSection } from "../extensions/loom/context";
+import { readVendorManifest } from "../extensions/loom/vendor-skills";
 import { DEFAULT_SKILLS } from "../shared/loom-config.js";
 
 const REPOS = (DEFAULT_SKILLS as ReadonlyArray<{ name: string; url: string; branch: string }>).map(
@@ -18,11 +20,31 @@ const REPOS = (DEFAULT_SKILLS as ReadonlyArray<{ name: string; url: string; bran
 );
 const BUNDLED = new Set(REPOS.map((r) => r.name));
 
+/**
+ * The section a default install actually gets, assembled the way the system
+ * prompt assembles it: real config on disk, real repo resolution, real catalog
+ * lookup. Rendering from hand-picked inputs would measure the renderer and not
+ * the thing that is paid for on every turn.
+ */
 function renderDefaultRouter(): string {
-  const catalog = readBundledCatalog()!;
-  const entries = new Map(REPOS.map((r) => [r.name, selectSkills(catalog[r.name] ?? [])]));
-  return renderSkillsSection(REPOS, entries, BUNDLED);
+  return buildSkillsContext();
 }
+
+let tmp: string;
+beforeEach(() => {
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-router-"));
+  vi.spyOn(os, "homedir").mockReturnValue(tmp);
+  fs.mkdirSync(path.join(tmp, ".loom"), { recursive: true });
+  fs.writeFileSync(
+    path.join(tmp, ".loom", "config.json"),
+    JSON.stringify({ skills: { repos: REPOS.map((r) => ({ ...r, enabled: true })) } }),
+    "utf-8",
+  );
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
 
 // Room for a few more skills over what a default install renders today, and
 // nowhere near enough for a cast allowlist to slip in unnoticed: the twelve

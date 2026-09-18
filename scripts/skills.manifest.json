@@ -17,6 +17,7 @@
     },
     {
       "plugin": "foundry-skills",
+      "repo": "foundry",
       "as": "",
       "router": "never",
       "transforms": ["rewrite-local-paths", "strip-wiki-links"],

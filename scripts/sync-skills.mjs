@@ -84,13 +84,28 @@ export const REPO_BLOB_BASE = {
 // `/Users/<someone>/` or `/home/<someone>/`. The expanded forms also carry the
 // author's account name, which we would otherwise publish to npm and into every
 // installer, so all three have to be caught.
-const CHECKOUT_ROOT = String.raw`(?:~|/(?:Users|home)/[A-Za-z0-9._-]+)`;
+// A username can be anything a filesystem allows, so the class is "not a slash"
+// rather than a guess at what characters people use.
+const CHECKOUT_ROOT = String.raw`(?:~|/(?:Users|home)/[^/\s"'\`]+)`;
 const SEG = String.raw`[A-Za-z0-9._-]+`;
 const LOCAL_CHECKOUT = new RegExp(
   `${CHECKOUT_ROOT}/projects/repositories/(${SEG})(/${SEG})?/`,
   "g",
 );
-const LOCAL_CHECKOUT_RESIDUE = new RegExp(`${CHECKOUT_ROOT}/projects/repositories`);
+
+// Anything rooted in somebody's home directory is refused, whatever the layout
+// below it: a named user directory on any of the three platforms, or a bare `~/`
+// that is not one of the tool caches below. Narrowing this to one checkout
+// layout, which is what it used to be, meant a note citing `~/notes/private.md`
+// or `/Users/alice/work/...` sailed through and shipped to npm with the author's
+// account name in it.
+const HOME_DIR_PATH = /(?:\/(?:Users|home)\/[^/\s"'`]+\/)|(?:[A-Za-z]:\\Users\\[^\\\s"'`]+\\)/i;
+const TILDE_PATH = /~\/([^\s"'`]*)/g;
+
+// `~/` prefixes that name a tool's own cache or config rather than anything of
+// the author's. Every one of these is cited by content we vendor today. Add to
+// it deliberately; the point of the list is that a new one gets looked at.
+const GENERIC_HOME_PREFIXES = [".cache/", ".config/", ".claude/", ".foundry/"];
 
 /**
  * Rewrite a local checkout of `<repo>` to that repo's GitHub blob base. A
@@ -98,7 +113,17 @@ const LOCAL_CHECKOUT_RESIDUE = new RegExp(`${CHECKOUT_ROOT}/projects/repositorie
  * holds clones of several projects and only some of them have a known upstream.
  */
 export function rewriteLocalPaths(text, bases = REPO_BLOB_BASE) {
-  const out = text.replace(LOCAL_CHECKOUT, (match, repo, sub) => {
+  const out = text.replace(LOCAL_CHECKOUT, (match, repo, sub, offset, whole) => {
+    // The rewrite only replaces the prefix, so whatever follows it rides along
+    // into the URL. A `..` segment there resolves, in any client that fetches
+    // it, to a path in a different repository than the one we mapped.
+    const suffix = /^[^\s"'`)\]]*/.exec(whole.slice(offset + match.length))?.[0] ?? "";
+    if (suffix.split("/").includes("..")) {
+      throw new Error(
+        `"${match}${suffix}" walks out of the repository it maps to -- ` +
+          `the rewritten URL would point somewhere else entirely`,
+      );
+    }
     // Own-property only: `bases["constructor"]` is truthy and would splice a
     // native-code stringification into shipped guidance.
     const two = sub ? `${repo}${sub}` : null;
@@ -129,8 +154,12 @@ const WIKI_LINK_ANCHORED = new RegExp(String.raw`^\[\[(${LINK_SEG})(?:\|(${LINK_
 
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
 const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})\s*$/;
+const BLOCKQUOTE_MARKER = /^ {0,3}(?:> ?)+/;
 const MASK = "\0";
-const INLINE_SPAN = /(`+)(?:(?!\1)[\s\S])*?\1/g;
+// A code span is delimited by backtick runs of equal length, so the opener must
+// not be preceded by a backtick and the closer must not be followed by one.
+// Without those bounds `` `a```b` `` closed after `a` and exposed the rest.
+const INLINE_SPAN = /(?<!`)(`+)[\s\S]*?\1(?!`)/g;
 
 /**
  * Blank out fenced blocks and inline code spans, preserving length so an offset
@@ -146,19 +175,25 @@ export function maskCode(text) {
   const out = [];
   let fence = null;
   for (const line of text.split("\n")) {
-    const open = FENCE_OPEN.exec(line);
+    // A fence inside a blockquote is still a fence; the markers are not content.
+    const body = line.replace(BLOCKQUOTE_MARKER, "");
+    const open = FENCE_OPEN.exec(body);
     if (fence === null) {
+      // The opening line is masked too, not only the lines after it: its info
+      // string is part of the block's syntax, not prose.
+      out.push(open ? MASK.repeat(line.length) : line);
       if (open) fence = open[1];
-      // Inline spans only matter outside a fence; inside one the whole line goes.
-      out.push(open ? line : line.replace(INLINE_SPAN, (m) => MASK.repeat(m.length)));
       continue;
     }
     out.push(MASK.repeat(line.length));
-    const close = FENCE_CLOSE.exec(line);
+    const close = FENCE_CLOSE.exec(body);
     // CommonMark closes a fence only with the same character, at least as long.
     if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
   }
-  return out.join("\n");
+  // Inline spans are masked over the whole text, after fences: a span can run
+  // across lines, and a backtick inside a fence is already gone so it cannot
+  // pair with one outside.
+  return out.join("\n").replace(INLINE_SPAN, (m) => MASK.repeat(m.length));
 }
 
 export function stripWikiLinks(text) {
@@ -226,11 +261,55 @@ export function applyJsonTransforms(text, names = []) {
     return text;
   }
   if (!parsed || typeof parsed[JSON_PROSE_FIELD] !== "string") return text;
-  const stripped = stripWikiLinks(parsed[JSON_PROSE_FIELD]);
-  if (stripped === parsed[JSON_PROSE_FIELD]) return text;
-  // Re-encode just that field so the rest of the file keeps its original
-  // formatting and key order rather than being reflowed by a round trip.
-  return text.replace(JSON.stringify(parsed[JSON_PROSE_FIELD]), () => JSON.stringify(stripped));
+  const original = parsed[JSON_PROSE_FIELD];
+  const stripped = stripWikiLinks(original);
+  if (stripped === original) return text;
+  // Splice the field's own span rather than searching the file for its value.
+  // Searching replaced the first literal that decoded the same way, so
+  // `{"ref":"[[x]]","body":"[[x]]"}` rewrote `ref` and left `body` alone, and a
+  // body written with unicode escapes matched nothing at all.
+  const spans = findJsonStringSpans(text, JSON_PROSE_FIELD, original);
+  if (spans.length !== 1) {
+    throw new Error(
+      `expected exactly one "${JSON_PROSE_FIELD}" string to rewrite, found ${spans.length}`,
+    );
+  }
+  const [start, end] = spans[0];
+  return text.slice(0, start) + JSON.stringify(stripped) + text.slice(end);
+}
+
+/** End offset (exclusive) of the JSON string literal that opens at `start`. */
+function endOfJsonString(text, start) {
+  for (let i = start + 1; i < text.length; i++) {
+    if (text[i] === "\\") {
+      i++;
+      continue;
+    }
+    if (text[i] === '"') return i + 1;
+  }
+  return -1;
+}
+
+/** Offsets of every `"<key>": "<literal>"` whose literal decodes to `expected`. */
+export function findJsonStringSpans(text, key, expected) {
+  const keyLiteral = JSON.stringify(key);
+  const spans = [];
+  for (let i = text.indexOf(keyLiteral); i !== -1; i = text.indexOf(keyLiteral, i + 1)) {
+    let j = i + keyLiteral.length;
+    while (j < text.length && /\s/.test(text[j])) j++;
+    if (text[j] !== ":") continue;
+    j++;
+    while (j < text.length && /\s/.test(text[j])) j++;
+    if (text[j] !== '"') continue;
+    const end = endOfJsonString(text, j);
+    if (end === -1) continue;
+    try {
+      if (JSON.parse(text.slice(j, end)) === expected) spans.push([j, end]);
+    } catch {
+      // Not a literal we can reason about; leave it alone.
+    }
+  }
+  return spans;
 }
 
 function toSurfaces(v) {
@@ -308,8 +387,21 @@ export function buildCatalogEntries(plugin, files, readText) {
 }
 
 function assertNoLocalCheckout(text, targetName) {
-  if (LOCAL_CHECKOUT_RESIDUE.test(text)) {
-    throw new Error(`${targetName}: a local-checkout reference survived the rewrite`);
+  const named = HOME_DIR_PATH.exec(text);
+  if (named) {
+    throw new Error(
+      `${targetName}: "${named[0]}" is a path in somebody's home directory, ` +
+        `which must not ship -- rewrite it upstream or exclude the file`,
+    );
+  }
+  for (const m of text.matchAll(TILDE_PATH)) {
+    const rest = m[1];
+    if (GENERIC_HOME_PREFIXES.some((prefix) => rest.startsWith(prefix))) continue;
+    throw new Error(
+      `${targetName}: "~/${rest}" is a path in somebody's home directory that is not a ` +
+        `known tool cache -- rewrite it upstream, exclude the file, or add the prefix ` +
+        `to GENERIC_HOME_PREFIXES if it really is generic`,
+    );
   }
 }
 
@@ -357,7 +449,10 @@ export function selectFiles(entry, available) {
   const selected = new Map();
 
   const add = (file) => {
-    if (file.target.startsWith("/") || file.target.split("/").includes("..")) {
+    // Split on both separators: `..\\..\\x.md` has no forward slash at all, and
+    // `path.join` on Windows would happily walk it out of the vendor directory.
+    const segments = file.target.split(/[\\/]/);
+    if (/^([A-Za-z]:)?[\\/]/.test(file.target) || segments.includes("..")) {
       throw new Error(`plugin "${entry.plugin}": target "${file.target}" leaves the vendor tree`);
     }
     const clash = selected.get(file.target);
@@ -430,17 +525,27 @@ export function checkVendored({ source, vendored, declared, recorded, present, h
         `pin moved to ${source.repo}@${short(source.commit)} but files were not ` +
         `re-synced (vendored from ${vendored.repo}@${short(vendored.commit)})`,
     });
-  } else if (
-    source.manifestSha &&
-    vendored.manifestSha &&
-    source.manifestSha !== vendored.manifestSha
-  ) {
+  } else {
     // Globs cannot be re-evaluated without the source tree, so the only offline
-    // way to notice an edited selection is to hash the manifest itself.
-    failures.push({
-      kind: "moved-pin",
-      message: "the manifest changed but files were not re-synced",
-    });
+    // way to notice an edited selection, or an edited transform, is to hash the
+    // inputs. A recorded hash that is absent is not a pass: it means the tree
+    // was written by something that did not record it.
+    for (const [label, want, have] of [
+      ["the manifest", source.manifestSha, vendored.manifestSha],
+      ["the sync script", source.syncSha, vendored.syncSha],
+    ]) {
+      if (!have) {
+        failures.push({
+          kind: "moved-pin",
+          message: `_manifest.json records no hash for ${label}`,
+        });
+      } else if (want !== have) {
+        failures.push({
+          kind: "moved-pin",
+          message: `${label} changed but files were not re-synced`,
+        });
+      }
+    }
   }
 
   const recordedTargets = new Set(recorded.map((f) => f.target));
@@ -486,6 +591,35 @@ export function checkVendored({ source, vendored, declared, recorded, present, h
   return failures;
 }
 
+/**
+ * The files a commit actually contains under `prefix`, as slash-separated paths
+ * relative to it.
+ *
+ * Deliberately not a directory walk. A checkout can hold anything the author
+ * left lying around -- an ignored `.env`, a scratch file, a symlink out of the
+ * tree -- and none of it is covered by the commit whose provenance we record, so
+ * a walk would let it ship with a clean pin. Only regular blobs are accepted:
+ * git records a symlink as mode 120000 and a submodule as 160000, and following
+ * either is how a sync ends up copying something from outside its source.
+ */
+export function listCommittedFiles(dir, rev, prefix) {
+  const out = git(["ls-tree", "-r", "-z", rev, "--", prefix], dir);
+  const files = [];
+  for (const record of out.split("\0")) {
+    if (!record) continue;
+    const tab = record.indexOf("\t");
+    const [mode, type] = record.slice(0, tab).split(" ");
+    const file = record.slice(tab + 1);
+    if (type !== "blob" || (mode !== "100644" && mode !== "100755")) {
+      throw new Error(
+        `${file}: not a regular file in ${rev} (mode ${mode}); refusing to vendor it`,
+      );
+    }
+    files.push(file.slice(prefix.length + 1));
+  }
+  return files.sort();
+}
+
 /** Every file under `dir`, as slash-separated paths relative to it. */
 export function listFiles(dir) {
   if (!fs.existsSync(dir)) return [];
@@ -529,12 +663,17 @@ function materializeSource(manifest) {
     // Record what the checkout actually is, not what the manifest asked for.
     // Otherwise a sync from a side branch writes a provenance record naming a
     // commit whose content it does not contain, and the gate certifies it.
+    // Files are enumerated from the commit, so the directory has to be a
+    // repository -- there is no provenance to record for a bare folder.
     const commit = localCheckoutCommit(dir);
+    if (commit === null) {
+      throw new Error(`LOOM_AGENTIC_PLUGINS_DIR is set but ${dir} is not a git repository`);
+    }
     console.log(`Reading ${dir} (LOOM_AGENTIC_PLUGINS_DIR) at ${commit}.`);
     if (commit !== manifest.commit) {
       console.log("That is not the pinned commit, so `check:skills` will reject the result.");
     }
-    return { dir, commit, cleanup: () => {} };
+    return { dir, commit, rev: "HEAD", cleanup: () => {} };
   }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-skills-sync-"));
   git(["init", "-q"], dir);
@@ -544,6 +683,7 @@ function materializeSource(manifest) {
   return {
     dir,
     commit: git(["rev-parse", "HEAD"], dir).trim(),
+    rev: "HEAD",
     cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
   };
 }
@@ -553,7 +693,7 @@ function localCheckoutCommit(dir) {
     const head = git(["rev-parse", "HEAD"], dir).trim();
     return git(["status", "--porcelain"], dir).trim() ? `${head}+dirty` : head;
   } catch {
-    return "local-checkout-not-a-git-repo";
+    return null;
   }
 }
 
@@ -584,9 +724,14 @@ async function sync() {
     // a stale manifest beside it reports as four hash mismatches rather than as
     // "the last sync did not finish".
     for (const plugin of manifest.plugins) {
+      const prefix = `plugins/${plugin.plugin}/${PLUGIN_SKILLS_ROOT}`;
       const root = path.join(source.dir, "plugins", plugin.plugin, PLUGIN_SKILLS_ROOT);
       if (!fs.existsSync(root)) {
         throw new Error(`plugin "${plugin.plugin}" has no ${PLUGIN_SKILLS_ROOT}/ directory`);
+      }
+      const committed = listCommittedFiles(source.dir, source.rev, prefix);
+      if (committed.length === 0) {
+        throw new Error(`plugin "${plugin.plugin}" has no committed files under ${prefix}`);
       }
       plugins.push({
         plugin: plugin.plugin,
@@ -598,7 +743,7 @@ async function sync() {
         upstream: readUpstreamPin(source.dir, plugin.plugin),
       });
 
-      const pluginFiles = selectFiles(plugin, listFiles(root));
+      const pluginFiles = selectFiles(plugin, committed);
       const transformed = new Map(
         pluginFiles.map((f) => {
           const raw = fs.readFileSync(path.join(root, f.source), "utf-8");
@@ -651,8 +796,12 @@ async function sync() {
 
     entries.sort((a, b) => byTargetName(a.target, b.target));
     for (const entry of entries) {
-      const abs = path.join(VENDOR_DIR, entry.target);
+      const abs = safeVendorPath(entry.target);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
+      // Writing through an existing symlink would put the content wherever it
+      // points. Replace the link rather than follow it.
+      const existing = lstatOrNull(abs);
+      if (existing?.isSymbolicLink()) fs.rmSync(abs);
       fs.writeFileSync(abs, entry.text, "utf-8");
       console.log(`  ${entry.target}  (${entry.bytes} bytes)`);
       delete entry.text;
@@ -686,6 +835,11 @@ async function sync() {
           tag: manifest.tag ?? null,
           manifestSha256: sha256(manifestText),
           catalogSha256: sha256(catalogText),
+          // The transforms decide what the vendored bytes are, so a change to
+          // them without a re-sync is the same class of drift as a moved pin --
+          // and the only one the hashes above cannot see. Re-running the sync
+          // after editing this script is the cost; the diff is usually empty.
+          syncSha256: sha256(fs.readFileSync(fileURLToPath(import.meta.url), "utf-8")),
           plugins,
           files: entries,
         },
@@ -715,6 +869,27 @@ const PIN_TYPES_SOURCE = [
   "};",
   "",
 ].join("\n");
+
+function lstatOrNull(abs) {
+  try {
+    return fs.lstatSync(abs);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve a target inside the vendor directory, refusing anything that leaves
+ * it. `selectFiles` rejects the obvious shapes, but it works on strings and this
+ * works on the resolved path, which is the thing the write actually uses.
+ */
+function safeVendorPath(target) {
+  const abs = path.resolve(VENDOR_DIR, target);
+  if (abs !== VENDOR_DIR && !abs.startsWith(VENDOR_DIR + path.sep)) {
+    throw new Error(`target "${target}" resolves outside the vendor directory`);
+  }
+  return abs;
+}
 
 function renderPinModule(manifest, commit) {
   // Written in the repo's own formatting rather than JSON.stringify's: the file
@@ -773,11 +948,17 @@ function check() {
   const manifest = JSON.parse(manifestText);
 
   const failures = checkVendored({
-    source: { repo: manifest.repo, commit: manifest.commit, manifestSha: sha256(manifestText) },
+    source: {
+      repo: manifest.repo,
+      commit: manifest.commit,
+      manifestSha: sha256(manifestText),
+      syncSha: sha256(fs.readFileSync(fileURLToPath(import.meta.url), "utf-8")),
+    },
     vendored: {
       repo: vendored.repo,
       commit: vendored.commit,
       manifestSha: vendored.manifestSha256,
+      syncSha: vendored.syncSha256,
     },
     declared: declaredTargets(manifest),
     recorded: vendored.files,
@@ -810,7 +991,12 @@ function check() {
   const catalogActual = fs.existsSync(VENDOR_CATALOG)
     ? sha256(fs.readFileSync(VENDOR_CATALOG, "utf-8"))
     : null;
-  if (vendored.catalogSha256 && catalogActual !== vendored.catalogSha256) {
+  if (!vendored.catalogSha256) {
+    failures.push({
+      kind: "missing",
+      message: `_manifest.json records no hash for ${VENDOR_CATALOG_NAME}`,
+    });
+  } else if (catalogActual !== vendored.catalogSha256) {
     failures.push({
       kind: "hash-mismatch",
       message: `${VENDOR_CATALOG_NAME}: hand-edited, corrupt or missing (sha256 mismatch)`,

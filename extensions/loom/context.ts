@@ -1096,7 +1096,8 @@ export function renderSkillsSection(
   return sections.join("\n");
 }
 
-function buildSkillsContext(): string {
+/** Exported so a test can measure the section the system prompt actually gets. */
+export function buildSkillsContext(): string {
   const repos = listEnabledSkillRepos();
   const entriesByRepo = new Map<string, SkillEntry[]>();
   const bundled = new Set<string>();

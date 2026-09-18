@@ -8,8 +8,11 @@
  * `--check` is supposed to fail.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseFrontmatter as parseFrontmatterTs } from "../extensions/loom/skills-discovery";
 import { readVendorManifest, vendorSkillsDir } from "../extensions/loom/vendor-skills";
@@ -19,6 +22,8 @@ import {
   checkVendored,
   declaredTargets,
   buildCatalogEntries,
+  findJsonStringSpans,
+  listCommittedFiles,
   matchesPattern,
   parseFrontmatter,
   rewriteLocalPaths,
@@ -222,7 +227,7 @@ describe("applyTransforms", () => {
       // else refuses at the residue assertion. Either way it does not ship.
       expect(() =>
         applyTransforms("cited at /Users/someone/projects/repositories/x/y.py", target, transforms),
-      ).toThrow(/no GitHub base|survived the rewrite/);
+      ).toThrow(/no GitHub base|home directory/);
     }
   });
 
@@ -332,7 +337,12 @@ describe("selectFiles", () => {
   });
 });
 
-const PIN = { repo: "galaxyproject/foundry", commit: "74a49c1a0ba5f5be43e5c4132994ea197d26d334" };
+const PIN = {
+  repo: "galaxyproject/foundry",
+  commit: "74a49c1a0ba5f5be43e5c4132994ea197d26d334",
+  manifestSha: "m",
+  syncSha: "s",
+};
 
 function check(overrides: Record<string, unknown> = {}) {
   return checkVendored({
@@ -354,12 +364,28 @@ describe("checkVendored", () => {
   it("catches a manifest edited without a re-sync", () => {
     // Which files a glob selects cannot be recomputed offline, so hashing the
     // manifest is the only way the gate notices a changed selection.
-    const failures = check({
-      source: { ...PIN, manifestSha: "one" },
-      vendored: { ...PIN, manifestSha: "two" },
-    });
+    const failures = check({ vendored: { ...PIN, manifestSha: "two" } });
     expect(failures).toEqual([
       { kind: "moved-pin", message: "the manifest changed but files were not re-synced" },
+    ]);
+  });
+
+  it("catches an edited transform that was never re-synced", () => {
+    // The transforms decide what the vendored bytes are, and nothing else in
+    // the gate can see a change to them.
+    const failures = check({ vendored: { ...PIN, syncSha: "other" } });
+    expect(failures).toEqual([
+      { kind: "moved-pin", message: "the sync script changed but files were not re-synced" },
+    ]);
+  });
+
+  it("treats a missing hash as a failure, not as a check to skip", () => {
+    // A recorded tree with no hash was written by something that did not record
+    // one, which is exactly the case the hash exists to catch.
+    const failures = check({ vendored: { repo: PIN.repo, commit: PIN.commit } });
+    expect(failures.map((f) => f.message)).toEqual([
+      "_manifest.json records no hash for the manifest",
+      "_manifest.json records no hash for the sync script",
     ]);
   });
 
@@ -517,5 +543,124 @@ describe("buildCatalogEntries", () => {
     expect(() =>
       buildCatalogEntries(plugin, [{ source: "x.md", target: "x.md" }], () => ""),
     ).toThrow(/vendors no SKILL.md/);
+  });
+});
+
+describe("listCommittedFiles", () => {
+  // What a checkout contains and what its commit contains are different sets,
+  // and only the second one is covered by the provenance the sync records.
+  let repo: string;
+  const git = (...args: string[]) =>
+    spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], {
+      cwd: repo,
+      encoding: "utf-8",
+    });
+
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), "loom-tree-"));
+    mkdirSync(join(repo, "plugins", "p", "skills", "example"), { recursive: true });
+    writeFileSync(
+      join(repo, "plugins", "p", "skills", "example", "SKILL.md"),
+      "---\nname: a\n---\n",
+    );
+    writeFileSync(join(repo, ".gitignore"), ".env\n");
+    git("init", "-q");
+    git("add", "-A");
+    git("commit", "-qm", "first");
+  });
+  afterEach(() => rmSync(repo, { recursive: true, force: true }));
+
+  const listed = () => listCommittedFiles(repo, "HEAD", "plugins/p/skills") as string[];
+
+  it("lists what the commit holds", () => {
+    expect(listed()).toEqual(["example/SKILL.md"]);
+  });
+
+  it("ignores a file the commit does not have, however it got there", () => {
+    // An ignored file leaves `git status --porcelain` empty, so the sync would
+    // have recorded a clean pin and shipped it. A `.env` is the bad case.
+    writeFileSync(join(repo, "plugins", "p", "skills", "example", ".env"), "SECRET=x\n");
+    writeFileSync(join(repo, "plugins", "p", "skills", "example", "scratch.md"), "notes\n");
+    expect(git("status", "--porcelain").stdout).not.toContain(".env");
+    expect(listed()).toEqual(["example/SKILL.md"]);
+  });
+
+  it("refuses a symlink rather than following it out of the source tree", () => {
+    symlinkSync("/etc/hosts", join(repo, "plugins", "p", "skills", "example", "linked.md"));
+    git("add", "-A");
+    git("commit", "-qm", "link");
+    expect(() => listed()).toThrow(/not a regular file/);
+  });
+});
+
+describe("what the write side refuses", () => {
+  it("rejects a Windows-separated traversal target", () => {
+    // `..\..\x.md` has no forward slash, so splitting on "/" alone saw one
+    // harmless segment while path.join on Windows walked out of the tree.
+    for (const target of ["..\\..\\outside.md", "C:\\outside.md", "\\outside.md"]) {
+      expect(() =>
+        selectFiles({ plugin: "p", as: "", include: [{ source: "a.md", target }] }, ["a.md"]),
+      ).toThrow(/leaves the vendor tree/);
+    }
+  });
+});
+
+describe("rewriteLocalPaths containment", () => {
+  it("refuses a path that walks out of the repository it maps to", () => {
+    // Only the prefix is replaced, so the rest rides into the URL. A reader
+    // resolving `.../galaxy/blob/dev/../../../../evil/repo/...` lands somewhere
+    // else entirely.
+    expect(() =>
+      rewriteLocalPaths("~/projects/repositories/galaxy/../../../../evil/repo/blob/main/a.md"),
+    ).toThrow(/walks out of the repository/);
+  });
+
+  it("still rewrites an ordinary deep path", () => {
+    expect(rewriteLocalPaths("~/projects/repositories/galaxy/lib/galaxy/jobs/__init__.py")).toBe(
+      `${REPO_BLOB_BASE.galaxy}lib/galaxy/jobs/__init__.py`,
+    );
+  });
+});
+
+describe("home-directory paths", () => {
+  const both = ["rewrite-local-paths", "strip-wiki-links"];
+
+  it.each([
+    ["a non-ASCII username in a layout we map", "/Users/joé/projects/repositories/galaxy/lib/x.py"],
+    ["any other layout under a user directory", "/Users/alice/work/galaxy/lib/x.py"],
+    ["a linux home", "/home/carol/scratch/notes.md"],
+    ["a Windows home", "C:\\Users\\bob\\projects\\repositories\\galaxy\\x.py"],
+    ["a bare tilde path that is not a tool cache", "~/notes/private.md"],
+  ])("refuses or rewrites %s rather than publishing it", (_label, cited) => {
+    let out: string;
+    try {
+      out = applyTransforms(`cited at ${cited}`, "a.md", both) as string;
+    } catch {
+      return; // refused outright, which is the other acceptable answer
+    }
+    expect(out).not.toContain(cited);
+    expect(out).not.toMatch(/\/(?:Users|home)\/[^/\s]+\//);
+  });
+
+  it.each(["~/.cache/gxwf", "~/.config/claude/x.json", "~/.claude/skills/y", "~/.foundry/iwc"])(
+    "leaves the tool cache %s alone",
+    (cited) => {
+      expect(applyTransforms(`run against ${cited}`, "a.md", both)).toBe(`run against ${cited}`);
+    },
+  );
+});
+
+describe("findJsonStringSpans", () => {
+  it("finds the field's own literal, not another with the same value", () => {
+    const text = '{"ref": "[[x]]", "body": "[[x]]"}';
+    const spans = findJsonStringSpans(text, "body", "[[x]]") as [number, number][];
+    expect(spans).toHaveLength(1);
+    expect(text.slice(spans[0][0], spans[0][1])).toBe('"[[x]]"');
+    expect(text.slice(0, spans[0][0])).toContain('"ref"');
+  });
+
+  it("finds a literal written with unicode escapes", () => {
+    const text = '{"body":"see \\u005b\\u005bvalidate\\u005d\\u005d"}';
+    expect(findJsonStringSpans(text, "body", "see [[validate]]")).toHaveLength(1);
   });
 });

@@ -48,7 +48,6 @@ import {
   hasBundledContent,
   isBundledRepo,
   readBundledRepoFile,
-  readVendoredSkill,
 } from "./vendor-skills";
 import { parse as parseHtml } from "node-html-parser";
 
@@ -387,13 +386,13 @@ exact file when it becomes relevant.`,
       }),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
-      // Bundled reference ships inside the package -- resolve it from disk
-      // before the configured-repo path, which is GitHub-backed and cached.
-      // On a miss, fall through to a configured repo of the same name rather
-      // than erroring: `galaxyproject/foundry` is a repo a user may well add,
-      // and the bundled set must not silently shadow the whole thing.
-      if (params.repo === VENDOR_REPO_NAME) {
-        const res = readVendoredSkill(params.path);
+      // The reserved name reads bundled reference material, but only when the
+      // user has not claimed it: configuring a repo called "foundry" has to win,
+      // or an explicitly chosen branch is silently answered from the package.
+      // Checked before the read, not after a miss, because the bundled tree now
+      // holds a whole skills mirror and would answer for paths that belong to it.
+      if (params.repo === VENDOR_REPO_NAME && !findSkillRepo(VENDOR_REPO_NAME)) {
+        const res = readBundledRepoFile({ name: VENDOR_REPO_NAME }, params.path);
         if (res.ok) {
           return {
             content: [{ type: "text", text: res.text }],
@@ -401,22 +400,19 @@ exact file when it becomes relevant.`,
               repo: VENDOR_REPO_NAME,
               path: params.path,
               length: res.text.length,
-              cached: true,
+              bundled: true,
             },
           };
         }
-        if (!findSkillRepo(VENDOR_REPO_NAME)) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error: ${res.error}. Bundled files: ${res.available.join(", ") || "(none)"}.`,
-              },
-            ],
-            details: { error: true, repo: VENDOR_REPO_NAME, path: params.path },
-          };
-        }
-        // A repo named "foundry" is configured — let the normal path serve it.
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error: ${res.error}. Bundled files: ${res.available.join(", ") || "(none)"}.`,
+            },
+          ],
+          details: { error: true, repo: VENDOR_REPO_NAME, path: params.path },
+        };
       }
 
       const repo = findSkillRepo(params.repo);
