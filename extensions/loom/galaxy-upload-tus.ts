@@ -75,13 +75,65 @@ export interface TusUploadResult {
 // memory bounded while still being large enough to avoid excessive round-trips.
 const DEFAULT_CHUNK = 10 * 1024 * 1024;
 
-/** Scheme + host + port, or null when the URL will not parse. */
+/**
+ * Scheme + host + port, or null when the URL will not parse. Duplicated rather
+ * than imported from `shared/` on purpose: this module's header keeps it free
+ * of loom imports so it can move into @galaxyproject/galaxy-ops unchanged.
+ */
 function originOf(url: string | null | undefined): string | null {
   try {
     return new URL(String(url)).origin;
   } catch {
     return null;
   }
+}
+
+/** A stored resume entry. `uploadUrl` is real at runtime; the type defs omit it. */
+type StoredUpload = tusClient.PreviousUpload & {
+  uploadUrl?: string | null;
+  urlStorageKey?: string;
+};
+
+/**
+ * The resume store with anything off-origin filtered out, in both directions.
+ *
+ * tus writes the upload URL to the store right after it hands it to us, and
+ * abort() does not cancel that write; FileUrlStorage.addUpload keys every entry
+ * on a fresh random id, so it appends rather than overwrites and nothing ever
+ * removes it. A refused foreign URL would therefore be persisted to
+ * ~/.loom/upload-resume.json once per attempt, unbounded, and the first entry
+ * back out would be the poisoned one -- killing resume for that file for good.
+ *
+ * Filtering on the way in keeps it out of the file; filtering on the way out
+ * (and deleting what it finds) heals a file an earlier build already wrote.
+ */
+function originScopedUrlStorage(
+  inner: tusClient.UrlStorage,
+  belongsHere: (url: string | null | undefined) => boolean,
+): tusClient.UrlStorage {
+  const keep = async (found: tusClient.PreviousUpload[]): Promise<tusClient.PreviousUpload[]> => {
+    const kept: tusClient.PreviousUpload[] = [];
+    for (const entry of found as StoredUpload[]) {
+      if (belongsHere(entry.uploadUrl)) {
+        kept.push(entry);
+      } else if (entry.urlStorageKey) {
+        // Best effort: a store we cannot prune still yields the right result,
+        // it just stays dirty.
+        await inner.removeUpload(entry.urlStorageKey).catch(() => {});
+      }
+    }
+    return kept;
+  };
+  return {
+    findAllUploads: async () => keep(await inner.findAllUploads()),
+    findUploadsByFingerprint: async (fingerprint: string) =>
+      keep(await inner.findUploadsByFingerprint(fingerprint)),
+    removeUpload: (urlStorageKey: string) => inner.removeUpload(urlStorageKey),
+    // Returning "" instead of a key is what tells tus there is nothing to
+    // remove later (_removeFromUrlStorage bails on a falsy key).
+    addUpload: async (fingerprint: string, upload: tusClient.PreviousUpload) =>
+      belongsHere((upload as StoredUpload).uploadUrl) ? inner.addUpload(fingerprint, upload) : "",
+  };
 }
 
 export function tusUpload(opts: TusUploadOpts): Promise<TusUploadResult> {
@@ -116,7 +168,9 @@ export function tusUpload(opts: TusUploadOpts): Promise<TusUploadResult> {
       headers: { "x-api-key": opts.apiKey },
       chunkSize: opts.chunkSize ?? DEFAULT_CHUNK,
       retryDelays: [0, 1000, 3000, 5000],
-      urlStorage: new FileUrlStorage(opts.storagePath),
+      urlStorage: originScopedUrlStorage(new FileUrlStorage(opts.storagePath), (url) =>
+        sameOriginAsGalaxy(url),
+      ),
       storeFingerprintForResuming: true,
       removeFingerprintOnSuccess: true,
       onProgress: opts.onProgress,
@@ -184,16 +238,9 @@ export function tusUpload(opts: TusUploadOpts): Promise<TusUploadResult> {
       .findPreviousUploads()
       .then((previous) => {
         if (settled) return; // aborted while the resume lookup was in flight
-        // A stored URL on another origin is not resumed -- and not an error
-        // either: starting fresh re-runs creation, which either succeeds on the
-        // right origin or refuses with the message above, and overwrites the
-        // stale entry either way.
-        // `uploadUrl` is written on every stored entry at runtime and read back
-        // by resumeFromPreviousUpload, but the type defs omit it.
-        const storedUrl = (previous[0] as { uploadUrl?: string | null } | undefined)?.uploadUrl;
-        if (previous.length > 0 && sameOriginAsGalaxy(storedUrl)) {
-          upload.resumeFromPreviousUpload(previous[0]);
-        }
+        // Everything here is already on the configured origin: the store
+        // wrapper drops (and deletes) anything else before we see it.
+        if (previous.length > 0) upload.resumeFromPreviousUpload(previous[0]);
         upload.start();
       })
       .catch(() => {

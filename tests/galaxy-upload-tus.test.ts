@@ -63,7 +63,7 @@ import { tusUpload, type TusUploadOpts } from "../extensions/loom/galaxy-upload-
 const { FakeUpload, FakeFileUrlStorage } = vi.hoisted(() => {
   class FakeUpload {
     static lastInstance: FakeUpload | undefined;
-    static previousUploads: unknown[] = [];
+
     static resumeCalls = 0;
     // When set, findPreviousUploads() returns this pending promise instead of
     // resolving synchronously -- lets a test fire abort *during* the lookup.
@@ -84,8 +84,21 @@ const { FakeUpload, FakeFileUrlStorage } = vi.hoisted(() => {
       this.startCalled = true;
     }
 
+    // Mirrors real tus: the previous-upload lookup goes through urlStorage,
+    // which is where the origin filtering lives.
     findPreviousUploads(): Promise<unknown[]> {
-      return FakeUpload.findPreviousDeferred ?? Promise.resolve(FakeUpload.previousUploads);
+      if (FakeUpload.findPreviousDeferred) return FakeUpload.findPreviousDeferred;
+      const storage = this.opts.urlStorage as {
+        findUploadsByFingerprint: (fingerprint: string) => Promise<unknown[]>;
+      };
+      return storage.findUploadsByFingerprint("fp");
+    }
+
+    getUrlStorage(): {
+      findUploadsByFingerprint: (fingerprint: string) => Promise<unknown[]>;
+      addUpload: (fingerprint: string, upload: unknown) => Promise<string>;
+    } {
+      return this.opts.urlStorage as never;
     }
 
     resumeFromPreviousUpload(prev: unknown) {
@@ -125,7 +138,39 @@ const { FakeUpload, FakeFileUrlStorage } = vi.hoisted(() => {
     }
   }
 
-  class FakeFileUrlStorage {}
+  /** An in-memory stand-in for FileUrlStorage, with the same append semantics. */
+  class FakeFileUrlStorage {
+    static entries: Record<string, Record<string, unknown>> = {};
+    static nextKey = 0;
+
+    static list(): Record<string, unknown>[] {
+      return Object.entries(FakeFileUrlStorage.entries).map(([urlStorageKey, v]) => ({
+        ...v,
+        urlStorageKey,
+      }));
+    }
+
+    findAllUploads(): Promise<Record<string, unknown>[]> {
+      return Promise.resolve(FakeFileUrlStorage.list());
+    }
+
+    findUploadsByFingerprint(_fingerprint: string): Promise<Record<string, unknown>[]> {
+      return Promise.resolve(FakeFileUrlStorage.list());
+    }
+
+    removeUpload(urlStorageKey: string): Promise<void> {
+      delete FakeFileUrlStorage.entries[urlStorageKey];
+      return Promise.resolve();
+    }
+
+    addUpload(_fingerprint: string, upload: Record<string, unknown>): Promise<string> {
+      // Real FileUrlStorage keys on a random id, so this appends; it never
+      // replaces an existing entry for the same file.
+      const key = `tus::fp::${FakeFileUrlStorage.nextKey++}`;
+      FakeFileUrlStorage.entries[key] = upload;
+      return Promise.resolve(key);
+    }
+  }
 
   return { FakeUpload, FakeFileUrlStorage };
 });
@@ -145,9 +190,10 @@ vi.mock("fs", async () => {
 
 beforeEach(() => {
   FakeUpload.lastInstance = undefined;
-  FakeUpload.previousUploads = [];
   FakeUpload.resumeCalls = 0;
   FakeUpload.findPreviousDeferred = null;
+  FakeFileUrlStorage.entries = {};
+  FakeFileUrlStorage.nextKey = 0;
 });
 
 describe("tusUpload", () => {
@@ -266,11 +312,9 @@ describe("tusUpload", () => {
   });
 
   it("resumes from a stored previous upload when one exists for the file", async () => {
-    const prev = {
+    FakeFileUrlStorage.entries["tus::fp::1"] = {
       uploadUrl: "https://galaxy.test/api/upload/resumable_upload/OLD",
-      urlStorageKey: "tus::fp::1",
     };
-    FakeUpload.previousUploads = [prev];
 
     const uploadPromise = tusUpload(baseOpts);
     await new Promise((r) => setTimeout(r, 0));
@@ -278,7 +322,9 @@ describe("tusUpload", () => {
     const inst = FakeUpload.lastInstance!;
     // The stored partial must be handed to resumeFromPreviousUpload before start().
     expect(FakeUpload.resumeCalls).toBe(1);
-    expect(inst.resumedFrom).toBe(prev);
+    expect(inst.resumedFrom).toMatchObject({
+      uploadUrl: "https://galaxy.test/api/upload/resumable_upload/OLD",
+    });
     expect(inst.startCalled).toBe(true);
 
     inst.url = "https://galaxy.test/api/upload/resumable_upload/OLD";
@@ -287,8 +333,6 @@ describe("tusUpload", () => {
   });
 
   it("starts fresh (no resumeFromPreviousUpload) when there is no stored partial", async () => {
-    FakeUpload.previousUploads = [];
-
     const uploadPromise = tusUpload(baseOpts);
     await new Promise((r) => setTimeout(r, 0));
 
@@ -331,10 +375,10 @@ describe("tusUpload", () => {
     await expect(uploadPromise).resolves.toEqual({ sessionId: "SID-7" });
   });
 
-  it("ignores a stored partial that points at another origin and starts fresh", async () => {
-    FakeUpload.previousUploads = [
-      { uploadUrl: "https://evil.test/api/upload/resumable_upload/OLD", urlStorageKey: "k" },
-    ];
+  it("ignores a stored partial that points at another origin, and prunes it", async () => {
+    FakeFileUrlStorage.entries["k"] = {
+      uploadUrl: "https://evil.test/api/upload/resumable_upload/OLD",
+    };
 
     const uploadPromise = tusUpload(baseOpts);
     await new Promise((r) => setTimeout(r, 0));
@@ -342,10 +386,35 @@ describe("tusUpload", () => {
     const inst = FakeUpload.lastInstance!;
     expect(FakeUpload.resumeCalls).toBe(0);
     expect(inst.startCalled).toBe(true);
+    // Left behind it would be read again on every later attempt, and it is the
+    // first entry out, so resume for this file would be dead for good.
+    expect(FakeFileUrlStorage.entries).toEqual({});
 
     inst.url = "https://galaxy.test/api/upload/resumable_upload/NEW";
     inst.triggerSuccess();
     await expect(uploadPromise).resolves.toEqual({ sessionId: "NEW" });
+  });
+
+  it("refuses to write an off-origin upload URL to the resume store", async () => {
+    const uploadPromise = tusUpload(baseOpts);
+    await new Promise((r) => setTimeout(r, 0));
+    const storage = FakeUpload.lastInstance!.getUrlStorage();
+
+    const key = await storage.addUpload("fp", {
+      uploadUrl: "https://evil.test/api/upload/resumable_upload/SID",
+    });
+    // tus treats a falsy key as "nothing to remove later".
+    expect(key).toBe("");
+    expect(FakeFileUrlStorage.entries).toEqual({});
+
+    await storage.addUpload("fp", {
+      uploadUrl: "https://galaxy.test/api/upload/resumable_upload/SID",
+    });
+    expect(Object.values(FakeFileUrlStorage.entries)).toHaveLength(1);
+
+    FakeUpload.lastInstance!.url = "https://galaxy.test/api/upload/resumable_upload/SID";
+    FakeUpload.lastInstance!.triggerSuccess();
+    await uploadPromise;
   });
 
   it("does not start() if the signal aborts during the resume lookup", async () => {
