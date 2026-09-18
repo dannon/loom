@@ -33,6 +33,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { parse as parseYaml } from "yaml";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 
@@ -41,6 +42,12 @@ const MANIFEST_PATH = path.join(REPO_ROOT, "scripts", "skills.manifest.json");
 const VENDOR_DIR = path.join(REPO_ROOT, "extensions", "loom", "vendor", "skills");
 const VENDOR_MANIFEST_NAME = "_manifest.json";
 const VENDOR_MANIFEST = path.join(VENDOR_DIR, VENDOR_MANIFEST_NAME);
+const VENDOR_CATALOG_NAME = "_catalog.json";
+const VENDOR_CATALOG = path.join(VENDOR_DIR, VENDOR_CATALOG_NAME);
+const GENERATED = new Set([VENDOR_MANIFEST_NAME, VENDOR_CATALOG_NAME]);
+
+/** The product-surface id Loom claims. A skill opts in with `metadata.surfaces: [loom]`. */
+const SURFACE_ID = "loom";
 
 // agentic-plugins follows the plugin layout every harness reads: skill content
 // for a plugin lives under `plugins/<name>/skills/`. Include and exclude
@@ -194,6 +201,80 @@ export function applyTransforms(text, targetName, names = []) {
     if (!fn) throw new Error(`unknown transform "${name}"`);
     return fn(acc);
   }, text);
+}
+
+function toSurfaces(v) {
+  if (typeof v === "string") return [v.trim()].filter(Boolean);
+  if (Array.isArray(v)) {
+    return v
+      .filter((x) => typeof x === "string")
+      .map((x) => x.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+/**
+ * A port of the runtime's `parseFrontmatter`. The sync runs under plain node and
+ * cannot import the TypeScript one, so the two are kept honest by a test that
+ * runs both over the same inputs, including every vendored SKILL.md.
+ */
+export function parseFrontmatter(text) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!m) return {};
+  let data;
+  try {
+    data = parseYaml(m[1]);
+  } catch {
+    return {};
+  }
+  if (!data || typeof data !== "object") return {};
+  const fm = {};
+  if (typeof data.name === "string") fm.name = data.name;
+  if (typeof data.description === "string") fm.description = data.description;
+  if (typeof data.when_to_use === "string") fm.when_to_use = data.when_to_use.trim();
+  const metadata = data.metadata && typeof data.metadata === "object" ? data.metadata : undefined;
+  fm.surfaces = toSurfaces(metadata?.surfaces);
+  return fm;
+}
+
+/**
+ * The router's view of a plugin: one entry per SKILL.md, at the path a fetch
+ * would use. Built at sync time so a first run has a catalog without reaching
+ * GitHub, and so the descriptions in the system prompt are the ones we shipped
+ * rather than whatever upstream looks like today.
+ *
+ * Refuses a plugin with nothing tagged for this surface: `selectSkills` is
+ * tag-or-all, so an untagged mirror would quietly put every skill it holds into
+ * the cached system prompt.
+ */
+export function buildCatalogEntries(plugin, files, readText) {
+  const entries = [];
+  for (const file of files) {
+    if (!file.target.endsWith("SKILL.md")) continue;
+    const fm = parseFrontmatter(readText(file));
+    if (!fm.name || !fm.description) {
+      throw new Error(`${file.target}: SKILL.md has no name or description in its frontmatter`);
+    }
+    const entry = {
+      path: file.target,
+      name: fm.name,
+      description: fm.description,
+      surfaces: fm.surfaces ?? [],
+    };
+    if (fm.when_to_use) entry.when_to_use = fm.when_to_use;
+    entries.push(entry);
+  }
+  if (entries.length === 0) {
+    throw new Error(`plugin "${plugin.plugin}" is in the router but vendors no SKILL.md`);
+  }
+  if (!entries.some((e) => e.surfaces.includes(SURFACE_ID))) {
+    throw new Error(
+      `plugin "${plugin.plugin}" has no skill tagged surfaces: [${SURFACE_ID}] -- ` +
+        `the router is tag-or-all, so every one of its ${entries.length} skills would be offered`,
+    );
+  }
+  return entries;
 }
 
 /**
@@ -459,6 +540,7 @@ async function sync() {
   try {
     const entries = [];
     const plugins = [];
+    const catalog = {};
     const byTarget = new Map();
 
     // Read and transform everything before writing anything. A transform that
@@ -473,13 +555,24 @@ async function sync() {
       plugins.push({
         plugin: plugin.plugin,
         as: plugin.as ?? "",
+        repo: plugin.repo,
         router: plugin.router ?? "never",
         transforms: plugin.transforms ?? [],
         why: plugin.why,
         upstream: readUpstreamPin(source.dir, plugin.plugin),
       });
 
-      for (const file of selectFiles(plugin, listFiles(root))) {
+      const pluginFiles = selectFiles(plugin, listFiles(root));
+      if (plugin.router === "catalog") {
+        if (!plugin.repo) {
+          throw new Error(`plugin "${plugin.plugin}" is in the router but names no repo`);
+        }
+        catalog[plugin.repo] = buildCatalogEntries(plugin, pluginFiles, (f) =>
+          fs.readFileSync(path.join(root, f.source), "utf-8"),
+        );
+      }
+
+      for (const file of pluginFiles) {
         const owner = byTarget.get(file.target);
         if (owner) {
           throw new Error(`plugins "${owner}" and "${plugin.plugin}" both vendor ${file.target}`);
@@ -517,6 +610,19 @@ async function sync() {
       delete entry.text;
     }
 
+    const catalogText =
+      JSON.stringify(
+        {
+          $comment:
+            "Generated by scripts/sync-skills.mjs from the vendored SKILL.md " +
+            "frontmatter. Do not hand-edit; run `npm run sync:skills` instead.",
+          ...catalog,
+        },
+        null,
+        2,
+      ) + "\n";
+    fs.writeFileSync(VENDOR_CATALOG, catalogText, "utf-8");
+
     fs.writeFileSync(
       VENDOR_MANIFEST,
       JSON.stringify(
@@ -529,6 +635,7 @@ async function sync() {
           commitDate: manifest.commitDate,
           tag: manifest.tag ?? null,
           manifestSha256: sha256(manifestText),
+          catalogSha256: sha256(catalogText),
           plugins,
           files: entries,
         },
@@ -555,7 +662,7 @@ async function sync() {
 function pruneStale(keep) {
   if (!fs.existsSync(VENDOR_DIR)) return;
   for (const rel of listFiles(VENDOR_DIR)) {
-    if (rel === VENDOR_MANIFEST_NAME || keep.has(rel)) continue;
+    if (GENERATED.has(rel) || keep.has(rel)) continue;
     fs.rmSync(path.join(VENDOR_DIR, rel));
     console.log(`  removed ${rel}`);
   }
@@ -593,7 +700,7 @@ function check() {
     },
     declared: declaredTargets(manifest),
     recorded: vendored.files,
-    present: listFiles(VENDOR_DIR).filter((f) => f !== VENDOR_MANIFEST_NAME),
+    present: listFiles(VENDOR_DIR).filter((f) => !GENERATED.has(f)),
     hashOf: (target) => {
       try {
         return sha256(fs.readFileSync(path.join(VENDOR_DIR, target), "utf-8"));
@@ -602,6 +709,18 @@ function check() {
       }
     },
   });
+
+  // The catalog is generated beside the manifest rather than vendored, so it is
+  // not in `present` and needs its own hash to catch a hand-edit.
+  const catalogActual = fs.existsSync(VENDOR_CATALOG)
+    ? sha256(fs.readFileSync(VENDOR_CATALOG, "utf-8"))
+    : null;
+  if (vendored.catalogSha256 && catalogActual !== vendored.catalogSha256) {
+    failures.push({
+      kind: "hash-mismatch",
+      message: `${VENDOR_CATALOG_NAME}: hand-edited, corrupt or missing (sha256 mismatch)`,
+    });
+  }
 
   if (failures.length > 0) {
     console.error("check:skills FAILED");

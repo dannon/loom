@@ -9,12 +9,18 @@
  */
 
 import { describe, it, expect } from "vitest";
+import fs from "node:fs";
+import { join } from "node:path";
+import { parseFrontmatter as parseFrontmatterTs } from "../extensions/loom/skills-discovery";
+import { readVendorManifest, vendorSkillsDir } from "../extensions/loom/vendor-skills";
 import {
   REPO_BLOB_BASE,
   applyTransforms,
   checkVendored,
   declaredTargets,
+  buildCatalogEntries,
   matchesPattern,
+  parseFrontmatter,
   rewriteLocalPaths,
   selectFiles,
   sha256,
@@ -390,5 +396,90 @@ describe("declaredTargets", () => {
 
   it("gives up entirely once anything is selected by pattern", () => {
     expect(declaredTargets(manifest({ include: ["a*.md"] }))).toBeNull();
+  });
+});
+
+describe("the ported frontmatter parser", () => {
+  // The sync runs under plain node and cannot import the TypeScript parser, so
+  // there are two of them. A drift between the two shows up as a catalog whose
+  // descriptions or surface tags disagree with what the runtime would read from
+  // the same bytes -- silently, and only for skills nobody re-reads.
+  const CASES: [string, string][] = [
+    ["no frontmatter", "# Just a heading\n"],
+    ["empty frontmatter", "---\n\n---\nbody"],
+    ["malformed yaml", "---\nname: [unclosed\n---\nbody"],
+    ["scalar yaml", "---\njust a string\n---\nbody"],
+    ["plain", "---\nname: a\ndescription: d\n---\n"],
+    [
+      "surfaces as a list",
+      "---\nname: a\ndescription: d\nmetadata:\n  surfaces: [loom, cli]\n---\n",
+    ],
+    ["surfaces as a string", "---\nname: a\ndescription: d\nmetadata:\n  surfaces: loom\n---\n"],
+    ["surfaces with junk", "---\nname: a\nmetadata:\n  surfaces: [loom, 3, '', '  x  ']\n---\n"],
+    ["surfaces not under metadata", "---\nname: a\nsurfaces: [loom]\n---\n"],
+    ["when_to_use padded", "---\nname: a\nwhen_to_use: '  use me  '\n---\n"],
+    ["non-string name", "---\nname: 7\ndescription: d\n---\n"],
+    ["crlf", "---\r\nname: a\r\ndescription: d\r\n---\r\nbody"],
+  ];
+
+  it.each(CASES)("agrees with the runtime parser on %s", (_label, text) => {
+    expect(parseFrontmatter(text)).toEqual(parseFrontmatterTs(text));
+  });
+
+  it("agrees on every vendored SKILL.md", () => {
+    const manifest = readVendorManifest()!;
+    const skillFiles = manifest.files.filter((f) => f.target.endsWith("SKILL.md"));
+    expect(skillFiles.length).toBeGreaterThan(0);
+    for (const f of skillFiles) {
+      const text = fs.readFileSync(join(vendorSkillsDir(), f.target), "utf-8");
+      expect(parseFrontmatter(text)).toEqual(parseFrontmatterTs(text));
+    }
+  });
+});
+
+describe("buildCatalogEntries", () => {
+  const plugin = { plugin: "p" };
+  const skill = (name: string, surfaces: string) =>
+    `---\nname: ${name}\ndescription: about ${name}\nmetadata:\n  surfaces: ${surfaces}\n---\n`;
+
+  it("keeps every skill, tagged or not, at the path a fetch would use", () => {
+    // selectSkills does the filtering at render time; the catalog is the whole
+    // repo so a retagged skill upstream does not need a Loom change.
+    const files = [
+      { source: "a/SKILL.md", target: "skills/a/SKILL.md" },
+      { source: "b/SKILL.md", target: "skills/b/SKILL.md" },
+      { source: "a/references/deep.md", target: "skills/a/references/deep.md" },
+    ];
+    const text: Record<string, string> = {
+      "a/SKILL.md": skill("a", "[loom]"),
+      "b/SKILL.md": skill("b", "[]"),
+    };
+    const entries = buildCatalogEntries(plugin, files, (f: { source: string }) => text[f.source]);
+    expect(entries).toEqual([
+      { path: "skills/a/SKILL.md", name: "a", description: "about a", surfaces: ["loom"] },
+      { path: "skills/b/SKILL.md", name: "b", description: "about b", surfaces: [] },
+    ]);
+  });
+
+  it("refuses a plugin with nothing tagged for this surface", () => {
+    // The router is tag-or-all, so an untagged mirror puts every skill it holds
+    // into the cached system prompt instead of none of them.
+    const files = [{ source: "b/SKILL.md", target: "skills/b/SKILL.md" }];
+    expect(() => buildCatalogEntries(plugin, files, () => skill("b", "[]"))).toThrow(
+      /no skill tagged/,
+    );
+  });
+
+  it("refuses a SKILL.md with no name or description", () => {
+    const files = [{ source: "b/SKILL.md", target: "skills/b/SKILL.md" }];
+    expect(() => buildCatalogEntries(plugin, files, () => "# no frontmatter\n")).toThrow(
+      /no name or description/,
+    );
+  });
+
+  it("refuses a router plugin that vendors no SKILL.md at all", () => {
+    expect(() =>
+      buildCatalogEntries(plugin, [{ source: "x.md", target: "x.md" }], () => ""),
+    ).toThrow(/vendors no SKILL.md/);
   });
 });

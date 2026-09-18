@@ -1,10 +1,20 @@
 {
-  "$comment": "Skill content vendored into Loom. The source is galaxyproject/agentic-plugins, which mirrors galaxy-skills and the Foundry casts at pins of its own; the pin recorded here is a commit because tags are mutable, and `tag` is a label that stays null while the pinned commit is ahead of the newest tag upstream. Regenerate with `npm run sync:skills`; verify with `npm run check:skills`. Do not hand-edit files under extensions/loom/vendor/skills/. An exclude is content Loom has no use for, such as a cast's feedback ledger, which belongs to a review loop Loom does not run.",
+  "$comment": "Skill content vendored into Loom. The source is galaxyproject/agentic-plugins, which mirrors galaxy-skills and the Foundry casts at pins of its own; the pin recorded here is a commit because tags are mutable, and `tag` is a label that stays null while the pinned commit is ahead of the newest tag upstream. Regenerate with `npm run sync:skills`; verify with `npm run check:skills`. Do not hand-edit files under extensions/loom/vendor/skills/. `as` is the prefix each plugin's content is written under, relative to its `skills/` root, chosen so a bundled path is the same string as the path a live fetch would use. `repo` names the configured skills repo a plugin backs, and `router: \"catalog\"` puts its SKILL.md frontmatter into _catalog.json; `never` keeps a plugin out of the system prompt entirely. An exclude is content Loom has no use for, such as a cast's feedback ledger, which belongs to a review loop Loom does not run.",
   "repo": "galaxyproject/agentic-plugins",
   "commit": "aa4da4bd68eb00e360dfd5aa6e998feb5de0ac49",
   "commitDate": "2026-09-17",
   "tag": null,
   "plugins": [
+    {
+      "plugin": "galaxy-skills",
+      "repo": "galaxy-skills",
+      "as": "skills",
+      "router": "catalog",
+      "transforms": [],
+      "why": "Using and building Galaxy: collection manipulation, the MCP tool surface, user-defined tools, workflow reports, reproducibility.",
+      "include": ["**"],
+      "exclude": []
+    },
     {
       "plugin": "foundry-skills",
       "as": "",
