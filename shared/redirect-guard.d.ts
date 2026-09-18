@@ -1,6 +1,4 @@
-export declare const REDIRECT_STATUSES: readonly number[];
-
-export type RedirectRefusalKind = "cross-origin" | "unparsable" | "too-many-hops";
+export type RedirectRefusalKind = "cross-origin" | "unreadable" | "unparsable" | "too-many-hops";
 
 export declare class RedirectRefusedError extends Error {
   readonly kind: RedirectRefusalKind;
@@ -19,7 +17,6 @@ export declare class RedirectRefusedError extends Error {
 }
 
 export declare function originOf(url: string): string | null;
-export declare function isSameOrigin(a: string, b: string): boolean;
 
 export interface SameOriginFetchOptions {
   /** Defaults to `globalThis.fetch`, resolved per call. */

@@ -1,12 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import {
-  fetchSameOriginOnly,
-  isSameOrigin,
-  originOf,
-  RedirectRefusedError,
-} from "../shared/redirect-guard.js";
+import { fetchSameOriginOnly, originOf, RedirectRefusedError } from "../shared/redirect-guard.js";
 
 const KEY = "SEKRET-CANARY-123";
 
@@ -15,6 +10,8 @@ interface Seen {
   method: string;
   key: string | null;
   body: string;
+  contentType: string | null;
+  contentLength: string | null;
 }
 
 /**
@@ -34,6 +31,8 @@ async function startServer(
         method: req.method ?? "",
         key: (req.headers["x-api-key"] as string | undefined) ?? null,
         body: Buffer.concat(chunks).toString("utf8"),
+        contentType: req.headers["content-type"] ?? null,
+        contentLength: req.headers["content-length"] ?? null,
       });
       handler(req, res, seen);
     });
@@ -52,17 +51,11 @@ function ok(res: http.ServerResponse) {
   res.end(JSON.stringify({ ok: true }));
 }
 
-describe("originOf / isSameOrigin", () => {
-  it("reduces a URL to scheme, host and port", () => {
+describe("originOf", () => {
+  it("reduces a URL to scheme, host and port, dropping path, query and userinfo", () => {
     expect(originOf("https://galaxy.example/api/histories?key=abc")).toBe("https://galaxy.example");
     expect(originOf("http://user:pw@galaxy.example:8080/x")).toBe("http://galaxy.example:8080");
     expect(originOf("not a url")).toBeNull();
-  });
-
-  it("treats a scheme change as an origin change", () => {
-    expect(isSameOrigin("http://galaxy.example/a", "https://galaxy.example/a")).toBe(false);
-    expect(isSameOrigin("https://galaxy.example/a", "https://galaxy.example/b")).toBe(true);
-    expect(isSameOrigin("https://galaxy.example", "https://galaxy.example:8443")).toBe(false);
   });
 });
 
@@ -215,6 +208,49 @@ describe("fetchSameOriginOnly against real servers", () => {
     expect(a.seen[1].body).toContain("history_id");
   });
 
+  it("refuses a chain that turns cross-origin only on the last hop", async () => {
+    // Two honest same-origin hops, then a jump. The guard compares every hop
+    // against the origin the caller started from, not against the last one.
+    reset(302, "none");
+    let hops = 0;
+    const chain = http.createServer((req, res) => {
+      hops += 1;
+      if (hops <= 2) {
+        res.writeHead(302, { location: `${chainOrigin}/hop-${hops}` });
+        res.end();
+        return;
+      }
+      res.writeHead(302, { location: `${b.origin}${req.url}` });
+      res.end();
+    });
+    await new Promise<void>((r) => chain.listen(0, "127.0.0.1", r));
+    const chainOrigin = `http://127.0.0.1:${(chain.address() as AddressInfo).port}`;
+
+    const err = await fetchSameOriginOnly(
+      `${chainOrigin}/api/histories`,
+      { headers: { "x-api-key": KEY } },
+      { serverLabel: "Galaxy", urlSettingLabel: "GALAXY_URL" },
+    ).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(RedirectRefusedError);
+    expect((err as RedirectRefusedError).kind).toBe("cross-origin");
+    expect(hops).toBe(3);
+    expect(b.seen).toHaveLength(0);
+    await new Promise<void>((r) => chain.close(() => r()));
+  });
+
+  it("drops the body headers when a same-origin redirect turns a POST into a GET", async () => {
+    reset(303, "a-same");
+    await fetchSameOriginOnly(`${a.origin}/api/tools/fetch`, {
+      method: "POST",
+      headers: { "x-api-key": KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ history_id: "h1" }),
+    });
+    expect(a.seen[0].contentType).toBe("application/json");
+    expect(a.seen[1].contentType).toBeNull();
+    expect(a.seen[1].contentLength).toBeNull();
+  });
+
   it("passes a non-redirect response straight through", async () => {
     reset(302, "none");
     const res = await fetchSameOriginOnly(`${a.origin}/api/histories`, {
@@ -277,11 +313,60 @@ describe("fetchSameOriginOnly error wording", () => {
     expect(err.message).toContain("HTTP 302");
   });
 
-  it("leaves a 3xx with no Location to the caller's own status handling", async () => {
+  it("leaves a redirect status with no Location to the caller's own status handling", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response(null, { status: 302 }),
+    ) as unknown as typeof fetch;
+    const res = await fetchSameOriginOnly("https://galaxy.example/api/x", {}, { fetchImpl });
+    expect(res.status).toBe(302);
+  });
+
+  it("passes a 304 through, since it is not a redirect", async () => {
     const fetchImpl = vi.fn(
       async () => new Response(null, { status: 304 }),
     ) as unknown as typeof fetch;
     const res = await fetchSameOriginOnly("https://galaxy.example/api/x", {}, { fetchImpl });
     expect(res.status).toBe(304);
+  });
+
+  it("refuses a redirect whose headers it cannot read rather than passing it on", async () => {
+    // The shape a hand-rolled test double takes: a status and a body, no headers.
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 307,
+      json: async () => ({}),
+    })) as unknown as typeof fetch;
+    const err = (await fetchSameOriginOnly(
+      "https://galaxy.example/api/x",
+      { headers: { "x-api-key": KEY } },
+      { fetchImpl, serverLabel: "Galaxy" },
+    ).catch((e: unknown) => e)) as RedirectRefusedError;
+    expect(err).toBeInstanceOf(RedirectRefusedError);
+    expect(err.kind).toBe("unreadable");
+  });
+
+  it("strips userinfo off a same-origin Location instead of handing it to fetch", async () => {
+    const calls: string[] = [];
+    let served = false;
+    const fetchImpl = vi.fn(async (url: string) => {
+      calls.push(url);
+      if (served) return new Response("{}", { status: 200 });
+      served = true;
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://user:pw@galaxy.example/final?token=SHOULD-NOT-APPEAR" },
+      });
+    }) as unknown as typeof fetch;
+
+    const res = await fetchSameOriginOnly(
+      "https://galaxy.example/api/x",
+      { headers: { "x-api-key": KEY } },
+      { fetchImpl },
+    );
+    expect(res.status).toBe(200);
+    // Same origin, so it is followed -- but without the credentials, which
+    // fetch refuses outright with a TypeError quoting the whole URL.
+    expect(calls[1]).toBe("https://galaxy.example/final?token=SHOULD-NOT-APPEAR");
+    expect(calls[1]).not.toContain("user:pw");
   });
 });

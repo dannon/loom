@@ -1,8 +1,8 @@
 // A fetch wrapper for requests that carry a credential header.
 //
 // Node's fetch defaults to `redirect: "follow"`, and undici strips only
-// `authorization`, `proxy-authorization` and `cookie` when a redirect crosses
-// origins. A custom credential header -- Galaxy's `x-api-key` -- is forwarded
+// `authorization`, `proxy-authorization`, `cookie` and `host` when a redirect
+// crosses origins. A custom credential header -- Galaxy's `x-api-key` -- is forwarded
 // intact, so a server that answers 3xx pointing at another host receives the
 // caller's key while the caller sees an ordinary result. This takes redirects
 // manually instead: only an exact same-origin hop is followed, everything else
@@ -18,9 +18,7 @@
 // logs, notebooks and bug reports.
 
 /** Statuses that carry a Location and mean "go here instead". */
-export const REDIRECT_STATUSES = Object.freeze([301, 302, 303, 307, 308]);
-
-const REDIRECT_STATUS_SET = new Set(REDIRECT_STATUSES);
+const REDIRECT_STATUS_SET = new Set([301, 302, 303, 307, 308]);
 
 /** Request-body headers, dropped when a redirect turns the request into a GET. */
 const BODY_HEADERS = new Set([
@@ -36,14 +34,15 @@ const DEFAULT_MAX_HOPS = 3;
 /**
  * A redirect we would not follow, or could not follow safely.
  *
- * `kind` is what went wrong: `cross-origin` (the common one), `unparsable`
- * (a Location we cannot resolve, so we cannot prove where it points) and
+ * `kind` is what went wrong: `cross-origin` (the common one), `unreadable`
+ * (a redirect whose headers we cannot read at all), `unparsable` (a Location
+ * we can read but cannot resolve, so we cannot prove where it points) and
  * `too-many-hops` (same-origin redirects that never settle).
  */
 export class RedirectRefusedError extends Error {
   /**
    * @param {string} message
-   * @param {{ kind: "cross-origin" | "unparsable" | "too-many-hops", status: number,
+   * @param {{ kind: "cross-origin" | "unreadable" | "unparsable" | "too-many-hops", status: number,
    *           fromOrigin: string, toOrigin?: string | null }} detail
    */
   constructor(message, detail) {
@@ -63,15 +62,6 @@ export function originOf(url) {
   } catch {
     return null;
   }
-}
-
-/**
- * True when two URLs share a scheme, host and port. A scheme change is an
- * origin change, so http and https on the same host are NOT the same origin.
- */
-export function isSameOrigin(a, b) {
-  const oa = originOf(a);
-  return oa !== null && oa === originOf(b);
 }
 
 /** Headers minus the request-body ones, in whatever shape they arrived. */
@@ -106,12 +96,31 @@ function initForNextHop(init, status) {
   return next;
 }
 
-function locationOf(response) {
-  if (!REDIRECT_STATUS_SET.has(response?.status)) return null;
+/**
+ * `undefined` when the response's headers cannot be read at all, `null` when
+ * they can and carry no Location, otherwise the Location value. The first two
+ * are not the same thing: one means we do not know where the server is
+ * pointing, the other means it is not pointing anywhere.
+ */
+function readLocation(response) {
   const get = response.headers?.get;
-  if (typeof get !== "function") return null;
-  const location = response.headers.get("location");
-  return location ? location : null;
+  if (typeof get !== "function") return undefined;
+  return response.headers.get("location") || null;
+}
+
+/**
+ * Release an intermediate response we are not returning. Without this the
+ * body of every hop -- and of the redirect we refuse -- sits on its socket
+ * until the GC gets to it, which on a server that pads its 3xx bodies costs a
+ * connection and a buffer per call.
+ */
+function discard(response) {
+  try {
+    const cancelled = response?.body?.cancel?.();
+    if (cancelled && typeof cancelled.catch === "function") cancelled.catch(() => {});
+  } catch {
+    // Already consumed, already errored, or not a real Response: nothing to do.
+  }
 }
 
 /**
@@ -137,16 +146,27 @@ export async function fetchSameOriginOnly(url, init = {}, options = {}) {
 
   for (let hop = 0; ; hop++) {
     const response = await fetchImpl(currentUrl, currentInit);
-    const location = locationOf(response);
-    // Not a redirect, or a 3xx with nothing to follow: the caller's normal
-    // status handling owns it from here.
-    if (!location) return response;
+    const status = response?.status;
+    // Not a redirect at all: the caller's normal status handling owns it.
+    if (!REDIRECT_STATUS_SET.has(status)) return response;
 
-    const status = response.status;
+    const location = readLocation(response);
+    if (location === undefined) {
+      discard(response);
+      throw new RedirectRefusedError(
+        `${serverLabel} answered HTTP ${status} but where it was pointing could not be read, so the request was refused and no credentials were sent onward.`,
+        { kind: "unreadable", status, fromOrigin: startOrigin },
+      );
+    }
+    // A 3xx with no Location points nowhere, so there is nothing to refuse --
+    // the caller's `!response.ok` branch reports it the way it always has.
+    if (location === null) return response;
+
     let target;
     try {
       target = new URL(location, currentUrl);
     } catch {
+      discard(response);
       throw new RedirectRefusedError(
         `${serverLabel} answered HTTP ${status} with a redirect target that could not be read, so the request was refused and no credentials were sent to it.`,
         { kind: "unparsable", status, fromOrigin: startOrigin },
@@ -154,6 +174,7 @@ export async function fetchSameOriginOnly(url, init = {}, options = {}) {
     }
 
     if (target.origin !== startOrigin) {
+      discard(response);
       throw new RedirectRefusedError(
         crossOriginMessage(serverLabel, urlSettingLabel, status, startOrigin, target.origin),
         {
@@ -166,12 +187,21 @@ export async function fetchSameOriginOnly(url, init = {}, options = {}) {
     }
 
     if (hop >= maxHops) {
+      discard(response);
       throw new RedirectRefusedError(
-        `${serverLabel} redirected the request more than ${maxHops} times within ${startOrigin} without answering, so the request was given up on.`,
+        `${serverLabel} redirected the request more than ${maxHops} times within ${startOrigin} without ever settling, so the request was given up on.`,
         { kind: "too-many-hops", status, fromOrigin: startOrigin, toOrigin: target.origin },
       );
     }
 
+    // Userinfo is dropped before re-issuing. It does not change the origin, so
+    // a Location carrying it would pass the check above and then die inside
+    // fetch with a TypeError that quotes the whole URL back -- path, query and
+    // all -- which is the one thing these errors must never do.
+    target.username = "";
+    target.password = "";
+
+    discard(response);
     currentInit = initForNextHop(currentInit, status);
     currentUrl = target.toString();
   }
