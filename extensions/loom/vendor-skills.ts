@@ -32,6 +32,14 @@ export interface VendorManifestEntry {
   why?: string;
 }
 
+export interface VendorManifestPlugin {
+  plugin: string;
+  as: string;
+  repo?: string;
+  /** "catalog" puts this plugin's skills in the prompt router; "never" keeps them out. */
+  router: string;
+}
+
 export interface VendorManifest {
   repo: string;
   /** Commit, not tag: tags move, and "what did we ship" has to stay answerable. */
@@ -39,6 +47,7 @@ export interface VendorManifest {
   /** A label for the commit, null while the pin is ahead of the newest tag. */
   tag?: string | null;
   commitDate?: string;
+  plugins?: VendorManifestPlugin[];
   files: VendorManifestEntry[];
 }
 

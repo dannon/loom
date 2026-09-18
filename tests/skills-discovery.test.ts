@@ -16,7 +16,6 @@ import {
   isCatalogStale,
   refreshCatalog,
   skillsCacheDir,
-  BUILTIN_CATALOG,
   refreshAllCatalogs,
 } from "../extensions/loom/skills-discovery";
 import { listEnabledSkillRepos } from "../extensions/loom/skills";
@@ -362,19 +361,6 @@ describe("catalog cache", () => {
     expect(skills.map((s) => s.path)).toEqual(["new/SKILL.md"]);
     expect(fetchMock).toHaveBeenCalled();
     expect(readCatalog(REPO)?.skills.map((s) => s.path)).toEqual(["new/SKILL.md"]);
-  });
-});
-
-describe("BUILTIN_CATALOG", () => {
-  it("ships the curated galaxy-skills set, all loom-tagged", () => {
-    const entries = BUILTIN_CATALOG["galaxy-skills"];
-    expect(entries.map((e) => e.path)).toEqual([
-      "collection-manipulation/SKILL.md",
-      "galaxy-integration/mcp-reference/SKILL.md",
-      "udt-authoring/SKILL.md",
-      "workflow-reports/SKILL.md",
-    ]);
-    for (const e of entries) expect(e.surfaces).toContain("loom");
   });
 });
 

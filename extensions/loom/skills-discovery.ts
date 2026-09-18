@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { listEnabledSkillRepos, type ConfiguredSkillRepo } from "./skills";
+import { isBundledRepo, readBundledCatalog } from "./vendor-skills";
 export type { ConfiguredSkillRepo };
 
 /** The product-surface id Loom claims. A skill opts in with `surfaces: [loom]`. */
@@ -312,76 +313,45 @@ export async function refreshAllCatalogs(): Promise<CatalogRefreshResult[]> {
   );
 }
 
-/** Current cached catalog counts without refreshing (the status path). */
+/**
+ * The entries a repo contributes to the router: what shipped in the package if
+ * the repo is still pointed at it, otherwise whatever the last walk cached.
+ * There is no hand-written third copy any more -- it had drifted from upstream
+ * in both directions, listing a skill under a name it no longer had and missing
+ * one that had been tagged for months.
+ */
+export function resolveCatalogEntries(repo: ConfiguredSkillRepo): SkillEntry[] {
+  const bundled = isBundledRepo(repo) ? readBundledCatalog()?.[repo.name] : undefined;
+  return bundled ?? readCatalog(repo)?.skills ?? [];
+}
+
+/** Current catalog counts without refreshing (the status path). */
 export function catalogSummary(): CatalogRefreshResult[] {
   return listEnabledSkillRepos().map((repo) => {
+    if (isBundledRepo(repo)) {
+      const entries = readBundledCatalog()?.[repo.name];
+      return { repo: repo.name, count: entries?.length ?? 0, ok: true, cached: true };
+    }
     const cat = readCatalog(repo);
     return { repo: repo.name, count: cat?.skills.length ?? 0, ok: true, cached: cat !== null };
   });
 }
 
-/** For each enabled repo: refresh on start if stale/missing. Errors are swallowed (keep cache). */
+/**
+ * For each live repo: refresh on start if stale/missing. Errors are swallowed
+ * (keep cache). Bundled repos are skipped -- there is nothing to fetch, and a
+ * catalog that rewrites itself mid-session would bust the cached system prompt.
+ */
 export async function backgroundRefreshSkills(): Promise<void> {
   await Promise.all(
-    listEnabledSkillRepos().map(async (repo) => {
-      try {
-        await refreshCatalog(repo);
-      } catch (err) {
-        console.warn(`[skills] background refresh failed for ${repo.name}:`, err);
-      }
-    }),
+    listEnabledSkillRepos()
+      .filter((repo) => !isBundledRepo(repo))
+      .map(async (repo) => {
+        try {
+          await refreshCatalog(repo);
+        } catch (err) {
+          console.warn(`[skills] background refresh failed for ${repo.name}:`, err);
+        }
+      }),
   );
 }
-
-const MCP_REFERENCE_WHEN_TO_USE =
-  "Reach for this before any Galaxy MCP tool call -- creating/listing histories, " +
-  "uploading data, finding and running tools, inspecting datasets or invocations -- " +
-  "and for the common gotchas (id vs name, history vs dataset ids, collection shapes).";
-
-/**
- * Offline / first-run fallback. Used only when a repo has no resolved-catalog
- * cache yet and the tree-walk can't run. Mirrors whatever is tagged on
- * galaxy-skills `main` at ship time (collection-manipulation, galaxy-integration,
- * udt-authoring, workflow-reports). Keep these in sync with the upstream frontmatter.
- */
-export const BUILTIN_CATALOG: Record<string, SkillEntry[]> = {
-  "galaxy-skills": [
-    {
-      path: "collection-manipulation/SKILL.md",
-      name: "galaxy-transform-collection",
-      description:
-        "Galaxy Collection Transformation Command - transform Galaxy dataset collections " +
-        "reproducibly using Galaxy's native tools. Use when asked to filter, sort, relabel, " +
-        "restructure, flatten, nest, merge, or otherwise manipulate Galaxy collections.",
-      surfaces: ["loom"],
-    },
-    {
-      path: "galaxy-integration/mcp-reference/SKILL.md",
-      name: "galaxy-mcp-reference",
-      description:
-        "Galaxy MCP server tools reference for histories, datasets, tools, and workflows",
-      when_to_use: MCP_REFERENCE_WHEN_TO_USE,
-      surfaces: ["loom"],
-    },
-    {
-      path: "udt-authoring/SKILL.md",
-      name: "udt-authoring",
-      description:
-        "Use when authoring a Galaxy User-Defined Tool (UDT) -- a `class: GalaxyUserTool` " +
-        "YAML definition that wraps a container and command into a tool a non-admin user " +
-        "creates and runs (e.g. via Galaxy MCP create_user_tool / run_user_tool, or POST " +
-        "/api/unprivileged_tools). Not for classic XML/ToolShed tool wrappers.",
-      surfaces: ["loom"],
-    },
-    {
-      path: "workflow-reports/SKILL.md",
-      name: "workflow-reports",
-      description:
-        "Use this skill when asked to create, draft, or write a Galaxy workflow report " +
-        "template for the Workflow Editor's Report tab. Triggers on requests like " +
-        '"create a report for this workflow", "draft a workflow report template", ' +
-        '"write a Galaxy report for workflow <id/url>".',
-      surfaces: ["loom"],
-    },
-  ],
-};
