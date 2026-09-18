@@ -42,6 +42,14 @@ try {
   // every check that reads the repo still passes and the published CLI has no
   // catalog and no reference material behind its own hints.
   const VENDOR = "extensions/loom/vendor/skills";
+  // Checked before they are read, or excluding the vendor tree from `files`
+  // fails with a raw ENOENT instead of the message written for exactly that.
+  const generated = [`${VENDOR}/_manifest.json`, `${VENDOR}/_catalog.json`].filter(
+    (rel) => !existsSync(join(pkgDir, rel)),
+  );
+  if (generated.length > 0) {
+    throw new Error(`tarball is missing vendored files:\n  ${generated.join("\n  ")}`);
+  }
   const manifest = JSON.parse(readFileSync(join(pkgDir, VENDOR, "_manifest.json"), "utf8"));
   // Matched by suffix rather than imported, because this script runs under plain
   // node and the constants are TypeScript. So the count is asserted too: a

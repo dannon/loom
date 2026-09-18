@@ -1105,9 +1105,10 @@ export function buildSkillsContext(): string {
     if (isBundledRepo(r)) bundled.add(r.name);
     entriesByRepo.set(r.name, selectSkills(resolveCatalogEntries(r)));
   }
-  // Don't emit a contentless skills section. If nothing resolved (e.g. a
-  // user-added repo whose catalog hasn't been fetched yet, no builtin), stay
-  // silent until the background refresh populates it next session.
+  // Don't emit a contentless skills section. If nothing resolved -- a user-added
+  // repo whose catalog has not been fetched yet, and nothing of it in the
+  // package -- stay silent until the background refresh populates it next
+  // session.
   const hasAny = [...entriesByRepo.values()].some((e) => e.length > 0);
   if (!hasAny) return "";
   return renderSkillsSection(repos, entriesByRepo, bundled);

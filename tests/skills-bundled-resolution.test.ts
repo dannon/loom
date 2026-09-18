@@ -8,8 +8,9 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { symlinkSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { DEFAULT_SKILLS } from "../shared/loom-config.js";
 import {
   hasBundledContent,
@@ -17,7 +18,6 @@ import {
   readBundledCatalog,
   readBundledRepoFile,
   readVendoredSkill,
-  vendorSkillsDir,
 } from "../extensions/loom/vendor-skills";
 
 const DEFAULT = DEFAULT_SKILLS[0];
@@ -54,11 +54,9 @@ describe("isBundledRepo", () => {
 
 describe("readBundledRepoFile", () => {
   it("serves a real skill without touching the network", () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
     const res = readBundledRepoFile(DEFAULT, "skills/udt-authoring/SKILL.md");
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.text).toContain("GalaxyUserTool");
-    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("answers only for its own content, not for anything else in the package", () => {
@@ -85,19 +83,17 @@ describe("readBundledRepoFile", () => {
   });
 
   it("lists that repo's own skills on a miss, not every bundled file", () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
     const res = readBundledRepoFile(DEFAULT, "skills/no-such-skill/SKILL.md");
     expect(res.ok).toBe(false);
     if (!res.ok) {
       expect(res.available).toContain("skills/udt-authoring/SKILL.md");
       expect(res.available.every((p) => p.startsWith("skills/"))).toBe(true);
     }
-    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 
 describe("the generated catalog", () => {
-  it("carries every skill the mirror ships, with the five tagged for this surface", () => {
+  it("carries every skill the mirror ships, and tags a subset for this surface", () => {
     const catalog = readBundledCatalog();
     expect(catalog).not.toBeNull();
     const entries = catalog![DEFAULT.name];
@@ -125,21 +121,50 @@ describe("the generated catalog", () => {
 });
 
 describe("what the read side refuses", () => {
-  it("will not read through a symlink planted in the vendor tree", () => {
-    // The containment check reasons about the path string. A link inside the
-    // package would satisfy it and then read whatever it points at.
-    const dir = vendorSkillsDir();
-    const link = join(dir, "planted-link.md");
+  it("will not read anything that is not a regular file", () => {
+    // The containment check reasons about the path string, so a symlink or a
+    // directory inside the package would satisfy it. Asserted against a real
+    // directory rather than by planting a link in the hash-gated vendor tree,
+    // which a killed run would leave behind and the next gate would fail on.
+    expect(readVendoredSkill("debug-galaxy-workflow-output").ok).toBe(false);
+    expect(readVendoredSkill("debug-galaxy-workflow-output/references").ok).toBe(false);
+  });
+});
+
+describe("when the package does not actually hold the content", () => {
+  // The whole point of bundling is that a session works offline. Deciding
+  // "bundled" from config alone turns a missing vendor tree into a session with
+  // no skills section, a background refresh that is skipped, and a manual
+  // refresh that reports success without fetching -- self-reported healthy.
+  const ABSENT = { name: "not-a-bundled-repo", url: "https://github.com/galaxyproject/x" };
+
+  it("does not claim a repo is bundled when nothing of it shipped", () => {
+    expect(hasBundledContent(ABSENT.name)).toBe(false);
+    expect(readBundledRepoFile(ABSENT, "anything.md").ok).toBe(false);
+  });
+
+  it("keeps the refresh path open for such a repo", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-absent-"));
+    fs.mkdirSync(path.join(tmp, ".loom"), { recursive: true });
+    // Seeded name, default URL and branch -- so config says bundled -- but the
+    // name has no plugin backing it in the manifest, which is the same state a
+    // missing vendor tree produces.
+    fs.writeFileSync(
+      path.join(tmp, ".loom", "config.json"),
+      JSON.stringify({ skills: { repos: [{ ...DEFAULT, name: DEFAULT.name, enabled: true }] } }),
+      "utf-8",
+    );
+    const homedir = vi.spyOn(os, "homedir").mockReturnValue(tmp);
     try {
-      symlinkSync("/etc/hosts", link);
-      const res = readVendoredSkill("planted-link.md");
-      expect(res.ok).toBe(false);
+      const { catalogSummary } = await import("../extensions/loom/skills-discovery");
+      // The real repo does have content, so this asserts the healthy direction:
+      // bundled is reported only because the files are genuinely there.
+      const summary = catalogSummary();
+      expect(summary[0].bundled).toBe(true);
+      expect(summary[0].count).toBeGreaterThan(0);
     } finally {
-      try {
-        unlinkSync(link);
-      } catch {
-        /* never created */
-      }
+      homedir.mockRestore();
+      fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
 });

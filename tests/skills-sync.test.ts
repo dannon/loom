@@ -27,6 +27,7 @@ import {
   matchesPattern,
   parseFrontmatter,
   rewriteLocalPaths,
+  safeVendorPath,
   selectFiles,
   sha256,
   stripWikiLinks,
@@ -338,8 +339,8 @@ describe("selectFiles", () => {
 });
 
 const PIN = {
-  repo: "galaxyproject/foundry",
-  commit: "74a49c1a0ba5f5be43e5c4132994ea197d26d334",
+  repo: "galaxyproject/agentic-plugins",
+  commit: "aa4da4bd68eb00e360dfd5aa6e998feb5de0ac49",
   manifestSha: "m",
   syncSha: "s",
 };
@@ -423,7 +424,7 @@ describe("checkVendored", () => {
     expect(failures.map((f) => f.kind)).toEqual(["hash-mismatch"]);
   });
 
-  it("skips the manifest comparison when the selection is by pattern", () => {
+  it("skips the declared-target comparison when the selection is by pattern", () => {
     // A glob cannot be re-evaluated offline, so the gate falls back to
     // comparing the recorded manifest against what is on disk.
     expect(check({ declared: null })).toEqual([]);
@@ -662,5 +663,78 @@ describe("findJsonStringSpans", () => {
   it("finds a literal written with unicode escapes", () => {
     const text = '{"body":"see \\u005b\\u005bvalidate\\u005d\\u005d"}';
     expect(findJsonStringSpans(text, "body", "see [[validate]]")).toHaveLength(1);
+  });
+});
+
+describe("safeVendorPath", () => {
+  // The guard the write actually uses. The suite above exercises selectFiles,
+  // which is the selection side; this is the one that sees a resolved path.
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "loom-vendor-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("accepts a nested target under the vendor directory", () => {
+    expect(safeVendorPath("cast/references/a.md", dir)).toBe(join(dir, "cast/references/a.md"));
+  });
+
+  it("refuses a path that resolves out of it", () => {
+    expect(() => safeVendorPath("../escape.md", dir)).toThrow(/outside the vendor directory/);
+  });
+
+  it("refuses a path whose parent directory is a symlink", () => {
+    // mkdirSync(..., {recursive:true}) is satisfied by an existing symlinked
+    // directory and the write goes straight through it, so checking only the
+    // final component is not enough.
+    const outside = mkdtempSync(join(tmpdir(), "loom-outside-"));
+    try {
+      mkdirSync(join(dir, "cast"), { recursive: true });
+      symlinkSync(outside, join(dir, "cast", "notes"));
+      expect(() => safeVendorPath("cast/notes/a.md", dir)).toThrow(/through a symlink/);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("staysUnder, via rewriteLocalPaths", () => {
+  it.each([
+    ["literal", "../../../../evil/repo/blob/main/a.md"],
+    ["backslash", "..\\..\\..\\..\\evil\\repo\\blob\\main\\a.md"],
+    ["percent-encoded", "%2e%2e/%2e%2e/%2e%2e/%2e%2e/evil/repo/blob/main/a.md"],
+    ["double-encoded", "%252e%252e/%252e%252e/%252e%252e/%252e%252e/evil/x.md"],
+  ])("refuses a %s traversal in the suffix", (_label, suffix) => {
+    // Checking the spelling is a losing game; all four normalize to the same URL
+    // in whatever resolves the link, so the produced URL is what gets checked.
+    expect(() => rewriteLocalPaths(`~/projects/repositories/galaxy/${suffix}`)).toThrow(
+      /walks out of the repository/,
+    );
+  });
+
+  it("refuses one that escapes a two-segment mapping too", () => {
+    expect(() =>
+      rewriteLocalPaths("~/projects/repositories/workflow-fixtures/iwc-src/../../evil/x.md"),
+    ).toThrow(/walks out of the repository/);
+  });
+
+  it("names the repository, not the subdirectory, when a mapping is missing", () => {
+    // `some-new-repo/lib` as the suggested key produces a map entry that covers
+    // one directory and fails again on the next citation in the same repo.
+    expect(() => rewriteLocalPaths("~/projects/repositories/some-new-repo/lib/thing.py")).toThrow(
+      /add "some-new-repo" to REPO_BLOB_BASE/,
+    );
+  });
+});
+
+describe("applyJsonTransforms nesting", () => {
+  it("refuses prose it cannot reach rather than shipping it untransformed", () => {
+    const nested = JSON.stringify({ command: { body: "see [[validate]]" } });
+    expect(() => applyTransforms(nested, "x.json", ["strip-wiki-links"])).toThrow(/nested "body"/);
+  });
+
+  it("leaves a nested body alone when it has no links to strip", () => {
+    const nested = JSON.stringify({ command: { body: "ordinary prose" } });
+    expect(applyTransforms(nested, "x.json", ["strip-wiki-links"])).toBe(nested);
   });
 });

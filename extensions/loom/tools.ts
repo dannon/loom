@@ -361,14 +361,16 @@ analyses in Galaxy.`,
   pi.registerTool({
     name: "skills_fetch",
     label: "Fetch Skill",
-    description: `Fetch operational know-how from a configured skills repo. The
-system prompt's "Skills repositories" section lists the available repos and the
-canonical paths inside each. Results are cached locally for 24h. If \`repo\` is
-omitted, the first enabled repo is used (typically \`galaxy-skills\`).
+    description: `Load operational know-how from a skills repo. The system
+prompt's "Skills repositories" section lists the repos and the canonical paths
+inside each; a repo marked bundled there is read from the package, and any other
+is fetched and cached locally for 24h. If \`repo\` is omitted, the first enabled
+repo is used (typically \`galaxy-skills\`).
 
-\`repo: "${VENDOR_REPO_NAME}"\` reads Galaxy reference material bundled with Loom
-(offline, no network). It is not listed in the skills router; hints name the
-exact file when it becomes relevant.`,
+\`repo: "${VENDOR_REPO_NAME}"\` reads Galaxy workflow reference material bundled
+with Loom, always offline. It is deliberately absent from the router, so its
+paths are not listed there: a hint names the exact file when it becomes
+relevant, and a wrong path answers with the entry points that do exist.`,
     parameters: Type.Object({
       repo: Type.Optional(
         Type.String({
@@ -380,25 +382,37 @@ exact file when it becomes relevant.`,
       ),
       path: Type.String({
         description:
-          "Relative path inside the repo, exactly as the skills router prints it, " +
-          "e.g. 'skills/collection-manipulation/SKILL.md', " +
-          "'skills/galaxy-mcp-reference/gotchas.md'.",
+          "Relative path inside the repo. For a repo the router lists, use the " +
+          "path it prints, e.g. 'skills/collection-manipulation/SKILL.md'; a " +
+          "skill's own reference docs sit beside it, e.g. " +
+          `'skills/galaxy-mcp-reference/gotchas.md'. For '${VENDOR_REPO_NAME}', ` +
+          "use the path a hint gave you.",
       }),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+      // Normalised once, up front, so every branch below reasons about the same
+      // string. The reserved-name branch used to take the model's raw input.
+      const cleanPath = params.path.replace(/^\/+/, "").replace(/\\/g, "/");
+      if (cleanPath.includes("..") || cleanPath === "") {
+        return {
+          content: [{ type: "text", text: `Error: Invalid skill path "${params.path}"` }],
+          details: { error: true },
+        };
+      }
+
       // The reserved name reads bundled reference material, but only when the
       // user has not claimed it: configuring a repo called "foundry" has to win,
       // or an explicitly chosen branch is silently answered from the package.
       // Checked before the read, not after a miss, because the bundled tree now
       // holds a whole skills mirror and would answer for paths that belong to it.
       if (params.repo === VENDOR_REPO_NAME && !findSkillRepo(VENDOR_REPO_NAME)) {
-        const res = readBundledRepoFile({ name: VENDOR_REPO_NAME }, params.path);
+        const res = readBundledRepoFile({ name: VENDOR_REPO_NAME }, cleanPath);
         if (res.ok) {
           return {
             content: [{ type: "text", text: res.text }],
             details: {
               repo: VENDOR_REPO_NAME,
-              path: params.path,
+              path: cleanPath,
               length: res.text.length,
               bundled: true,
             },
@@ -408,10 +422,10 @@ exact file when it becomes relevant.`,
           content: [
             {
               type: "text",
-              text: `Error: ${res.error}. Bundled files: ${res.available.join(", ") || "(none)"}.`,
+              text: `Error: ${res.error}. Available: ${res.available.join(", ") || "(none)"}.`,
             },
           ],
-          details: { error: true, repo: VENDOR_REPO_NAME, path: params.path },
+          details: { error: true, repo: VENDOR_REPO_NAME, path: cleanPath },
         };
       }
 
@@ -430,14 +444,6 @@ exact file when it becomes relevant.`,
                 : `Error: No skills repos are enabled. Configure one in Preferences → Skills.`,
             },
           ],
-          details: { error: true },
-        };
-      }
-
-      const cleanPath = params.path.replace(/^\/+/, "").replace(/\\/g, "/");
-      if (cleanPath.includes("..") || cleanPath === "") {
-        return {
-          content: [{ type: "text", text: `Error: Invalid skill path "${params.path}"` }],
           details: { error: true },
         };
       }
@@ -462,9 +468,7 @@ exact file when it becomes relevant.`,
           content: [
             {
               type: "text",
-              text:
-                `Error: ${res.error} in bundled ${repo.name}. ` +
-                `Skills in this repo: ${res.available.join(", ") || "(none)"}.`,
+              text: `Error: ${res.error}. Available: ${res.available.join(", ") || "(none)"}.`,
             },
           ],
           details: { error: true, repo: repo.name, path: cleanPath },

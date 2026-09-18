@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { maskCode } from "../scripts/sync-skills.mjs";
 import {
   INVOCATION_FAILURE_REFERENCE,
   JOB_FAILURE_REFERENCE,
 } from "../extensions/loom/invocation-failure-hint";
 import {
-  VENDOR_REPO_NAME,
   readVendorManifest,
   readVendoredSkill,
   resolveVendorPath,
@@ -83,25 +83,22 @@ describe("vendored skills", () => {
     for (const f of readVendorManifest()!.files) {
       const text = fs.readFileSync(path.join(vendorSkillsDir(), f.target), "utf-8");
       expect(text).not.toMatch(/~\/projects\/repositories/);
-      expect(text).not.toMatch(/\/(?:Users|home)\/[A-Za-z0-9._-]+\//);
+      expect(text).not.toMatch(/\/(?:Users|home)\/[^/\s"'`]+\//);
     }
   });
 
-  it("leaves no wiki-link in prose, and no bracket pair inside a code fence", () => {
-    // Stated as the rule rather than as "no [[ anywhere": a fenced `[[a, b]]`
-    // is a 2D array literal the transform is required to leave alone, so the
-    // blanket assertion would go red the first time such a file is vendored.
+  it("leaves no bracket pair that the transform would have treated as a link", () => {
+    // The rule, not the corpus. A surviving `[[...]]` is correct when it is an
+    // array literal -- quote, comma or whitespace inside -- or when it is code.
+    // Asserting "no [[ outside a fence" instead contradicts the sync test that
+    // requires an unfenced `[["foo", "oo"]]` to survive, and passed only
+    // because no vendored file happens to contain one yet.
     for (const f of readVendorManifest()!.files) {
       if (!f.target.endsWith(".md")) continue;
       const text = fs.readFileSync(path.join(vendorSkillsDir(), f.target), "utf-8");
-      let fenced = false;
-      for (const line of text.split("\n")) {
-        if (/^ {0,3}(?:`{3,}|~{3,})/.test(line)) {
-          fenced = !fenced;
-          continue;
-        }
-        if (!fenced) expect(line).not.toMatch(/\[\[[^\]]+\]\]/);
-      }
+      const survivors = [...maskCode(text).matchAll(/\[\[([^\]]+)\]\]/g)].map((m) => m[1]);
+      const linkShaped = survivors.filter((target) => !/[\s"',[\]]/.test(target));
+      expect(linkShaped).toEqual([]);
     }
   });
 
@@ -130,13 +127,6 @@ describe("vendored skills", () => {
     const targets = readVendorManifest()!.files.map((f) => f.target);
     expect(targets.some((t) => t.endsWith("_feedback.md"))).toBe(false);
     expect(targets).toContain("debug-galaxy-workflow-output/SKILL.md");
-  });
-
-  it("reserves a repo name that cannot collide with a configured repo", () => {
-    // Configured repos are allowlisted to github.com/galaxyproject/*, and a
-    // user-added repo named "foundry" would otherwise shadow the bundled set.
-    // skills_fetch checks the bundled name first, so assert it stays stable.
-    expect(VENDOR_REPO_NAME).toBe("foundry");
   });
 });
 

@@ -81,11 +81,11 @@ export function readBundledCatalog(): Record<string, SkillEntry[]> | null {
  * whether the repo is read from the package or fetched from GitHub, and a path
  * that 404s live must not quietly resolve here.
  */
-function ownsTarget(repoName: string, target: string): boolean {
+function ownedTargets(repoName: string): string[] {
   const manifest = readVendorManifest();
   const plugin = manifest?.plugins?.find((p) => p.repo === repoName)?.plugin;
-  if (!plugin) return false;
-  return manifest?.files.some((f) => f.target === target && f.plugin === plugin) ?? false;
+  if (!plugin) return [];
+  return (manifest?.files ?? []).filter((f) => f.plugin === plugin).map((f) => f.target);
 }
 
 /**
@@ -93,25 +93,38 @@ function ownsTarget(repoName: string, target: string): boolean {
  * that repo's own skills rather than every file in the package.
  */
 export function readBundledRepoFile(repo: { name: string }, rawPath: string): VendorReadResult {
+  const owned = ownedTargets(repo.name);
+  // What to offer on a miss. A repo in the router has a catalog and its skills
+  // are the useful answer; a repo that is deliberately out of the router has
+  // none, and offering nothing is how the reserved reference set used to
+  // dead-end on the relative paths its own SKILL.md prints.
   const catalog = (readBundledCatalog()?.[repo.name] ?? []).map((s) => s.path);
+  const available = catalog.length ? catalog : summarise(owned);
   const clean = (typeof rawPath === "string" ? rawPath : "")
     .replace(/^\/+/, "")
     .replace(/\\/g, "/");
   const target = LEGACY_FLAT_PATHS[clean] ?? clean;
-  if (!ownsTarget(repo.name, target)) {
-    return { ok: false, error: `No file "${rawPath}" in ${repo.name}`, available: catalog };
+  if (!owned.includes(target)) {
+    return { ok: false, error: `No file "${rawPath}" in ${repo.name}`, available };
   }
   const res = readVendoredSkill(target);
-  if (res.ok) return res;
-  return { ...res, available: catalog.length ? catalog : res.available };
+  return res.ok ? res : { ...res, available };
+}
+
+/**
+ * Every entry point, plus a count of what sits under each. Printing 149 paths
+ * at a model that mistyped one is not help; the SKILL.md files are where it
+ * should start, and the count tells it the references exist.
+ */
+function summarise(targets: string[]): string[] {
+  const entries = targets.filter((t) => t.endsWith("SKILL.md")).sort();
+  const rest = targets.length - entries.length;
+  return rest > 0 ? [...entries, `(and ${rest} reference files alongside these)`] : entries;
 }
 
 /** True when the package actually holds any content for this repo name. */
 export function hasBundledContent(repoName: string): boolean {
-  const manifest = readVendorManifest();
-  const plugin = manifest?.plugins?.find((p) => p.repo === repoName)?.plugin;
-  if (!plugin) return false;
-  return manifest?.files.some((f) => f.plugin === plugin) ?? false;
+  return ownedTargets(repoName).length > 0;
 }
 
 /** Absolute path to the vendored skills directory (sibling of this module). */
@@ -172,10 +185,7 @@ export type VendorReadResult =
 
 /** Read one vendored file. Never touches the network. */
 export function readVendoredSkill(rawPath: string): VendorReadResult {
-  // Only built on the failure paths: the manifest is ~50 KB of JSON and every
-  // successful read would otherwise parse it just to throw the result away.
-  const available = () =>
-    (readVendorManifest()?.files ?? []).map((f) => f.target).filter((t) => t !== "_manifest.json");
+  const available = () => (readVendorManifest()?.files ?? []).map((f) => f.target);
   if (typeof rawPath !== "string") {
     return { ok: false, error: `Invalid vendored skill path`, available: available() };
   }

@@ -99,7 +99,22 @@ const LOCAL_CHECKOUT = new RegExp(
 // layout, which is what it used to be, meant a note citing `~/notes/private.md`
 // or `/Users/alice/work/...` sailed through and shipped to npm with the author's
 // account name in it.
-const HOME_DIR_PATH = /(?:\/(?:Users|home)\/[^/\s"'`]+\/)|(?:[A-Za-z]:\\Users\\[^\\\s"'`]+\\)/i;
+const HOME_DIR_PATH = new RegExp(
+  [
+    // /Users/<name>/ and /home/<name>/, with a backslash-escaped space allowed
+    // inside the name so `/Users/bob\ smith/x` does not slip through.
+    String.raw`\/(?:Users|home)\/(?:[^/\s"'\`]|\\ )+\/`,
+    // C:\Users\<name>\
+    String.raw`[A-Za-z]:\\Users\\(?:[^\\\s"'\`]|\\ )+\\`,
+    // The single-user roots, which have no name segment at all.
+    String.raw`\/(?:root|var\/root)\/`,
+    // ~<name>/ -- the tilde form that still carries an account name.
+    String.raw`~[A-Za-z0-9._-]+\/`,
+    // The Windows environment variables that expand to one.
+    String.raw`%(?:USERPROFILE|HOMEPATH|APPDATA|LOCALAPPDATA)%`,
+  ].join("|"),
+  "i",
+);
 const TILDE_PATH = /~\/([^\s"'`]*)/g;
 
 // `~/` prefixes that name a tool's own cache or config rather than anything of
@@ -108,35 +123,64 @@ const TILDE_PATH = /~\/([^\s"'`]*)/g;
 const GENERIC_HOME_PREFIXES = [".cache/", ".config/", ".claude/", ".foundry/"];
 
 /**
+ * Whether `base + suffix`, once a URL parser has had its way with it, is still
+ * under `base`. Percent-decoded first so `%2e%2e` cannot hide, and backslashes
+ * read as separators the way a browser reads them.
+ */
+function staysUnder(base, suffix) {
+  let decoded = suffix;
+  for (let i = 0; i < 3; i++) {
+    let next;
+    try {
+      next = decodeURIComponent(decoded);
+    } catch {
+      return false;
+    }
+    if (next === decoded) break;
+    decoded = next;
+  }
+  try {
+    return new URL(decoded.replace(/\\/g, "/"), base).href.startsWith(base);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Rewrite a local checkout of `<repo>` to that repo's GitHub blob base. A
  * two-segment key wins over a one-segment one, because one of these checkouts
  * holds clones of several projects and only some of them have a known upstream.
  */
 export function rewriteLocalPaths(text, bases = REPO_BLOB_BASE) {
-  const out = text.replace(LOCAL_CHECKOUT, (match, repo, sub, offset, whole) => {
-    // The rewrite only replaces the prefix, so whatever follows it rides along
-    // into the URL. A `..` segment there resolves, in any client that fetches
-    // it, to a path in a different repository than the one we mapped.
-    const suffix = /^[^\s"'`)\]]*/.exec(whole.slice(offset + match.length))?.[0] ?? "";
-    if (suffix.split("/").includes("..")) {
-      throw new Error(
-        `"${match}${suffix}" walks out of the repository it maps to -- ` +
-          `the rewritten URL would point somewhere else entirely`,
-      );
-    }
+  return text.replace(LOCAL_CHECKOUT, (match, repo, sub, offset, whole) => {
     // Own-property only: `bases["constructor"]` is truthy and would splice a
     // native-code stringification into shipped guidance.
     const two = sub ? `${repo}${sub}` : null;
-    if (two && Object.hasOwn(bases, two)) return bases[two];
-    if (Object.hasOwn(bases, repo)) {
-      return bases[repo] + (sub ? `${sub.slice(1)}/` : "");
+    const base = two && Object.hasOwn(bases, two) ? bases[two] : undefined;
+    const prefix = base ?? (Object.hasOwn(bases, repo) ? bases[repo] : undefined);
+    if (prefix === undefined) {
+      throw new Error(
+        `no GitHub base for "${match}" -- add "${repo}" to REPO_BLOB_BASE ` +
+          `(or "${two ?? repo}" if only that subdirectory has a known upstream), ` +
+          `or the vendored copy ships a path that only exists on the author's machine`,
+      );
     }
-    throw new Error(
-      `no GitHub base for "${match}" -- add "${two ?? repo}" to REPO_BLOB_BASE, ` +
-        `or the vendored copy ships a path that only exists on the author's machine`,
-    );
+    const replacement = base ?? prefix + (sub ? `${sub.slice(1)}/` : "");
+
+    // Only the prefix is replaced, so whatever follows rides along into the URL.
+    // Checking the spelling of that suffix is a losing game -- `..` can be
+    // written with backslashes or percent-encoded, and both normalize away in
+    // whatever eventually resolves the link. Build the URL instead and ask
+    // whether it still points inside the repository we mapped it to.
+    const suffix = /^[^\s"'`)\]]*/.exec(whole.slice(offset + match.length))?.[0] ?? "";
+    if (!staysUnder(replacement, suffix)) {
+      throw new Error(
+        `"${match}${suffix}" walks out of the repository it maps to -- ` +
+          `the rewritten URL would resolve somewhere else entirely`,
+      );
+    }
+    return replacement;
   });
-  return out;
 }
 
 // Obsidian wiki-links resolve inside the Foundry vault and nowhere else. Left
@@ -260,7 +304,18 @@ export function applyJsonTransforms(text, names = []) {
   } catch {
     return text;
   }
-  if (!parsed || typeof parsed[JSON_PROSE_FIELD] !== "string") return text;
+  if (!parsed || typeof parsed[JSON_PROSE_FIELD] !== "string") {
+    // Only a top-level `body` is rewritten, so a nested one would ship with its
+    // links intact and nothing would say so. Refuse rather than miss it.
+    const nested = findNestedProse(parsed);
+    if (nested) {
+      throw new Error(
+        `a nested "${JSON_PROSE_FIELD}" at ${nested} carries wiki-links; ` +
+          `the rewrite only handles a top-level one`,
+      );
+    }
+    return text;
+  }
   const original = parsed[JSON_PROSE_FIELD];
   const stripped = stripWikiLinks(original);
   if (stripped === original) return text;
@@ -276,6 +331,28 @@ export function applyJsonTransforms(text, names = []) {
   }
   const [start, end] = spans[0];
   return text.slice(0, start) + JSON.stringify(stripped) + text.slice(end);
+}
+
+/** Path to the first nested prose field holding a wiki-link, or null. */
+function findNestedProse(value, trail = "$") {
+  if (Array.isArray(value)) {
+    for (const [i, item] of value.entries()) {
+      const hit = findNestedProse(item, `${trail}[${i}]`);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (!value || typeof value !== "object") return null;
+  for (const [key, item] of Object.entries(value)) {
+    if (key === JSON_PROSE_FIELD && typeof item === "string" && WIKI_LINK.test(item)) {
+      WIKI_LINK.lastIndex = 0;
+      return `${trail}.${key}`;
+    }
+    WIKI_LINK.lastIndex = 0;
+    const hit = findNestedProse(item, `${trail}.${key}`);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 /** End offset (exclusive) of the JSON string literal that opens at `start`. */
@@ -486,7 +563,10 @@ export function selectFiles(entry, available) {
 /**
  * The targets the manifest names outright, or null when any plugin selects by
  * pattern -- a glob cannot be re-evaluated without the source tree, so offline
- * there is nothing to compare against. An explicit include that an exclude also
+ * there is nothing to compare against. Both plugins glob today, so this returns
+ * null in production and the two comparisons it feeds are exercised only by
+ * tests; the explicit-include form is kept for a future plugin that needs to
+ * name a handful of files rather than a directory. An explicit include that an exclude also
  * matches is not vendored, so it is not declared either; counting it would make
  * `sync` and `check` disagree on a manifest that is perfectly consistent.
  */
@@ -506,8 +586,8 @@ export function declaredTargets(manifest) {
  * actually on disk.
  *
  * @param {object} args
- * @param {{repo: string, commit: string, manifestSha?: string}} args.source what the manifest asks for
- * @param {{repo: string, commit: string, manifestSha?: string}} args.vendored what the vendored copy was built from
+ * @param {{repo: string, commit: string, manifestSha?: string, syncSha?: string}} args.source what the manifest asks for
+ * @param {{repo: string, commit: string, manifestSha?: string, syncSha?: string}} args.vendored what the vendored copy was built from
  * @param {string[] | null} args.declared targets the manifest names outright, null when it selects by pattern
  * @param {{target: string, sha256: string}[]} args.recorded entries in the vendored manifest
  * @param {string[]} args.present files found under the vendor dir, manifest excluded
@@ -516,7 +596,14 @@ export function declaredTargets(manifest) {
  */
 export function checkVendored({ source, vendored, declared, recorded, present, hashOf }) {
   const failures = [];
-  const short = (c) => (typeof c === "string" ? c.slice(0, 7) : String(c));
+  // Keep whatever follows the sha. Truncating `aa4da4b+dirty` to `aa4da4b`
+  // makes the message read "pin moved to X but vendored from X", and the
+  // suffix is the entire content of that failure.
+  const short = (c) => {
+    if (typeof c !== "string") return String(c);
+    const m = /^([0-9a-f]{7,40})(.*)$/.exec(c);
+    return m ? m[1].slice(0, 7) + m[2] : c;
+  };
 
   if (source.repo !== vendored.repo || source.commit !== vendored.commit) {
     failures.push({
@@ -598,9 +685,12 @@ export function checkVendored({ source, vendored, declared, recorded, present, h
  * Deliberately not a directory walk. A checkout can hold anything the author
  * left lying around -- an ignored `.env`, a scratch file, a symlink out of the
  * tree -- and none of it is covered by the commit whose provenance we record, so
- * a walk would let it ship with a clean pin. Only regular blobs are accepted:
- * git records a symlink as mode 120000 and a submodule as 160000, and following
- * either is how a sync ends up copying something from outside its source.
+ * a walk would let it ship with a clean pin. Each entry carries whether it is a
+ * regular blob; git records a symlink as mode 120000 and a submodule as 160000.
+ *
+ * Content is still read from the working tree, which is the same thing for the
+ * fetched copy and is the point of the local override. A local checkout that
+ * differs from its commit reports `+dirty` and the gate refuses the result.
  */
 export function listCommittedFiles(dir, rev, prefix) {
   const out = git(["ls-tree", "-r", "-z", rev, "--", prefix], dir);
@@ -670,10 +760,11 @@ function materializeSource(manifest) {
       throw new Error(`LOOM_AGENTIC_PLUGINS_DIR is set but ${dir} is not a git repository`);
     }
     console.log(`Reading ${dir} (LOOM_AGENTIC_PLUGINS_DIR) at ${commit}.`);
+    const commitDate = git(["show", "-s", "--format=%cs", "HEAD"], dir).trim();
     if (commit !== manifest.commit) {
       console.log("That is not the pinned commit, so `check:skills` will reject the result.");
     }
-    return { dir, commit, rev: "HEAD", cleanup: () => {} };
+    return { dir, commit, commitDate, rev: "HEAD", cleanup: () => {} };
   }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-skills-sync-"));
   git(["init", "-q"], dir);
@@ -683,6 +774,10 @@ function materializeSource(manifest) {
   return {
     dir,
     commit: git(["rev-parse", "HEAD"], dir).trim(),
+    // Read from the commit, not from the manifest: the date reaches a tooltip in
+    // Preferences, and a pin bump that forgot to update it by hand would ship a
+    // wrong one with the gate perfectly happy.
+    commitDate: git(["show", "-s", "--format=%cs", "HEAD"], dir).trim(),
     rev: "HEAD",
     cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
   };
@@ -717,6 +812,7 @@ async function sync() {
     const entries = [];
     const plugins = [];
     const catalog = {};
+    const claimedRepos = new Set();
     const byTarget = new Map();
 
     // Read and transform everything before writing anything. A transform that
@@ -746,22 +842,36 @@ async function sync() {
       const pluginFiles = selectFiles(plugin, committed);
       const transformed = new Map(
         pluginFiles.map((f) => {
-          const raw = fs.readFileSync(path.join(root, f.source), "utf-8");
+          const from = `plugins/${plugin.plugin}/${PLUGIN_SKILLS_ROOT}/${f.source}`;
+          const bytes = fs.readFileSync(path.join(root, f.source));
+          // Everything vendored is prose or JSON. Reading a binary as UTF-8
+          // would replace every invalid sequence, hash the damage as if it were
+          // the content, and sail through the gate.
+          if (bytes.includes(0)) {
+            throw new Error(`${from}: looks binary; the vendored set is text only`);
+          }
           try {
-            return [f.target, applyTransforms(raw, f.target, plugin.transforms)];
+            return [
+              f.target,
+              applyTransforms(bytes.toString("utf-8"), f.target, plugin.transforms),
+            ];
           } catch (err) {
-            const from = `plugins/${plugin.plugin}/${PLUGIN_SKILLS_ROOT}/${f.source}`;
             throw new Error(`${from}: ${err.message}`, { cause: err });
           }
         }),
       );
 
+      // Checked for every plugin, not only the routed ones: reads are scoped by
+      // which plugin owns a repo name, and the lookup takes the first claimant.
+      if (plugin.repo) {
+        if (claimedRepos.has(plugin.repo) || plugin.repo in Object.prototype) {
+          throw new Error(`repo "${plugin.repo}" is claimed twice or is not usable as a key`);
+        }
+        claimedRepos.add(plugin.repo);
+      }
       if (plugin.router === "catalog") {
         if (!plugin.repo) {
           throw new Error(`plugin "${plugin.plugin}" is in the router but names no repo`);
-        }
-        if (Object.hasOwn(catalog, plugin.repo) || plugin.repo in Object.prototype) {
-          throw new Error(`repo "${plugin.repo}" is claimed twice or is not usable as a key`);
         }
         // Read the transformed text, not the upstream bytes: a description is
         // copied straight into the cached system prompt, so it has to be the
@@ -819,7 +929,11 @@ async function sync() {
         2,
       ) + "\n";
     fs.writeFileSync(VENDOR_CATALOG, catalogText, "utf-8");
-    fs.writeFileSync(PIN_MODULE, renderPinModule(manifest, source.commit), "utf-8");
+    fs.writeFileSync(
+      PIN_MODULE,
+      renderPinModule(manifest, source.commit, source.commitDate),
+      "utf-8",
+    );
     fs.writeFileSync(PIN_TYPES, PIN_TYPES_SOURCE, "utf-8");
 
     fs.writeFileSync(
@@ -831,7 +945,7 @@ async function sync() {
             "run `npm run sync:skills` instead.",
           repo: manifest.repo,
           commit: source.commit,
-          commitDate: manifest.commitDate,
+          commitDate: source.commitDate,
           tag: manifest.tag ?? null,
           manifestSha256: sha256(manifestText),
           catalogSha256: sha256(catalogText),
@@ -883,15 +997,36 @@ function lstatOrNull(abs) {
  * it. `selectFiles` rejects the obvious shapes, but it works on strings and this
  * works on the resolved path, which is the thing the write actually uses.
  */
-function safeVendorPath(target) {
-  const abs = path.resolve(VENDOR_DIR, target);
-  if (abs !== VENDOR_DIR && !abs.startsWith(VENDOR_DIR + path.sep)) {
+export function safeVendorPath(target, vendorDir = VENDOR_DIR) {
+  const abs = path.resolve(vendorDir, target);
+  if (abs !== vendorDir && !abs.startsWith(vendorDir + path.sep)) {
     throw new Error(`target "${target}" resolves outside the vendor directory`);
+  }
+  // The string is contained; the filesystem may not be. A symlinked directory
+  // anywhere above the file satisfies `mkdirSync(..., { recursive: true })` and
+  // the write goes straight through it, so resolve as much of the parent chain
+  // as exists and check that too.
+  const realParent = realpathOfNearestExisting(path.dirname(abs));
+  const realVendor = realpathOfNearestExisting(vendorDir);
+  if (realParent !== realVendor && !realParent.startsWith(realVendor + path.sep)) {
+    throw new Error(`target "${target}" resolves outside the vendor directory through a symlink`);
   }
   return abs;
 }
 
-function renderPinModule(manifest, commit) {
+/** realpath of `dir`, or of the deepest part of it that exists yet. */
+function realpathOfNearestExisting(dir) {
+  for (let candidate = dir; ; candidate = path.dirname(candidate)) {
+    try {
+      return fs.realpathSync(candidate);
+    } catch {
+      const parent = path.dirname(candidate);
+      if (parent === candidate) return dir;
+    }
+  }
+}
+
+function renderPinModule(manifest, commit, commitDate) {
   // Written in the repo's own formatting rather than JSON.stringify's: the file
   // is committed, so the formatter would rewrite it and the gate below, which
   // reads the commit straight back out of it, would stop matching.
@@ -903,7 +1038,7 @@ function renderPinModule(manifest, commit) {
     "export const SKILLS_PIN = {",
     field("repo", manifest.repo),
     field("commit", commit),
-    field("commitDate", manifest.commitDate ?? null),
+    field("commitDate", commitDate ?? null),
     field("tag", manifest.tag ?? null),
     "};",
     "",
@@ -1027,9 +1162,16 @@ if (isDirectInvocation()) {
     console.error(`usage: sync-skills.mjs [--check] (got ${args.join(" ")})`);
     process.exit(2);
   }
-  if (args[0] === "--check") {
-    check();
-  } else {
-    await sync();
+  try {
+    if (args[0] === "--check") {
+      check();
+    } else {
+      await sync();
+    }
+  } catch (err) {
+    // The messages are the point of this script's failures; eight lines of node
+    // internals on top of them is not.
+    console.error(`sync-skills: ${err instanceof Error ? err.message : err}`);
+    process.exit(1);
   }
 }

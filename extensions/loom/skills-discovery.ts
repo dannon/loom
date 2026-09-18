@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { listEnabledSkillRepos, type ConfiguredSkillRepo } from "./skills";
-import { isBundledRepo, readBundledCatalog } from "./vendor-skills";
+import { hasBundledContent, isBundledRepo, readBundledCatalog } from "./vendor-skills";
 export type { ConfiguredSkillRepo };
 
 /** The product-surface id Loom claims. A skill opts in with `surfaces: [loom]`. */
@@ -302,7 +302,7 @@ export async function refreshAllCatalogs(): Promise<CatalogRefreshResult[]> {
   // and offline it would report a failure for a repo that works.
   return Promise.all(
     listEnabledSkillRepos().map(async (repo): Promise<CatalogRefreshResult> => {
-      if (isBundledRepo(repo)) {
+      if (readsFromPackage(repo)) {
         const entries = readBundledCatalog()?.[repo.name];
         return { repo: repo.name, count: entries?.length ?? 0, ok: true, bundled: true };
       }
@@ -322,21 +322,43 @@ export async function refreshAllCatalogs(): Promise<CatalogRefreshResult[]> {
 }
 
 /**
+ * Whether this repo is answered from the package. Config alone is not enough:
+ * `isBundledRepo` reads the config, and if the vendored tree is missing -- a
+ * packaging regression, a half-finished install -- treating the repo as bundled
+ * means an empty router, a background refresh that is skipped, and a manual
+ * refresh that reports success without fetching. A session that quietly has no
+ * skills and says it is fine. Treat it as live instead and let it recover.
+ */
+function readsFromPackage(repo: ConfiguredSkillRepo): boolean {
+  return isBundledRepo(repo) && hasBundledContent(repo.name);
+}
+
+/**
  * The entries a repo contributes to the router: what shipped in the package if
  * the repo is still pointed at it, otherwise whatever the last walk cached.
  * There is no hand-written third copy any more -- it had drifted from upstream
  * in both directions, listing a skill under a name it no longer had and missing
  * one that had been tagged for months.
+ *
+ * The last resort is the shipped catalog for a repo we ship that has been
+ * pointed somewhere else. Its descriptions are from the pinned commit rather
+ * than from that branch, which is a smaller lie than the alternative: deleting
+ * the hand-written fallback left a branch-pointed repo with no skills section
+ * at all until a background refresh landed, and that refresh only helps the
+ * next session.
  */
 export function resolveCatalogEntries(repo: ConfiguredSkillRepo): SkillEntry[] {
-  const bundled = isBundledRepo(repo) ? readBundledCatalog()?.[repo.name] : undefined;
-  return bundled ?? readCatalog(repo)?.skills ?? [];
+  const bundled = readBundledCatalog()?.[repo.name];
+  if (readsFromPackage(repo) && bundled?.length) return bundled;
+  const cached = readCatalog(repo)?.skills;
+  if (cached?.length) return cached;
+  return bundled ?? [];
 }
 
 /** Current catalog counts without refreshing (the status path). */
 export function catalogSummary(): CatalogRefreshResult[] {
   return listEnabledSkillRepos().map((repo) => {
-    if (isBundledRepo(repo)) {
+    if (readsFromPackage(repo)) {
       const entries = readBundledCatalog()?.[repo.name];
       return { repo: repo.name, count: entries?.length ?? 0, ok: true, bundled: true };
     }
@@ -353,7 +375,7 @@ export function catalogSummary(): CatalogRefreshResult[] {
 export async function backgroundRefreshSkills(): Promise<void> {
   await Promise.all(
     listEnabledSkillRepos()
-      .filter((repo) => !isBundledRepo(repo))
+      .filter((repo) => !readsFromPackage(repo))
       .map(async (repo) => {
         try {
           await refreshCatalog(repo);
