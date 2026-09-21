@@ -3,6 +3,7 @@
 import json
 import logging
 from html.parser import HTMLParser
+from urllib.parse import urlsplit
 
 from olite.substrate.http import http
 
@@ -11,6 +12,8 @@ logger = logging.getLogger(__name__)
 GTN_HOST = "training.galaxyproject.org"
 GTN_BASE = f"https://{GTN_HOST}"
 GTN_API = f"{GTN_BASE}/training-material/api"
+FETCH_MAX_CHARS = 40000
+ERROR_MAX_CHARS = 400
 
 # Chrome that carries no tutorial content; dropped whole, as loom drops them.
 DROP_TAGS = {"script", "style", "nav", "header", "footer", "aside", "noscript"}
@@ -167,15 +170,30 @@ async def _gtn_fetch(args):
     if not url:
         return {"error": "A tutorial url is required."}
 
-    # Hostname check, not a substring check: "training.galaxyproject.org.evil.com"
-    host = url.split("//", 1)[-1].split("/", 1)[0].split("@")[-1].split(":")[0].lower()
-    if not url.lower().startswith(("http://", "https://")) or host != GTN_HOST:
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    if parts.scheme not in ("http", "https") or host != GTN_HOST:
         return {"error": f"Only URLs on {GTN_HOST} are allowed. Got: {host or url}"}
 
-    page = await http.request("GET", url)
+    try:
+        page = await http.request("GET", url)
+    except Exception as exc:
+        detail = str(exc)
+        if len(detail) > ERROR_MAX_CHARS:
+            detail = detail[:ERROR_MAX_CHARS] + " ..."
+        return {"url": url, "error": detail,
+                "hint": "Check the url with gtn_search; tutorial paths include the topic, "
+                        "and a topic listed in one place may live under another."}
     if not isinstance(page, str):
         page = json.dumps(page)
-    return {"url": url, "content": _strip_html(page)}
+    text = _strip_html(page)
+    if len(text) > FETCH_MAX_CHARS:
+        return {"url": url, "content": text[:FETCH_MAX_CHARS], "truncated": True,
+                "chars_total": len(text),
+                "note": f"Showing the first {FETCH_MAX_CHARS} of {len(text)} characters. "
+                        "Objectives and the first hands-on sections are here; open the url "
+                        "for the rest."}
+    return {"url": url, "content": text}
 
 
 # --- Schemas -----------------------------------------------------------------

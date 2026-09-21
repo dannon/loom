@@ -38,11 +38,11 @@ server-side fetch runs at datacenter bandwidth.
 
 - **Preferred:** `upload_file_from_url({ url, history_id })` (optional `file_name`,
   `file_type`, `dbkey`). One hop, no local copy.
-- **There is no local-upload path here.** `upload_file` is unavailable in the
-  browser; if the user has a file only on their machine, say so and ask them to
-  upload it through the Galaxy UI, then continue from the history."""
+- **There is no path from the user's disk.** `upload_file` reads only the browser
+  filesystem `run_python` writes to; if the user has a file only on their machine,
+  ask them to upload it through the Galaxy UI, then continue from the history."""
 
-# loom: buildGalaxyContextBlock(), "Invoking a Galaxy workflow". Ported as-is apart
+# loom: buildGalaxyContextBlock(), "Invoking a Galaxy workflow".
 INVOKING_WORKFLOW = """### Invoking a Galaxy workflow
 
 Call `get_workflow_input_template` before `invoke_workflow`. Take the
@@ -62,7 +62,7 @@ keep its keys, replace every placeholder (`<value>`, `<dataset_id>`,
   label, index, or uuid won't fix that -- the key was never the problem. Put the
   value in `inputs`."""
 
-# loom: buildGalaxyContextBlock(), "Executing a Galaxy step". Held out until olite
+# loom: buildGalaxyContextBlock(), "Executing a Galaxy step".
 EXECUTING_A_STEP = """### Executing a Galaxy step
 
 **Galaxy work runs in the background -- submit and hand control back to the user.**
@@ -84,8 +84,6 @@ Do not verify or check off a step in the turn that submitted it -- it is not don
 yet, and a checkbox that ran ahead of the evidence is worse than an empty one."""
 
 # loom: buildOperatingDisciplineBlock(), "Confirm scope" verbatim; "Secrets" adapted.
-# loom: the "Drafting a new plan" section of buildGalaxyContextBlock, which loom emits only
-# when Galaxy is connected. Same gate here -- see GALAXY_UNAVAILABLE.
 DRAFTING_A_PLAN = """### Drafting a new plan
 
 When drafting a plan, **first** consult Galaxy
@@ -121,8 +119,7 @@ resources before deciding what runs where:
 resuming, not for every new plan."""
 
 
-# loom: buildGalaxyContextBlock's NOT CONNECTED variant, shell-disabled branch. loom keys on
-# missing credentials; olite is served by Galaxy and keys on the tool catalog failing to load.
+# loom: buildGalaxyContextBlock's NOT CONNECTED variant, shell-disabled branch.
 GALAXY_UNAVAILABLE = """## Galaxy: NOT AVAILABLE
 
 The Galaxy tool catalog did not load, so no Galaxy tool or workflow can run in this
@@ -194,12 +191,12 @@ verification step before telling the user the work is done.
 
 Match the verification check to the artifact or action being completed:
 
-- **Galaxy workflow or tool run** -- confirm the run reached a terminal state
-  (`get_job_details`, or the relevant invocation call), then inspect the resulting
-  datasets or collections enough to confirm they exist and look plausible for the
-  request.
-- **Authored Galaxy workflow** -- import it, invoke it on a small appropriate test
-  input, poll to completion, and inspect outputs.
+- **Galaxy workflow or tool run** -- verify once you are told it reached a terminal
+  state, then inspect the resulting datasets or collections enough to confirm they
+  exist and look plausible for the request. Submitting is not verifying, and a
+  pending run is reported as pending.
+- **Authored Galaxy workflow** -- import it and invoke it on a small appropriate test
+  input, then verify its outputs when it finishes.
 - **Galaxy dataset or collection output** -- inspect state, datatype, metadata,
   size, preview/peek, expected element count, and failed or hidden elements when
   collections are involved.
@@ -229,7 +226,7 @@ and say exactly what is unverified. Do **not** say "done" or "complete" for that
 artifact. Say "created but not verified" and ask for the missing input or approval
 to change scope."""
 
-# loom: buildPlanConventionBlock(). Three adaptations, all forced by what olite has:
+# loom: buildPlanConventionBlock(), adapted to the controls this build has.
 PLAN_CONVENTION = """## Plans and the approval gate
 
 A plan is drafted in the conversation and, once approved, written into the record
@@ -288,7 +285,7 @@ Identify mitochondrial variants from 4 paired-end WGS samples using the IWC
 - [ ] 2. **Align to chrM reference** — BWA-MEM, sorted BAM out
   - Routing: galaxy
   - Tool: bwa_mem
-  - Verification: poll the job to `ok` and inspect the BAM outputs
+  - Verification: once the run finishes, inspect the BAM outputs
 - [ ] 3. **Call variants** — bcftools call, filter Q>=30
   - Routing: galaxy
   - Tool: bcftools_call
@@ -312,9 +309,9 @@ Conventions:
 - The routing tag is `[galaxy]` or `[remote]`, literal, lowercase, no spaces inside
   the brackets. There is no local execution in this build, so every step runs on
   Galaxy.
-- Each step needs a **Verification** sub-bullet naming a concrete check -- poll the
-  job and inspect the dataset, parse the file, compare expected rows -- never a
-  vague "looks good".
+- Each step needs a **Verification** sub-bullet naming a concrete check -- inspect the
+  dataset, parse the file, compare expected rows -- never a vague "looks good". For
+  Galaxy work the check runs once the step finishes, not by waiting in the turn.
 - Mark step status by editing the checkbox: `- [ ]` pending, `- [x]` verified
   complete, `- [!]` failed. Never mark `- [x]` before the verification actually ran.
 - Keep the ```plan fence when you draft or re-draft a plan in chat; it is what makes
@@ -339,7 +336,7 @@ Default = full set.
 After each edit batch, re-show the table with the modified values in **bold** so the
 user can confirm they took."""
 
-# loom: buildChatFormattingBlock(). The "notebook is the durable progress record"
+# loom: buildChatFormattingBlock(), the record wording retargeted to the page.
 CHAT_FORMATTING = """## Chat formatting
 
 Chat is rendered as markdown. Tokens stream live, so adjacent bold/italic markers
@@ -453,10 +450,6 @@ You are **{model}**{via}. That is your identity for this session: state it
 accurately when asked, and do not claim to be a different model or provider."""
 
 
-# Composed the way loom composes: each entry is a function of the session context that
-# may return "" to withhold itself. loom gates nine of its sixteen blocks this way; a flat
-# list of constants cannot express that, which is how the gating went unported.
-# Every condition below traces to a loom guard -- see seams/registry.json.
 
 
 def _no_local_shell(ctx):
@@ -517,6 +510,27 @@ def _galaxy_page_markdown(ctx):
     return GALAXY_PAGE_MARKDOWN
 
 
+def seed_dataset_block(dataset_id):
+    """ADDED: olite can be opened on a dataset, which loom has no equivalent for.
+
+    Galaxy mounts olite as a visualization plugin, so the user may arrive with one already
+    selected. Naming it is what makes "plot it" resolvable; without this the referent is only
+    in the shell's chat, which never reaches the model.
+    """
+    if not dataset_id:
+        return ""
+    return (
+        f"## Starting dataset\n\n"
+        f"The user opened OLite on dataset `{dataset_id}`. Take it as the one they mean when "
+        f"they refer to a dataset without naming another, and call `get_dataset_details` for "
+        f"its columns and datatype before acting on it."
+    )
+
+
+def _seed_dataset(ctx):
+    return seed_dataset_block(ctx.get("seed_dataset"))
+
+
 def _active_model(ctx):
     # loom: `if (!active) return ""`.
     return active_model_block(ctx.get("model"), ctx.get("provider"))
@@ -528,6 +542,7 @@ def _current_date(ctx):
 
 # Order follows loom's composition: runtime, then Galaxy, then discipline.
 BLOCKS = [
+    _seed_dataset,
     _active_model,
     _no_local_shell,
     _galaxy_unavailable,
@@ -547,7 +562,8 @@ BLOCKS = [
 ]
 
 
-def system_text(today=None, model=None, provider=None, galaxy_ok=True):
+def system_text(today=None, model=None, provider=None, galaxy_ok=True, seed_dataset=None):
     """The block text appended to the shell-seeded identity prompt."""
-    ctx = {"today": today, "model": model, "provider": provider, "galaxy_ok": galaxy_ok}
+    ctx = {"today": today, "model": model, "provider": provider, "galaxy_ok": galaxy_ok,
+           "seed_dataset": seed_dataset}
     return "\n\n".join(b for b in (block(ctx) for block in BLOCKS) if b)

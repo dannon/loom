@@ -1,17 +1,14 @@
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional
-
-from .http import http
+from typing import Any, Optional
+from collections.abc import Callable
 
 from olite.exceptions import ConfigurationError, ProviderError
-from .openapi_ops import openapi_get, openapi_post, openapi_put
+
+from .http import http
 from .openapi import OpenApiCatalog
+from .openapi_ops import openapi_get, openapi_post, openapi_put
 
-
-class API_METHODS:
-    GET = "get"
-    POST = "post"
-    PUT = "put"
+GET, POST, PUT = "get", "post", "put"
 
 
 @dataclass
@@ -19,26 +16,26 @@ class ApiOp:
     target: str
     handler: Callable
     capability: Optional[str] = None
-    meta: Dict[str, Any] = field(default_factory=dict)
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class ApiTarget:
     name: str
     base_url: str
-    headers: Optional[Callable[[], Dict[str, str]]] = None
+    headers: Optional[Callable[[], dict[str, str]]] = None
 
     def build_url(self, path: str) -> str:
         return f"{self.base_url.rstrip('/')}/{path.lstrip('/')}"
 
-    def get_headers(self) -> Dict[str, str]:
+    def get_headers(self) -> dict[str, str]:
         if self.headers:
             return self.headers()
         return {}
 
-ALLOWED_METHODS = [API_METHODS.GET, API_METHODS.POST, API_METHODS.PUT]
+ALLOWED_METHODS = (GET, POST, PUT)
 
-# Targeted write allowlist: which POST ops may be reached at all (by catalog op
+# The only write ops the agent may reach, by catalog op name.
 WRITE_ALLOWLIST = {
     "tools.post",  # run_tool
     "histories.post",  # create_history
@@ -46,7 +43,7 @@ WRITE_ALLOWLIST = {
     "histories.show.contents.bulk.put",  # change_datatype, add_tags and the other bulk operations
 }
 PROVIDER_NAME = "galaxy"
-# Prefix allowlist scopes what the agent can reach. Widened past polaris's read
+# The API paths the catalog indexes; anything else is unreachable through it.
 PREFIXES = [
     "/api/histories",
     "/api/datasets",
@@ -61,7 +58,6 @@ PREFIXES = [
     "/api/version",
     "/api/whoami",
 ]
-DUMP_ENDPOINTS_PATH = None  # Set to a file path to dump discovered endpoints
 
 
 class GalaxyApi:
@@ -77,12 +73,7 @@ class GalaxyApi:
         url = f"{self.galaxy_root}openapi.json"
         try:
             spec = await http.request("GET", url)
-            self.openapi = OpenApiCatalog(
-                spec=spec,
-                prefixes=PREFIXES,
-                methods=ALLOWED_METHODS,
-                dump_path=DUMP_ENDPOINTS_PATH,
-            )
+            self.openapi = OpenApiCatalog(spec=spec, prefixes=PREFIXES, methods=ALLOWED_METHODS)
         except Exception as e:
             raise ProviderError(f"Failed to load OpenAPI schema from {url}: {e}") from e
         return self
@@ -93,9 +84,6 @@ class GalaxyApi:
             base_url=self.galaxy_root,
             headers=self._galaxy_headers,
         )
-
-    def ops(self):
-        return {}
 
     def resolve_op(self, name):
         prefix = f"{PROVIDER_NAME}."
@@ -108,13 +96,13 @@ class GalaxyApi:
         if not resolved:
             return None
         path, operation, method = resolved
-        if method == API_METHODS.GET:
+        if method == GET:
             handler, capability = openapi_get, "read"
-        elif method in (API_METHODS.POST, API_METHODS.PUT):
+        elif method in (POST, PUT):
             # Writes are targeted: only allowlisted ops resolve at all, per method.
             if local not in WRITE_ALLOWLIST:
                 return None
-            handler = openapi_post if method == API_METHODS.POST else openapi_put
+            handler = openapi_post if method == POST else openapi_put
             capability = "write"
         else:
             return None

@@ -8,6 +8,7 @@ from dataclasses import replace
 from olite.exceptions import ProviderError
 
 from ..http import http
+from ..rate_limiter import TokenBucketRateLimiter
 from .api import get_adapter
 from .providers import resolve
 
@@ -35,8 +36,6 @@ class Llm:
         self.target = resolve(config)
         self.adapter = get_adapter(self.target.api)
         # The rate comes from the endpoint; one bucket per session, shared by scoped views.
-        from ..rate_limiter import TokenBucketRateLimiter
-
         self._limiter = TokenBucketRateLimiter.from_requests_per_minute(self.target.rate_limit)
         logger.info(
             "llm target: provider=%s model=%s window=%d max_tokens=%d",
@@ -87,12 +86,13 @@ class Llm:
                 body=body,
                 signal=cancellation.signal if cancellation else None,
                 on_retry=on_retry,
+                # A completion that errored produced nothing, so asking again repeats nothing.
+                retry_errors=True,
             )
             try:
                 return self.adapter.parse_reply(payload)
             except ProviderError:
-                # A 200 carrying nothing usable is transport-shaped, so it is retried here
-                # rather than in the loop, which pi leaves to its caller.
+                # A 200 carrying nothing usable is transport-shaped, so retry here.
                 if attempt == EMPTY_REPLY_ATTEMPTS - 1:
                     raise
                 logger.warning("empty provider reply, retrying (%d/%d)", attempt + 1, EMPTY_REPLY_ATTEMPTS - 1)

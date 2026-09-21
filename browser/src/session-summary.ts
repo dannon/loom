@@ -1,5 +1,7 @@
 /** Shell-written proof a session happened; loom: session-lifecycle.ts + notebook-writer.ts. */
 
+import { editRecord } from "./record-write";
+
 const FENCE_OPEN = "```olite-session";
 const FENCE_CLOSE = "```";
 
@@ -83,15 +85,6 @@ export function upsertSessionSummary(content: string, s: SessionSummary): string
     return rebuilt.join("\n");
 }
 
-/** Find this history's record by its deterministic slug, the way the brain does. */
-async function findRecord(root: string, credentials: RequestCredentials, historyId: string) {
-    const res = await fetch(`${root}api/pages?limit=500`, { credentials });
-    if (!res.ok) return null;
-    const pages = await res.json();
-    if (!Array.isArray(pages)) return null;
-    return pages.find((p: any) => p && p.slug === `olite-${historyId}`) || null;
-}
-
 /**
  * Write the block into the record. loom does this at session end; a browser tab has no
  * reliable end event, so olite upserts after each turn and the latest write wins.
@@ -103,23 +96,7 @@ export async function writeSessionSummary(
     summary: Omit<SessionSummary, "record">,
 ): Promise<boolean> {
     if (!historyId) return false;
-    try {
-        const page = await findRecord(root, credentials, historyId);
-        if (!page) return false;
-        const full = await (await fetch(`${root}api/pages/${page.id}`, { credentials })).json();
-        const content = (full && full.content) || "";
-        const updated = upsertSessionSummary(content, { ...summary, record: page.id });
-        if (updated === content) return true;
-        const put = await fetch(`${root}api/pages/${page.id}`, {
-            method: "PUT",
-            credentials,
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content: updated }),
-        });
-        return put.ok;
-    } catch (e) {
-        // The record is the agent's to maintain; a failed summary must not break a turn.
-        console.warn("[olite] could not write the session summary", e);
-        return false;
-    }
+    return editRecord({ root, credentials, historyId }, (content, recordId) =>
+        upsertSessionSummary(content, { ...summary, record: recordId }),
+    );
 }

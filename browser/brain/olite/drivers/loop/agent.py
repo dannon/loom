@@ -5,6 +5,7 @@ import logging
 
 from olite import compaction
 from olite.substrate import Cancellation
+from olite.substrate.llm.json_parse import loads_with_repair
 
 from .brief import brief
 
@@ -21,40 +22,57 @@ TRUNCATED_ERROR = (
     'Tool call "{name}" was not executed: the response hit the output token limit, so '
     "its arguments may be truncated. Re-issue the tool call with complete arguments."
 )
-# Reported back rather than replaced with `{}`, which would run the wrong request.
-MALFORMED_ARGS_ERROR = 'Tool call "{name}" was not executed: its arguments are not valid JSON ({detail}).'
+MALFORMED_ARGS_ERROR = (
+    'Tool call "{name}" was not executed: its arguments are not valid JSON ({detail}). '
+    "Re-issue the tool call with valid arguments as one JSON object. Do not paste tool "
+    "results or file contents into an "
+    "argument: read them from the value the earlier tool already returned."
+)
 # pi's wording for a call dropped because the run was aborted.
 ABORTED_ERROR = "Operation aborted"
-# Tool results are NOT truncated, matching Orbit.
+# How a turn ended. One of these is assigned at every exit, so no branch can leave the
+# outcome half-described; the initial value is what a spent step budget looks like.
+EXHAUSTED, ABORTED, REPLIED, FINISHED = "exhausted", "aborted", "replied", "finished"
+MAX_TOOL_RESULT_BYTES = 64 * 1024
+OVERSIZED_RESULT_ERROR = (
+    'Tool call "{name}" returned {size} KB, over the {cap} KB limit for a single result, so '
+    "it was discarded. Re-issue it with a narrower query: add a filter, or set a smaller "
+    "limit and page with offset."
+)
 
 
 class LoopDriver:
-    def __init__(self, substrate, processes=None, skills=None, confirmation=None):
+    def __init__(self, substrate, processes=None, skills=None):
         self.substrate = substrate
-        self.tools = ToolSurface(substrate, processes, skills, confirmation)
+        self.processes = processes
+        self.skills = skills
         self.compaction = compaction.Settings(
             getattr(substrate, "config", None), getattr(substrate.llm, "target", None)
         )
         # A tool result carries whatever a command printed, including a key it read.
         self.secrets = collect_secret_values(getattr(substrate, "config", None))
+        config = getattr(substrate, "config", None) or {}
+        self.max_steps = int(config.get("max_steps") or MAX_STEPS)
 
-    async def run(self, transcripts, on_event=None, cancellation=None):
+    async def run(self, transcripts, on_event=None, cancellation=None, confirmation=None):
+        # One surface per turn: its artifacts, repeat guard and approval bridge are the turn's.
+        tools = ToolSurface(self.substrate, self.processes, self.skills, confirmation)
         messages = [dict(m) for m in transcripts]
         # This run's output, kept apart from the transcript that compaction rewrites.
         produced = []
         logs = []
-        done = False
-        exhausted = True  # cleared by whichever branch ends the loop deliberately
-        aborted = False
+        ended = EXHAUSTED
         reported_overflow = False
         usage = {"input": 0, "output": 0, "cost": None}
         # The provider's own token count and where it was measured.
         measured = None
         cancellation = cancellation or Cancellation()
 
-        for _ in range(MAX_STEPS):
+        steps = 0
+        for _ in range(self.max_steps):
+            steps += 1
             if cancellation.aborted:
-                aborted, exhausted = True, False
+                ended = ABORTED
                 break
 
             # Top of a step is the only point where every tool call has its result.
@@ -75,7 +93,7 @@ class LoopDriver:
             try:
                 reply = await self.substrate.llm.complete(
                     messages,
-                    tools=self.tools.schemas(),
+                    tools=tools.schemas(),
                     cancellation=cancellation,
                     on_retry=lambda info: _emit(on_event, {"type": "llm_retry", **info}),
                 )
@@ -83,7 +101,7 @@ class LoopDriver:
                 # The flag decides whether this was the abort, never the error text.
                 if not cancellation.aborted:
                     raise
-                aborted, exhausted = True, False
+                ended = ABORTED
                 break
 
             # Providers disagree on the key names, and some report only a total.
@@ -111,15 +129,11 @@ class LoopDriver:
                 f"reasoning={_detail.get('reasoning_tokens')}"
             )
 
-            assistant = {
-                "role": "assistant",
-                "content": reply.content,
-                "tool_calls": tool_calls,
-            }
-            # Without it the transcript is a run of contentless tool calls: the model
-            # cannot see what it already concluded and re-issues the same call.
+            assistant = {"role": "assistant", "content": reply.content or None}
+            if tool_calls:
+                assistant["tool_calls"] = tool_calls
             if reply.reasoning:
-                assistant["reasoning_content"] = reply.reasoning
+                assistant[reply.reasoning_key] = reply.reasoning
             messages.append(assistant)
             produced.append(assistant)
             # Kept beside the message, which goes back to the provider verbatim.
@@ -130,7 +144,7 @@ class LoopDriver:
             if not tool_calls:
                 if reply.content:
                     logs.append(f"assistant: {reply.content}")
-                exhausted = False
+                ended = REPLIED
                 break
 
             terminating = []
@@ -140,15 +154,17 @@ class LoopDriver:
                 call_id = call.get("id")
 
                 refusal = None
+                gated = False
                 args = {}
                 if cancellation.aborted:
-                    # Every remaining call still needs a result, or the next request
+                    # Every remaining call still needs a result, or the next request is
+                    # a tool_call with nothing answering it.
                     refusal = ABORTED_ERROR
                 elif truncated:
                     refusal = TRUNCATED_ERROR.format(name=name)
                 else:
                     try:
-                        args = json.loads(fn.get("arguments") or "{}")
+                        args = loads_with_repair(fn.get("arguments") or "{}")
                     except json.JSONDecodeError as e:
                         refusal = MALFORMED_ARGS_ERROR.format(name=name, detail=e)
 
@@ -159,9 +175,16 @@ class LoopDriver:
                     content, is_error = refusal, True
                 else:
                     logs.append(f"call {name}({brief(args)})")
-                    outcome = await self.tools.dispatch(name, args)
+                    outcome = await tools.dispatch(name, args)
                     logs.append(f"  -> {brief(outcome.content)}")
                     content, is_error = outcome.text, outcome.is_error
+                    gated = outcome.refused
+                    size = len(content.encode("utf-8"))
+                    if size > MAX_TOOL_RESULT_BYTES:
+                        logs.append(f"  -> discarded {size} bytes, over the result limit")
+                        content, is_error = OVERSIZED_RESULT_ERROR.format(
+                            name=name, size=size // 1024,
+                            cap=MAX_TOOL_RESULT_BYTES // 1024), True
                 tool_message = {
                     "role": "tool",
                     "tool_call_id": call_id,
@@ -173,7 +196,8 @@ class LoopDriver:
                 # `is_error` rides the event so the shell states the outcome.
                 _emit(
                     on_event,
-                    {"type": "tool_end", "id": call_id, "name": name, "content": content, "is_error": is_error},
+                    {"type": "tool_end", "id": call_id, "name": name, "content": content,
+                     "is_error": is_error, "refused": refusal is not None or gated},
                 )
 
                 # Only an executed `finish` counts; a refused one was never dispatched.
@@ -181,23 +205,24 @@ class LoopDriver:
 
             # pi ends a turn only when every call in the batch asked to.
             if terminating and all(terminating):
-                done = True
-                exhausted = False
+                ended = FINISHED
                 break
 
             if cancellation.aborted:
-                aborted, exhausted = True, False
+                ended = ABORTED
                 break
 
         return {
             "logs": logs,
             "messages": messages,
             "new_messages": produced,
-            "done": done,
-            "aborted": aborted,
-            "exhausted": exhausted,
-            "artifacts": self.tools.artifacts,
+            "done": ended == FINISHED,
+            "aborted": ended == ABORTED,
+            "exhausted": ended == EXHAUSTED,
+            "artifacts": tools.artifacts,
             "usage": usage,
+            "steps": steps,
+            "max_steps": self.max_steps,
         }
 
 

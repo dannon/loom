@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal
+from typing import Any, Literal
 
-from ..schemas import DatasetProfile, FieldType, ValidationResult
+from ..schemas import FieldType
 from .base import VEGA_LITE_SCHEMA, BaseShell, RendererType, ShellParamsType
 
 
@@ -12,16 +12,16 @@ class LineTimeShell(BaseShell):
     goals = ["trend"]
     semantics: Literal["rowwise", "aggregate"] = "rowwise"
 
-    signatures: List[List[FieldType]] = [
+    signatures: list[list[FieldType]] = [
         ["temporal", "quantitative"],
     ]
 
-    required: Dict[str, Any] = {
+    required: dict[str, Any] = {
         "x": {"type": "temporal"},
         "y": {"type": "quantitative"},
     }
 
-    optional: Dict[str, Any] = {
+    optional: dict[str, Any] = {
         "color": {"type": "nominal"},
         "tooltip": {"type": "any"},
     }
@@ -29,13 +29,13 @@ class LineTimeShell(BaseShell):
     def compile(
         self,
         params: ShellParamsType,
-        values: List[Dict[str, Any]],
+        values: list[dict[str, Any]],
         renderer: RendererType,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if renderer != "vega-lite":
             return {}
 
-        encoding: Dict[str, Any] = {
+        encoding: dict[str, Any] = {
             "x": {"field": params.get("x", ""), "type": "temporal"},
             "y": {"field": params.get("y", ""), "type": "quantitative"},
         }
@@ -53,64 +53,3 @@ class LineTimeShell(BaseShell):
             "mark": {"type": "line"},
         }
 
-    def validate(
-        self,
-        profile: DatasetProfile,
-        params: ShellParamsType,
-    ) -> ValidationResult:
-        x_field = params.get("x")
-        y_field = params.get("y")
-
-        if not x_field or not y_field:
-            return {
-                "errors": [{"code": "missing_required_encoding"}],
-                "ok": False,
-                "warnings": [],
-            }
-
-        fields = profile.get("fields", {})
-        x_meta = fields.get(x_field)
-        y_meta = fields.get(y_field)
-
-        if not x_meta or not y_meta:
-            return {
-                "errors": [{"code": "unknown_field"}],
-                "ok": False,
-                "warnings": [],
-            }
-
-        if x_meta.get("type") != "temporal":
-            return {
-                "errors": [
-                    {
-                        "code": "invalid_field_type",
-                        "details": {
-                            "encoding": "x",
-                            "field": x_field,
-                            "expected": "temporal",
-                            "actual": x_meta.get("type"),
-                        },
-                    }
-                ],
-                "ok": False,
-                "warnings": [],
-            }
-
-        if y_meta.get("type") != "quantitative":
-            return {
-                "errors": [
-                    {
-                        "code": "invalid_field_type",
-                        "details": {
-                            "encoding": "y",
-                            "field": y_field,
-                            "expected": "quantitative",
-                            "actual": y_meta.get("type"),
-                        },
-                    }
-                ],
-                "ok": False,
-                "warnings": [],
-            }
-
-        return {"errors": [], "ok": True, "warnings": []}
