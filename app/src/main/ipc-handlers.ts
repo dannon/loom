@@ -52,6 +52,9 @@ import {
 } from "./oauth-handler.js";
 import { isLocalShellAvailable } from "./local-shell.js";
 
+/** Where "report an issue" files go. One place to flip when the repo is renamed. */
+const ISSUE_REPO = "galaxyproject/loom";
+
 /**
  * Sentinel the renderer sends back in a secret field when the user did NOT
  * change it. Main preserves whatever is already on disk in that case.
@@ -796,7 +799,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
     const title = typeof payload?.title === "string" ? payload.title : "";
     const body = typeof payload?.body === "string" ? payload.body : "";
     const params = new URLSearchParams({ title, body });
-    const url = `https://github.com/galaxyproject/loom/issues/new?${params.toString()}`;
+    const url = `https://github.com/${ISSUE_REPO}/issues/new?${params.toString()}`;
     await shell.openExternal(url);
     return { opened: true };
   });
