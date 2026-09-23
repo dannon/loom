@@ -28,7 +28,13 @@ import { resolveShutdownGraceMs } from "./shutdown-grace.js";
 import { DASHBOARD_FILENAME, DASHBOARD_MAX_BYTES } from "../shared/dashboard-contract.js";
 import { casWriteLayoutFile, readLayoutFile } from "../shared/dashboard-layout-store.js";
 import { listFilesForWeb, readFileForWeb, readNotebookForWeb } from "./files-surface.js";
-import { DESKTOP_SHELL_KIND, mirrorToLegacyEnv, readEnv, writeEnv } from "../shared/orbit-env.js";
+import {
+  DESKTOP_SHELL_KIND,
+  envNames,
+  mirrorToLegacyEnv,
+  readEnv,
+  writeEnv,
+} from "../shared/orbit-env.js";
 import { resolveConfigPath, resolveDefaultAnalysesDir } from "../shared/state-dir.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -51,7 +57,9 @@ const HOST = readEnv("WEB_HOST") ?? "127.0.0.1";
 const WEB_TOKEN = readEnv("WEB_TOKEN");
 const ALLOW_INSECURE = readEnv("WEB_ALLOW_INSECURE") === "1";
 
-const IS_REMOTE_MODE = readEnv("MODE") === "remote";
+// Fail closed on a conflict: the image pins remote, and an inherited twin
+// saying anything else must not reopen the local surfaces.
+const IS_REMOTE_MODE = envNames("MODE").some((n) => process.env[n] === "remote");
 const REMOTE_SESSION_CWD = "/tmp/loom-session";
 
 function log(...args: unknown[]): void {

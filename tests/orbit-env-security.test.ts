@@ -99,3 +99,19 @@ describe("web-mode-gate honors ORBIT_NOTEBOOK_ALLOWLIST", () => {
     ).toMatchObject({ block: true });
   });
 });
+
+// The image pins remote mode; an inherited twin must not talk the server out of it.
+describe("remote mode pinning", () => {
+  it("the image sets both spellings of MODE", async () => {
+    const { readFileSync } = await import("node:fs");
+    const docker = readFileSync(new URL("../Dockerfile", import.meta.url), "utf-8");
+    expect(docker).toMatch(/^ENV LOOM_MODE=remote$/m);
+    expect(docker).toMatch(/^ENV ORBIT_MODE=remote$/m);
+  });
+
+  it("the server goes remote if any spelling says so", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../web/server.ts", import.meta.url), "utf-8");
+    expect(src).toMatch(/IS_REMOTE_MODE = envNames\("MODE"\)\.some\(/);
+  });
+});

@@ -34,6 +34,7 @@ FROM node:22-slim AS runner
 
 ENV NODE_ENV=production
 ENV LOOM_MODE=remote
+ENV ORBIT_MODE=remote
 ENV PORT=3000
 # Reachable via the published port. The server refuses to start on this bind
 # without LOOM_WEB_TOKEN (or LOOM_WEB_ALLOW_INSECURE=1 behind a trusted proxy),
