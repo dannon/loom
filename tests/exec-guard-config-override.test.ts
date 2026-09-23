@@ -59,9 +59,15 @@ describe("configOverrideLocations", () => {
 
   it("ignores relative overrides, which would resolve per-process", () => {
     const env = { ORBIT_CONFIG_PATH: "config.json", LOOM_CONFIG_DIR: "./state" };
-    expect(configOverrideLocations({ home: HOME, env })).toEqual({ dirs: [], files: [] });
     expect(resolveConfigPath({ home: HOME, env })).not.toContain("state");
     expect(resolveConfigPath({ home: HOME, env })).not.toBe(nodePath.resolve("config.json"));
+  });
+
+  it("still protects what a relative override names, though it isn't honored", () => {
+    const env = { ORBIT_CONFIG_PATH: "brain.json" };
+    expect(configOverrideLocations({ home: HOME, env }).files).toEqual([
+      nodePath.resolve("brain.json"),
+    ]);
   });
 
   it("is empty when nothing is set", () => {
@@ -173,6 +179,29 @@ describe("policy", () => {
       const d = decide({ ...req("bash", { command }), config: trusted }, deps);
       expect(d.decision, command).toBe("deny");
     }
+  });
+
+  it("denies the ways a shell can spell the config without its full path", () => {
+    clearOverrides();
+    vi.stubEnv("ORBIT_CONFIG_PATH", `${CWD}/brain.json`);
+    const trusted = { ...cfg, trustedWorkspaces: [CWD] };
+    for (const command of [
+      `dd if=/dev/null of=brain.json`,
+      `python -c "open('brain.json','w').write('{}')"`,
+      `cat "$HOME"/project/brain.json`,
+      `printf x >brain.json`,
+    ]) {
+      const d = decide({ ...req("bash", { command }), config: trusted }, deps);
+      expect(d.decision, command).toBe("deny");
+    }
+  });
+
+  it("handles a config filename with a space in it", () => {
+    clearOverrides();
+    vi.stubEnv("ORBIT_CONFIG_PATH", "/srv/my brain.json");
+    const trusted = { ...cfg, trustedWorkspaces: [CWD] };
+    const command = `printf '{}' | tee "/srv/my brain.json"`;
+    expect(decide({ ...req("bash", { command }), config: trusted }, deps).decision).toBe("deny");
   });
 
   it("doesn't deny a write that merely shares a prefix with the config", () => {

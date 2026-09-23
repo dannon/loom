@@ -59,7 +59,9 @@ const ALLOW_INSECURE = readEnv("WEB_ALLOW_INSECURE") === "1";
 
 // Fail closed on a conflict: the image pins remote, and an inherited twin
 // saying anything else must not reopen the local surfaces.
-const IS_REMOTE_MODE = envNames("MODE").some((n) => process.env[n] === "remote");
+const IS_REMOTE_MODE = envNames("MODE").some(
+  (n) => process.env[n]?.trim().toLowerCase() === "remote",
+);
 const REMOTE_SESSION_CWD = "/tmp/loom-session";
 
 function log(...args: unknown[]): void {

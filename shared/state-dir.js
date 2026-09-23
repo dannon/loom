@@ -47,6 +47,14 @@ function absoluteOverride(v, home) {
   return expandHome(v, home);
 }
 
+// For protection only: a relative override is never honored, but whatever it
+// names was meant to be a key store, so the guard still treats it as one
+// (relative to this process, which for the brain is the workspace).
+function protectedOverride(v, home) {
+  if (!v) return undefined;
+  return absoluteOverride(v, home) ?? path.resolve(v);
+}
+
 function override(name, opts) {
   return absoluteOverride(readEnv(name, opts?.env), homeOf(opts));
 }
@@ -100,13 +108,13 @@ export function configOverrideLocations(opts = {}) {
   const dirs = [];
   const files = [];
   for (const name of envNames("CONFIG_DIR")) {
-    const dir = absoluteOverride(env[name], home);
+    const dir = protectedOverride(env[name], home);
     if (!dir) continue;
     dirs.push(dir);
     files.push(path.join(dir, CONFIG_FILE));
   }
   for (const name of envNames("CONFIG_PATH")) {
-    const file = absoluteOverride(env[name], home);
+    const file = protectedOverride(env[name], home);
     if (file) files.push(file);
   }
   return { dirs: [...new Set(dirs)], files: [...new Set(files)] };

@@ -113,5 +113,6 @@ describe("remote mode pinning", () => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync(new URL("../web/server.ts", import.meta.url), "utf-8");
     expect(src).toMatch(/IS_REMOTE_MODE = envNames\("MODE"\)\.some\(/);
+    expect(src).toMatch(/toLowerCase\(\) === "remote"/);
   });
 });
