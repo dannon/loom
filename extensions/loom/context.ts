@@ -23,6 +23,7 @@ import {
 } from "./skills-discovery";
 import { findGalaxyPageBlocks } from "./galaxy-page-binding";
 import { isLocalShellDisabled } from "./local-exec.js";
+import { resolveWorkspaceStateDirName, type WorkspaceStateDirName } from "./workspace-state-dir";
 import { SRA_IMPORT_GUIDANCE } from "./sra-import-gate";
 import { GALAXY_PAGE_MARKDOWN_GUIDANCE } from "./galaxy-page-markdown-guidance";
 import {
@@ -442,35 +443,49 @@ is invisible to the background poller. Use the IDs returned by Galaxy.
 `;
 }
 
+// Resolved once per workspace for the life of the process: the system prompt
+// is one cached block, and the agent creating the dir mid-session must not
+// flip its name and bust that cache.
+const stateDirNameByCwd = new Map<string, WorkspaceStateDirName>();
+function sessionStateDirName(cwd: string): WorkspaceStateDirName {
+  let name = stateDirNameByCwd.get(cwd);
+  if (!name) {
+    name = resolveWorkspaceStateDirName(cwd);
+    stateDirNameByCwd.set(cwd, name);
+  }
+  return name;
+}
+
 /**
  * Local-tool environment convention — per-analysis conda env rooted in
  * the analysis cwd. Always relevant; no longer mode-gated.
  */
-export function buildLocalEnvContext(): string {
+export function buildLocalEnvContext(cwd: string = process.cwd()): string {
   // No local shell (Windows remote-only): the conda/bash local-tool path does
   // not exist here -- don't coach the model to use a shell it can't reach.
   if (isLocalShellDisabled()) return "";
+  const env = `${sessionStateDirName(cwd)}/env`;
   return `
 ## Local-tool environment (per-analysis conda env)
 
 When running any bioinformatics tool locally, use a **per-analysis conda
-environment** rooted at \`.loom/env/\` inside the current analysis
+environment** rooted at \`${env}/\` inside the current analysis
 directory. Isolates tool versions between analyses and keeps each
 notebook's reproducibility record self-contained.
 
 Conventions:
 
-- **Env path:** \`.loom/env/\` (prefix style: \`-p .loom/env\`, not \`-n name\`).
+- **Env path:** \`${env}/\` (prefix style: \`-p ${env}\`, not \`-n name\`).
 - **Channel priority:** \`-c bioconda -c conda-forge\`, in that order.
 - **Prefer \`mamba\`** if available (\`which mamba\`) — much faster solves.
   Fall back to \`conda\` if absent. Same flags either way.
 
 Lifecycle (lazy):
 
-1. First tool needed: \`test -d .loom/env\`. If missing:
-   \`conda create -p .loom/env -c bioconda -c conda-forge -y python=3.11\`
-2. Install in batches: \`conda install -p .loom/env -c bioconda -c conda-forge -y bwa samtools lofreq\`
-3. Run via \`conda run -p .loom/env <cmd>\` or full path \`.loom/env/bin/<cmd>\`.
+1. First tool needed: \`test -d ${env}\`. If missing:
+   \`conda create -p ${env} -c bioconda -c conda-forge -y python=3.11\`
+2. Install in batches: \`conda install -p ${env} -c bioconda -c conda-forge -y bwa samtools lofreq\`
+3. Run via \`conda run -p ${env} <cmd>\` or full path \`${env}/bin/<cmd>\`.
 4. Record installs under a \`## Environment\` heading in \`notebook.md\` for
    reproducibility.
 
@@ -555,7 +570,7 @@ the activity stream.
 # — without the \`.failed\` branch a quick crash gets reported as
 # "still running" indefinitely.
 mkdir -p foldseek_work
-nohup sh -c '.loom/env/bin/foldseek easy-cluster ... > foldseek_work/run.log 2>&1 \\
+nohup sh -c '${env}/bin/foldseek easy-cluster ... > foldseek_work/run.log 2>&1 \\
   && touch foldseek_work/.done || touch foldseek_work/.failed' > /dev/null 2>&1 &
 disown
 echo "Launched foldseek — tail foldseek_work/run.log to monitor"
@@ -1218,7 +1233,7 @@ export function setupContextInjection(pi: ExtensionAPI): void {
       buildExecutionModeBlock(),
       buildGalaxyContextBlock(),
       buildSkillsContext(),
-      buildLocalEnvContext(),
+      buildLocalEnvContext(ctx.cwd),
       buildNoLocalShellBlock(),
       buildTeamDispatchContext(),
       buildSessionIndexContext(),
