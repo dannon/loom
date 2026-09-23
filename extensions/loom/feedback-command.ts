@@ -3,6 +3,7 @@ import { submitFeedback, buildBrainSysinfo, appendToOutbox, readLoomVersion } fr
 import { getRecentActivityEvents } from "./activity.js";
 import { loadConfig } from "./config.js";
 import {
+  CLI_FEEDBACK_SOURCE,
   SCHEMA_VERSION,
   formatActivityTail,
   capFeedbackPayload,
@@ -48,7 +49,7 @@ export function registerFeedbackCommand(pi: ExtensionAPI): void {
       // loom-cli row is filterable by release in triage, even without diagnostics.
       const payload: FeedbackPayload = {
         schemaVersion: SCHEMA_VERSION,
-        source: "loom-cli",
+        source: CLI_FEEDBACK_SOURCE,
         title: title.trim(),
         body: body.trim(),
         clientTs: new Date().toISOString(),

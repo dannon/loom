@@ -29,6 +29,8 @@ import { GALAXY_PAGE_MARKDOWN_GUIDANCE } from "./galaxy-page-markdown-guidance";
 import {
   buildUserInstructionsBlock,
   buildWorkspaceInstructionsContext,
+  discoverInstructionFiles,
+  takeShadowNotices,
 } from "./user-instructions.js";
 import { readEnv } from "../../shared/orbit-env.js";
 
@@ -1220,6 +1222,9 @@ export function setupContextInjection(pi: ExtensionAPI): void {
     // (see the pi.on("context") handler) instead of busting the cached prefix.
     // The live activity tail was likewise dropped; it stays in the Activity pane.
     const omitAnchors = isLlama4Family(ctx.model);
+    for (const notice of takeShadowNotices(discoverInstructionFiles())) {
+      ctx.ui.notify(notice, "info");
+    }
     const systemPrompt = [
       buildActiveModelBlock(),
       buildTesterIdBlock(),
