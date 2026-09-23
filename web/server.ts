@@ -29,6 +29,7 @@ import { DASHBOARD_FILENAME, DASHBOARD_MAX_BYTES } from "../shared/dashboard-con
 import { casWriteLayoutFile, readLayoutFile } from "../shared/dashboard-layout-store.js";
 import { listFilesForWeb, readFileForWeb, readNotebookForWeb } from "./files-surface.js";
 import { DESKTOP_SHELL_KIND, readEnv, writeEnv } from "../shared/orbit-env.js";
+import { resolveConfigPath, resolveDefaultAnalysesDir } from "../shared/state-dir.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // In dev this file runs from web/; the container bundles it to web/build/ and
@@ -38,9 +39,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // the brain, the lockdown gate, and the static bundle all silently go missing.
 const WEB_ROOT = basename(__dirname) === "build" ? resolve(__dirname, "..") : __dirname;
 const LOOM_BIN = resolve(WEB_ROOT, "../bin/loom.js");
-const LOOM_CONFIG_DIR = join(homedir(), ".loom");
-const LOOM_CONFIG_PATH = join(LOOM_CONFIG_DIR, "config.json");
-const DEFAULT_CWD = join(LOOM_CONFIG_DIR, "analyses");
 
 const PORT = parseInt(process.env.PORT || "3000", 10);
 // Bind loopback by default; the WS is an authenticated-agent surface, so an
@@ -59,9 +57,10 @@ function log(...args: unknown[]): void {
 // ── Config helpers ───────────────────────────────────────────────────────────
 
 function loadConfig(): Record<string, unknown> {
-  if (existsSync(LOOM_CONFIG_PATH)) {
+  const configPath = resolveConfigPath();
+  if (existsSync(configPath)) {
     try {
-      const cfg = JSON.parse(readFileSync(LOOM_CONFIG_PATH, "utf-8"));
+      const cfg = JSON.parse(readFileSync(configPath, "utf-8"));
       return { ...cfg, _mode: "desktop" };
     } catch {
       /* */
@@ -71,8 +70,9 @@ function loadConfig(): Record<string, unknown> {
 }
 
 function saveConfig(config: Record<string, unknown>): void {
-  mkdirSync(LOOM_CONFIG_DIR, { recursive: true });
-  writeFileSync(LOOM_CONFIG_PATH, JSON.stringify(config, null, 2) + "\n");
+  const configPath = resolveConfigPath();
+  mkdirSync(dirname(configPath), { recursive: true });
+  writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
 }
 
 function synthesizedRemoteConfig(): Record<string, unknown> {
@@ -112,7 +112,7 @@ function getCwd(): string {
     return REMOTE_SESSION_CWD;
   }
   const cfg = loadConfig();
-  let cwd = (cfg.defaultCwd as string) || DEFAULT_CWD;
+  let cwd = (cfg.defaultCwd as string) || resolveDefaultAnalysesDir();
   if (cwd.startsWith("~")) cwd = join(homedir(), cwd.slice(1));
   mkdirSync(cwd, { recursive: true });
   return cwd;
