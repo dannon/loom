@@ -131,7 +131,27 @@ export async function writeNotebook(
       throw new NotebookChangedError(filePath);
     }
   }
-  await fs.rename(tmp, filePath);
+  await renameReplacing(tmp, filePath);
+}
+
+// Windows refuses to replace a file another rename (or a scanner) is touching
+// at that instant, with EPERM/EACCES/EBUSY, where POSIX would just swap it in.
+// Retrying briefly gives the same last-writer-wins outcome POSIX gets.
+async function renameReplacing(from: string, to: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fs.rename(from, to);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      const transient = code === "EPERM" || code === "EACCES" || code === "EBUSY";
+      if (process.platform !== "win32" || !transient || attempt >= 10) {
+        await fs.rm(from, { force: true });
+        throw err;
+      }
+      await new Promise((r) => setTimeout(r, 10 * (attempt + 1)));
+    }
+  }
 }
 
 /**
