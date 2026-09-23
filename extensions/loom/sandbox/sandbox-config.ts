@@ -34,6 +34,7 @@ const DENY_READ = [
   "~/.pgpass",
   "~/.npmrc",
   "~/.loom/config.json",
+  "~/.orbit/config.json",
 ];
 
 // Sensitive files the sandbox blocks bash from writing even inside the

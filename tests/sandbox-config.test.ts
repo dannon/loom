@@ -43,7 +43,13 @@ describe("buildSandboxConfig", () => {
   it("denies reading the credential set", () => {
     const fs = buildSandboxConfig(base).filesystem!;
     expect(fs.denyRead).toEqual(
-      expect.arrayContaining(["~/.ssh", "~/.aws", "~/.loom/config.json", "~/Library/Keychains"]),
+      expect.arrayContaining([
+        "~/.ssh",
+        "~/.aws",
+        "~/.loom/config.json",
+        "~/.orbit/config.json",
+        "~/Library/Keychains",
+      ]),
     );
   });
 

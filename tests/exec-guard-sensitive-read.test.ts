@@ -15,6 +15,7 @@ describe("isSensitivePath", () => {
       "/home/alice/.netrc",
       "/home/alice/project/.env",
       "/home/alice/.loom/config.json",
+      "/home/alice/.orbit/config.json",
     ])
       expect(isSensitivePath(p, HOME), p).toBe(true);
   });
@@ -80,6 +81,7 @@ describe("isCredentialStore", () => {
       "/home/alice/.pgpass",
       "/home/alice/.npmrc",
       "/home/alice/.loom/config.json",
+      "/home/alice/.orbit/config.json",
     ])
       expect(isCredentialStore(p, HOME), p).toBe(true);
   });

@@ -11,7 +11,15 @@ const SENSITIVE_HOME_DIRS = [
   "Library/Keychains",
 ];
 // Exact files under $HOME.
-const SENSITIVE_HOME_FILES = [".netrc", ".loom/config.json", ".pgpass", ".npmrc"];
+// Both brain config locations: a newer release may have copied the config
+// into ~/.orbit, and this one reads it from there when it exists.
+const SENSITIVE_HOME_FILES = [
+  ".netrc",
+  ".loom/config.json",
+  ".orbit/config.json",
+  ".pgpass",
+  ".npmrc",
+];
 // Basename / extension patterns sensitive anywhere.
 const SENSITIVE_BASENAME =
   /^(\.env(\..+)?|id_rsa|id_ed25519|id_ecdsa|.*\.pem|.*\.key|.*\.keychain(-db)?|credentials)$/i;
