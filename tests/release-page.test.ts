@@ -10,13 +10,16 @@ describe("resolveReleasePageUrl", () => {
     expect(resolveReleasePageUrl(LATEST)).toBe(LATEST);
   });
 
-  it("passes an orbit releases URL through too, for after the repo rename", () => {
+  it("passes the renamed repo's releases URLs through", () => {
     const url = "https://github.com/galaxyproject/orbit/releases/tag/v0.9.0";
     expect(resolveReleasePageUrl(url)).toBe(url);
+    expect(resolveReleasePageUrl("https://github.com/galaxyproject/orbit/releases/latest")).toBe(
+      "https://github.com/galaxyproject/orbit/releases/latest",
+    );
+    expect(resolveReleasePageUrl("https://github.com/galaxyproject/orbit/issues/1")).toBe(LATEST);
   });
 
   it("pins a non-releases orbit URL like any other", () => {
-    expect(resolveReleasePageUrl("https://github.com/galaxyproject/orbit/issues/1")).toBe(LATEST);
     expect(
       resolveReleasePageUrl("https://github.com/galaxyproject/orbit/releases/../issues/1"),
     ).toBe(LATEST);

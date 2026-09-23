@@ -16,8 +16,8 @@
 
 const LATEST_RELEASES_PAGE = "https://github.com/galaxyproject/loom/releases/latest";
 
-// Both, because the repo is being renamed to galaxyproject/orbit and an update
-// feed can hand back either spelling across the transition.
+// Both names stay valid across the Loom -> Orbit repo rename: old links in
+// the CHANGELOG keep working, and the moved notice points at the new repo.
 const RELEASES_PATH_PREFIXES = ["/galaxyproject/loom/releases/", "/galaxyproject/orbit/releases/"];
 
 export function resolveReleasePageUrl(url: unknown): string {
