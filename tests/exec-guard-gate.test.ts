@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { registerExecGuard } from "../extensions/loom/exec-guard/gate";
+import { registerExecGuard, workspaceRoots } from "../extensions/loom/exec-guard/gate";
 import { APPROVAL_DETAIL_LIMIT, splitApprovalPrompt } from "../shared/approval-prompt.js";
 
 let sandbox: string, prevHome: string | undefined;
@@ -295,33 +295,23 @@ describe("registerExecGuard -- destructive Galaxy ops (#338)", () => {
   });
 });
 
-// The jail roots include both state-dir spellings whichever the workspace uses,
-// so a workspace whose state dir is a symlink (e.g. onto a bigger disk) reads
-// the same under either name -- and writes into it still prompt under either.
-describe.each([".loom", ".orbit"])("registerExecGuard -- %s state dir as a jail root", (D) => {
+describe("workspaceRoots", () => {
+  it("does not make either state dir a root of its own", () => {
+    // A symlinked .loom/.orbit would otherwise silently trust its target.
+    expect(workspaceRoots("/w", ["/extra"])).toEqual(["/w", os.tmpdir(), "/extra"]);
+  });
+});
+
+// A workspace whose state dir is a symlink (e.g. onto a bigger disk): a write
+// through it realpaths to a path with no state segment, but it still prompts.
+describe.each([".loom", ".orbit"])("registerExecGuard -- symlinked %s state dir", (D) => {
   let elsewhere: string;
   beforeEach(() => {
     elsewhere = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "loom-gate-state-")));
-    fs.writeFileSync(path.join(elsewhere, "x.txt"), "x");
     fs.symlinkSync(elsewhere, path.join(sandbox, "project", D));
   });
   afterEach(() => {
     fs.rmSync(elsewhere, { recursive: true, force: true });
-  });
-
-  it("reads through the state dir without prompting", async () => {
-    const c = ctx();
-    const r = await handler(
-      {
-        type: "tool_call",
-        toolName: "read",
-        toolCallId: "s1",
-        input: { path: path.join(sandbox, "project", D, "x.txt") },
-      },
-      c,
-    );
-    expect(r?.block).toBeFalsy();
-    expect(c.ui.select).not.toHaveBeenCalled();
   });
 
   it("still prompts for a write into it", async () => {

@@ -2,7 +2,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as os from "os";
 import * as path from "path";
 import { getNotebookPath } from "../state";
-import { WORKSPACE_STATE_DIR_NAMES } from "../workspace-state-dir";
 import { appendActivityEvent } from "../activity";
 import { redactArgs } from "../activity-hooks";
 import {
@@ -46,6 +45,14 @@ function audit(
   });
 }
 
+// The state dir (.loom/.orbit) is deliberately not a root of its own. Under
+// cwd it is already inside the jail; the only thing a separate root ever added
+// was trust in wherever a symlinked state dir pointed, which the user never
+// granted.
+export function workspaceRoots(cwd: string, extra: string[]): string[] {
+  return [cwd, os.tmpdir(), ...extra];
+}
+
 export function registerExecGuard(pi: ExtensionAPI): void {
   pi.on("tool_call", async (event, ctx) => {
     const config = loadGuardianConfig();
@@ -55,13 +62,10 @@ export function registerExecGuard(pi: ExtensionAPI): void {
 
     const input = event.input as Record<string, unknown>;
     const cwd = ctx.cwd;
-    const roots = [
-      cwd,
-      os.tmpdir(),
-      ...WORKSPACE_STATE_DIR_NAMES.map((name) => path.join(cwd, name)),
-      ...config.extraWorkspaceRoots,
-    ];
-    const resolver = createPathResolver(roots, os.homedir());
+    const resolver = createPathResolver(
+      workspaceRoots(cwd, config.extraWorkspaceRoots),
+      os.homedir(),
+    );
 
     let result: PolicyResult;
     try {

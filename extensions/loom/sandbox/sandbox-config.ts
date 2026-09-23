@@ -59,7 +59,7 @@ export function hostFromUrl(url?: string): string | undefined {
 
 /**
  * Build the ASRT profile: writable = workspace + tmp + both state-dir spellings
- * (the same jail the exec-guard enforces); readable = everything except the credential set; network
+ * (ASRT itself refuses an allow path that symlinks out of bounds); readable = everything except the credential set; network
  * = deny-all for bash by default, allowlisting only the Galaxy host (Galaxy work
  * itself flows over MCP, not bash, so a tight bash network default is safe).
  */
