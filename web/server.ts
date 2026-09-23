@@ -23,7 +23,7 @@ import { encodeEventPayload } from "./event-payload.js";
 import { evaluateBind, authorizeWsUpgrade } from "./auth.js";
 import { isForwardableUiResponse } from "./rpc-guard.js";
 import { ACTIVE_LLM_API_KEY_ENV, isCustomProvider } from "../shared/custom-provider.js";
-import { hasProviderKey, llmKeyEnvVar } from "./llm-credentials.js";
+import { hasProviderKey, llmKeyEnvVar } from "./llm-key-routing.js";
 import { resolveShutdownGraceMs } from "./shutdown-grace.js";
 import { DASHBOARD_FILENAME, DASHBOARD_MAX_BYTES } from "../shared/dashboard-contract.js";
 import { casWriteLayoutFile, readLayoutFile } from "../shared/dashboard-layout-store.js";

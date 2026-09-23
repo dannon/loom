@@ -24,7 +24,7 @@ COPY web ./web
 # web/build/, keeping `../shared/brain-env.js` in the output -- which resolves to
 # web/shared/ at runtime, not the /app/shared this image ships, so the server
 # died on module load. Bundling inlines every relative import (shared/, auth,
-# rpc-guard, llm-credentials) and leaves bare package imports external for the
+# rpc-guard, llm-key-routing) and leaves bare package imports external for the
 # runner's npm ci to supply. Typechecking stays in CI, which has the app deps
 # this stage doesn't install.
 RUN cd web && npm run build && npm run build:server
