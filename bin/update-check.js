@@ -14,6 +14,11 @@ import { isNewer, pickChannel } from "../shared/version-compare.js";
 
 const PKG = "@galaxyproject/loom";
 const REGISTRY = "https://registry.npmjs.org/@galaxyproject/loom";
+// Loom is being renamed Orbit. The new package name is claimed with a 0.0.0
+// placeholder, so only a real release there means "moved".
+const ORBIT_PKG = "@galaxyproject/orbit";
+const ORBIT_REGISTRY = "https://registry.npmjs.org/@galaxyproject/orbit";
+const ORBIT_PLACEHOLDER = "0.0.0";
 const CACHE_FILE = path.join(os.homedir(), ".loom", "version-check.json");
 const SUCCESS_TTL_MS = 24 * 60 * 60 * 1000;
 const FAILURE_TTL_MS = 60 * 60 * 1000;
@@ -29,7 +34,7 @@ export function getLoomVersion() {
 }
 
 /**
- * @typedef {{ fetchedAt: number, failed: true } | { fetchedAt: number, failed?: false, latest: string, channel: string }} Cache
+ * @typedef {{ fetchedAt: number, failed: true } | { fetchedAt: number, failed?: false, latest: string, channel: string, orbitLatest?: string }} Cache
  */
 
 /** Parse + TTL-validate a cache file's contents. Pure.
@@ -46,13 +51,19 @@ export function parseCache(raw, now) {
   if (now - parsed.fetchedAt > (failed ? FAILURE_TTL_MS : SUCCESS_TTL_MS)) return null;
   if (failed) return { fetchedAt: parsed.fetchedAt, failed: true };
   if (typeof parsed.latest !== "string" || typeof parsed.channel !== "string") return null;
-  return { fetchedAt: parsed.fetchedAt, latest: parsed.latest, channel: parsed.channel };
+  /** @type {Cache} */
+  const entry = { fetchedAt: parsed.fetchedAt, latest: parsed.latest, channel: parsed.channel };
+  if (typeof parsed.orbitLatest === "string") entry.orbitLatest = parsed.orbitLatest;
+  return entry;
 }
 
 /** Build the notice string, or null if up to date / no usable cache. Pure.
  * @param {string} current @param {Cache | null} cache @returns {string | null} */
 export function noticeFor(current, cache) {
   if (!cache || cache.failed) return null;
+  if (cache.orbitLatest && isNewer(ORBIT_PLACEHOLDER, cache.orbitLatest)) {
+    return `Loom is now Orbit -- \`npm i -g ${ORBIT_PKG}\``;
+  }
   if (!isNewer(current, cache.latest)) return null;
   return `loom ${cache.latest} is available (you have ${current}) -- run: npm i -g ${PKG}@${cache.channel}`;
 }
@@ -82,6 +93,23 @@ function writeCache(entry) {
   } catch {}
 }
 
+/** The `latest` dist-tag of @galaxyproject/orbit, or null when it isn't
+ * published yet or the registry can't be reached. Never throws.
+ * @param {typeof fetch} [fetchFn] @returns {Promise<string | null>} */
+export async function fetchOrbitLatest(fetchFn = fetch) {
+  try {
+    const res = await fetchFn(ORBIT_REGISTRY, {
+      headers: { Accept: "application/vnd.npm.install-v1+json" },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const latest = (await res.json())?.["dist-tags"]?.latest;
+    return typeof latest === "string" ? latest : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Query the npm registry for the newest version on the install's channel and
  * cache it. Best-effort: a failure writes a short-TTL failure marker. */
 export async function refreshCache() {
@@ -98,7 +126,8 @@ export async function refreshCache() {
     // lightweight Accept header above is enough -- no full packument needed.
     const latest = body["dist-tags"]?.[channel];
     if (typeof latest !== "string") throw new Error("no dist-tag");
-    writeCache({ fetchedAt: Date.now(), latest, channel });
+    const orbitLatest = await fetchOrbitLatest();
+    writeCache({ fetchedAt: Date.now(), latest, channel, ...(orbitLatest ? { orbitLatest } : {}) });
   } catch {
     writeCache({ fetchedAt: Date.now(), failed: true });
   }
