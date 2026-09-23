@@ -3,7 +3,8 @@
 Galaxy resolves test files from two places and only one is served over HTTP:
 inputs come from the tool's `test-data/` via the API, expected outputs live in a
 clone of galaxy-test-data (`tool_util/verify/test_data.py`, GitDataResolver).
-So the harness needs that clone; `GALAXY_TEST_DATA` names it.
+Galaxy serves those inputs but answers 404 for the expected outputs, so those are
+vendored in `fixtures/tool-tests/`; `GALAXY_TEST_DATA` names a clone to fall back on.
 """
 
 import hashlib
@@ -15,6 +16,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
+ROOT = pathlib.Path(__file__).resolve().parent.parent
 TEST_DATA_REPO = "https://github.com/galaxyproject/galaxy-test-data.git"
 POLL_SECONDS = 3
 
@@ -87,6 +89,10 @@ class Galaxy:
         return self.call(f"api/histories/{history_id}/contents?v=dev&deleted=false&visible=true")
 
 
+# Galaxy serves a test's inputs but not its expected outputs, so those are vendored.
+VENDORED_EXPECTATIONS = ROOT / "fixtures" / "tool-tests"
+
+
 def expected_dir():
     """Where galaxy-test-data was cloned; Galaxy keys the cache by md5 of the repo url."""
     named = os.environ.get("GALAXY_TEST_DATA", "").strip()
@@ -100,11 +106,12 @@ def expected_dir():
 
 
 def expected_bytes(name, extra_dirs=()):
-    for d in [*extra_dirs, expected_dir()]:
+    for d in [*extra_dirs, VENDORED_EXPECTATIONS, expected_dir()]:
         if d and (pathlib.Path(d) / name).exists():
             return (pathlib.Path(d) / name).read_bytes()
     raise ToolTestError(
-        f"expected output {name!r} not found; clone {TEST_DATA_REPO} and set GALAXY_TEST_DATA")
+        f"expected output {name!r} not found; add it to {VENDORED_EXPECTATIONS.name}/ "
+        f"or clone {TEST_DATA_REPO} and set GALAXY_TEST_DATA")
 
 
 def stage(galaxy, tool_id, test_index=0, history_name=None):

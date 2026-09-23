@@ -1,5 +1,26 @@
 // Stands in for the provider and Galaxy; scripted per scenario via /__script.
 const http = require("http");
+const fs = require("fs");
+const path = require("path");
+
+const ROOT = path.join(__dirname, "..");
+// Where Galaxy serves a visualization plugin from, and the host page it renders.
+const PLUGIN_HREF = "/static/plugins/visualizations/olite/static";
+const HOST_PAGE = "/plugins/visualizations/olite";
+const TYPES = {
+    ".js": "text/javascript",
+    ".mjs": "text/javascript",
+    ".css": "text/css",
+    ".html": "text/html",
+    ".json": "application/json",
+    ".wasm": "application/wasm",
+    ".map": "application/json",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".md": "text/markdown",
+};
 
 let script = "confirm";     // confirm | slow | compact | ratelimit
 let rateLimited = 0;
@@ -30,6 +51,21 @@ const deleteHistory = [{
     function: { name: "update_history", arguments: JSON.stringify({ history_id: "h1", deleted: true }) },
 }];
 
+// Top-level await plus a cross-origin pyfetch: the two things a sync exec could not do.
+const RUN_PYTHON_CODE = [
+    "import asyncio",
+    "await asyncio.sleep(0)",
+    "r = await pyfetch('http://127.0.0.1:8099/__seen')",
+    "body = await r.string()",
+    "f\"awaited:{r.status}:{'calls' in body}\"",
+].join("\n");
+
+const runPython = [{
+    id: "call_1",
+    type: "function",
+    function: { name: "run_python", arguments: JSON.stringify({ code: RUN_PYTHON_CODE }) },
+}];
+
 const createVisualization = [{
     id: "call_1",
     type: "function",
@@ -38,6 +74,69 @@ const createVisualization = [{
         arguments: JSON.stringify({ dataset_id: "d1", visualization: "ngl" }),
     },
 }];
+
+// Galaxy parses olite.xml server-side and hands the specs back through data-incoming;
+// reading the file keeps the harness on the same prompt the deployment would serve.
+function pluginSpecs() {
+    const xml = fs.readFileSync(path.join(ROOT, "public", "olite.xml"), "utf8");
+    const found = xml.match(/<ai_prompt>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/ai_prompt>/);
+    return { ai_prompt: found ? found[1].trim() : "" };
+}
+
+// The shape VisualizationFrame reads from /api/plugins/<name> to build data-incoming.
+function pluginDict() {
+    return {
+        name: "olite",
+        html: "AI Research Assistant",
+        embeddable: true,
+        href: PLUGIN_HREF,
+        entry_point: { attr: { entry_point_type: "script", src: "index.js", css: "index.css" } },
+        specs: pluginSpecs(),
+        settings: [],
+    };
+}
+
+function serveStatic(res, rel) {
+    const file = path.join(ROOT, "static", rel);
+    if (!file.startsWith(path.join(ROOT, "static")) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        return res.end("not found");
+    }
+    res.writeHead(200, {
+        "Content-Type": TYPES[path.extname(file)] || "application/octet-stream",
+        "Access-Control-Allow-Origin": "*",
+    });
+    return res.end(fs.readFileSync(file));
+}
+
+const escapeAttr = (text) =>
+    text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+// What VisualizationFrame.vue builds in the browser, rendered here instead: the same
+// data-incoming, the same plugin href, so a built app resolves Pyodide the way it does
+// in a deployment rather than from the dev server.
+function hostPage(url) {
+    const params = new URL(url, "http://127.0.0.1:8099").searchParams;
+    const incoming = {
+        root: "http://127.0.0.1:8099/",
+        visualization_config: {
+            dataset_id: params.get("dataset_id") || undefined,
+            history_id: params.get("history_id") || undefined,
+            settings: {},
+        },
+        visualization_plugin: pluginDict(),
+        visualization_title: "AI Research Assistant",
+    };
+    return [
+        "<!doctype html>",
+        '<html lang="en"><head><meta charset="UTF-8" />',
+        `<link rel="stylesheet" href="${PLUGIN_HREF}/index.css" />`,
+        "</head><body>",
+        `<div id="app" data-incoming="${escapeAttr(JSON.stringify(incoming))}"></div>`,
+        `<script type="module" src="${PLUGIN_HREF}/index.js"><\/script>`,
+        "</body></html>",
+    ].join("\n");
+}
 
 const server = http.createServer(async (req, res) => {
     const url = req.url || "";
@@ -57,6 +156,12 @@ const server = http.createServer(async (req, res) => {
         return json(res, 200, { prompts: 0 });
     }
     if (url.startsWith("/__seen")) return json(res, 200, { seen, calls, prompts });
+
+    if (url.startsWith(PLUGIN_HREF)) return serveStatic(res, url.slice(PLUGIN_HREF.length).split("?")[0]);
+    if (url === "/" || url.startsWith(HOST_PAGE)) {
+        res.writeHead(200, { "Content-Type": "text/html" });
+        return res.end(hostPage(url));
+    }
 
     if (url.includes("/chat/completions")) {
         calls += 1;
@@ -115,6 +220,13 @@ const server = http.createServer(async (req, res) => {
         if (script === "compact") {
             return json(res, 200, message("ok"));
         }
+        if (script === "python") {
+            const msgs = body.messages || [];
+            const tail = msgs[msgs.length - 1] || {};
+            return json(res, 200, tail.role === "tool"
+                ? message(`python returned ${tail.content}`)
+                : message("", runPython));
+        }
         // Keyed on the last message; by turn two the transcript always has a tool result.
         const messages = body.messages || [];
         const last = messages[messages.length - 1] || {};
@@ -128,6 +240,7 @@ const server = http.createServer(async (req, res) => {
 
     // Everything else is Galaxy; record it so tests can assert on the PUT.
     seen.push(`${req.method} ${url}`);
+    if (url.includes("/api/plugins/olite")) return json(res, 200, pluginDict());
     if (url.includes("/api/plugins")) return json(res, 200, [{ name: "ngl", settings: [], tracks: [] }]);
     if (url.includes("/api/datatypes/")) return json(res, 200, [{ visualization: "ngl" }]);
     if (url.includes("/api/datasets/")) {

@@ -83,7 +83,61 @@ BRANCHES = [
 CONSTS = [
     ("extensions/loom/galaxy-page-markdown-guidance.ts", "GALAXY_PAGE_MARKDOWN_GUIDANCE",
      "unconditional, injected with the page tools", "GALAXY_PAGE_MARKDOWN", "PORTED", ""),
+    ("extensions/loom/sra-import-gate.ts", "SRA_IMPORT_GUIDANCE",
+     "unconditional when Galaxy is reachable", "IMPORTING_SRA", "PORTED",
+     "loom also enforces this with a tool-call gate that groups sibling SRA submissions; "
+     "olite carries the guidance only."),
 ]
+
+
+# Rows with no loom symbol to fingerprint, or whose loom anchor is not a block in CTX.
+EXTRA = [
+    ("context.project-data-placement", "prompt-branch",
+     ("extensions/loom/context.ts", "setupContextInjection",
+      "every turn that injects notebook or workspace context"),
+     ("brain/olite/runtime.py", "_inject_record"), "PORTED",
+     "olite has one project-data channel (the record); loom has two."),
+    ("prompt.seedDatasetBlock", "prompt-block", None,
+     ("brain/olite/prompt.py", "seed_dataset_block"), "ADDED",
+     "loom has no equivalent because nothing opens it on a dataset. Galaxy mounts olite as a "
+     "visualization plugin, so the user can arrive with one already selected, and naming it is "
+     "what makes a bare \"plot it\" resolvable: the referent is otherwise only in the shell's "
+     "chat, which never reaches the model. Emitted only when a dataset was supplied, so a bare "
+     "start produces byte-identical system text."),
+    ("tool.ena_runs", "tool", None,
+     ("brain/olite/drivers/loop/ena.py", "ENA_RUNS"), "ADDED",
+     "loom has no equivalent because Orbit reaches ENA through a general shell. ENA's FASTQ "
+     "paths are not derivable from an accession -- the shard directory is its first six "
+     "characters and the numbered subdirectory depends on its length -- and whether a run is "
+     "paired is a property of the run, not its name. A live session guessed four URLs and all "
+     "four 404'd, one of them for a run that has no second mate at all. Read-only and "
+     "host-scoped to www.ebi.ac.uk, the same shape as gtn_search/gtn_fetch."),
+    ("hint.fetch-failure", "tool-result-hint", None,
+     ("brain/olite/drivers/loop/fetch_failure_hint.py", "ARCHIVE_HINT"), "ADDED",
+     "loom has no equivalent: its only tool-result hint covers failed workflow invocations, "
+     "a different trigger that stays unported. The shape is borrowed from it -- append the "
+     "imperative to a result that already reports the failure, rather than refusing the call "
+     "that caused it. Galaxy names the url and the status but cannot say that writing another "
+     "url from memory is the wrong next move, which is what a measured session did eight "
+     "times. Pairs with tool.ena_runs, which is the answer the hint names."),
+]
+
+
+def _extra_rows():
+    rows = []
+    for row_id, kind, loom, olite, label, note in EXTRA:
+        anchor = None
+        if loom:
+            file, symbol, condition = loom
+            src = extract.ts_symbol((LOOM / file).read_text(), symbol)
+            if src is None:
+                raise SystemExit(f"loom symbol not found: {symbol}")
+            anchor = {"file": file, "symbol": symbol, "condition": condition,
+                      "fingerprint": extract.fingerprint(src)}
+        rows.append({"id": row_id, "kind": kind, "loom": anchor,
+                     "olite": {"file": olite[0], "symbol": olite[1]},
+                     "label": label, "note": note})
+    return rows
 
 
 def main():
@@ -156,6 +210,8 @@ def main():
             "label": label,
             "note": note,
         })
+
+    rows.extend(_extra_rows())
 
     out = ROOT / "seams/registry.json"
     registry = json.loads(out.read_text()) if out.exists() else {}

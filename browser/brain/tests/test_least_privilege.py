@@ -24,6 +24,13 @@ def test_absent_capabilities_take_the_default_but_an_empty_list_grants_nothing()
     assert CapabilityManifest([]).granted == set()
 
 
+def test_the_default_grant_is_everything_the_plugin_ships_to_do():
+    """Galaxy authorizes every call against the user's session, so this widens the agent's
+    reach, never the user's. A narrower default silently half-disabled a real install."""
+    assert CapabilityManifest().allows("write")
+    assert set(DEFAULT_CAPABILITIES) == {"llm", "local", "read", "write"}
+
+
 def test_intersect_narrows_and_cannot_escalate():
     session = CapabilityManifest(["llm", "local", "read"])
 
@@ -77,12 +84,12 @@ def test_a_scoped_write_is_refused_at_the_call():
 def test_a_view_shares_state_rather_than_resetting_it():
     """Rebuilding services would wipe the namespace and hand out a fresh rate budget."""
     substrate = Substrate(CONFIG)
-    substrate.local.run("x = 41")
+    asyncio.run(substrate.local.run("x = 41"))
 
     view = substrate.scoped(["llm", "local", "read"])
 
     # Same interpreter namespace, not a fresh one.
-    assert view.local.run("x + 1") == "42"
+    assert asyncio.run(view.local.run("x + 1")) == "42"
     # One rate limiter per session, shared by every scoped view.
     assert view.llm._limiter is substrate.llm._limiter
     # Same loaded spec, so scoping costs no network round trip.

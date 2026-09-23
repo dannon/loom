@@ -6,6 +6,8 @@ import sys
 import tempfile
 from urllib.parse import urlencode
 
+import jsonschema
+
 from olite import vendor
 from olite.substrate.http import http
 
@@ -13,6 +15,7 @@ from . import page_edit
 from .galaxy_tool_docs import DOCS
 from .paging import ROW_CAP, page
 from .tool_inputs import build_input_template, summarize_tool_inputs
+from .visualization_inputs import build_visualization_template, template_cases
 
 TOOLS = []
 HANDLERS = {}
@@ -213,8 +216,54 @@ async def _run_tool(g, a):
         raise ToolParameterError(str(exc), template) from exc
 
 
+# Lookups over data Galaxy holds still for a session: the same question returns the same answer.
+SETTLED = frozenset({
+    "search_tools_by_name",
+    "search_tools_by_keywords",
+    "get_visualization_details",
+})
+
+
+def settled(name):
+    """Whether repeating this call with the same arguments can produce anything new."""
+    return name in SETTLED
+
+
+def _no_tool_matched(query):
+    # An empty list reads as an answer, so the same search comes back; say it is exhausted.
+    return {
+        "query": query,
+        "tools": [],
+        "hint": "No installed Galaxy tool matches this text. A near-identical query returns the "
+                "same empty answer, so change the term or the route rather than searching again.",
+    }
+
+
+# This agent, and a standalone plugin that defers its chart to its own LLM at view time.
+NOT_OFFERED = {"olite", "vintent"}
+
+
+async def _a_visualization_named(g, query):
+    """The installed visualization this query names, if the tool catalog is the wrong one."""
+    wanted = (query or "").strip().lower()
+    installed = await g.get("api/plugins") or []
+    names = [p.get("name") for p in installed if p.get("name") not in NOT_OFFERED]
+    return next((n for n in names if n and n.lower() == wanted), None)
+
+
 async def _search_tools_by_name(g, a):
-    return await g.get(f"api/tools{_q({'q': a['query']})}")
+    found = await g.get(f"api/tools{_q({'q': a['query']})}")
+    if found:
+        return found
+    plugin = await _a_visualization_named(g, a["query"])
+    if plugin:
+        return {
+            "query": a["query"],
+            "tools": [],
+            "hint": f"{plugin!r} is a visualization, which the tool catalog does not hold. "
+                    f"list_visualizations names the ones that can render a given dataset.",
+        }
+    return _no_tool_matched(a["query"])
 
 
 async def _get_tool_details(g, a):
@@ -310,7 +359,8 @@ async def _update_history(g, a):
 
 
 async def _search_tools_by_keywords(g, a):
-    return await g.get(f"api/tools{_q({'q': ' '.join(a.get('keywords') or [])})}")
+    query = " ".join(a.get("keywords") or [])
+    return await g.get(f"api/tools{_q({'q': query})}") or _no_tool_matched(query)
 
 
 PANEL_STRUCTURAL = {"ToolSection", "ToolSectionLabel"}
@@ -644,6 +694,7 @@ async def _list_visualizations(g, a):
     numeric = [t for t in column_types if t in NUMERIC_COLUMNS]
 
     matching = await g.get(f"api/plugins{_q({'dataset_id': a['dataset_id']})}") or []
+    matching = [p for p in matching if p.get("name") not in NOT_OFFERED]
     preferred = await _preferred_visualizations(g, extension)
     matching.sort(key=lambda p: p.get("name") not in preferred)
 
@@ -755,9 +806,14 @@ async def _get_visualization_details(g, a):
                 "hint": "Call list_visualizations for a dataset to see what this server offers."}
 
     types = (vendor.galaxy_charts_inputs() or {}).get("types") or {}
+    template = build_visualization_template(plugin, types)
+    other_cases = template_cases(plugin)
     return {
         "name": plugin.get("name"),
         "description": plugin.get("description"),
+        # The shape to fill, as get_tool_input_template gives one for a Galaxy tool.
+        "config_template": template,
+        **({"other_cases": other_cases} if other_cases else {}),
         "settings": [_describe_parameter(p, types) for p in (plugin.get("settings") or [])],
         "tracks": [_describe_parameter(p, types) for p in (plugin.get("tracks") or [])],
         "hint": "`stores` is the shape each value must take. Build `settings` and `tracks` to "
@@ -822,6 +878,7 @@ async def _get_visualization_options(g, a):
         return {"error": f"Refused: {name!r} declares no parameter {wanted!r}.",
                 "hint": f"Call get_visualization_details for {name!r} to see what it declares."}
 
+    declared_cases = sorted({w for w, _ in found if w is not None})
     when = a.get("when")
     if when is not None:
         found = [(w, p) for w, p in found if w == when]
@@ -874,6 +931,15 @@ async def _get_visualization_options(g, a):
     listed = [{"id": e.get("id"), "name": e.get("name") or e.get("label")} for e in entries]
     result = {"parameter": wanted, "source": kind, "total": len(entries),
               "options": listed[:ROW_CAP]}
+    # A case can be declared and still hold nothing on this server: IGV's builtin genomes
+    # are a data table an admin may never have filled. Naming its siblings is the difference
+    # between a dead end and a second try.
+    siblings = [c for c in declared_cases if c != when]
+    if not entries and siblings:
+        result["other_cases"] = siblings
+        result["hint"] = (f"This server lists no {wanted!r} for {when!r}. The same parameter is "
+                          f"declared for {', '.join(repr(c) for c in siblings)}; try one of those.")
+        return result
     if search:
         result["matches"] = [e for e in entries if _match(e, search)][:MATCH_CAP]
         result["hint"] = ("`matches` holds the values to store as given; pass one through "
@@ -923,7 +989,9 @@ async def _show_visualization(g, a):
                      "visualization": name, "dataset_id": a["dataset_id"],
                      "url": f"/visualizations/display{_q(query)}"},
         "hint": "The visualization is displayed to the user. Nothing was added to Galaxy, so "
-                "call save_visualization if they ask to keep it. Say what it shows and finish.",
+                "call save_visualization if they ask to keep it. Writing it into the record "
+                "means putting {{artifact}} where it belongs in the page content. Say what it "
+                "shows and finish.",
     }
 
 
@@ -968,14 +1036,37 @@ def _check_level(entry, declared, types, where):
             if nested:
                 return nested
             continue
-        spec = (types.get(param.get("type")) or {}).get("stores") or {}
-        if spec.get("type") == "object" and value is not None and not isinstance(value, dict):
-            return {"error": f"Refused: {param['name']!r} takes the whole entry it was chosen "
-                             f"from, not {value!r}.",
-                    "expected": spec,
-                    "hint": "Call get_visualization_options with `search` and pass the value it "
-                            "returns through unchanged."}
+        bad = _wrong_shape(param["name"], value, (types.get(param.get("type")) or {}).get("stores"))
+        if bad:
+            return bad
     return None
+
+
+def _wrong_shape(name, value, spec):
+    """The value against the schema galaxy-charts publishes for the input's type.
+
+    Checked both ways: an id where the entry belongs, and an entry where the value does.
+    Galaxy type-checks neither, so the plugin is left reading a shape it cannot use.
+    """
+    if not spec or value is None:
+        return None
+    try:
+        jsonschema.validate(value, spec)
+        return None
+    except jsonschema.ValidationError as exc:
+        wanted = spec.get("type")
+        if wanted == "object":
+            error = f"Refused: {name!r} takes the whole entry it was chosen from, not {value!r}."
+        elif isinstance(value, (dict, list)):
+            error = f"Refused: {name!r} stores {wanted}, not the entry it was chosen from."
+        else:
+            error = f"Refused: {name!r} stores {wanted}: {exc.message}"
+    return {
+        "error": error,
+        "expected": spec,
+        "hint": "Call get_visualization_options with `search`: it returns the value to store, "
+                "whole for an input that takes an entry and bare for one that takes a string.",
+    }
 
 
 def _reject_undeclared(plugin, a):
@@ -1052,7 +1143,9 @@ async def _save_visualization(g, a):
         "title": title,
         "artifact": artifact,
         "hint": "Saved to the user's visualizations and displayed. It is not a history dataset. "
-                "Say what it shows and finish.",
+                "Writing it into the record means putting {{artifact}} where it belongs in the "
+                "page content; visualization_id above identifies the saved object and renders "
+                "nothing in a page. Say what it shows and finish.",
     }
 
 
@@ -1359,6 +1452,11 @@ _tool("import_workflow_from_iwc", "write", "Import an IWC workflow into Galaxy b
 def tool_schemas(manifest):
     """Advertised tool schemas, filtered to the capabilities the manifest grants."""
     return [t["schema"] for t in TOOLS if manifest.allows(t["capability"])]
+
+
+def declared(name):
+    """One tool's declaration, whether or not a manifest would advertise it."""
+    return next((t for t in TOOLS if t["name"] == name), None)
 
 
 def get_handler(name):

@@ -57,11 +57,52 @@ def evaluate(scenario, run):
     _artifacts(a.get("artifacts"), run, failures, exercised)
     _tool_output(a.get("toolOutput"), run, failures, exercised)
     _invocation(a.get("invocation"), run, failures, exercised)
+    _collection(a.get("collection"), run, failures, exercised)
     _visualization(a.get("visualization"), run, failures, exercised)
     _record(a.get("record"), run, failures, exercised)
     _budget(a.get("budget"), run, failures, exercised)
     _history(a.get("history"), run, failures, exercised)
+    _any_of(a.get("anyOf"), run, failures, exercised)
     return failures, exercised
+
+
+# Dimensions a branch may assert; the rest grade the turn as a whole and never belong here.
+_BRANCH_DIMENSIONS = {
+    "artifacts": lambda spec, run, f, e: _artifacts(spec, run, f, e),
+    "visualization": lambda spec, run, f, e: _visualization(spec, run, f, e),
+    "toolCalls": lambda spec, run, f, e: _tool_calls(spec, run, f, e),
+    "collection": lambda spec, run, f, e: _collection(spec, run, f, e),
+    "record": lambda spec, run, f, e: _record(spec, run, f, e),
+}
+
+
+def _any_of(branches, run, failures, exercised):
+    """Several acceptable outcomes, where the product accepts whichever one happened.
+
+    Each branch is graded by the same checkers a scenario would use on its own, so a
+    branch passes only on observable state. The run fails when every branch fails, and
+    the report names what each one wanted.
+    """
+    if not branches:
+        return
+    reasons = []
+    for branch in branches:
+        attempted = [key for key in branch if key in _BRANCH_DIMENSIONS]
+        unknown = [key for key in branch if key not in _BRANCH_DIMENSIONS]
+        if unknown:
+            failures.append(Failure("anyOf.unknownDimension",
+                                    f"{', '.join(sorted(unknown))} cannot be graded inside anyOf",
+                                    "other"))
+            return
+        got, seen = [], set()
+        for key in attempted:
+            _BRANCH_DIMENSIONS[key](branch[key], run, got, seen)
+        if not got:
+            exercised.update(seen)
+            return
+        reasons.append("; ".join(f.detail for f in got))
+    exercised.add("behavior")
+    failures.append(Failure("anyOf", "no acceptable outcome: " + " | ".join(reasons), "behavior"))
 
 
 def _events(spec, run, failures, exercised):
@@ -150,6 +191,10 @@ def _tool_calls(spec, run, failures, exercised):
             if contains:
                 detail += f" with {contains}"
             failures.append(Failure("toolCalls.mustInclude", detail, "behavior"))
+    for name in spec.get("mustNotInclude") or []:
+        if any(called == name for called, _ in issued):
+            failures.append(Failure("toolCalls.mustNotInclude",
+                                    f"called {name}, which this scenario forbids", "behavior"))
 
 
 _SEPARATORS = (",", " ", "\u00a0", "\u202f", "_", ".")
@@ -765,6 +810,10 @@ def _record(spec, run, failures, exercised):
         if needle.lower() not in content.lower():
             failures.append(Failure("record.mustMention",
                                     f"the record never mentions {needle!r}", "record"))
+    for needle in spec.get("mustNotMention") or []:
+        if needle.lower() in content.lower():
+            failures.append(Failure("record.mustNotMention",
+                                    f"the record holds {needle!r}", "record"))
     if spec.get("idsResolve"):
         _record_ids_resolve(spec, run, failures, galaxy, content)
 
@@ -788,6 +837,34 @@ def _track_dataset(track):
     if isinstance(value, dict):
         return value.get("id")
     return value
+
+
+# galaxy-charts stores these as a bare value; only data/data_table/data_json take an entry.
+SCALAR_INPUT_TYPES = {"boolean", "color", "text", "textarea", "integer", "float", "select",
+                      "data_column"}
+
+
+def _object_valued_scalars(galaxy, detail):
+    """Parameters the plugin declares as scalars but whose stored value is an entry.
+
+    Read from the plugin declaration rather than olite's own contract, so a hole in the
+    tool's validation cannot hide behind the same hole here.
+    """
+    config = (detail.get("latest_revision") or {}).get("config") or {}
+    plugin = galaxy.call(f"api/plugins/{detail.get('type')}") or {}
+    declared = {}
+    for group in ("settings", "tracks"):
+        for param in plugin.get(group) or []:
+            if isinstance(param, dict) and param.get("name"):
+                declared[param["name"]] = param.get("type")
+
+    entries = [config.get("settings") or {}, *(config.get("tracks") or [])]
+    return [
+        f"{key}={value!r}"
+        for entry in entries if isinstance(entry, dict)
+        for key, value in entry.items()
+        if declared.get(key) in SCALAR_INPUT_TYPES and isinstance(value, (dict, list))
+    ]
 
 
 def _visualization(spec, run, failures, exercised):
@@ -857,6 +934,17 @@ def _visualization(spec, run, failures, exercised):
                 f"no saved visualization has settings.{path} containing {wanted!r}; "
                 f"found {sorted(seen) or 'nothing'}", "behavior"))
 
+    # A plugin reads a bare value; an entry stored in its place renders an empty chart while
+    # the agent reports success, so the chat and the pane both look right.
+    if spec.get("scalarValues"):
+        for v in matching:
+            wrong = _object_valued_scalars(galaxy, v)
+            if wrong:
+                failures.append(Failure(
+                    "visualization.scalarValues",
+                    f"saved config stores an entry where the plugin declares a scalar: "
+                    f"{', '.join(wrong)}", "behavior"))
+
     # Adding a track means the saved config gained a dataset, which no assertion about the
     # chat or the pane can see: the agent reports success either way.
     for want in spec.get("tracksDataset") or []:
@@ -871,6 +959,68 @@ def _visualization(spec, run, failures, exercised):
                 "visualization.tracksDataset",
                 f"no saved visualization tracks {want}; tracks reference {sorted(tracked - {None})}",
                 "behavior"))
+
+
+def _collection(spec, run, failures, exercised):
+    """The collection the agent built, as Galaxy holds it.
+
+    `organize_datasets` reports what it did; only the history says whether a tagged
+    collection of the right structure, element count and datatype actually landed.
+    """
+    if not spec:
+        return
+    exercised.add("behavior")
+    staged = getattr(run, "staged", None)
+    if not staged:
+        failures.append(Failure("collection", "scenario staged no history", "behavior"))
+        return
+
+    galaxy, history_id = staged["galaxy"], staged["history_id"]
+    contents = galaxy.call(f"api/histories/{history_id}/contents") or []
+    built = [c for c in contents
+             if c.get("history_content_type") == "dataset_collection" and not c.get("deleted")]
+    if not built:
+        failures.append(Failure("collection.exists",
+                                "no dataset collection in the staged history", "behavior"))
+        return
+
+    details = [galaxy.call(f"api/dataset_collections/{c['id']}?instance_type=history") or c
+               for c in built]
+
+    wanted_type = spec.get("type")
+    if wanted_type:
+        seen = [d.get("collection_type") for d in details]
+        if wanted_type not in seen:
+            failures.append(Failure("collection.type",
+                                    f"collection(s) of type {seen}, wanted {wanted_type!r}",
+                                    "behavior"))
+            return
+        details = [d for d in details if d.get("collection_type") == wanted_type]
+
+    wanted_elements = spec.get("elements")
+    if wanted_elements is not None:
+        counts = [d.get("element_count") for d in details]
+        if wanted_elements not in counts:
+            failures.append(Failure("collection.elements",
+                                    f"element counts {counts}, wanted {wanted_elements}",
+                                    "behavior"))
+
+    if spec.get("tagged"):
+        tagged = [d for d in details if d.get("tags")]
+        if not tagged:
+            failures.append(Failure("collection.tagged",
+                                    "the collection carries no tags", "behavior"))
+
+    wanted_datatype = spec.get("elementDatatype")
+    if wanted_datatype:
+        # Galaxy computes this over the leaves; walking `elements` by hand reaches a nested
+        # `object` whose `extension` is absent, which passed the check while proving nothing.
+        seen = {t for d in details for t in (d.get("elements_datatypes") or [])}
+        if seen != {wanted_datatype}:
+            failures.append(Failure(
+                "collection.elementDatatype",
+                f"elements have datatype {sorted(seen) or 'none reported'}, "
+                f"wanted {wanted_datatype!r}", "behavior"))
 
 
 def _invocation(spec, run, failures, exercised):

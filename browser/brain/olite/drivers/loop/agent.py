@@ -10,7 +10,7 @@ from olite.substrate.llm.json_parse import loads_with_repair
 from .brief import brief
 
 from .secret_redaction import collect_secret_values, redact_secrets
-from .tools import ToolSurface
+from .tools import ToolSurface, plain_tool_name, without_control_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +54,11 @@ class LoopDriver:
         config = getattr(substrate, "config", None) or {}
         self.max_steps = int(config.get("max_steps") or MAX_STEPS)
 
-    async def run(self, transcripts, on_event=None, cancellation=None, confirmation=None):
-        # One surface per turn: its artifacts, repeat guard and approval bridge are the turn's.
-        tools = ToolSurface(self.substrate, self.processes, self.skills, confirmation)
+    async def run(self, transcripts, on_event=None, cancellation=None, confirmation=None,
+                  artifacts=None):
+        # One surface per turn. Earlier turns' artifacts are handed in by the caller, which
+        # holds them: this driver is rebuilt whenever the session's config changes.
+        tools = ToolSurface(self.substrate, self.processes, self.skills, confirmation, artifacts)
         messages = [dict(m) for m in transcripts]
         # This run's output, kept apart from the transcript that compaction rewrites.
         produced = []
@@ -147,6 +149,9 @@ class LoopDriver:
                 ended = REPLIED
                 break
 
+            # The whole batch, before any of it runs: a gate on sibling calls needs it.
+            tools.observe(tool_calls)
+
             terminating = []
             for call in tool_calls:
                 fn = call.get("function", {})
@@ -175,7 +180,7 @@ class LoopDriver:
                     content, is_error = refusal, True
                 else:
                     logs.append(f"call {name}({brief(args)})")
-                    outcome = await tools.dispatch(name, args)
+                    outcome = await tools.dispatch(name, args, call_id)
                     logs.append(f"  -> {brief(outcome.content)}")
                     content, is_error = outcome.text, outcome.is_error
                     gated = outcome.refused
@@ -188,8 +193,8 @@ class LoopDriver:
                 tool_message = {
                     "role": "tool",
                     "tool_call_id": call_id,
-                    "name": name,
-                    "content": redact_secrets(content, self.secrets),
+                    "name": plain_tool_name(name),
+                    "content": without_control_tokens(redact_secrets(content, self.secrets)),
                 }
                 messages.append(tool_message)
                 produced.append(tool_message)

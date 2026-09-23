@@ -1,7 +1,8 @@
 // The chat/artifact split must be adjustable: drag, toggle, shortcut, and a narrow
 // window must collapse the pane without overwriting the stored preference.
 const { chromium } = require("playwright");
-const APP = process.env.APP_URL || "http://localhost:4173/";
+const offline = require("./offline.cjs");
+const APP = process.env.APP_URL || "http://127.0.0.1:8099/plugins/visualizations/olite";
 
 const results = [];
 function check(name, ok, detail) {
@@ -14,6 +15,7 @@ const stored = (p) => p.evaluate(() => localStorage.getItem("olite.artifactColla
 (async () => {
     const browser = await chromium.launch();
     const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+    await offline(page);
     await page.goto(APP);
     await page.waitForSelector("#cred-overlay:not(.hidden)", { timeout: 20000 });
     await page.selectOption("#cred-provider", "openrouter");
@@ -22,6 +24,19 @@ const stored = (p) => p.evaluate(() => localStorage.getItem("olite.artifactColla
     await page.waitForFunction(() => (document.querySelector("#model-btn")?.textContent||"").includes("·"));
 
     check("starts collapsed", await collapsed(page));
+
+    // Nothing has been produced yet, so there is nothing to open and nothing to offer.
+    const btnHidden = () => page.evaluate(() => document.querySelector("#artifact-btn").classList.contains("hidden"));
+    check("no button while the pane is empty", await btnHidden());
+    await page.keyboard.press("Control+\\");
+    check("the shortcut cannot open an empty pane", await collapsed(page));
+
+    // A turn fills the pane; this driver is about the pane itself, so it fills it directly.
+    await page.evaluate(() => {
+        document.querySelector("#artifact-content").innerHTML = "<p>chart</p>";
+    });
+    await page.waitForSelector("#artifact-btn:not(.hidden)", { timeout: 5000 });
+    check("the button appears once there is something to show", !(await btnHidden()));
 
     await page.click("#artifact-btn");
     check("toggle button expands", !(await collapsed(page)));
@@ -32,6 +47,19 @@ const stored = (p) => p.evaluate(() => localStorage.getItem("olite.artifactColla
 
     await page.keyboard.press("Control+\\");
     check("Ctrl+\\ toggles", !(await collapsed(page)));
+
+    // Emptying the pane is what a session reset does, and it used to leave the chart on screen.
+    await page.evaluate(() => {
+        document.querySelector("#artifact-content").innerHTML = "";
+    });
+    await page.waitForFunction(() => document.querySelector("#artifact-btn").classList.contains("hidden"), { timeout: 5000 });
+    check("emptying the pane shuts and hides it", (await collapsed(page)) && (await btnHidden()));
+    await page.evaluate(() => {
+        document.querySelector("#artifact-content").innerHTML = "<p>chart</p>";
+    });
+    await page.waitForSelector("#artifact-btn:not(.hidden)", { timeout: 5000 });
+    // No click needed: the preference still says expanded, and there is something to show again.
+    check("reopens itself once there is something to show again", !(await collapsed(page)));
 
     // Drag the divider; the chat pane's flex basis should change and stay clamped.
     const before = await page.evaluate(() => document.querySelector("#chat-pane").style.flex || "");
