@@ -192,11 +192,15 @@ describe.each(WORKSPACE_STATE_DIR_NAMES)("isProtectedWritePath / isLoomStatePath
       isProtectedWritePath(`/home/alice/${D}/analyses/proj/${OTHER.toUpperCase()}/x`, HOME),
     ).toBe(true);
   });
-  it("does not fold case on the carve-out (folding would widen an exemption)", () => {
-    expect(
-      isProtectedWritePath(`/home/alice/${D.toUpperCase()}/analyses/proj/notebook.md`, HOME),
-    ).toBe(true);
-  });
+  // path.win32.relative folds case, and on NTFS .LOOM really is the same dir as .loom.
+  it.skipIf(process.platform === "win32")(
+    "does not fold case on the carve-out (folding would widen an exemption)",
+    () => {
+      expect(
+        isProtectedWritePath(`/home/alice/${D.toUpperCase()}/analyses/proj/notebook.md`, HOME),
+      ).toBe(true);
+    },
+  );
   it("with no home, falls back to the absolute-path check", () => {
     expect(isProtectedWritePath(`/home/alice/${D}/analyses/proj/notebook.md`)).toBe(true);
   });

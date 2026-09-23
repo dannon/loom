@@ -27,9 +27,11 @@ const cfg: GuardianConfig = {
   consentAcknowledged: null,
   sandbox: false,
 };
+// posix.resolve so Windows doesn't prefix these fake POSIX paths with a drive
+// letter that HOME lacks.
 const resolver: PathResolver = {
   contains: (p) => {
-    const resolved = nodePath.resolve(CWD, p.replace(/^~(?=$|\/)/, HOME));
+    const resolved = nodePath.posix.resolve(CWD, p.replace(/^~(?=$|\/)/, HOME));
     return { resolved, inside: resolved.startsWith(CWD) };
   },
 };
