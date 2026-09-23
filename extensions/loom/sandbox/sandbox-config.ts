@@ -1,6 +1,7 @@
 import * as path from "path";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { normalizeGalaxyUrl } from "../profiles";
+import { WORKSPACE_STATE_DIR_NAMES } from "../workspace-state-dir";
 
 /**
  * Inputs for deriving the OS-sandbox profile. Pure: no I/O, fully testable.
@@ -57,8 +58,8 @@ export function hostFromUrl(url?: string): string | undefined {
 }
 
 /**
- * Build the ASRT profile: writable = workspace + tmp + .loom (the same jail the
- * exec-guard enforces); readable = everything except the credential set; network
+ * Build the ASRT profile: writable = workspace + tmp + both state-dir spellings
+ * (the same jail the exec-guard enforces); readable = everything except the credential set; network
  * = deny-all for bash by default, allowlisting only the Galaxy host (Galaxy work
  * itself flows over MCP, not bash, so a tight bash network default is safe).
  */
@@ -66,7 +67,7 @@ export function buildSandboxConfig(input: SandboxConfigInput): SandboxRuntimeCon
   const allowWrite = [
     input.cwd,
     input.tmpDir,
-    path.join(input.cwd, ".loom"),
+    ...WORKSPACE_STATE_DIR_NAMES.map((name) => path.join(input.cwd, name)),
     ...(input.extraWriteRoots ?? []),
   ];
   const galaxyHost = hostFromUrl(input.galaxyUrl);

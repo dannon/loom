@@ -295,9 +295,10 @@ describe("registerExecGuard -- destructive Galaxy ops (#338)", () => {
   });
 });
 
-// The state dir is a jail root, so a workspace whose state dir is a symlink
-// (e.g. onto a bigger disk) reads through it -- but writes into it still prompt.
-describe.each([".loom"])("registerExecGuard -- %s state dir as a jail root", (D) => {
+// The jail roots include both state-dir spellings whichever the workspace uses,
+// so a workspace whose state dir is a symlink (e.g. onto a bigger disk) reads
+// the same under either name -- and writes into it still prompt under either.
+describe.each([".loom", ".orbit"])("registerExecGuard -- %s state dir as a jail root", (D) => {
   let elsewhere: string;
   beforeEach(() => {
     elsewhere = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "loom-gate-state-")));

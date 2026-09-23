@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as os from "os";
 import * as path from "path";
 import { getNotebookPath } from "../state";
+import { WORKSPACE_STATE_DIR_NAMES } from "../workspace-state-dir";
 import { appendActivityEvent } from "../activity";
 import { redactArgs } from "../activity-hooks";
 import {
@@ -54,7 +55,12 @@ export function registerExecGuard(pi: ExtensionAPI): void {
 
     const input = event.input as Record<string, unknown>;
     const cwd = ctx.cwd;
-    const roots = [cwd, os.tmpdir(), path.join(cwd, ".loom"), ...config.extraWorkspaceRoots];
+    const roots = [
+      cwd,
+      os.tmpdir(),
+      ...WORKSPACE_STATE_DIR_NAMES.map((name) => path.join(cwd, name)),
+      ...config.extraWorkspaceRoots,
+    ];
     const resolver = createPathResolver(roots, os.homedir());
 
     let result: PolicyResult;
