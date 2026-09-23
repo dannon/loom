@@ -14,6 +14,10 @@ export function legacyStateDir(home?: string): string;
 export function orbitStateDir(home?: string): string;
 export function resolveStateDir(opts?: StateDirOptions): string;
 export function resolveConfigPath(opts?: StateDirOptions): string;
+export function configOverrideLocations(opts?: StateDirOptions): {
+  dirs: string[];
+  files: string[];
+};
 export function resolveCliVersionCheckPath(opts?: StateDirOptions): string;
 export function resolveDefaultAnalysesDir(opts?: StateDirOptions): string;
 export function migrateStateDir(opts?: StateDirOptions & { enabled?: boolean; now?: Date }): {

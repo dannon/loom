@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { readEnv } from "./orbit-env.js";
+import { envNames, readEnv } from "./orbit-env.js";
 
 // Off for the compatibility release: ~/.orbit is used only if a newer release
 // already put a config there, and nothing is copied. The rename release flips
@@ -75,6 +75,35 @@ export function resolveStateDir(opts = {}) {
 /** @param {StateDirOptions} [opts] */
 export function resolveConfigPath(opts = {}) {
   return override("CONFIG_PATH", opts) ?? path.join(resolveStateDir(opts), CONFIG_FILE);
+}
+
+/**
+ * Every place a CONFIG_DIR / CONFIG_PATH override could put the brain's
+ * config, under every spelling of those names -- not just the one
+ * resolveConfigPath would pick. The exec-guard and the sandbox protect all of
+ * them, so an override set under the "losing" spelling (or one a
+ * differently-versioned bundle would prefer) is never a readable key store.
+ *
+ * @param {StateDirOptions} [opts]
+ * @returns {{ dirs: string[], files: string[] }}
+ */
+export function configOverrideLocations(opts = {}) {
+  const env = opts.env ?? process.env;
+  const home = homeOf(opts);
+  const dirs = [];
+  const files = [];
+  for (const name of envNames("CONFIG_DIR")) {
+    const v = env[name];
+    if (!v) continue;
+    const dir = expandHome(v, home);
+    dirs.push(dir);
+    files.push(path.join(dir, CONFIG_FILE));
+  }
+  for (const name of envNames("CONFIG_PATH")) {
+    const v = env[name];
+    if (v) files.push(expandHome(v, home));
+  }
+  return { dirs: [...new Set(dirs)], files: [...new Set(files)] };
 }
 
 /**

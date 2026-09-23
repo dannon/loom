@@ -1,5 +1,9 @@
+import * as fs from "fs";
 import * as path from "path";
 import { WORKSPACE_STATE_DIR_NAMES } from "../workspace-state-dir";
+import { configOverrideLocations } from "../../../shared/state-dir.js";
+
+type EnvLike = Record<string, string | undefined>;
 
 // Directories under $HOME that hold credentials/secrets.
 const SENSITIVE_HOME_DIRS = [
@@ -54,17 +58,60 @@ function withinFolded(abs: string, dir: string): boolean {
 // to an ask). This is the floor that closes #183 -- ~/.loom/config.json is a
 // store. The basename patterns (.env, *.pem, *.key, ...) are deliberately NOT
 // stores: those can be project fixtures, so they keep the ask/deny-by-tier path.
-export function isCredentialStore(absPath: string, home: string): boolean {
+export function isCredentialStore(
+  absPath: string,
+  home: string,
+  env: EnvLike = process.env,
+): boolean {
   const norm = path.normalize(absPath);
   for (const d of SENSITIVE_HOME_DIRS) if (withinFolded(norm, path.join(home, d))) return true;
   for (const f of SENSITIVE_HOME_FILES) {
     if (norm.toLowerCase() === path.join(home, f).toLowerCase()) return true;
   }
+  for (const f of configOverride(home, env).files) {
+    if (norm.toLowerCase() === f.toLowerCase()) return true;
+  }
   return false;
 }
 
-export function isSensitivePath(absPath: string, home: string): boolean {
-  if (isCredentialStore(absPath, home)) return true;
+// Callers hand us realpaths, so an override written through a symlink is
+// compared both as written and as resolved. A file that doesn't exist yet
+// resolves through its parent.
+function withRealpath(p: string): string[] {
+  const out = [p];
+  try {
+    out.push(fs.realpathSync(p));
+  } catch {
+    try {
+      out.push(path.join(fs.realpathSync(path.dirname(p)), path.basename(p)));
+    } catch {
+      /* nothing on disk yet -- the lexical path is all there is */
+    }
+  }
+  return out;
+}
+
+/**
+ * The brain config's override locations (ORBIT_/LOOM_ CONFIG_DIR and
+ * CONFIG_PATH, every spelling). The fixed ~/.loom and ~/.orbit entries above
+ * cover the defaults; an override can put the key store anywhere, and it is
+ * just as much a key store there.
+ */
+export function configOverride(
+  home: string,
+  env: EnvLike = process.env,
+): { dirs: string[]; files: string[] } {
+  if (!home) return { dirs: [], files: [] };
+  const { dirs, files } = configOverrideLocations({ env, home });
+  return { dirs: dirs.flatMap(withRealpath), files: files.flatMap(withRealpath) };
+}
+
+export function isSensitivePath(
+  absPath: string,
+  home: string,
+  env: EnvLike = process.env,
+): boolean {
+  if (isCredentialStore(absPath, home, env)) return true;
   if (SENSITIVE_BASENAME.test(path.basename(path.normalize(absPath)))) return true;
   return false;
 }
@@ -94,8 +141,25 @@ function hasSegment(p: string, name: string): boolean {
 // happens to sit inside one -- stays gated. `.git` is never carved out: a
 // workspace is never legitimately inside one. Pass home="" for the plain
 // absolute check (callers without a home / the unit tests).
-export function isProtectedWritePath(absPath: string, home = ""): boolean {
-  if (hasSegment(path.normalize(absPath), ".git")) return true;
+export function isProtectedWritePath(
+  absPath: string,
+  home = "",
+  env: EnvLike = process.env,
+): boolean {
+  const norm = path.normalize(absPath);
+  if (hasSegment(norm, ".git")) return true;
+  // An overridden config dir is Loom's home state wherever it lives, the same
+  // as ~/.loom -- it just has no segment name to match on.
+  const override = configOverride(home, env);
+  if (override.files.some((f) => norm.toLowerCase() === f.toLowerCase())) return true;
+  for (const d of override.dirs) {
+    if (!withinFolded(norm, d)) continue;
+    // Same carve-out as ~/.loom/analyses: an override pointed at the old
+    // default must not turn every analysis write into a prompt.
+    const analyses = path.join(d, "analyses");
+    if (within(norm, analyses) && !hasStateSegment(path.relative(analyses, norm))) continue;
+    return true;
+  }
   return isLoomStatePath(absPath, home);
 }
 

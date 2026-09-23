@@ -6,6 +6,7 @@ import {
   isCredentialStore,
   isProtectedWritePath,
   isLoomStatePath,
+  configOverride,
 } from "./sensitive-read";
 import type { PolicyDeps, PolicyRequest, PolicyResult } from "./types";
 import {
@@ -25,6 +26,26 @@ function denyCredentialStore(p: string): PolicyResult {
     category: "read:credential-store",
     reason: `access to credential store ${p} blocked for all models`,
   };
+}
+
+// Same write verbs bash-risk's LOOM_WRITE triggers on, plus rm/ln.
+const SHELL_WRITE_VERB = /(?:>>?|\btee\b|\bsed\b[^\n]*-i|\bcp\b|\bmv\b|\bdd\b|\brm\b|\bln\b)/;
+
+// Only the config FILE, not the whole override dir: a dir override can sit
+// above the analyses tree (someone pinning LOOM_CONFIG_DIR=~/.loom), and the
+// write tool already prompts for the rest of the dir.
+function writesConfigOverride(command: string, home: string): boolean {
+  const { files } = configOverride(home);
+  if (files.length === 0 || !SHELL_WRITE_VERB.test(command)) return false;
+  const text = command.replace(/["'\\]/g, "").toLowerCase();
+  return files.some((f) => {
+    const forms = [f];
+    if (home && f.startsWith(home + path.sep)) {
+      const rest = f.slice(home.length);
+      forms.push("~" + rest, "$HOME" + rest, "${HOME}" + rest);
+    }
+    return forms.some((form) => text.includes(form.toLowerCase()));
+  });
 }
 
 const FILE_WRITE_TOOLS = new Set(["write", "edit"]);
@@ -122,6 +143,16 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
           reason: "write to the Loom config directory",
         };
       }
+    }
+    // An overridden config location has no `.loom/` segment for the classifier
+    // to spot, so a write verb naming it is caught here instead -- the same
+    // verdict a shell write into ~/.loom/config.json gets.
+    if (writesConfigOverride(command, deps.home)) {
+      return {
+        decision: "deny",
+        category: "bash:catastrophic",
+        reason: "write to the Loom config directory",
+      };
     }
     // Sensitive-read floor: every content-read target, including inside a pipe or
     // compound command (closes the `cat secret | tool` evasion). A dedicated
