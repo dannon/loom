@@ -283,7 +283,11 @@ function scanLoomWrite(
   command: string,
   home: string,
 ): { catastrophic: boolean; targets: string[] } {
-  if (!LOOM_WRITE.test(command)) return { catastrophic: false, targets: [] };
+  // Backslashes are stripped for the trigger too: bash drops them, so
+  // `.lo\om/` names the same directory and must not skip the per-word check.
+  if (!LOOM_WRITE.test(command) && !LOOM_WRITE.test(command.replace(/\\/g, ""))) {
+    return { catastrophic: false, targets: [] };
+  }
   const words = shellWords(command).filter(mentionsLoom);
   if (words.length === 0) return { catastrophic: true, targets: [] };
   const targets: string[] = [];

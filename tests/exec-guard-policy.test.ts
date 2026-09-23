@@ -721,6 +721,20 @@ describe.each(WORKSPACE_STATE_DIR_NAMES)("decide -- %s state dir", (D) => {
   };
 
   it("a file-tool write into the state dir prompts even inside the workspace", () => {
+    for (const toolName of ["write", "edit"])
+      for (const key of ["path", "file_path"]) {
+        const r = decide(
+          req({ toolName, toolInput: { [key]: `${CWD}/${D}/activity.jsonl` } }),
+          deps,
+        );
+        expect(r.decision, `${toolName}/${key}`).toBe("ask");
+        expect(r.category, `${toolName}/${key}`).toBe("write:protected");
+        expect(
+          decide(req({ toolName, modelTier: "weak", toolInput: { [key]: `${CWD}/${D}/x` } }), deps)
+            .decision,
+          `${toolName}/${key}/weak`,
+        ).toBe("deny");
+      }
     for (const toolName of ["write", "edit"]) {
       const r = decide(req({ toolName, toolInput: { path: `${CWD}/${D}/config.json` } }), deps);
       expect(r.decision, toolName).toBe("ask");

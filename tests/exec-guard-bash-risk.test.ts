@@ -576,3 +576,20 @@ describe("classifyBash -- both state-dir spellings, whichever the workspace uses
       expect(classifyBash(c, HOME).kind, c).toBe("unknown");
   });
 });
+
+describe("classifyBash -- a backslash inside the state-dir name", () => {
+  it("still triggers the per-word check on its own", () => {
+    for (const c of [
+      `echo x > ${HOME}/.lo\\om/config.json`,
+      `echo x > ${HOME}/.or\\bit/config.json`,
+      `cp evil ~/.\\orbit/config.json`,
+      `echo x > .or\\bit/env/bin/python`,
+    ])
+      expect(classifyBash(c, HOME).kind, c).toBe("catastrophic");
+  });
+  it("and still carves out the analysis workspace the shell would really write", () => {
+    expect(classifyBash(`echo x > ${HOME}/.or\\bit/analyses/proj/out.txt`, HOME).kind).toBe(
+      "unknown",
+    );
+  });
+});
