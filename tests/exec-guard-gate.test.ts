@@ -294,3 +294,47 @@ describe("registerExecGuard -- destructive Galaxy ops (#338)", () => {
     expect(confirm.mock.calls[0][1] as string).toMatch(/entire history/i);
   });
 });
+
+// The state dir is a jail root, so a workspace whose state dir is a symlink
+// (e.g. onto a bigger disk) reads through it -- but writes into it still prompt.
+describe.each([".loom"])("registerExecGuard -- %s state dir as a jail root", (D) => {
+  let elsewhere: string;
+  beforeEach(() => {
+    elsewhere = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "loom-gate-state-")));
+    fs.writeFileSync(path.join(elsewhere, "x.txt"), "x");
+    fs.symlinkSync(elsewhere, path.join(sandbox, "project", D));
+  });
+  afterEach(() => {
+    fs.rmSync(elsewhere, { recursive: true, force: true });
+  });
+
+  it("reads through the state dir without prompting", async () => {
+    const c = ctx();
+    const r = await handler(
+      {
+        type: "tool_call",
+        toolName: "read",
+        toolCallId: "s1",
+        input: { path: path.join(sandbox, "project", D, "x.txt") },
+      },
+      c,
+    );
+    expect(r?.block).toBeFalsy();
+    expect(c.ui.select).not.toHaveBeenCalled();
+  });
+
+  it("still prompts for a write into it", async () => {
+    const c = ctx();
+    const r = await handler(
+      {
+        type: "tool_call",
+        toolName: "write",
+        toolCallId: "s2",
+        input: { path: path.join(sandbox, "project", D, "y.txt"), content: "y" },
+      },
+      c,
+    );
+    expect(c.ui.select).toHaveBeenCalled();
+    expect(r?.block).toBe(true);
+  });
+});
