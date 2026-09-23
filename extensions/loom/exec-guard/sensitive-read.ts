@@ -65,8 +65,12 @@ export function isCredentialStore(
 ): boolean {
   const norm = path.normalize(absPath);
   for (const d of SENSITIVE_HOME_DIRS) if (withinFolded(norm, path.join(home, d))) return true;
+  // Also as realpaths: callers compare resolved targets, so a config.json that
+  // is itself a symlink into the workspace would otherwise read as a plain
+  // workspace file.
   for (const f of SENSITIVE_HOME_FILES) {
-    if (norm.toLowerCase() === path.join(home, f).toLowerCase()) return true;
+    const candidates = home ? withRealpath(path.join(home, f)) : [path.join(home, f)];
+    if (candidates.some((c) => norm.toLowerCase() === c.toLowerCase())) return true;
   }
   for (const f of configOverride(home, env).files) {
     if (norm.toLowerCase() === f.toLowerCase()) return true;

@@ -39,9 +39,16 @@ function expandHome(p, home) {
   return path.resolve(p.replace(/^~(?=$|[/\\])/, home));
 }
 
+// Relative overrides are ignored: they would resolve against each process's
+// own cwd, so the desktop shell and the brain it spawns into a project could
+// read two different configs -- one of them sitting in the workspace.
+function absoluteOverride(v, home) {
+  if (!v || !(path.isAbsolute(v) || /^~(?=$|[/\\])/.test(v))) return undefined;
+  return expandHome(v, home);
+}
+
 function override(name, opts) {
-  const v = readEnv(name, opts?.env);
-  return v ? expandHome(v, homeOf(opts)) : undefined;
+  return absoluteOverride(readEnv(name, opts?.env), homeOf(opts));
 }
 
 /** @param {string} [home] */
@@ -93,15 +100,14 @@ export function configOverrideLocations(opts = {}) {
   const dirs = [];
   const files = [];
   for (const name of envNames("CONFIG_DIR")) {
-    const v = env[name];
-    if (!v) continue;
-    const dir = expandHome(v, home);
+    const dir = absoluteOverride(env[name], home);
+    if (!dir) continue;
     dirs.push(dir);
     files.push(path.join(dir, CONFIG_FILE));
   }
   for (const name of envNames("CONFIG_PATH")) {
-    const v = env[name];
-    if (v) files.push(expandHome(v, home));
+    const file = absoluteOverride(env[name], home);
+    if (file) files.push(file);
   }
   return { dirs: [...new Set(dirs)], files: [...new Set(files)] };
 }

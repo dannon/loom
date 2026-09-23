@@ -31,21 +31,29 @@ function denyCredentialStore(p: string): PolicyResult {
 // Same write verbs bash-risk's LOOM_WRITE triggers on, plus rm/ln.
 const SHELL_WRITE_VERB = /(?:>>?|\btee\b|\bsed\b[^\n]*-i|\bcp\b|\bmv\b|\bdd\b|\brm\b|\bln\b)/;
 
+// A reference to the override variables themselves (`cat "$ORBIT_CONFIG_PATH"`)
+// is the key store by another name, and the resolver would read it as a
+// literal filename in the workspace.
+const CONFIG_OVERRIDE_VAR = /\$\{?(?:ORBIT|LOOM)_CONFIG_(?:DIR|PATH)\b/i;
+
+function shellTokens(command: string): string[] {
+  return command
+    .replace(/["'\\]/g, "")
+    .split(/[\s;&|<>()]+/)
+    .filter(Boolean);
+}
+
 // Only the config FILE, not the whole override dir: a dir override can sit
 // above the analyses tree (someone pinning LOOM_CONFIG_DIR=~/.loom), and the
-// write tool already prompts for the rest of the dir.
+// write tool already prompts for the rest of the dir. Matched per word on the
+// basename, so a relative `./brain.json` or `x/../brain.json` from inside the
+// dir still counts, while `brain.json.bak` does not. That over-matches a
+// same-named file elsewhere, which only costs anything while an override is set.
 function writesConfigOverride(command: string, home: string): boolean {
   const { files } = configOverride(home);
   if (files.length === 0 || !SHELL_WRITE_VERB.test(command)) return false;
-  const text = command.replace(/["'\\]/g, "").toLowerCase();
-  return files.some((f) => {
-    const forms = [f];
-    if (home && f.startsWith(home + path.sep)) {
-      const rest = f.slice(home.length);
-      forms.push("~" + rest, "$HOME" + rest, "${HOME}" + rest);
-    }
-    return forms.some((form) => text.includes(form.toLowerCase()));
-  });
+  const names = new Set(files.map((f) => path.basename(f).toLowerCase()));
+  return shellTokens(command).some((t) => names.has(path.basename(t).toLowerCase()));
 }
 
 const FILE_WRITE_TOOLS = new Set(["write", "edit"]);
@@ -147,6 +155,9 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     // An overridden config location has no `.loom/` segment for the classifier
     // to spot, so a write verb naming it is caught here instead -- the same
     // verdict a shell write into ~/.loom/config.json gets.
+    if (CONFIG_OVERRIDE_VAR.test(command)) {
+      return denyCredentialStore("$ORBIT_/LOOM_CONFIG_PATH or CONFIG_DIR");
+    }
     if (writesConfigOverride(command, deps.home)) {
       return {
         decision: "deny",

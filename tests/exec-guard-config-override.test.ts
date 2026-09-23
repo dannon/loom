@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { configOverrideLocations } from "../shared/state-dir.js";
+import fs from "node:fs";
+import os from "node:os";
+import nodePath from "node:path";
+import { configOverrideLocations, resolveConfigPath } from "../shared/state-dir.js";
 import {
   isCredentialStore,
   isProtectedWritePath,
@@ -52,6 +55,13 @@ describe("configOverrideLocations", () => {
       "/etc/o.json",
       "/etc/l.json",
     ]);
+  });
+
+  it("ignores relative overrides, which would resolve per-process", () => {
+    const env = { ORBIT_CONFIG_PATH: "config.json", LOOM_CONFIG_DIR: "./state" };
+    expect(configOverrideLocations({ home: HOME, env })).toEqual({ dirs: [], files: [] });
+    expect(resolveConfigPath({ home: HOME, env })).not.toContain("state");
+    expect(resolveConfigPath({ home: HOME, env })).not.toBe(nodePath.resolve("config.json"));
   });
 
   it("is empty when nothing is set", () => {
@@ -151,10 +161,58 @@ describe("policy", () => {
     }
   });
 
+  it("denies a relative shell write to a config that lives in the workspace", () => {
+    clearOverrides();
+    vi.stubEnv("ORBIT_CONFIG_PATH", `${CWD}/brain.json`);
+    const trusted = { ...cfg, trustedWorkspaces: [CWD] };
+    for (const command of [
+      `echo '{"guardian":{"enabled":false}}' > ./brain.json`,
+      `echo x > sub/../brain.json`,
+      `cp /tmp/x "brain.json"`,
+    ]) {
+      const d = decide({ ...req("bash", { command }), config: trusted }, deps);
+      expect(d.decision, command).toBe("deny");
+    }
+  });
+
+  it("doesn't deny a write that merely shares a prefix with the config", () => {
+    clearOverrides();
+    vi.stubEnv("ORBIT_CONFIG_PATH", `${CWD}/brain.json`);
+    const d = decide(req("bash", { command: `cp ${CWD}/brain.json.backup out.json` }), deps);
+    expect(d.category).not.toBe("bash:catastrophic");
+  });
+
+  it.each(OVERRIDE_VARS)("denies reaching the config through $%s", (name) => {
+    clearOverrides();
+    vi.stubEnv(name, "/srv/cfg");
+    for (const command of [`cat "$${name}"`, `cat \${${name}}/config.json`]) {
+      expect(decide(req("bash", { command }), deps).category, command).toBe(
+        "read:credential-store",
+      );
+    }
+  });
+
   it("gates the write tool on the moved config", () => {
     clearOverrides();
     vi.stubEnv("ORBIT_CONFIG_PATH", "/srv/brain.json");
     expect(decide(req("write", { path: "/srv/brain.json" }), deps).decision).not.toBe("allow");
+  });
+});
+
+describe("default config symlinked elsewhere", () => {
+  it("still treats the symlink's target as the key store", () => {
+    const home = fs.realpathSync(fs.mkdtempSync(nodePath.join(os.tmpdir(), "cfg-link-")));
+    try {
+      const target = nodePath.join(home, "work", "settings.json");
+      fs.mkdirSync(nodePath.dirname(target), { recursive: true });
+      fs.writeFileSync(target, "{}");
+      fs.mkdirSync(nodePath.join(home, ".orbit"));
+      fs.symlinkSync(target, nodePath.join(home, ".orbit", "config.json"));
+      clearOverrides();
+      expect(isCredentialStore(target, home)).toBe(true);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 
