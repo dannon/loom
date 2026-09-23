@@ -108,7 +108,9 @@ function hasStateSegment(p: string): boolean {
 export function isLoomStatePath(absPath: string, home = ""): boolean {
   const norm = path.normalize(absPath);
   if (!hasStateSegment(norm)) return false;
-  if (home) {
+  // A home that itself sits under a state dir gets no carve-out: the segment
+  // above it is state no matter which analyses tree the path is in.
+  if (home && !hasStateSegment(path.normalize(home))) {
     for (const name of WORKSPACE_STATE_DIR_NAMES) {
       const analyses = path.join(home, name, "analyses");
       if (within(norm, analyses) && !hasStateSegment(path.relative(analyses, norm))) {

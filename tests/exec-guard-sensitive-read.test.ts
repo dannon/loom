@@ -202,3 +202,11 @@ describe.each(WORKSPACE_STATE_DIR_NAMES)("isProtectedWritePath / isLoomStatePath
     expect(isProtectedWritePath(`/data/My${D}/foo`, HOME)).toBe(false);
   });
 });
+
+describe("isLoomStatePath -- a home that is itself under a state dir", () => {
+  it.each(WORKSPACE_STATE_DIR_NAMES)("gets no %s/analyses carve-out", (D) => {
+    for (const odd of ["/srv/.loom/alice", "/srv/.orbit/alice"]) {
+      expect(isLoomStatePath(`${odd}/${D}/analyses/p/out.txt`, odd), odd).toBe(true);
+    }
+  });
+});
