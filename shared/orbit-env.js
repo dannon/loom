@@ -81,6 +81,24 @@ export function writeEnv(env, name, value) {
 }
 
 /**
+ * Copy an ORBIT_ value onto its legacy name when the legacy name is unset, for
+ * consumers that can only look up one fixed name -- pi resolves a custom
+ * provider's apiKey from the env var models.json names (LOOM_ACTIVE_LLM_API_KEY),
+ * and older bundles only read LOOM_*. A legacy value that is already set is
+ * left alone: whoever set it did so on purpose.
+ *
+ * @param {Record<string, string | undefined>} env
+ * @param {string} name
+ */
+export function mirrorToLegacyEnv(env, name) {
+  const v = env[currentEnvName(name)];
+  if (v === undefined) return;
+  const legacy = legacyEnvNames(name);
+  if (legacy.some((n) => env[n] !== undefined)) return;
+  for (const n of legacy) env[n] = v;
+}
+
+/**
  * Is the brain running under the desktop/web renderer rather than the CLI?
  * "desktop" is the new spelling of the value; "orbit" stays accepted.
  *

@@ -1,3 +1,5 @@
+import { mirrorToLegacyEnv } from "./orbit-env.js";
+
 /**
  * Curated allowlist for the env that gets forwarded into the brain subprocess.
  * Forwarding the caller's process.env wholesale leaks unrelated secrets
@@ -94,6 +96,8 @@ export function buildBrainEnv(sourceEnv = process.env, opts = {}) {
     if (v === undefined) continue;
     if (BRAIN_ENV_PREFIXES.some((p) => k.startsWith(p))) env[k] = v;
   }
+  // pi reads a custom provider's key from LOOM_ACTIVE_LLM_API_KEY only.
+  mirrorToLegacyEnv(env, "ACTIVE_LLM_API_KEY");
   if (opts.includeProviderKeys) {
     for (const key of PROVIDER_API_KEY_NAMES) {
       const v = sourceEnv[key];

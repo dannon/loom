@@ -24,7 +24,7 @@ import {
   DEFAULT_ENDPOINT_API,
 } from "../shared/custom-provider.js";
 import { GALAXY_MCP_SPEC } from "../shared/galaxy-mcp-spec.js";
-import { isDesktopShell, readEnv, writeEnv } from "../shared/orbit-env.js";
+import { isDesktopShell, mirrorToLegacyEnv, readEnv, writeEnv } from "../shared/orbit-env.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -55,6 +55,10 @@ const piListModelsModulePath = join(piPackageDir, "dist/cli/list-models.js");
 const piConfigModulePath = join(piPackageDir, "dist/config.js");
 const piModelRuntimeModulePath = join(piPackageDir, "dist/core/model-runtime.js");
 const userArgs = process.argv.slice(2);
+
+// pi resolves a custom provider's key from LOOM_ACTIVE_LLM_API_KEY by name, so
+// a key supplied only as ORBIT_ACTIVE_LLM_API_KEY needs the legacy twin.
+mirrorToLegacyEnv(process.env, "ACTIVE_LLM_API_KEY");
 
 // Local-execution safety flags. Translate to env so the exec-guard (brain side)
 // reads them; strip so they aren't forwarded to pi as unknown flags.

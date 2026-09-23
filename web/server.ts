@@ -28,7 +28,7 @@ import { resolveShutdownGraceMs } from "./shutdown-grace.js";
 import { DASHBOARD_FILENAME, DASHBOARD_MAX_BYTES } from "../shared/dashboard-contract.js";
 import { casWriteLayoutFile, readLayoutFile } from "../shared/dashboard-layout-store.js";
 import { listFilesForWeb, readFileForWeb, readNotebookForWeb } from "./files-surface.js";
-import { DESKTOP_SHELL_KIND, readEnv, writeEnv } from "../shared/orbit-env.js";
+import { DESKTOP_SHELL_KIND, mirrorToLegacyEnv, readEnv, writeEnv } from "../shared/orbit-env.js";
 import { resolveConfigPath, resolveDefaultAnalysesDir } from "../shared/state-dir.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -39,6 +39,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // the brain, the lockdown gate, and the static bundle all silently go missing.
 const WEB_ROOT = basename(__dirname) === "build" ? resolve(__dirname, "..") : __dirname;
 const LOOM_BIN = resolve(WEB_ROOT, "../bin/loom.js");
+
+// A container may be handed only ORBIT_ACTIVE_LLM_API_KEY; the BYO-key check
+// and pi both look up the LOOM_ name, so give it one before anything reads it.
+mirrorToLegacyEnv(process.env, "ACTIVE_LLM_API_KEY");
 
 const PORT = parseInt(process.env.PORT || "3000", 10);
 // Bind loopback by default; the WS is an authenticated-agent surface, so an
