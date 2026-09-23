@@ -19,7 +19,6 @@ import {
 let home: string;
 let loom: string;
 let orbit: string;
-const noEnv = {};
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), "loom-state-home-"));
@@ -42,84 +41,57 @@ const posixOnly = process.platform === "win32" ? it.skip : it;
 
 describe("resolveStateDir", () => {
   it("keeps a fresh machine on ~/.loom until migration is switched on", () => {
-    expect(resolveStateDir({ home, env: noEnv, migrate: false })).toBe(loom);
-    expect(resolveStateDir({ home, env: noEnv, migrate: true })).toBe(orbit);
+    expect(resolveStateDir({ home, migrate: false })).toBe(loom);
+    expect(resolveStateDir({ home, migrate: true })).toBe(orbit);
   });
 
   it("keeps a loom-only machine on ~/.loom", () => {
     put(path.join(loom, "config.json"));
-    for (const migrate of both) expect(resolveStateDir({ home, env: noEnv, migrate })).toBe(loom);
+    for (const migrate of both) expect(resolveStateDir({ home, migrate })).toBe(loom);
   });
 
   it("uses ~/.orbit once it holds a config", () => {
     put(path.join(orbit, "config.json"));
-    for (const migrate of both) expect(resolveStateDir({ home, env: noEnv, migrate })).toBe(orbit);
+    for (const migrate of both) expect(resolveStateDir({ home, migrate })).toBe(orbit);
   });
 
   it("prefers ~/.orbit when both have a config", () => {
     put(path.join(loom, "config.json"));
     put(path.join(orbit, "config.json"));
-    for (const migrate of both) expect(resolveStateDir({ home, env: noEnv, migrate })).toBe(orbit);
+    for (const migrate of both) expect(resolveStateDir({ home, migrate })).toBe(orbit);
   });
 
   it("ignores a ~/.orbit that only holds desktop shell state", () => {
     put(path.join(orbit, "window-state.json"));
     put(path.join(orbit, "version-check.json"));
-    expect(resolveStateDir({ home, env: noEnv, migrate: false })).toBe(loom);
-  });
-
-  it("lets CONFIG_DIR override everything, ORBIT_ before LOOM_", () => {
-    put(path.join(orbit, "config.json"));
-    const pinned = path.join(home, "elsewhere");
-    expect(resolveStateDir({ home, env: { LOOM_CONFIG_DIR: pinned } })).toBe(pinned);
-    expect(
-      resolveStateDir({ home, env: { LOOM_CONFIG_DIR: "/nope", ORBIT_CONFIG_DIR: pinned } }),
-    ).toBe(pinned);
-    expect(resolveStateDir({ home, env: { ORBIT_CONFIG_DIR: "~/pinned" } })).toBe(
-      path.join(home, "pinned"),
-    );
-  });
-
-  it("treats an empty override as unset", () => {
-    expect(resolveStateDir({ home, env: { ORBIT_CONFIG_DIR: "" }, migrate: false })).toBe(loom);
+    expect(resolveStateDir({ home, migrate: false })).toBe(loom);
   });
 });
 
 describe("resolveConfigPath", () => {
   it("is config.json in the state dir", () => {
-    expect(resolveConfigPath({ home, env: noEnv, migrate: false })).toBe(
-      path.join(loom, "config.json"),
-    );
+    expect(resolveConfigPath({ home, migrate: false })).toBe(path.join(loom, "config.json"));
     put(path.join(orbit, "config.json"));
-    expect(resolveConfigPath({ home, env: noEnv })).toBe(path.join(orbit, "config.json"));
-  });
-
-  it("honors CONFIG_PATH, then CONFIG_DIR", () => {
-    const file = path.join(home, "custom.json");
-    expect(resolveConfigPath({ home, env: { LOOM_CONFIG_PATH: file } })).toBe(file);
-    expect(resolveConfigPath({ home, env: { ORBIT_CONFIG_DIR: path.join(home, "d") } })).toBe(
-      path.join(home, "d", "config.json"),
-    );
+    expect(resolveConfigPath({ home })).toBe(path.join(orbit, "config.json"));
   });
 });
 
 describe("resolveCliVersionCheckPath", () => {
   it("keeps the old name in ~/.loom", () => {
-    expect(resolveCliVersionCheckPath({ home, env: noEnv, migrate: false })).toBe(
+    expect(resolveCliVersionCheckPath({ home, migrate: false })).toBe(
       path.join(loom, "version-check.json"),
     );
   });
 
   it("never lands on the desktop's ~/.orbit/version-check.json", () => {
     put(path.join(orbit, "config.json"));
-    const p = resolveCliVersionCheckPath({ home, env: noEnv });
+    const p = resolveCliVersionCheckPath({ home });
     expect(p).toBe(path.join(orbit, "cli-version-check.json"));
-    expect(resolveCliVersionCheckPath({ home, env: noEnv, migrate: true })).toBe(p);
-    expect(resolveCliVersionCheckPath({ home, env: { ORBIT_CONFIG_DIR: orbit } })).toBe(p);
+    expect(resolveCliVersionCheckPath({ home, migrate: true })).toBe(p);
   });
 
   it("uses the namespaced name on a fresh machine after the flip", () => {
-    expect(resolveCliVersionCheckPath({ home, env: noEnv, migrate: true })).toBe(
+    expect(resolveCliVersionCheckPath({ home, migrate: true })).toBe(
       path.join(orbit, "cli-version-check.json"),
     );
   });
@@ -127,21 +99,15 @@ describe("resolveCliVersionCheckPath", () => {
 
 describe("resolveDefaultAnalysesDir", () => {
   it("is ~/.loom/analyses on a fresh machine today and ~/.orbit/analyses after the flip", () => {
-    expect(resolveDefaultAnalysesDir({ home, env: noEnv, migrate: false })).toBe(
-      path.join(loom, "analyses"),
-    );
-    expect(resolveDefaultAnalysesDir({ home, env: noEnv, migrate: true })).toBe(
-      path.join(orbit, "analyses"),
-    );
+    expect(resolveDefaultAnalysesDir({ home, migrate: false })).toBe(path.join(loom, "analyses"));
+    expect(resolveDefaultAnalysesDir({ home, migrate: true })).toBe(path.join(orbit, "analyses"));
   });
 
   it("keeps an existing ~/.loom/analyses even after the config moves", () => {
     fs.mkdirSync(path.join(loom, "analyses"), { recursive: true });
     put(path.join(orbit, "config.json"));
     for (const migrate of both) {
-      expect(resolveDefaultAnalysesDir({ home, env: noEnv, migrate })).toBe(
-        path.join(loom, "analyses"),
-      );
+      expect(resolveDefaultAnalysesDir({ home, migrate })).toBe(path.join(loom, "analyses"));
     }
   });
 
@@ -149,12 +115,12 @@ describe("resolveDefaultAnalysesDir", () => {
     fs.mkdirSync(path.join(loom, "analyses"), { recursive: true });
     fs.mkdirSync(path.join(orbit, "analyses"), { recursive: true });
     put(path.join(orbit, "config.json"));
-    expect(resolveDefaultAnalysesDir({ home, env: noEnv })).toBe(path.join(orbit, "analyses"));
+    expect(resolveDefaultAnalysesDir({ home })).toBe(path.join(orbit, "analyses"));
   });
 
   it("follows the state dir for an orbit-only machine", () => {
     put(path.join(orbit, "config.json"));
-    expect(resolveDefaultAnalysesDir({ home, env: noEnv })).toBe(path.join(orbit, "analyses"));
+    expect(resolveDefaultAnalysesDir({ home })).toBe(path.join(orbit, "analyses"));
   });
 });
 
@@ -182,40 +148,40 @@ describe("migrateStateDir", () => {
   it("is off in this release", () => {
     expect(MIGRATE_TO_ORBIT_STATE_DIR).toBe(false);
     seedLoom();
-    expect(migrateStateDir({ home, env: noEnv })).toEqual({ status: "disabled" });
+    expect(migrateStateDir({ home })).toEqual({ status: "disabled" });
     expect(fs.existsSync(orbit)).toBe(false);
     expect(fs.existsSync(path.join(loom, MOVED_MARKER_FILE))).toBe(false);
   });
 
   it("does nothing on a fresh machine", () => {
-    expect(migrateStateDir({ home, env: noEnv, enabled: true }).status).toBe("nothing-to-migrate");
+    expect(migrateStateDir({ home, enabled: true }).status).toBe("nothing-to-migrate");
     expect(fs.existsSync(orbit)).toBe(false);
   });
 
   it("copies config.json byte-for-byte and switches the resolver over", () => {
     seedLoom();
-    expect(migrateStateDir({ home, env: noEnv, enabled: true }).status).toBe("migrated");
+    expect(migrateStateDir({ home, enabled: true }).status).toBe("migrated");
     const copied = fs.readFileSync(path.join(orbit, "config.json"));
     expect(copied.equals(configBytes)).toBe(true);
     expect(copied.toString("utf-8")).toContain(encrypted);
-    expect(resolveStateDir({ home, env: noEnv, migrate: true })).toBe(orbit);
+    expect(resolveStateDir({ home, migrate: true })).toBe(orbit);
   });
 
   posixOnly("writes the copy as 0600, even from a looser source", () => {
     seedLoom(0o644);
-    migrateStateDir({ home, env: noEnv, enabled: true });
+    migrateStateDir({ home, enabled: true });
     expect(fs.statSync(path.join(orbit, "config.json")).mode & 0o777).toBe(0o600);
   });
 
   posixOnly("keeps 0600 from a 0600 source", () => {
     seedLoom(0o600);
-    migrateStateDir({ home, env: noEnv, enabled: true });
+    migrateStateDir({ home, enabled: true });
     expect(fs.statSync(path.join(orbit, "config.json")).mode & 0o777).toBe(0o600);
   });
 
   it("copies the what's-new stamp but not caches or the version check", () => {
     seedLoom();
-    migrateStateDir({ home, env: noEnv, enabled: true });
+    migrateStateDir({ home, enabled: true });
     expect(fs.readFileSync(path.join(orbit, "whats-new-seen.json"), "utf-8")).toBe(
       '{"version":"0.7.0"}',
     );
@@ -227,7 +193,7 @@ describe("migrateStateDir", () => {
 
   it("leaves ~/.loom intact and writes the marker", () => {
     seedLoom();
-    migrateStateDir({ home, env: noEnv, enabled: true, now: new Date("2026-10-01T00:00:00Z") });
+    migrateStateDir({ home, enabled: true, now: new Date("2026-10-01T00:00:00Z") });
     expect(fs.readFileSync(path.join(loom, "config.json")).equals(configBytes)).toBe(true);
     expect(fs.existsSync(path.join(loom, "cache", "skills", "galaxy-skills@abc", "SKILL.md"))).toBe(
       true,
@@ -241,19 +207,18 @@ describe("migrateStateDir", () => {
 
   it("leaves no staging files behind", () => {
     seedLoom();
-    migrateStateDir({ home, env: noEnv, enabled: true });
+    migrateStateDir({ home, enabled: true });
     expect(fs.readdirSync(orbit).filter((f) => f.includes(".migrating-"))).toEqual([]);
   });
 
   it("is idempotent and never overwrites the new copy", () => {
     seedLoom();
-    migrateStateDir({ home, env: noEnv, enabled: true, now: new Date("2026-10-01T00:00:00Z") });
+    migrateStateDir({ home, enabled: true, now: new Date("2026-10-01T00:00:00Z") });
     const marker = fs.readFileSync(path.join(loom, MOVED_MARKER_FILE), "utf-8");
     // The user changes settings after migrating; a second run must not revert them.
     fs.writeFileSync(path.join(orbit, "config.json"), '{"changed":true}');
     expect(
-      migrateStateDir({ home, env: noEnv, enabled: true, now: new Date("2027-01-01T00:00:00Z") })
-        .status,
+      migrateStateDir({ home, enabled: true, now: new Date("2027-01-01T00:00:00Z") }).status,
     ).toBe("already-migrated");
     expect(fs.readFileSync(path.join(orbit, "config.json"), "utf-8")).toBe('{"changed":true}');
     expect(fs.readFileSync(path.join(loom, MOVED_MARKER_FILE), "utf-8")).toBe(marker);
@@ -264,7 +229,7 @@ describe("migrateStateDir", () => {
     put(path.join(orbit, "window-state.json"), '{"width":1}');
     put(path.join(orbit, "version-check.json"), '{"desktop":true}');
     put(path.join(orbit, "whats-new-seen.json"), '{"version":"0.9.0"}');
-    expect(migrateStateDir({ home, env: noEnv, enabled: true }).status).toBe("migrated");
+    expect(migrateStateDir({ home, enabled: true }).status).toBe("migrated");
     expect(fs.readFileSync(path.join(orbit, "window-state.json"), "utf-8")).toBe('{"width":1}');
     expect(fs.readFileSync(path.join(orbit, "version-check.json"), "utf-8")).toBe(
       '{"desktop":true}',
@@ -274,25 +239,14 @@ describe("migrateStateDir", () => {
     );
   });
 
-  it("stays out of the way when the config dir is pinned by env", () => {
-    seedLoom();
-    for (const env of [
-      { ORBIT_CONFIG_DIR: loom },
-      { LOOM_CONFIG_PATH: path.join(loom, "c.json") },
-    ]) {
-      expect(migrateStateDir({ home, env, enabled: true }).status).toBe("pinned");
-    }
-    expect(fs.existsSync(orbit)).toBe(false);
-  });
-
   it("reports a failure without touching ~/.loom", () => {
     seedLoom();
     put(orbit, "not a directory");
-    const result = migrateStateDir({ home, env: noEnv, enabled: true });
+    const result = migrateStateDir({ home, enabled: true });
     expect(result.status).toBe("failed");
     expect(fs.readFileSync(path.join(loom, "config.json")).equals(configBytes)).toBe(true);
     expect(fs.existsSync(path.join(loom, MOVED_MARKER_FILE))).toBe(false);
-    expect(resolveStateDir({ home, env: noEnv, migrate: true })).toBe(loom);
+    expect(resolveStateDir({ home, migrate: true })).toBe(loom);
   });
 });
 

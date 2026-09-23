@@ -5,7 +5,6 @@ import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
 import { loadGuardianConfig, resolveSandbox } from "../exec-guard/guardian-config";
 import { isSandboxActive, setSandboxActive } from "../exec-guard/runtime-state";
 import { buildSandboxConfig } from "./sandbox-config";
-import { configOverride } from "../exec-guard/sensitive-read";
 import { createSandboxedBashOps } from "./sandbox-bash";
 import { describeSandboxInitFailure } from "./sandbox-init-message";
 
@@ -69,7 +68,6 @@ export function registerSandbox(pi: ExtensionAPI): void {
           tmpDir: os.tmpdir(),
           extraWriteRoots: cfg.extraWorkspaceRoots,
           galaxyUrl: process.env.GALAXY_URL,
-          configOverrideFiles: configOverride(os.homedir()).files,
         }),
       );
       setSandboxActive(true);

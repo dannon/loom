@@ -13,7 +13,6 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { envNames, readEnv } from "./orbit-env.js";
 
 // Off for the compatibility release: ~/.orbit is used only if a newer release
 // already put a config there, and nothing is copied. The rename release flips
@@ -28,35 +27,11 @@ const CONFIG_FILE = "config.json";
 const MIGRATED_EXTRA_FILES = ["whats-new-seen.json"];
 
 /**
- * @typedef {{ env?: Record<string, string | undefined>, home?: string, migrate?: boolean }} StateDirOptions
+ * @typedef {{ home?: string, migrate?: boolean }} StateDirOptions
  */
 
 function homeOf(opts) {
   return opts?.home ?? os.homedir();
-}
-
-function expandHome(p, home) {
-  return path.resolve(p.replace(/^~(?=$|[/\\])/, home));
-}
-
-// Relative overrides are ignored: they would resolve against each process's
-// own cwd, so the desktop shell and the brain it spawns into a project could
-// read two different configs -- one of them sitting in the workspace.
-function absoluteOverride(v, home) {
-  if (!v || !(path.isAbsolute(v) || /^~(?=$|[/\\])/.test(v))) return undefined;
-  return expandHome(v, home);
-}
-
-// For protection only: a relative override is never honored, but whatever it
-// names was meant to be a key store, so the guard still treats it as one
-// (relative to this process, which for the brain is the workspace).
-function protectedOverride(v, home) {
-  if (!v) return undefined;
-  return absoluteOverride(v, home) ?? path.resolve(v);
-}
-
-function override(name, opts) {
-  return absoluteOverride(readEnv(name, opts?.env), homeOf(opts));
 }
 
 /** @param {string} [home] */
@@ -70,15 +45,13 @@ export function orbitStateDir(home = os.homedir()) {
 }
 
 /**
- * ORBIT_CONFIG_DIR / LOOM_CONFIG_DIR win outright. Otherwise ~/.orbit once it
- * holds a config.json, else ~/.loom -- until migration is on, after which only
- * an unmigrated ~/.loom/config.json keeps a user on the old dir.
+ * ~/.orbit once it holds a config.json, else ~/.loom -- until migration is on,
+ * after which only an unmigrated ~/.loom/config.json keeps a user on the old
+ * dir.
  *
  * @param {StateDirOptions} [opts]
  */
 export function resolveStateDir(opts = {}) {
-  const pinned = override("CONFIG_DIR", opts);
-  if (pinned) return pinned;
   const home = homeOf(opts);
   const orbit = orbitStateDir(home);
   if (fs.existsSync(path.join(orbit, CONFIG_FILE))) return orbit;
@@ -89,35 +62,7 @@ export function resolveStateDir(opts = {}) {
 
 /** @param {StateDirOptions} [opts] */
 export function resolveConfigPath(opts = {}) {
-  return override("CONFIG_PATH", opts) ?? path.join(resolveStateDir(opts), CONFIG_FILE);
-}
-
-/**
- * Every place a CONFIG_DIR / CONFIG_PATH override could put the brain's
- * config, under every spelling of those names -- not just the one
- * resolveConfigPath would pick. The exec-guard and the sandbox protect all of
- * them, so an override set under the "losing" spelling (or one a
- * differently-versioned bundle would prefer) is never a readable key store.
- *
- * @param {StateDirOptions} [opts]
- * @returns {{ dirs: string[], files: string[] }}
- */
-export function configOverrideLocations(opts = {}) {
-  const env = opts.env ?? process.env;
-  const home = homeOf(opts);
-  const dirs = [];
-  const files = [];
-  for (const name of envNames("CONFIG_DIR")) {
-    const dir = protectedOverride(env[name], home);
-    if (!dir) continue;
-    dirs.push(dir);
-    files.push(path.join(dir, CONFIG_FILE));
-  }
-  for (const name of envNames("CONFIG_PATH")) {
-    const file = protectedOverride(env[name], home);
-    if (file) files.push(file);
-  }
-  return { dirs: [...new Set(dirs)], files: [...new Set(files)] };
+  return path.join(resolveStateDir(opts), CONFIG_FILE);
 }
 
 /**
@@ -202,11 +147,10 @@ function copyNoClobber(src, dest, mode) {
  * things went. Safe to call on every startup.
  *
  * @param {StateDirOptions & { enabled?: boolean, now?: Date }} [opts]
- * @returns {{ status: "disabled" | "pinned" | "nothing-to-migrate" | "already-migrated" | "migrated" | "failed", error?: unknown }}
+ * @returns {{ status: "disabled" | "nothing-to-migrate" | "already-migrated" | "migrated" | "failed", error?: unknown }}
  */
 export function migrateStateDir(opts = {}) {
   if (!(opts.enabled ?? MIGRATE_TO_ORBIT_STATE_DIR)) return { status: "disabled" };
-  if (override("CONFIG_DIR", opts) || override("CONFIG_PATH", opts)) return { status: "pinned" };
   const home = homeOf(opts);
   const legacy = legacyStateDir(home);
   const orbit = orbitStateDir(home);

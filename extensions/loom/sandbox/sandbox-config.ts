@@ -19,9 +19,6 @@ export interface SandboxConfigInput {
   galaxyUrl?: string;
   /** Additional domains a deployment wants reachable from bash. */
   extraAllowedDomains?: string[];
-  /** Absolute brain-config locations set by a CONFIG_DIR/CONFIG_PATH override:
-   *  unreadable and unwritable from bash, like ~/.loom/config.json. */
-  configOverrideFiles?: string[];
 }
 
 // Credential/secret locations under $HOME the sandbox blocks bash from reading,
@@ -82,9 +79,9 @@ export function buildSandboxConfig(input: SandboxConfigInput): SandboxRuntimeCon
   return {
     network: { allowedDomains, deniedDomains: [] },
     filesystem: {
-      denyRead: [...DENY_READ, ...(input.configOverrideFiles ?? [])],
+      denyRead: [...DENY_READ],
       allowWrite,
-      denyWrite: [...DENY_WRITE, ...(input.configOverrideFiles ?? [])],
+      denyWrite: [...DENY_WRITE],
     },
   };
 }

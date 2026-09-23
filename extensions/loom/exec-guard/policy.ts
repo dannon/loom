@@ -6,7 +6,6 @@ import {
   isCredentialStore,
   isProtectedWritePath,
   isLoomStatePath,
-  configOverride,
 } from "./sensitive-read";
 import type { PolicyDeps, PolicyRequest, PolicyResult } from "./types";
 import {
@@ -26,38 +25,6 @@ function denyCredentialStore(p: string): PolicyResult {
     category: "read:credential-store",
     reason: `access to credential store ${p} blocked for all models`,
   };
-}
-
-// A reference to the override variables themselves (`cat "$ORBIT_CONFIG_PATH"`)
-// is the key store by another name, and the resolver would read it as a
-// literal filename in the workspace.
-const CONFIG_OVERRIDE_VAR = /\$\{?(?:ORBIT|LOOM)_CONFIG_(?:DIR|PATH)\b/i;
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-// Any shell command that names the overridden config FILE, by its basename.
-// A resolved-path comparison is what we'd like, but the ways to spell a path
-// in bash (relative, `"$HOME"/x`, `of=x`, inside a python -c string, quoted
-// with spaces) outrun any parser here, and reads are no safer than writes for a
-// key store. So the basename standing as its own path component is enough.
-// That over-matches a same-named file elsewhere, which only costs anything
-// while an override is set; `brain.json.bak` does not match. The whole dir is
-// left to the write tool's check, since a dir override can sit above the
-// analyses tree (someone pinning LOOM_CONFIG_DIR=~/.loom).
-function mentionsConfigOverride(command: string, home: string): boolean {
-  const { files } = configOverride(home);
-  if (files.length === 0) return false;
-  const text = command.replace(/\\/g, "");
-  return files.some((f) =>
-    new RegExp(
-      String.raw`(?:^|[\s"'\`/=<>(,:])` +
-        escapeRegExp(path.basename(f)) +
-        String.raw`(?=$|[\s"'\`;&|)<>,])`,
-      "i",
-    ).test(text),
-  );
 }
 
 const FILE_WRITE_TOOLS = new Set(["write", "edit"]);
@@ -168,19 +135,6 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
       if (isSensitivePath(resolved, deps.home)) {
         return finalizeAsk(req, "read:sensitive", `read of sensitive path ${p}`);
       }
-    }
-    // An overridden config location has no `.loom/` segment for the classifier
-    // to spot, so a command naming it is caught here instead, after the
-    // read floor has had its say on the paths it could resolve.
-    if (CONFIG_OVERRIDE_VAR.test(command)) {
-      return denyCredentialStore("$ORBIT_/LOOM_CONFIG_PATH or CONFIG_DIR");
-    }
-    if (mentionsConfigOverride(command, deps.home)) {
-      return {
-        decision: "deny",
-        category: "bash:catastrophic",
-        reason: "shell access to the Loom config file",
-      };
     }
     // Workspace-jail floor: only confidently-parsed simple read commands, so a
     // compound command's jail semantics stay unchanged (it falls to "unknown").
