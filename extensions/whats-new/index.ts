@@ -22,6 +22,7 @@ import {
   formatHighlightsText,
   releaseUrlFor,
 } from "../../shared/whats-new.js";
+import { isDesktopShell } from "../../shared/orbit-env.js";
 
 // This file lives at <pkg>/extensions/whats-new/index.ts, so the package root is two up.
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -58,7 +59,7 @@ export default function whatsNewExtension(pi: ExtensionAPI): void {
     if (shown) return;
     shown = true;
     // Orbit owns its own what's-new banner for the embedded brain.
-    if (process.env.LOOM_SHELL_KIND === "orbit") return;
+    if (isDesktopShell()) return;
     try {
       const running = getLoomVersion();
       const decision = decideWhatsNew(loadEntries(), readSeen(), running, "latest");

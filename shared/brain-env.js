@@ -44,7 +44,7 @@ export const BRAIN_ENV_PASSTHROUGH = new Set([
   "NODE_EXTRA_CA_CERTS",
 ]);
 
-export const BRAIN_ENV_PREFIXES = ["LOOM_", "GALAXY_", "PI_"];
+export const BRAIN_ENV_PREFIXES = ["LOOM_", "ORBIT_", "GALAXY_", "PI_"];
 
 // Built-in provider -> the env var its API key lives in. Mirrors the brain's
 // PROVIDER_ENV_MAP (bin/loom.js / app/src/main/agent.ts).
@@ -77,7 +77,7 @@ export const PROVIDER_API_KEY_NAMES = new Set([
 
 /**
  * Build a curated brain env from a source env. Forwards the named baseline
- * and any LOOM_/GALAXY_/PI_-prefixed vars. Provider API keys are opt-in
+ * and any LOOM_/ORBIT_/GALAXY_/PI_-prefixed vars. Provider API keys are opt-in
  * because desktop sources them from the OS keychain, not the shell.
  *
  * @param {NodeJS.ProcessEnv} [sourceEnv]

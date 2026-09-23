@@ -25,6 +25,7 @@ import { getConfigDir, getConfigPath } from "../../../shared/loom-config.js";
 import { parseCliArgs, type CliArgs } from "./cli-args.js";
 import { initAutoUpdate } from "./auto-update.js";
 import { resolveStartupCwd } from "./startup-cwd.js";
+import { readEnv } from "../../../shared/orbit-env.js";
 
 // Workaround for systems where chrome-sandbox isn't suid root
 app.commandLine.appendSwitch("no-sandbox");
@@ -139,7 +140,7 @@ function getDefaultCwd(cliArgs?: CliArgs): string {
   // config.defaultCwd is rewritten by AgentManager.switchCwd on every in-app
   // directory change, so a clean restart reopens the last-used directory (#312).
   let configDefaultCwd: string | undefined;
-  if (!cliArgs?.cwd && !process.env.LOOM_CWD) {
+  if (!cliArgs?.cwd && !readEnv("CWD")) {
     try {
       const configPath = path.join(LOOM_DIR, "config.json");
       if (fs.existsSync(configPath)) {
@@ -150,7 +151,7 @@ function getDefaultCwd(cliArgs?: CliArgs): string {
   }
   let cwd = resolveStartupCwd({
     cliCwd: cliArgs?.cwd,
-    envCwd: process.env.LOOM_CWD,
+    envCwd: readEnv("CWD"),
     configDefaultCwd,
     fallback: DEFAULT_CWD,
   });
