@@ -85,16 +85,18 @@ export function writeEnv(env, name, value) {
  * consumers that can only look up one fixed name -- pi resolves a custom
  * provider's apiKey from the env var models.json names (LOOM_ACTIVE_LLM_API_KEY),
  * and older bundles only read LOOM_*. A legacy value that is already set is
- * left alone: whoever set it did so on purpose.
+ * left alone: whoever set it did so on purpose. An empty value counts as unset
+ * on both sides -- `LOOM_ACTIVE_LLM_API_KEY=` left over in a container or shell
+ * profile would otherwise shadow the real ORBIT_ key.
  *
  * @param {Record<string, string | undefined>} env
  * @param {string} name
  */
 export function mirrorToLegacyEnv(env, name) {
   const v = env[currentEnvName(name)];
-  if (v === undefined) return;
+  if (!v) return;
   const legacy = legacyEnvNames(name);
-  if (legacy.some((n) => env[n] !== undefined)) return;
+  if (legacy.some((n) => env[n])) return;
   for (const n of legacy) env[n] = v;
 }
 

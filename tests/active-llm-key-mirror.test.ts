@@ -23,6 +23,18 @@ describe("mirrorToLegacyEnv", () => {
     expect(env.LOOM_ACTIVE_LLM_API_KEY).toBe("shell");
   });
 
+  it("treats an empty legacy value as unset", () => {
+    const env = { ORBIT_ACTIVE_LLM_API_KEY: "new", LOOM_ACTIVE_LLM_API_KEY: "" };
+    mirrorToLegacyEnv(env, "ACTIVE_LLM_API_KEY");
+    expect(env.LOOM_ACTIVE_LLM_API_KEY).toBe("new");
+  });
+
+  it("does not mirror an empty ORBIT_ value", () => {
+    const env: Record<string, string | undefined> = { ORBIT_ACTIVE_LLM_API_KEY: "" };
+    mirrorToLegacyEnv(env, "ACTIVE_LLM_API_KEY");
+    expect(env.LOOM_ACTIVE_LLM_API_KEY).toBeUndefined();
+  });
+
   it("does nothing without an ORBIT_ value", () => {
     const env: Record<string, string | undefined> = {};
     mirrorToLegacyEnv(env, "ACTIVE_LLM_API_KEY");
@@ -50,6 +62,11 @@ describe("buildBrainEnv", () => {
       LOOM_ACTIVE_LLM_API_KEY: "deliberate",
     });
     expect(env.LOOM_ACTIVE_LLM_API_KEY).toBe("deliberate");
+  });
+
+  it("fills in an empty LOOM_ key from ORBIT_", () => {
+    const env = buildBrainEnv({ ORBIT_ACTIVE_LLM_API_KEY: "new", LOOM_ACTIVE_LLM_API_KEY: "" });
+    expect(env.LOOM_ACTIVE_LLM_API_KEY).toBe("new");
   });
 });
 
