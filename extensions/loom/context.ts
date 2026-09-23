@@ -29,6 +29,7 @@ import {
   buildUserInstructionsBlock,
   buildWorkspaceInstructionsContext,
 } from "./user-instructions.js";
+import { readEnv } from "../../shared/orbit-env.js";
 
 const NOTEBOOK_HEAD_MAX_CHARS = 2000;
 const NOTEBOOK_TAIL_MAX_CHARS = 4000;
@@ -167,7 +168,7 @@ You are **${modelStr}** running via the **${active}** provider. This is your cur
  * rest of the config, and never tells the agent to open the file (#183).
  */
 export function buildTesterIdBlock(): string {
-  const testerId = loadConfig().testerId || process.env.LOOM_TESTER_ID;
+  const testerId = loadConfig().testerId || readEnv("TESTER_ID");
   if (!testerId) return "";
   return `## Orbit tester ID
 

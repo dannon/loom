@@ -51,6 +51,7 @@ import {
   signOutOAuth,
 } from "./oauth-handler.js";
 import { isLocalShellAvailable } from "./local-shell.js";
+import { readEnv } from "../../../shared/orbit-env.js";
 
 /**
  * Sentinel the renderer sends back in a secret field when the user did NOT
@@ -808,7 +809,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
   ipc.handle("feedback:submit", async (_e, payload: FeedbackPayload) => {
     // Stamp the opaque tester code from config in main (authoritative; the
     // renderer never sets it). Non-secret; lets the team attribute the report.
-    const testerId = loadConfig().testerId || process.env.LOOM_TESTER_ID;
+    const testerId = loadConfig().testerId || readEnv("TESTER_ID");
     return await postFeedback(testerId ? { ...payload, testerId } : payload);
   });
 

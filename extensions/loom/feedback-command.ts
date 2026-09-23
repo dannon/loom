@@ -8,6 +8,7 @@ import {
   capFeedbackPayload,
 } from "../../shared/feedback-contract.js";
 import type { FeedbackPayload } from "../../shared/feedback-contract.js";
+import { readEnv } from "../../shared/orbit-env.js";
 
 /**
  * /feedback -- gather feedback inline via ctx.ui and POST it to the capture
@@ -41,7 +42,7 @@ export function registerFeedbackCommand(pi: ExtensionAPI): void {
 
       // Opaque tester code (config, env override) -- non-secret; lets the team
       // attribute the report. Omitted from the payload when unset.
-      const testerId = loadConfig().testerId || process.env.LOOM_TESTER_ID;
+      const testerId = loadConfig().testerId || readEnv("TESTER_ID");
 
       // The app version always rides along (non-sensitive build metadata) so every
       // loom-cli row is filterable by release in triage, even without diagnostics.
