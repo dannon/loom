@@ -52,6 +52,7 @@ import {
 } from "./oauth-handler.js";
 import { isLocalShellAvailable } from "./local-shell.js";
 import { readEnv } from "../../../shared/orbit-env.js";
+import { resolveStateDir } from "../../../shared/state-dir.js";
 
 /**
  * Sentinel the renderer sends back in a secret field when the user did NOT
@@ -507,7 +508,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
         url?: string;
         branch?: string;
       }>;
-      const base = path.join(os.homedir(), ".loom", "cache", "skills");
+      const base = path.join(resolveStateDir(), "cache", "skills");
       for (const r of repos) {
         // Skills code only ever uses filesystem-safe names; validate here too
         // since this builds a path and deletes files (defense in depth).

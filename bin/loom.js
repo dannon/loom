@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "url";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "fs";
 import { homedir } from "os";
 import { loadConfig as loadLoomConfig } from "../shared/loom-config.js";
+import { migrateStateDir } from "../shared/state-dir.js";
 import { spawn } from "child_process";
 import { getLoomVersion, detectInstall } from "./update-check.js";
 import { isUvxAvailable, uvxMissingNotice } from "./uvx-check.js";
@@ -96,6 +97,9 @@ function hasArg(flag) {
 
 const isInformationalCommand = ["--help", "-h", "--version", "--list-models"].some(hasArg);
 
+// Before the first config read, so a fresh copy in ~/.orbit is what gets read.
+migrateStateDir();
+
 // Config opt-out feeds the same single signal the extension + refresh read.
 try {
   if (loadLoomConfig().updateCheck === false) writeEnv(process.env, "NO_UPDATE_CHECK", "1");
@@ -150,7 +154,7 @@ async function handleInformationalCommand() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Loom brain-level config (~/.loom/config.json)
+// Loom brain-level config (<state dir>/config.json, see shared/state-dir.js)
 //
 // Shared by every consumer (loom CLI, Orbit, future shells). The CLI only
 // reads/writes it; it doesn't own the schema. Shell-specific state lives in
