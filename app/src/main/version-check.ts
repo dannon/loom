@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { isNewer } from "../../../shared/version-compare.js";
 import { loadConfig } from "../../../shared/loom-config.js";
+import { readEnv } from "../../../shared/orbit-env.js";
 import { detectRepoMoved, forcedRepoMoved, type RepoMovedInfo } from "./repo-moved.js";
 
 const RELEASES_API = "https://api.github.com/repos/galaxyproject/loom/releases/latest";
@@ -151,11 +152,11 @@ function writeMovedCache(entry: MovedCacheShape): void {
 /**
  * Has galaxyproject/loom been renamed? Returns the new repo's release info when
  * GitHub says so, otherwise null -- including on any network trouble, which
- * must never surface the notice. ORBIT_FORCE_REPO_MOVED fakes a move for a
+ * must never surface the notice. ORBIT_FORCE_REPO_MOVED (via readEnv) fakes a move for a
  * look at the banner.
  */
 export async function checkRepoMoved(): Promise<RepoMovedInfo | null> {
-  const forced = forcedRepoMoved(process.env.ORBIT_FORCE_REPO_MOVED);
+  const forced = forcedRepoMoved(readEnv("FORCE_REPO_MOVED"));
   if (forced) return forced;
   if (loadConfig().updateCheck === false) return null;
   const cached = readMovedCache();
