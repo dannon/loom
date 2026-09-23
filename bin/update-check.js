@@ -1,5 +1,5 @@
 // CLI-owned update-check helper. Queries the npm registry for the newest
-// version on the user's channel, caches the answer in ~/.loom/, and exposes a
+// version on the user's channel, caches the answer in the state dir, and exposes a
 // notice string for the CLI-shell glue extension to surface in-session. The
 // network refresh runs as a detached child (see bin/loom.js) so it never
 // blocks startup or is killed mid-write. Pure helpers (parseCache, noticeFor)
@@ -7,14 +7,13 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import { isNewer, pickChannel } from "../shared/version-compare.js";
+import { resolveCliVersionCheckPath } from "../shared/state-dir.js";
 
 const PKG = "@galaxyproject/loom";
 const REGISTRY = "https://registry.npmjs.org/@galaxyproject/loom";
-const CACHE_FILE = path.join(os.homedir(), ".loom", "version-check.json");
 const SUCCESS_TTL_MS = 24 * 60 * 60 * 1000;
 const FAILURE_TTL_MS = 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 5000;
@@ -60,7 +59,7 @@ export function noticeFor(current, cache) {
 /** Read + validate the cache from disk. @returns {Cache | null} */
 export function readCache() {
   try {
-    return parseCache(fs.readFileSync(CACHE_FILE, "utf-8"), Date.now());
+    return parseCache(fs.readFileSync(resolveCliVersionCheckPath(), "utf-8"), Date.now());
   } catch {
     return null;
   }
@@ -77,8 +76,9 @@ export function readNotice() {
 
 function writeCache(entry) {
   try {
-    fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(entry));
+    const file = resolveCliVersionCheckPath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(entry));
   } catch {}
 }
 
