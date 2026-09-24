@@ -5,8 +5,9 @@ import json
 
 import pytest
 
-from olite.drivers.loop import fetch_failure_hint as hint
-from olite.drivers.loop.tools import ToolSurface
+from olit.drivers.loop import fetch_failure_hint as hint
+from olit.drivers.loop.tools import ToolSurface
+
 from .fakes import FakeSubstrate
 
 # The shape Galaxy returned in the session this exists for.
@@ -90,5 +91,5 @@ def test_the_hint_rides_the_tool_result_without_deforming_it():
     payload, _, appended = text.partition("\n\n")
     # The model still gets parseable JSON; the hint sits after it, as loom appends its own.
     assert json.loads(payload)["state"] == "error"
-    assert appended.startswith("[olite]")
+    assert appended.startswith("[olit]")
     assert "ena_runs" in appended

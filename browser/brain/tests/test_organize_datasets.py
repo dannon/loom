@@ -2,8 +2,7 @@
 
 import asyncio
 
-from olite.drivers.graph import GraphDriver
-from olite.registry import ProcessRegistry, load_primitives
+from olit.registry import ProcessRegistry, load_primitives
 
 load_primitives()
 
@@ -12,9 +11,7 @@ SRA = [
     for i, (n, m) in enumerate([(n, m) for n in (1, 2) for m in (1, 2)])
 ]
 # Files as they arrive from an unzipped archive: no mate markers.
-ZIPPED = [
-    {"id": f"z{i}", "name": f"run_{i}.txt", "history_content_type": "dataset"} for i in range(3, 7)
-]
+ZIPPED = [{"id": f"z{i}", "name": f"run_{i}.txt", "history_content_type": "dataset"} for i in range(3, 7)]
 
 
 class FakeCatalog:
@@ -116,9 +113,7 @@ def test_no_datatype_means_no_write():
 def test_the_datatype_is_set_before_the_collection_is_built():
     catalog, _ = _run(SRA, datatype="fastqsanger.gz")
     order = catalog.targets()
-    assert order.index("galaxy.histories.show.contents.bulk.put") < order.index(
-        "galaxy.dataset_collections.post"
-    )
+    assert order.index("galaxy.histories.show.contents.bulk.put") < order.index("galaxy.dataset_collections.post")
 
 
 def test_a_caller_who_names_neither_structure_nor_collection_still_gets_pairs():
@@ -132,7 +127,7 @@ def test_a_caller_who_names_neither_structure_nor_collection_still_gets_pairs():
 
 def test_a_call_without_a_history_is_refused_before_galaxy_is_touched():
     """The guard is the generated schema, checked in dispatch, whichever kind the process is."""
-    from olite.drivers.loop.tools import ToolSurface
+    from olit.drivers.loop.tools import ToolSurface
 
     substrate = FakeSubstrate(SRA)
     surface = ToolSurface(substrate, ProcessRegistry().load_packaged())
@@ -180,8 +175,13 @@ def test_the_datatype_write_is_batched():
 
 
 WITH_COLLECTION = [
-    {"id": "c1", "name": "reads", "history_content_type": "dataset_collection",
-     "collection_type": "list", "element_count": 4},
+    {
+        "id": "c1",
+        "name": "reads",
+        "history_content_type": "dataset_collection",
+        "collection_type": "list",
+        "element_count": 4,
+    },
     *SRA,
 ]
 
@@ -218,7 +218,7 @@ def test_an_uncompressed_datatype_is_refused_for_gzipped_reads():
     An agent planning this work wrote `fastqsanger` three times and hedged with
     "or fastq depending on the server's default". Nothing checked the argument.
     """
-    from olite.registry.python.organize_datasets import summarize_state
+    from olit.registry.python.organize_datasets import summarize_state
 
     catalog, result = _run(SRA, datatype="fastqsanger")
     summary = summarize_state(result["state"])
@@ -243,7 +243,7 @@ def test_an_uncompressed_datatype_is_fine_for_uncompressed_files():
 
 def test_galaxys_own_detected_extension_counts_as_compressed():
     """The name may not end in .gz when Galaxy already typed it that way."""
-    from olite.registry.python.organize_datasets import compression_lost
+    from olit.registry.python.organize_datasets import compression_lost
 
     detected = [{"id": "d1", "name": "reads_1", "extension": "fastqsanger.gz"}]
     assert compression_lost("fastqsanger", detected) == ["reads_1"]

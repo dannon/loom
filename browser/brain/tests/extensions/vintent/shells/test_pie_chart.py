@@ -1,5 +1,4 @@
-import pytest
-from olite.registry.extensions.vintent.modules.shells.pie_chart import PieChartShell
+from olit.registry.extensions.vintent.modules.shells.pie_chart import PieChartShell
 
 
 def _profile(fields):
@@ -64,10 +63,12 @@ class TestPieChartProcesses:
 
     def test_processes_with_custom_op_and_value(self):
         shell = PieChartShell()
-        profile = _profile({
-            "category": {"type": "nominal"},
-            "amount": {"type": "quantitative"},
-        })
+        profile = _profile(
+            {
+                "category": {"type": "nominal"},
+                "amount": {"type": "quantitative"},
+            }
+        )
         params = {"category": "category", "value": "amount", "op": "sum"}
         processes = shell.processes(profile, params)
         assert processes[0]["params"]["op"] == "sum"

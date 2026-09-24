@@ -1,12 +1,12 @@
-"""agent.yml is validated on load against the grammar in olite/schema.py."""
+"""agent.yml is validated on load against the grammar in olit/schema.py."""
 
 import pytest
 import yaml
 from pydantic import ValidationError
 
-from olite.exceptions import ConfigurationError
-from olite.registry import ProcessRegistry
-from olite.schema import AgentDefinition
+from olit.exceptions import ConfigurationError
+from olit.registry import ProcessRegistry
+from olit.schema import AgentDefinition
 
 MINIMAL = """
 version: 1
@@ -20,7 +20,7 @@ nodes:
 
 
 def test_the_shipped_graphs_validate():
-    """The drift check: every graph olite ships must match the grammar."""
+    """The drift check: every graph olit ships must match the grammar."""
     registry = ProcessRegistry().load_packaged()
     graphs = [n for n in registry.names() if registry.get(n).graph is not None]
     assert graphs

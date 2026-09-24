@@ -1,15 +1,15 @@
-"""Organising a large history: what OLite sends, and what it hands back.
+"""Organising a large history: what Olit sends, and what it hands back.
 
 The capability a user asked for is grouping loose compressed reads into a tagged
 collection. Its value depends on holding up at real element counts, so this drives the
 process against a recording substrate and asserts the shape of every request it makes.
-Galaxy is not involved: this is the half OLite controls.
+Galaxy is not involved: this is the half Olit controls.
 """
 
 import asyncio
 import json
 
-from olite.registry.python.organize_datasets import BATCH, organize_datasets, summarize_state
+from olit.registry.python.organize_datasets import BATCH, organize_datasets, summarize_state
 
 
 class Catalog:
@@ -36,16 +36,15 @@ class Substrate:
 def history(pairs, ext="fasta.gz"):
     """`ext` is what Galaxy currently holds, which is not always what the user wants."""
     return [
-        {"name": f"SRR{i:06}_{mate}.fasta.gz", "id": f"{i}_{mate}",
-         "extension": ext, "history_content_type": "dataset"}
-        for i in range(pairs) for mate in (1, 2)
+        {"name": f"SRR{i:06}_{mate}.fasta.gz", "id": f"{i}_{mate}", "extension": ext, "history_content_type": "dataset"}
+        for i in range(pairs)
+        for mate in (1, 2)
     ]
 
 
 def run(pairs, ext="fasta.gz", **kwargs):
     substrate = Substrate(history(pairs, ext))
-    state = asyncio.run(organize_datasets(substrate, history_id="h1", collection_name="reads",
-                                          **kwargs))
+    state = asyncio.run(organize_datasets(substrate, history_id="h1", collection_name="reads", **kwargs))
     return state, substrate.catalog.calls
 
 
@@ -98,8 +97,9 @@ def test_what_the_model_sees_does_not_grow_with_the_history():
 def test_a_datatype_that_would_drop_compression_is_refused_before_anything_is_written():
     state, calls = run(5000, datatype="fasta")
     assert "compression_lost" in state
-    assert not [t for t, _ in calls if t.endswith("post") or t.endswith("bulk.put")], \
-        "a refusal must not leave a half-built collection behind"
+    assert not [
+        t for t, _ in calls if t.endswith("post") or t.endswith("bulk.put")
+    ], "a refusal must not leave a half-built collection behind"
     assert summarize_state(state)["ok"] is False
 
 

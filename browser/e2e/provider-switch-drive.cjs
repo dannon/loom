@@ -2,7 +2,7 @@
 // and must not discard the conversation (session memory lives in IndexedDB).
 const { chromium } = require("playwright");
 const offline = require("./offline.cjs");
-const APP = process.env.APP_URL || "http://127.0.0.1:8099/plugins/visualizations/olite";
+const APP = process.env.APP_URL || "http://127.0.0.1:8099/plugins/visualizations/olit";
 
 const results = [];
 function check(name, ok, detail) {
@@ -44,7 +44,7 @@ function check(name, ok, detail) {
         null, { timeout: 20000 });
 
     check("switch took effect after reload", true, await page.textContent("#model-btn"));
-    const stored = await page.evaluate(() => sessionStorage.getItem("olite.credentials"));
+    const stored = await page.evaluate(() => sessionStorage.getItem("olit.credentials"));
     check("stored credentials replaced", stored.includes("deepseek") && !stored.includes("k1"), stored);
     check("overlay does not reappear once switched",
         await page.evaluate(() => {
@@ -70,7 +70,7 @@ function check(name, ok, detail) {
     await page.waitForFunction(() => !document.querySelector("#cred-overlay"), null, { timeout: 5000 });
     check("backdrop click dismisses the switch picker", true);
     check("credentials survive dismissal",
-        (await page.evaluate(() => sessionStorage.getItem("olite.credentials"))).includes("deepseek"));
+        (await page.evaluate(() => sessionStorage.getItem("olit.credentials"))).includes("deepseek"));
 
     // First run must NOT be dismissible: there is nothing to fall back to.
     await page.evaluate(() => sessionStorage.clear());

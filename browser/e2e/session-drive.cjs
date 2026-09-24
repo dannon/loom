@@ -1,4 +1,4 @@
-// A reload must not lose the conversation: pi resumes from session.jsonl, olite from IndexedDB.
+// A reload must not lose the conversation: pi resumes from session.jsonl, olit from IndexedDB.
 const { chromium } = require("playwright");
 const OUT = process.env.OUT || "/tmp";
 const APP = process.env.APP_URL || "http://localhost:5173/";
@@ -26,7 +26,7 @@ function check(name, ok, detail) {
         }
         return false;
     };
-    const booted = () => wait(() => /olite ready|Resumed this history/i.test(document.body.innerText), 60000);
+    const booted = () => wait(() => /olit ready|Resumed this history/i.test(document.body.innerText), 60000);
     const idle = () => wait(() => !document.querySelector("#send-btn").classList.contains("hidden"), 60000);
 
     // The default scenario answers with a destructive call and opens the gate; this one just replies.

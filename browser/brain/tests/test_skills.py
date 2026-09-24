@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from olite.drivers.loop import agent as loop_agent
-from olite.drivers.loop.tools import ToolSurface
-from olite.registry import SkillEntry, SkillRegistry, parse_frontmatter, select_skills
-from olite.registry.skills import SURFACE_ID
+from olit.drivers.loop import agent as loop_agent
+from olit.drivers.loop.tools import ToolSurface
+from olit.registry import SkillEntry, SkillRegistry, parse_frontmatter, select_skills
+from olit.registry.skills import SURFACE_ID
 
 SKILL = """---
 name: galaxy-transform-collection
@@ -23,10 +23,8 @@ metadata:
 Use Galaxy's native tools; never build collections ad hoc.
 """
 
-VENDORED = Path(__file__).resolve().parents[1] / "olite" / "registry" / "skills" / "galaxy-skills"
-needs_corpus = pytest.mark.skipif(
-    not VENDORED.is_dir(), reason="galaxy-skills not vendored (run npm run build:skills)"
-)
+VENDORED = Path(__file__).resolve().parents[1] / "olit" / "registry" / "skills" / "galaxy-skills"
+needs_corpus = pytest.mark.skipif(not VENDORED.is_dir(), reason="galaxy-skills not vendored (run npm run build:skills)")
 
 
 class FakeManifest:
@@ -189,11 +187,11 @@ def test_the_vendored_corpus_loads_and_is_pinned():
 
 
 @needs_corpus
-def test_olite_is_the_default_repo():
-    """olite's own skills route to olite's processes; the corpus knows nothing of them."""
+def test_olit_is_the_default_repo():
+    """olit's own skills route to olit's processes; the corpus knows nothing of them."""
     registry = SkillRegistry().load_packaged()
-    assert registry.names()[0] == "olite-skills"
-    assert registry.find(None).name == "olite-skills"
+    assert registry.names()[0] == "olit-skills"
+    assert registry.find(None).name == "olit-skills"
 
 
 @needs_corpus

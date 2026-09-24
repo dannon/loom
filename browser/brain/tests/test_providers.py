@@ -2,9 +2,8 @@
 
 import pytest
 
-from olite.substrate.llm import REGISTRY, Limits, Model, Provider, get_adapter, resolve
-from olite.substrate.llm.providers import DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS
-
+from olit.substrate.llm import REGISTRY, Limits, Model, Provider, get_adapter, resolve
+from olit.substrate.llm.providers import DEFAULT_CONTEXT_WINDOW
 
 # --- resolution ----------------------------------------------------------------
 
@@ -73,7 +72,11 @@ def test_config_still_wins_over_everything():
 def test_an_unknown_everything_falls_back_to_the_defaults():
     target = resolve({"ai_base_url": "http://x.invalid", "ai_model": "mystery"})
     assert target.context_window == DEFAULT_CONTEXT_WINDOW
-    assert target.max_tokens == DEFAULT_MAX_TOKENS
+
+
+def test_an_endpoint_that_states_no_cap_leaves_the_output_length_to_the_model():
+    """pi omits max_tokens unless one is configured; an imposed cap truncates a long answer."""
+    assert resolve({"ai_base_url": "http://x.invalid", "ai_model": "mystery"}).max_tokens is None
 
 
 def test_the_rate_limit_comes_from_the_endpoint():
@@ -111,7 +114,7 @@ def test_the_adapter_builds_and_parses_one_round_trip():
 
     body = adapter.build_request(target, [{"role": "user", "content": "hi"}], tools=None)
     assert body["model"] == "gemini-3.7-flash"
-    assert body["max_tokens"] == DEFAULT_MAX_TOKENS
+    assert "max_tokens" not in body
     assert adapter.url(target).endswith("/chat/completions")
     assert adapter.headers(target)["Authorization"] == "Bearer k"
 
@@ -126,27 +129,28 @@ def test_the_adapter_builds_and_parses_one_round_trip():
     assert reply.usage["total_tokens"] == 12
 
 
-def test_a_provider_can_opt_out_of_sampling_parameters():
-    """Some models reject temperature and top_p; that is a provider fact."""
-    plain = Provider(id="p", base_url="http://x.invalid")
-    picky = Provider(id="q", base_url="http://x.invalid", compat={"sampling": False})
-    adapter = get_adapter("openai-completions")
+def _target(provider, model=None):
+    from olit.substrate.llm.providers import Target
 
-    from olite.substrate.llm.providers import Target
+    return Target(provider, model or Model("m"), "http://x.invalid", None, 1000, None, 30)
 
-    def target_for(provider):
-        return Target(provider, Model("m"), "http://x.invalid", None, 1000, 100, 30)
 
-    assert "temperature" in adapter.build_request(target_for(plain), [], None)
-    assert "temperature" not in adapter.build_request(target_for(picky), [], None)
+def test_no_sampling_field_is_sent_unless_one_is_configured():
+    """Orbit sends none, so a comparison run measures the runtime rather than our defaults."""
+    body = get_adapter("openai-completions").build_request(_target(Provider(id="p")), [], None)
+    assert "temperature" not in body and "top_p" not in body
+
+
+def test_a_provider_that_needs_a_sampling_setting_can_state_one():
+    provider = Provider(id="q", compat={"temperature": 0.2, "sampling_params": {"top_p": 0.8}})
+    body = get_adapter("openai-completions").build_request(_target(provider), [], None)
+    assert body["temperature"] == 0.2 and body["top_p"] == 0.8
 
 
 def test_a_model_setting_beats_a_provider_setting():
-    provider = Provider(id="p", compat={"sampling": True})
-    model = Model("m", compat={"sampling": False})
-    from olite.substrate.llm.providers import Target
-
-    assert Target(provider, model, None, None, 1000, 100, 30).compat("sampling") is False
+    provider = Provider(id="p", compat={"temperature": 0.2})
+    model = Model("m", compat={"temperature": 0.9})
+    assert _target(provider, model).compat("temperature") == 0.9
 
 
 # --- endpoint limits the brain can act on ----------------------------------------
@@ -180,7 +184,7 @@ def test_galaxys_limits_are_recorded():
 def test_the_probe_reads_llama_cpps_reported_window():
     import asyncio
 
-    from olite.substrate.llm import client
+    from olit.substrate.llm import client
 
     async def fake(method, url, **kw):
         assert url.endswith("/props")
@@ -197,7 +201,7 @@ def test_the_probe_reads_llama_cpps_reported_window():
 def test_a_server_without_props_leaves_the_default_alone():
     import asyncio
 
-    from olite.substrate.llm import client
+    from olit.substrate.llm import client
 
     async def missing(method, url, **kw):
         raise RuntimeError("404")
@@ -213,8 +217,8 @@ def test_a_server_without_props_leaves_the_default_alone():
 def test_a_configured_window_is_not_overridden_by_a_probe():
     import asyncio
 
-    from olite.substrate.llm import Llm
-    from olite.substrate.manifest import CapabilityManifest
+    from olit.substrate.llm import Llm
+    from olit.substrate.manifest import CapabilityManifest
 
     llm = Llm({"ai_provider": "ollama", "ai_context_window": 8000}, CapabilityManifest())
     asyncio.run(llm.init())
@@ -236,10 +240,12 @@ def test_openrouter_reaches_several_vendors_on_one_key():
 
 def test_openrouter_states_no_rate_limit_because_it_has_no_fixed_one():
     """Gemini's 5/minute was measured; OpenRouter's scales with credit, so none is invented."""
-    from olite.substrate.llm.providers import DEFAULT_RATE_LIMIT, OPENROUTER
+    from olit.substrate.llm.providers import DEFAULT_RATE_LIMIT, OPENROUTER
 
     assert OPENROUTER.rate_limit is None
-    assert resolve({"ai_provider": "openrouter", "ai_model": "anthropic/claude-sonnet-5"}).rate_limit == DEFAULT_RATE_LIMIT
+    assert (
+        resolve({"ai_provider": "openrouter", "ai_model": "anthropic/claude-sonnet-5"}).rate_limit == DEFAULT_RATE_LIMIT
+    )
 
 
 def test_an_unlisted_openrouter_model_still_resolves():
@@ -252,7 +258,7 @@ def test_an_unlisted_openrouter_model_still_resolves():
 def test_an_unusable_provider_response_is_an_error_not_an_empty_turn():
     """pi turns a failed provider response into stopReason "error"; a silent empty turn
     would be graded as the agent choosing to stop, which is a different claim."""
-    from olite.exceptions import ProviderError
+    from olit.exceptions import ProviderError
 
     adapter = get_adapter("openai-completions")
 
@@ -279,13 +285,21 @@ class _Adapter:
         self.empties = empties
         self.sent = 0
 
-    def url(self, target): return "http://x/v1/chat/completions"
-    def headers(self, target): return {}
-    def oversized_tools(self, target, tools): return []
-    def build_request(self, *a, **k): return {}
+    def url(self, target):
+        return "http://x/v1/chat/completions"
+
+    def headers(self, target):
+        return {}
+
+    def oversized_tools(self, target, tools):
+        return []
+
+    def build_request(self, *a, **k):
+        return {}
 
     def parse_reply(self, payload):
-        from olite.exceptions import ProviderError
+        from olit.exceptions import ProviderError
+
         self.sent += 1
         if self.sent <= self.empties:
             raise ProviderError("The model provider returned an empty response.")
@@ -293,10 +307,12 @@ class _Adapter:
 
 
 def _llm_with(adapter, monkeypatch):
-    import olite.substrate.llm.client as client_mod
-    from olite.substrate.llm.client import Llm
+    import olit.substrate.llm.client as client_mod
+    from olit.substrate.llm.client import Llm
 
-    async def fake_request(**kwargs): return {}
+    async def fake_request(**kwargs):
+        return {}
+
     monkeypatch.setattr(client_mod.http, "request", fake_request)
     monkeypatch.setattr(client_mod.asyncio, "sleep", lambda s: _done())
 
@@ -308,14 +324,15 @@ def _llm_with(adapter, monkeypatch):
     return llm
 
 
-async def _done(): return None
+async def _done():
+    return None
 
 
 def test_one_empty_reply_is_resent_rather_than_raised(monkeypatch):
     """A single dropped response should not end a turn; two in a row is a broken endpoint."""
     import asyncio
 
-    from olite.substrate.llm.client import EMPTY_REPLY_ATTEMPTS
+    from olit.substrate.llm.client import EMPTY_REPLY_ATTEMPTS
 
     adapter = _Adapter(empties=1)
     llm = _llm_with(adapter, monkeypatch)
@@ -328,7 +345,7 @@ def test_one_empty_reply_is_resent_rather_than_raised(monkeypatch):
 def test_a_persistently_empty_endpoint_still_raises(monkeypatch):
     import asyncio
 
-    from olite.exceptions import ProviderError
+    from olit.exceptions import ProviderError
 
     adapter = _Adapter(empties=5)
     llm = _llm_with(adapter, monkeypatch)

@@ -1,14 +1,18 @@
 """A key the session holds must not ride a tool result into the transcript."""
 
-from olite.drivers.loop.secret_redaction import (
+from olit.drivers.loop.secret_redaction import (
     MIN_SECRET_LEN,
     REDACTED,
     collect_secret_values,
     redact_secrets,
 )
 
-CONFIG = {"ai_api_key": "sk-or-v1-9f3a2b7c4d1e", "galaxy_key": "fea4130124bb18ef",
-          "ai_model": "gpt-oss-120b", "galaxy_root": "http://galaxy/"}
+CONFIG = {
+    "ai_api_key": "sk-or-v1-9f3a2b7c4d1e",
+    "galaxy_key": "fea4130124bb18ef",
+    "ai_model": "gpt-oss-120b",
+    "galaxy_root": "http://galaxy/",
+}
 
 
 def test_only_credential_values_are_collected():
@@ -46,7 +50,7 @@ def test_the_minimum_length_is_loom_s():
 
 def test_the_validated_config_the_runtime_builds_is_read():
     """The runtime hands the driver a Config, not a dict; a dict-only check read nothing."""
-    from olite import config as config_module
+    from olit import config as config_module
 
     validated = config_module.parse({"ai_api_key": "sk-or-v1-9f3a2b7c4d1e", "galaxy_key": "fea4130124bb18ef"})
     assert collect_secret_values(validated) == ["fea4130124bb18ef", "sk-or-v1-9f3a2b7c4d1e"]

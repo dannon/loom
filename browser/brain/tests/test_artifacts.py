@@ -6,7 +6,7 @@ cannot paste one into a page. It writes a token instead and the dispatcher resol
 
 import json
 
-from olite.drivers.loop import artifacts
+from olit.drivers.loop import artifacts
 
 VEGA = {"kind": "vega-lite", "title": "Glucose by BMI", "spec": {"mark": "point"}}
 VIZ = {"kind": "visualization", "title": "atlas of d1", "visualization": "atlas", "dataset_id": "d1"}
@@ -46,8 +46,7 @@ def test_a_titled_token_takes_the_one_it_names():
 
 
 def test_several_tokens_each_resolve_in_one_write():
-    text, refusal = artifacts.resolve("{{artifact: Dataset lineage}}\n{{artifact: Glucose by BMI}}",
-                                      [VEGA, LINEAGE])
+    text, refusal = artifacts.resolve("{{artifact: Dataset lineage}}\n{{artifact: Glucose by BMI}}", [VEGA, LINEAGE])
     assert refusal is None
     assert text.index("```mermaid") < text.index("```vega")
 
@@ -72,7 +71,7 @@ def test_non_string_arguments_pass_through():
     assert artifacts.resolve({"a": 1}, [VEGA]) == ({"a": 1}, None)
 
 
-def test_every_artifact_olite_produces_has_a_renderer():
+def test_every_artifact_olit_produces_has_a_renderer():
     """A new artifact kind is a renderer entry; this fails until one is added."""
     assert set(artifacts.RENDERERS) >= {"vega-lite", "visualization", "mermaid"}
 
@@ -107,7 +106,7 @@ def _dispatch(content, held):
     """update_page through the real dispatcher, with `held` already produced this session."""
     import asyncio
 
-    from olite.drivers.loop.tools import ToolSurface
+    from olit.drivers.loop.tools import ToolSurface
 
     seen = []
     surface = ToolSurface(_Substrate(seen), None)
@@ -140,7 +139,7 @@ def test_a_chart_from_an_earlier_turn_is_still_placeable():
     """
     import asyncio
 
-    from olite.drivers.loop.tools import ToolSurface
+    from olit.drivers.loop.tools import ToolSurface
 
     seen = []
     substrate = _Substrate(seen)
@@ -157,7 +156,7 @@ def test_a_chart_from_an_earlier_turn_is_still_placeable():
 
 def test_the_driver_keeps_nothing_between_turns():
     """A model or history switch rebuilds the session; state kept here would vanish with it."""
-    from olite.drivers.loop.agent import LoopDriver
+    from olit.drivers.loop.agent import LoopDriver
 
     class _Llm:
         target = None
@@ -176,6 +175,6 @@ def test_the_hint_at_production_names_the_token():
     The hint read "Describe what it shows and finish", so a record written a turn later
     held the prose and not the chart.
     """
-    from olite.drivers.loop.tools import ARTIFACT_HINT
+    from olit.drivers.loop.tools import ARTIFACT_HINT
 
     assert "{{artifact}}" in ARTIFACT_HINT

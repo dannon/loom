@@ -2,7 +2,7 @@
 // resolves before the worker boots, which is the point of the ordering.
 const { chromium } = require("playwright");
 const offline = require("./offline.cjs");
-const APP = process.env.APP_URL || "http://127.0.0.1:8099/plugins/visualizations/olite";
+const APP = process.env.APP_URL || "http://127.0.0.1:8099/plugins/visualizations/olit";
 
 const results = [];
 function check(name, ok, detail) {
@@ -63,7 +63,7 @@ async function waitFor(page, fn, ms) {
     await page.click("#cred-save");
     check("overlay closes once a key is supplied", await waitFor(page, credClosed, 5000));
 
-    const stored = await page.evaluate(() => sessionStorage.getItem("olite.credentials"));
+    const stored = await page.evaluate(() => sessionStorage.getItem("olit.credentials"));
     check("credentials land in sessionStorage", !!stored && stored.includes("openrouter"), stored);
 
     // The key must never be written into the Galaxy-persisted plugin specs.

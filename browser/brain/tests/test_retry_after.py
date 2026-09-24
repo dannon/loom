@@ -1,6 +1,6 @@
 """A rate limiter states how long to wait, and the retry has to honour it."""
 
-from olite.substrate.http import MAX_RETRY_AFTER, RETRY_INFO_TYPE, retry_after
+from olit.substrate.http import MAX_RETRY_AFTER, RETRY_INFO_TYPE, retry_after
 
 GEMINI_429 = [
     {
@@ -74,7 +74,7 @@ def test_a_malformed_header_falls_through_rather_than_raising():
 
 def test_the_delay_the_old_code_would_have_used_was_too_short():
     """A guessed backoff is shorter than what a rate limiter asks for."""
-    from olite.substrate.http import INITIAL_BACKOFF, MAX_RETRIES
+    from olit.substrate.http import INITIAL_BACKOFF, MAX_RETRIES
 
     guessed = sum(INITIAL_BACKOFF * (2**a) for a in range(MAX_RETRIES - 1))
     assert guessed < retry_after(None, GEMINI_429)

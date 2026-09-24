@@ -23,33 +23,33 @@ cleanup() {
 }
 trap cleanup EXIT
 
-node e2e/stub.cjs > /tmp/olite-e2e-stub.log 2>&1 & pids+=($!)
+node e2e/stub.cjs > /tmp/olit-e2e-stub.log 2>&1 & pids+=($!)
 for _ in $(seq 20); do curl -sf -o /dev/null http://127.0.0.1:8099/__seen && break; sleep 0.5; done
 
 GALAXY_ROOT=http://127.0.0.1:8099 LLM_PROVIDER=ollama LLM_ROOT=http://127.0.0.1:8099 \
   LLM_PATH=/v1 LLM_KEY=stub LLM_MODEL=stub-model \
   LLM_CONTEXT_WINDOW=40000 LLM_KEEP_RECENT_TOKENS=50 \
-  npm run dev > /tmp/olite-e2e-dev.log 2>&1 & pids+=($!)
+  npm run dev > /tmp/olit-e2e-dev.log 2>&1 & pids+=($!)
 for _ in $(seq 40); do curl -sf -o /dev/null http://localhost:5173/ && break; sleep 1; done
 
-for d in confirm session catalog-refusal ratelimit visualization-artifact artifact-survives-switch run-python; do
-    if LLM_CONTEXT_WINDOW=40000 node "e2e/$d-drive.cjs" > "/tmp/olite-e2e-$d.log" 2>&1; then
+for d in confirm session unsaved-changes catalog-refusal ratelimit visualization-artifact artifact-survives-switch run-python; do
+    if LLM_CONTEXT_WINDOW=40000 node "e2e/$d-drive.cjs" > "/tmp/olit-e2e-$d.log" 2>&1; then
         echo "PASS  $d"
     else
-        echo "FAIL  $d  (/tmp/olite-e2e-$d.log)"; fail=1
+        echo "FAIL  $d  (/tmp/olit-e2e-$d.log)"; fail=1
     fi
 done
 
 # The built bundle, served the way Galaxy serves it: the stub renders the host page and
 # the plugin static path, so these drivers get the credentials modal and the brain both.
 # The build must not carry the dev env, or LLM_PROVIDER suppresses the modal.
-env -u LLM_PROVIDER -u LLM_ROOT -u LLM_MODEL -u LLM_KEY npm run build > /tmp/olite-e2e-build.log 2>&1
+env -u LLM_PROVIDER -u LLM_ROOT -u LLM_MODEL -u LLM_KEY npm run build > /tmp/olit-e2e-build.log 2>&1
 
 for d in credentials artifact-pane provider-switch galaxy-boot; do
-    if node "e2e/$d-drive.cjs" > "/tmp/olite-e2e-$d.log" 2>&1; then
+    if node "e2e/$d-drive.cjs" > "/tmp/olit-e2e-$d.log" 2>&1; then
         echo "PASS  $d"
     else
-        echo "FAIL  $d  (/tmp/olite-e2e-$d.log)"; fail=1
+        echo "FAIL  $d  (/tmp/olit-e2e-$d.log)"; fail=1
     fi
 done
 

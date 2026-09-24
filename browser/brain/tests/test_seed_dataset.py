@@ -1,6 +1,6 @@
-"""Opening OLite on a dataset names it for the agent; opening it bare says nothing."""
+"""Opening Olit on a dataset names it for the agent; opening it bare says nothing."""
 
-from olite import prompt
+from olit import prompt
 
 
 def test_the_dataset_is_named_so_a_bare_reference_resolves():

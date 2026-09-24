@@ -1,7 +1,8 @@
 """A call that keeps failing with identical arguments is refused, not retried forever."""
+
 import asyncio
 
-from olite.drivers.loop.tools import ToolSurface
+from olit.drivers.loop.tools import ToolSurface
 
 from .fakes import FakeSubstrate
 
@@ -16,7 +17,8 @@ class Runner(ToolSurface):
         return []
 
     async def _dispatch(self, name, args):
-        from olite.drivers.loop.tools import ToolOutcome
+        from olit.drivers.loop.tools import ToolOutcome
+
         self.calls += 1
         return ToolOutcome("boom" if self.fails else "fine", is_error=self.fails)
 

@@ -7,7 +7,7 @@ against was serialization happening first: the helper alone passes either way.
 import asyncio
 import json
 
-from olite.drivers.loop.tools import ToolSurface
+from olit.drivers.loop.tools import ToolSurface
 
 DATASET = "0f74b56904a59856"
 VIZ = "33b43b4e7093c91f"
@@ -46,8 +46,7 @@ class Substrate:
 
 def _create():
     surface = ToolSurface(Substrate())
-    outcome = asyncio.run(surface.dispatch(
-        "show_visualization", {"dataset_id": DATASET, "visualization": "ngl"}))
+    outcome = asyncio.run(surface.dispatch("show_visualization", {"dataset_id": DATASET, "visualization": "ngl"}))
     return surface, json.loads(outcome.text)
 
 

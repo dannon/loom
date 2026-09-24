@@ -30,7 +30,7 @@ const toolResults = async () =>
     p.on("console", (m) => logs.push(`[${m.type()}] ${m.text()}`));
 
     await p.goto(APP, { waitUntil: "domcontentloaded" });
-    const ready = await waitFor(p, () => /olite ready/i.test(document.body.innerText), 240000);
+    const ready = await waitFor(p, () => /olit ready/i.test(document.body.innerText), 240000);
     check("the brain is up", ready);
     if (!ready) {
         console.log(logs.slice(-20).join("\n"));

@@ -1,17 +1,15 @@
 """Planner behaviour when the model's reply does not match the built schema."""
 
 import asyncio
-from olite.substrate.llm import Reply
 import csv
 import io
 import json
 import os
 
-from olite.drivers.graph import GraphDriver
-from olite.drivers.graph.constants import PLANNER_MAX_ATTEMPTS, ErrorCode
-from olite.registry import ProcessRegistry
-
-from olite.registry import load_primitives
+from olit.drivers.graph import GraphDriver
+from olit.drivers.graph.constants import PLANNER_MAX_ATTEMPTS, ErrorCode
+from olit.registry import ProcessRegistry, load_primitives
+from olit.substrate.llm import Reply
 
 load_primitives()
 
@@ -154,7 +152,7 @@ def test_unplottable_data_fails_at_the_decision_not_at_compile():
 
 
 def test_fill_params_builder_rejects_an_unknown_shell():
-    from olite.registry.extensions.vintent.bridge import _fill_params_schema
+    from olit.registry.extensions.vintent.bridge import _fill_params_schema
 
     profile = {"fields": {"a": {"type": "quantitative"}}, "row_count": 1}
     try:

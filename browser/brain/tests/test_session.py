@@ -2,12 +2,13 @@
 
 import asyncio
 
-from olite import config as config_module
-from olite import runtime
-from olite.drivers.loop.agent import LoopDriver
-from olite.registry import ProcessRegistry
-from olite.substrate import Confirmation
-from olite.substrate.llm import Reply
+from olit import config as config_module
+from olit import runtime
+from olit.drivers.loop.agent import LoopDriver
+from olit.registry import ProcessRegistry
+from olit.substrate import Confirmation
+from olit.substrate.llm import Reply
+
 from .fakes import FakeSubstrate, ScriptedLlm, call
 
 
@@ -48,7 +49,8 @@ def test_the_session_is_built_once_and_rebuilt_only_for_a_different_config(monke
 
 def test_a_turns_artifacts_do_not_leak_into_the_next():
     llm = ScriptedLlm(
-        _turn(call("draw", "{}")), _turn(content="Drawn."),
+        _turn(call("draw", "{}")),
+        _turn(content="Drawn."),
         _turn(content="Nothing more."),
     )
     driver = LoopDriver(FakeSubstrate(llm, capabilities=("llm", "local", "read", "write")), _processes())

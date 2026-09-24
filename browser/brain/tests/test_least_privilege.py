@@ -5,11 +5,11 @@ import json
 
 import pytest
 
-from olite.drivers.loop.tools import ToolSurface
-from olite.registry import ProcessRegistry
-from olite.exceptions import CapabilityError
-from olite.substrate.manifest import DEFAULT_CAPABILITIES, CapabilityManifest
-from olite.substrate.substrate import Substrate
+from olit.drivers.loop.tools import ToolSurface
+from olit.exceptions import CapabilityError
+from olit.registry import ProcessRegistry
+from olit.substrate.manifest import DEFAULT_CAPABILITIES, CapabilityManifest
+from olit.substrate.substrate import Substrate
 
 CONFIG = {"galaxy_root": "http://galaxy.test", "capabilities": ["llm", "local", "read", "write"]}
 

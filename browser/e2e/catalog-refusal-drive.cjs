@@ -33,7 +33,7 @@ async function waitFor(page, fn, ms) {
     page.on("console", (m) => logs.push(`[${m.type()}] ${m.text()}`));
 
     await page.goto(APP, { waitUntil: "domcontentloaded" });
-    check("booted", await waitFor(page, () => /olite ready/i.test(document.body.innerText), 240000));
+    check("booted", await waitFor(page, () => /olit ready/i.test(document.body.innerText), 240000));
 
     await page.fill("#input", "Draft a plan to concatenate my two datasets.");
     await page.click("#send-btn");

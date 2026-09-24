@@ -3,8 +3,8 @@
 These files are copied **verbatim** from
 [`galaxyproject/loom`](https://github.com/galaxyproject/loom) (`app/src/renderer/`
 and `shared/`), MIT-licensed, "Copyright (c) 2024-2026 Galaxy Project contributors".
-olite reuses Orbit's chat UI directly so migrating Orbit users see a familiar
-interface. Keep these files untouched where possible; adapt in olite's own code
+olit reuses Orbit's chat UI directly so migrating Orbit users see a familiar
+interface. Keep these files untouched where possible; adapt in olit's own code
 (`src/main.ts`, `src/incoming.ts`) rather than editing here, so this folder stays
 diffable against upstream and can be synced (or promoted to a shared package) later.
 
@@ -32,7 +32,7 @@ from "../../../../shared/team-dispatch-contract.js"
 from "../../../../shared/loom-shell-contract.js"
 ```
 
-That path points outside the olite package, so it was retargeted to the vendored
+That path points outside the olit package, so it was retargeted to the vendored
 sibling copy:
 
 ```
@@ -41,7 +41,7 @@ from "../shared/loom-shell-contract.js"
 ```
 
 Nothing else was modified. The team-dispatch / parameter-form / plan-draft branches
-of `ChatPanel` were unused by olite but left intact so the file stays verbatim.
+of `ChatPanel` were unused by olit but left intact so the file stays verbatim.
 
 Two of the three are still unused, and one is no longer:
 
@@ -51,7 +51,7 @@ Two of the three are still unused, and one is no longer:
   is a complete interactive form (grouped, typed inputs, min/max/step, help text),
   but stage 3 of the approval gate deliberately stays a **markdown table**: the
   prompt already specifies one, it works on any model, and the form needs a payload
-  source olite does not have — Orbit builds `ParameterFormPayload` from an
+  source olit does not have — Orbit builds `ParameterFormPayload` from an
   `analyze_plan_parameters` tool that was never ported. Revisit only alongside that
   tool; the widget alone is not the missing half.
 - **team-dispatch — unused.** Orbit's experimental multi-agent surface, off by

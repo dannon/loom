@@ -41,9 +41,10 @@ through the same paths Galaxy uses.
 suite runs in CPython, where neither `eval_code_async` nor `pyfetch` exists. It asserts
 top-level `await` and a cross-origin `pyfetch` against the stub, so the CORS path is real.
 
-**Anything about persistence needs `?history_id=`.** `SessionMemory` keys on a history and
-stays disabled without one, so the dev page persists neither the transcript nor the
-artifacts until the URL supplies it, as Galaxy does in production.
+**Anything about persistence needs `?history_id=`.** IndexedDB continuity is keyed by the
+session the history last pointed at, so without a history in the URL the dev page starts a
+new conversation every load, where Galaxy supplies one in production. Saving to a
+Visualization is deliberate and independent of this.
 
 `LLM_KEEP_RECENT_TOKENS` must be small enough that the short test transcript has something
 older than the kept tail; at 500 the brain correctly reports "nothing older to summarize"
@@ -52,9 +53,9 @@ and the compaction checks fail. Compaction checks are skipped entirely unless
 
 ## Built tier — port 8099
 
-The stub also serves the built bundle the way a deployment does: `/api/plugins/olite`,
+The stub also serves the built bundle the way a deployment does: `/api/plugins/olit`,
 the host page carrying `data-incoming`, and the plugin static path
-`/static/plugins/visualizations/olite/static/`. So `root`, the plugin `href`, the Pyodide
+`/static/plugins/visualizations/olit/static/`. So `root`, the plugin `href`, the Pyodide
 URL and the system prompt are the deployment's, and the credentials modal appears because
 the build carries no dev env.
 

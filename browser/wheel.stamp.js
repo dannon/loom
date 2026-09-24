@@ -19,24 +19,26 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), "brain", "dist");
-const STAMPED = /^olite-.*-0[0-9a-f]{12}-py3-none-any\.whl$/;
+const STAMPED = /^olit-.*-0[0-9a-f]{12}-py3-none-any\.whl$/;
 
 function main() {
-    const wheels = readdirSync(DIST).filter((f) => f.startsWith("olite-") && f.endsWith(".whl"));
-    if (wheels.length !== 1) {
-        throw new Error(`Expected one brain wheel under brain/dist, found ${wheels.length}.`);
-    }
-    const [wheel] = wheels;
-    if (STAMPED.test(wheel)) {
-        console.log(`brain wheel already stamped: ${wheel}`);
-        return;
-    }
-    const digest = createHash("sha256").update(readFileSync(join(DIST, wheel))).digest("hex");
-    const tag = `0${digest.slice(0, 12)}`;
-    // olite-<version>-<tag>-py3-none-any.whl
-    const stamped = wheel.replace(/^(olite-[^-]+)-/, `$1-${tag}-`);
-    renameSync(join(DIST, wheel), join(DIST, stamped));
-    console.log(`brain wheel stamped: ${stamped}`);
+  const wheels = readdirSync(DIST).filter((f) => f.startsWith("olit-") && f.endsWith(".whl"));
+  if (wheels.length !== 1) {
+    throw new Error(`Expected one brain wheel under brain/dist, found ${wheels.length}.`);
+  }
+  const [wheel] = wheels;
+  if (STAMPED.test(wheel)) {
+    console.log(`brain wheel already stamped: ${wheel}`);
+    return;
+  }
+  const digest = createHash("sha256")
+    .update(readFileSync(join(DIST, wheel)))
+    .digest("hex");
+  const tag = `0${digest.slice(0, 12)}`;
+  // olit-<version>-<tag>-py3-none-any.whl
+  const stamped = wheel.replace(/^(olit-[^-]+)-/, `$1-${tag}-`);
+  renameSync(join(DIST, wheel), join(DIST, stamped));
+  console.log(`brain wheel stamped: ${stamped}`);
 }
 
 main();

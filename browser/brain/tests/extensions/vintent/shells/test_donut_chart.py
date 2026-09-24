@@ -1,5 +1,4 @@
-import pytest
-from olite.registry.extensions.vintent.modules.shells.donut_chart import DonutChartShell
+from olit.registry.extensions.vintent.modules.shells.donut_chart import DonutChartShell
 
 
 def _profile(fields):
@@ -64,10 +63,12 @@ class TestDonutChartProcesses:
 
     def test_processes_with_custom_op_and_value(self):
         shell = DonutChartShell()
-        profile = _profile({
-            "category": {"type": "nominal"},
-            "amount": {"type": "quantitative"},
-        })
+        profile = _profile(
+            {
+                "category": {"type": "nominal"},
+                "amount": {"type": "quantitative"},
+            }
+        )
         params = {"category": "category", "value": "amount", "op": "mean"}
         processes = shell.processes(profile, params)
         assert processes[0]["params"]["op"] == "mean"

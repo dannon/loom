@@ -2,7 +2,7 @@
 // window must collapse the pane without overwriting the stored preference.
 const { chromium } = require("playwright");
 const offline = require("./offline.cjs");
-const APP = process.env.APP_URL || "http://127.0.0.1:8099/plugins/visualizations/olite";
+const APP = process.env.APP_URL || "http://127.0.0.1:8099/plugins/visualizations/olit";
 
 const results = [];
 function check(name, ok, detail) {
@@ -10,7 +10,7 @@ function check(name, ok, detail) {
     console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`);
 }
 const collapsed = (p) => p.evaluate(() => document.body.classList.contains("artifact-collapsed"));
-const stored = (p) => p.evaluate(() => localStorage.getItem("olite.artifactCollapsed"));
+const stored = (p) => p.evaluate(() => localStorage.getItem("olit.artifactCollapsed"));
 
 (async () => {
     const browser = await chromium.launch();

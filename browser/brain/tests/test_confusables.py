@@ -5,9 +5,9 @@ import json
 
 import pytest
 
-from olite.drivers.loop import confusables
-from olite.drivers.loop.tools import ToolSurface
-from olite.registry import ProcessRegistry
+from olit.drivers.loop import confusables
+from olit.drivers.loop.tools import ToolSurface
+from olit.registry import ProcessRegistry
 
 # `run_python` with a Cyrillic е (U+0435) and о (U+043E).
 SNEAKY = "run_pythоn"
@@ -108,8 +108,16 @@ def test_folding_cannot_reach_a_tool_the_session_was_not_offered():
 def test_a_lookalike_process_name_still_reaches_its_process():
     """The fold applies to every advertised tool, processes included."""
     processes = ProcessRegistry()
-    processes.register("p", {"version": 1, "id": "p", "kind": "agent_pipeline", "start": "d",
-                             "nodes": {"d": {"type": "terminal", "output": {"ok": 1}}}})
+    processes.register(
+        "p",
+        {
+            "version": 1,
+            "id": "p",
+            "kind": "agent_pipeline",
+            "start": "d",
+            "nodes": {"d": {"type": "terminal", "output": {"ok": 1}}},
+        },
+    )
     surface = ToolSurface(FakeSubstrate(("local",)), processes)
 
     out = json.loads(asyncio.run(surface.dispatch("р", {})).text)  # Cyrillic er

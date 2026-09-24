@@ -1,4 +1,4 @@
 lint:
-	ruff check olite --fix
-	black olite
-	ruff check olite
+	ruff check olit --fix
+	black olit
+	ruff check olit

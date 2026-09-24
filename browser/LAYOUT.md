@@ -1,19 +1,19 @@
 # Layout
 
 ```
-public/olite.xml          plugin manifest: data sources, ai_prompt, capabilities
+public/olit.xml          plugin manifest: data sources, ai_prompt, capabilities
 src/                      the shell (TypeScript)
   main.ts                   boots the worker, wires the chat, runs a turn
   layout.ts artifact-pane.ts usage-bar.ts retry-notice.ts   the pane's parts
   pyodide/                  worker, manager, and the fetch that signs model requests
-  pyodide-runner.ts         the one call into the brain: `from olite import run`
+  pyodide-runner.ts         the one call into the brain: `from olit import run`
   config.ts incoming.ts credentials*.ts   what the brain is handed, and by whom
   invocations.ts            watches submitted jobs and workflows between turns
   record-write.ts record-jobs.ts session-summary.ts   shell-side edits to the record page
   session.ts                the conversation, in IndexedDB per user and history
   transcript.ts artifacts/  rendering messages, charts and Galaxy visualizations
   orbit/                    vendored from Orbit, byte-identical (seams/check_vendored.py)
-brain/olite/              the agent (Python, runs in Pyodide)
+brain/olit/              the agent (Python, runs in Pyodide)
   runtime.py                Session: substrate, registries and driver, built once per worker
   config.py prompt.py compaction.py
   substrate/                the capability gate and everything behind it:
@@ -25,9 +25,8 @@ brain/olite/              the agent (Python, runs in Pyodide)
     python/*.py               plain async processes (lineage_report, organize_datasets)
     extensions/               materializers a process can call, each behind a bridge.py
   vendor/                   contracts owned elsewhere, pinned (galaxy-charts input types)
-evals/                    behavioural scenarios against a real model and Galaxy
 e2e/                      Playwright drives against a stub, plus opt-in live drives
-seams/                    the Orbit parity registry and its checks
+vendored/                 integrity of the files copied in from elsewhere
 ```
 
 Two Galaxy surfaces, one gate. The loop uses named tools over direct REST

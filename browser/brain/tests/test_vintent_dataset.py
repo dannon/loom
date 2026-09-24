@@ -1,19 +1,17 @@
-"""End-to-end tests for the absorbed vintent pipeline as an olite graph process."""
+"""End-to-end tests for the absorbed vintent pipeline as an olit graph process."""
 
 import asyncio
-from olite.substrate.llm import Reply
 import csv
 import io
 import json
 import os
 
-from olite.drivers.graph import GraphDriver
-from olite.registry import ProcessRegistry, SkillRegistry
-from olite.registry.extensions.vintent.modules.profiler import profile_rows, rows_from_tabular
-from olite.registry.extensions.vintent.modules.process import run_process as leaf_run_process
-from olite.registry.extensions.vintent.modules.registry import PROCESSES, SHELLS
-
-from olite.registry import load_primitives
+from olit.drivers.graph import GraphDriver
+from olit.registry import ProcessRegistry, SkillRegistry, load_primitives
+from olit.registry.extensions.vintent.modules.process import run_process as leaf_run_process
+from olit.registry.extensions.vintent.modules.profiler import profile_rows, rows_from_tabular
+from olit.registry.extensions.vintent.modules.registry import PROCESSES, SHELLS
+from olit.substrate.llm import Reply
 
 load_primitives()
 
@@ -162,10 +160,11 @@ def test_headerless_tabular_is_referenced_with_explicit_column_names():
     rows = _scatter_fixture()["data"]["values"][:6]
     keys = list(rows[0])
     tab_text = "\n".join("\t".join(str(r[k]) for k in keys) for r in rows) + "\n"
-    decisions = {**DECISIONS["scatter"],
-                 "intent": {"goal": "relationship", "shell_fields": ["col:1", "col:2"],
-                            "extract_fields": []},
-                 "fill": {"x": "col:1", "y": "col:2"}}
+    decisions = {
+        **DECISIONS["scatter"],
+        "intent": {"goal": "relationship", "shell_fields": ["col:1", "col:2"], "extract_fields": []},
+        "fill": {"x": "col:1", "y": "col:2"},
+    }
     out = _run_graph(tab_text, decisions)
     data = out["artifact"]["spec"]["data"]
     assert data["url"] == "/api/datasets/d1/display"
@@ -222,7 +221,7 @@ def test_fetch_uses_scoped_catalog_display_op():
 
 def test_a_process_failure_surfaces_instead_of_returning_null():
     """A failed fetch must reach the model as an error, not a bare null."""
-    from olite.drivers.loop.tools import ToolSurface
+    from olit.drivers.loop.tools import ToolSurface
 
     class BrokenCatalog:
         async def call(self, target, input=None):
@@ -248,7 +247,7 @@ def test_a_process_failure_surfaces_instead_of_returning_null():
 
 def test_a_process_called_without_a_required_input_says_which_one():
     """Caught against the generated schema, before the graph or any API call."""
-    from olite.drivers.loop.tools import ToolSurface
+    from olit.drivers.loop.tools import ToolSurface
 
     class Sub:
         manifest = FakeManifest()
@@ -264,7 +263,7 @@ def test_a_process_called_without_a_required_input_says_which_one():
 
 def test_choose_shell_and_fill_schemas_are_state_derived():
     """The decision contracts come from the live profile, not the yaml."""
-    from olite.registry.extensions.vintent.bridge import _choose_shell_schema, _fill_params_schema
+    from olit.registry.extensions.vintent.bridge import _choose_shell_schema, _fill_params_schema
 
     profile = profile_rows(rows_from_tabular(_csv_from_rows(_scatter_fixture()["data"]["values"])))
     shell_enum = _choose_shell_schema(profile=profile)["properties"]["shellId"]["enum"]
@@ -293,9 +292,7 @@ class LoopLlm:
                 "type": "function",
                 "function": {
                     "name": "vintent_dataset",
-                    "arguments": json.dumps(
-                        {"dataset_id": "d1", "request": "scatter BMI vs Glucose"}
-                    ),
+                    "arguments": json.dumps({"dataset_id": "d1", "request": "scatter BMI vs Glucose"}),
                 },
             }
             return Reply(tool_calls=[call])
@@ -303,7 +300,7 @@ class LoopLlm:
 
 
 def test_full_loop_routes_artifact_and_injects_skill():
-    from olite.runtime import _inject_context, run
+    from olit.runtime import _inject_context
 
     csv_text = _csv_from_rows(_scatter_fixture()["data"]["values"])
     substrate = FakeSubstrate(csv_text, DECISIONS["scatter"])
@@ -319,11 +316,11 @@ def test_full_loop_routes_artifact_and_injects_skill():
     assert reinjected[0]["content"] == injected[0]["content"]
 
     # Drive the loop directly over the fake substrate (bypassing Substrate build).
-    from olite.drivers import LoopDriver
+    from olit.drivers import LoopDriver
 
     driver = LoopDriver(substrate, ProcessRegistry().load_packaged())
     transcripts = [
-        {"role": "system", "content": "You are olite."},
+        {"role": "system", "content": "You are olit."},
         {"role": "user", "content": "scatter BMI vs Glucose"},
     ]
     events = []
@@ -351,7 +348,7 @@ def test_full_loop_routes_artifact_and_injects_skill():
 
 
 def test_unfence_unwraps_planner_json_code_fences():
-    from olite.drivers.graph.registry import _unfence
+    from olit.drivers.graph.registry import _unfence
 
     # Models routinely wrap structured output in a markdown code fence; the planner
     assert _unfence('```json\n{"shellId": "area_chart"}\n```') == '{"shellId": "area_chart"}'
@@ -362,15 +359,13 @@ def test_unfence_unwraps_planner_json_code_fences():
 
 def test_the_vintent_tool_produces_a_chart_and_routes_it_out_of_band():
     """The tool path a model actually takes: dispatch by process name, chart comes back."""
-    from olite.drivers.loop.tools import ToolSurface
+    from olit.drivers.loop.tools import ToolSurface
 
     csv_text = _csv_from_rows(_scatter_fixture()["data"]["values"])
     substrate = FakeSubstrate(csv_text, DECISIONS["scatter"])
     surface = ToolSurface(substrate, ProcessRegistry().load_packaged())
 
-    outcome = asyncio.run(surface.dispatch(
-        "vintent_dataset", {"dataset_id": "d1", "request": "BMI against Glucose"}
-    ))
+    outcome = asyncio.run(surface.dispatch("vintent_dataset", {"dataset_id": "d1", "request": "BMI against Glucose"}))
     payload = json.loads(outcome.text)
 
     # The spec goes to the shell; the model sees only a reference to it.
@@ -381,7 +376,7 @@ def test_the_vintent_tool_produces_a_chart_and_routes_it_out_of_band():
 
 
 def test_the_vintent_tool_reads_the_dataset_it_was_given():
-    from olite.drivers.loop.tools import ToolSurface
+    from olit.drivers.loop.tools import ToolSurface
 
     csv_text = _csv_from_rows(_scatter_fixture()["data"]["values"])
     substrate = FakeSubstrate(csv_text, DECISIONS["scatter"])
@@ -400,7 +395,7 @@ def test_a_dataset_whose_job_is_still_running_is_named_as_such():
     empty and the profile finds no columns. Reporting that as "no columns to plot" sent
     one run into nine identical searches for a tool to set the datatype.
     """
-    from olite.drivers.loop.tools import ToolSurface
+    from olit.drivers.loop.tools import ToolSurface
 
     csv_text = _csv_from_rows(_scatter_fixture()["data"]["values"])
     substrate = FakeSubstrate(csv_text, DECISIONS["scatter"])
@@ -415,7 +410,7 @@ def test_a_dataset_whose_job_is_still_running_is_named_as_such():
 
 
 def test_a_ready_dataset_still_charts():
-    from olite.drivers.loop.tools import ToolSurface
+    from olit.drivers.loop.tools import ToolSurface
 
     csv_text = _csv_from_rows(_scatter_fixture()["data"]["values"])
     substrate = FakeSubstrate(csv_text, DECISIONS["scatter"])

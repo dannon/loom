@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from olite.config import Config, parse
+from olit.config import Config, parse
 
 
 def test_a_wrong_type_fails_here_naming_the_key():

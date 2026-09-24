@@ -3,7 +3,7 @@
 const { chromium } = require("playwright");
 const OUT = process.env.OUT || "/tmp";
 const STUB = "http://127.0.0.1:8099";
-const APP = process.env.APP_URL || `${STUB}/plugins/visualizations/olite?dataset_id=d1&history_id=h1`;
+const APP = process.env.APP_URL || `${STUB}/plugins/visualizations/olit?dataset_id=d1&history_id=h1`;
 
 const results = [];
 function check(name, ok, detail) {
@@ -24,7 +24,7 @@ const credOpen = () => {
     const el = document.querySelector("#cred-overlay");
     return !!el && !el.classList.contains("hidden");
 };
-const isReady = () => /olite ready|resumed this history/i.test(document.body.innerText);
+const isReady = () => /olit ready|resumed this history/i.test(document.body.innerText);
 const modalOpen = () => {
     const el = document.querySelector("#ext-overlay");
     return !!el && !el.classList.contains("hidden");
@@ -65,7 +65,7 @@ async function connect(page) {
         process.exit(1);
     }
 
-    const context = logs.find((l) => l.includes("[olite] context"));
+    const context = logs.find((l) => l.includes("[olit] context"));
     check("Galaxy calls resolve against the deployment root", !!context && context.includes(`${STUB}/`), context);
 
     // ---- the seed prompt comes from data-incoming, not the built-in fallback ----

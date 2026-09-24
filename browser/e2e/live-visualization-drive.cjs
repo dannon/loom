@@ -24,7 +24,7 @@ const check = (name, ok, detail) => {
 function artifactUrls() {
     const program = `
 import asyncio, json, os, urllib.request
-from olite.drivers.loop import galaxy_tools
+from olit.drivers.loop import galaxy_tools
 
 GALAXY, KEY = os.environ["GALAXY"], os.environ["KEY"]
 DATASET, VISUALIZATION = os.environ["DATASET"], os.environ["VISUALIZATION"]

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from olite.substrate.llm.json_parse import loads_with_repair, repair_json
+from olit.substrate.llm.json_parse import loads_with_repair, repair_json
 
 
 def test_valid_json_is_untouched():

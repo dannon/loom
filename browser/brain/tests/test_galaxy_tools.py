@@ -3,7 +3,7 @@
 import asyncio
 import json
 
-from olite.drivers.loop.tools import ToolSurface
+from olit.drivers.loop.tools import ToolSurface
 
 
 class FakeManifest:
@@ -64,7 +64,7 @@ def test_get_histories_hits_the_right_endpoint():
     asyncio.run(ToolSurface(sub).dispatch("get_histories", {"limit": 5}))
     assert sub.galaxy.calls[0][0] == "GET"
     assert sub.galaxy.calls[0][1].startswith("api/histories")
-    assert "limit=5" in sub.galaxy.calls[0][1]
+    assert "limit=6" in sub.galaxy.calls[0][1]
 
 
 def test_run_tool_posts_to_api_tools_and_needs_write():
@@ -84,19 +84,27 @@ def test_tool_panel_counts_tools_not_panel_entries():
     # The panel's top level is mostly sections; counting it answers ~20 for a server
     # with hundreds of tools. The count has to come from the tool, not the reader.
     panel = [
-        {"model_class": "ToolSection", "name": "Get Data", "elems": [
-            {"model_class": "DataSourceTool", "id": "upload1"},
-            {"model_class": "Tool", "id": "ftp"},
-            {"model_class": "ToolSectionLabel", "text": "not a tool"},
-        ]},
-        {"model_class": "ToolSection", "name": "Collection Operations", "elems": [
-            {"model_class": "UnzipCollectionTool", "id": "unzip"},
-            {"model_class": "FilterFailedDatasetsTool", "id": "filter_failed"},
-        ]},
+        {
+            "model_class": "ToolSection",
+            "name": "Get Data",
+            "elems": [
+                {"model_class": "DataSourceTool", "id": "upload1"},
+                {"model_class": "Tool", "id": "ftp"},
+                {"model_class": "ToolSectionLabel", "text": "not a tool"},
+            ],
+        },
+        {
+            "model_class": "ToolSection",
+            "name": "Collection Operations",
+            "elems": [
+                {"model_class": "UnzipCollectionTool", "id": "unzip"},
+                {"model_class": "FilterFailedDatasetsTool", "id": "filter_failed"},
+            ],
+        },
         {"model_class": "Tool", "id": "loose_tool"},
         {"model_class": "ToolSectionLabel", "text": "also not a tool"},
     ]
-    from olite.drivers.loop.galaxy_tools import _count_panel
+    from olit.drivers.loop.galaxy_tools import _count_panel
 
     assert _count_panel(panel) == (5, 2)
 
@@ -107,8 +115,10 @@ def test_get_tool_panel_reports_the_count_alongside_the_hierarchy():
             self.manifest.require("read")
             self.calls.append(("GET", path))
             return [
-                {"model_class": "ToolSection", "elems": [{"model_class": "Tool", "id": "a"},
-                                                         {"model_class": "Tool", "id": "b"}]},
+                {
+                    "model_class": "ToolSection",
+                    "elems": [{"model_class": "Tool", "id": "a"}, {"model_class": "Tool", "id": "b"}],
+                },
                 {"model_class": "Tool", "id": "c"},
             ]
 
@@ -123,8 +133,7 @@ def test_create_page_declares_markdown_so_galaxy_does_not_sanitize_it_as_html():
     # Galaxy defaults a page to html and runs the body through sanitize_html; markdown
     # sent without the format lands mangled or empty.
     sub = FakeSubstrate(("read", "write"))
-    asyncio.run(ToolSurface(sub).dispatch(
-        "create_page", {"title": "T", "slug": "s", "content": "## Heading\n\ntext"}))
+    asyncio.run(ToolSurface(sub).dispatch("create_page", {"title": "T", "slug": "s", "content": "## Heading\n\ntext"}))
     method, path, body = sub.galaxy.calls[0]
     assert (method, path) == ("POST", "api/pages")
     assert body["content_format"] == "markdown"
@@ -132,7 +141,7 @@ def test_create_page_declares_markdown_so_galaxy_does_not_sanitize_it_as_html():
 
 def test_history_details_uses_the_count_galaxy_already_reports():
     """Listing every content id to length it made this call grow with the history."""
-    from olite.drivers.loop import galaxy_tools
+    from olit.drivers.loop import galaxy_tools
 
     class Counting:
         def __init__(self):
@@ -149,7 +158,7 @@ def test_history_details_uses_the_count_galaxy_already_reports():
 
 
 def test_history_details_reports_no_items_when_galaxy_states_none():
-    from olite.drivers.loop import galaxy_tools
+    from olit.drivers.loop import galaxy_tools
 
     class Empty:
         async def get(self, path):
@@ -161,7 +170,7 @@ def test_history_details_reports_no_items_when_galaxy_states_none():
 
 def test_an_unreadable_preview_says_why():
     """An absent preview field reads the same as a dataset with no content."""
-    from olite.drivers.loop import galaxy_tools
+    from olit.drivers.loop import galaxy_tools
 
     class Unreadable:
         async def get(self, path, **kwargs):
@@ -175,7 +184,7 @@ def test_an_unreadable_preview_says_why():
 
 
 def test_invoke_workflow_passes_parameters_normalized_through():
-    from olite.drivers.loop import galaxy_tools
+    from olit.drivers.loop import galaxy_tools
 
     class Posting:
         async def post(self, path, body):
@@ -183,8 +192,11 @@ def test_invoke_workflow_passes_parameters_normalized_through():
             return {"id": "inv1"}
 
     galaxy = Posting()
-    asyncio.run(galaxy_tools.get_handler("invoke_workflow")(
-        galaxy, {"workflow_id": "w1", "inputs": {}, "parameters_normalized": True}))
+    asyncio.run(
+        galaxy_tools.get_handler("invoke_workflow")(
+            galaxy, {"workflow_id": "w1", "inputs": {}, "parameters_normalized": True}
+        )
+    )
     assert galaxy.body["parameters_normalized"] is True
 
 
@@ -212,6 +224,7 @@ def test_a_granted_tool_still_reports_the_parameters_it_was_not_given():
 
 def test_a_tool_search_with_no_matches_says_the_query_is_exhausted():
     """An empty list is an answer, and the model answered it by searching again."""
+
     class EmptyGalaxy(FakeGalaxy):
         async def get(self, path):
             self.manifest.require("read")

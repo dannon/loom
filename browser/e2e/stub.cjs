@@ -5,8 +5,8 @@ const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
 // Where Galaxy serves a visualization plugin from, and the host page it renders.
-const PLUGIN_HREF = "/static/plugins/visualizations/olite/static";
-const HOST_PAGE = "/plugins/visualizations/olite";
+const PLUGIN_HREF = "/static/plugins/visualizations/olit/static";
+const HOST_PAGE = "/plugins/visualizations/olit";
 const TYPES = {
     ".js": "text/javascript",
     ".mjs": "text/javascript",
@@ -75,10 +75,10 @@ const createVisualization = [{
     },
 }];
 
-// Galaxy parses olite.xml server-side and hands the specs back through data-incoming;
+// Galaxy parses olit.xml server-side and hands the specs back through data-incoming;
 // reading the file keeps the harness on the same prompt the deployment would serve.
 function pluginSpecs() {
-    const xml = fs.readFileSync(path.join(ROOT, "public", "olite.xml"), "utf8");
+    const xml = fs.readFileSync(path.join(ROOT, "public", "olit.xml"), "utf8");
     const found = xml.match(/<ai_prompt>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/ai_prompt>/);
     return { ai_prompt: found ? found[1].trim() : "" };
 }
@@ -86,7 +86,7 @@ function pluginSpecs() {
 // The shape VisualizationFrame reads from /api/plugins/<name> to build data-incoming.
 function pluginDict() {
     return {
-        name: "olite",
+        name: "olit",
         html: "AI Research Assistant",
         embeddable: true,
         href: PLUGIN_HREF,
@@ -240,7 +240,7 @@ const server = http.createServer(async (req, res) => {
 
     // Everything else is Galaxy; record it so tests can assert on the PUT.
     seen.push(`${req.method} ${url}`);
-    if (url.includes("/api/plugins/olite")) return json(res, 200, pluginDict());
+    if (url.includes("/api/plugins/olit")) return json(res, 200, pluginDict());
     if (url.includes("/api/plugins")) return json(res, 200, [{ name: "ngl", settings: [], tracks: [] }]);
     if (url.includes("/api/datatypes/")) return json(res, 200, [{ visualization: "ngl" }]);
     if (url.includes("/api/datasets/")) {

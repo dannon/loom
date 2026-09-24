@@ -1,21 +1,33 @@
 """The skeleton the description promises, built the way galaxy-mcp builds it."""
 
-from olite.drivers.loop.tool_inputs import build_input_template, summarize_tool_inputs
+from olit.drivers.loop.tool_inputs import build_input_template, summarize_tool_inputs
 
 CAT1 = {
     "inputs": [
         {"name": "input1", "type": "data", "optional": False},
-        {"name": "queries", "type": "repeat", "optional": False,
-         "inputs": [{"name": "input2", "type": "data", "optional": False}]},
+        {
+            "name": "queries",
+            "type": "repeat",
+            "optional": False,
+            "inputs": [{"name": "input2", "type": "data", "optional": False}],
+        },
     ]
 }
 COND = {
     "inputs": [
-        {"name": "adv", "type": "conditional",
-         "test_param": {"name": "mode", "type": "select",
-                        "options": [["Simple", "simple", True], ["Full", "full", False]]},
-         "cases": [{"value": "simple", "inputs": [{"name": "n", "type": "integer"}]},
-                   {"value": "full", "inputs": [{"name": "x", "type": "float"}]}]},
+        {
+            "name": "adv",
+            "type": "conditional",
+            "test_param": {
+                "name": "mode",
+                "type": "select",
+                "options": [["Simple", "simple", True], ["Full", "full", False]],
+            },
+            "cases": [
+                {"value": "simple", "inputs": [{"name": "n", "type": "integer"}]},
+                {"value": "full", "inputs": [{"name": "x", "type": "float"}]},
+            ],
+        },
     ]
 }
 

@@ -3,8 +3,8 @@
 import asyncio
 import json
 
-from olite.drivers.loop.tools import ToolSurface, _process_tool_schemas
-from olite.registry import ProcessRegistry
+from olit.drivers.loop.tools import ToolSurface, _process_tool_schemas
+from olit.registry import ProcessRegistry
 
 
 class FakeManifest:
@@ -124,7 +124,7 @@ def test_per_input_help_reaches_the_model():
 
 def test_a_process_summarizes_its_own_state():
     """organize_datasets owns its summary; the tool surface only asks for one."""
-    from olite.registry.python.organize_datasets import organize_datasets, summarize_state
+    from olit.registry.python.organize_datasets import organize_datasets, summarize_state
 
     assert organize_datasets.summarize is summarize_state
     assert _processes().get("organize_datasets").summarize is summarize_state
@@ -152,18 +152,22 @@ def test_a_process_the_manifest_hides_is_refused_rather_than_run():
     assert outcome.refused and "'write' capability" in outcome.text
 
 
-def test_an_olite_tool_is_named_as_one_at_every_galaxy_tool_lookup():
+def test_an_olit_tool_is_named_as_one_at_every_galaxy_tool_lookup():
     """`run_tool` said so; the read-only lookups handed back Galaxy's bare 404.
 
     An agent searched the catalog nine times for `vintent_dataset`, called
     get_tool_details twice, and settled for a different route.
     """
     surface = _surface()
-    for name in ("run_tool", "get_tool_details", "get_tool_input_template",
-                 "get_tool_run_examples", "get_tool_citations"):
-        outcome = asyncio.run(surface.dispatch(name, {"tool_id": "vintent_dataset",
-                                                      "history_id": "h1", "inputs": {}}))
-        assert "is an OLite tool" in outcome.text, name
+    for name in (
+        "run_tool",
+        "get_tool_details",
+        "get_tool_input_template",
+        "get_tool_run_examples",
+        "get_tool_citations",
+    ):
+        outcome = asyncio.run(surface.dispatch(name, {"tool_id": "vintent_dataset", "history_id": "h1", "inputs": {}}))
+        assert "is an Olit tool" in outcome.text, name
         assert "Call vintent_dataset directly" in outcome.text, name
 
 

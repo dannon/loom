@@ -8,7 +8,7 @@ import asyncio
 
 import pytest
 
-from olite.substrate.local import LocalExecutionError, LocalPython
+from olit.substrate.local import LocalExecutionError, LocalPython
 
 
 class Manifest:
@@ -54,11 +54,7 @@ def test_top_level_await_returns_the_awaited_value():
 
 
 def test_an_awaited_expression_is_the_result():
-    code = (
-        "async def double(n):\n"
-        "    return n * 2\n"
-        "await double(21)"
-    )
+    code = "async def double(n):\n" "    return n * 2\n" "await double(21)"
     assert run(local(), code) == "42"
 
 
@@ -97,7 +93,7 @@ def test_pyfetch_is_in_the_namespace_without_an_import(monkeypatch):
         calls.append(url)
         return FakeResponse("run_accession\nSRR390728\n")
 
-    monkeypatch.setattr("olite.substrate.local.pyfetch", fake_pyfetch)
+    monkeypatch.setattr("olit.substrate.local.pyfetch", fake_pyfetch)
     runner = local()
 
     code = (
@@ -111,7 +107,7 @@ def test_pyfetch_is_in_the_namespace_without_an_import(monkeypatch):
 
 def test_without_pyodide_the_name_is_simply_absent(monkeypatch):
     """CPython has no browser; the failure is an ordinary NameError, not a crash."""
-    monkeypatch.setattr("olite.substrate.local.pyfetch", None)
+    monkeypatch.setattr("olit.substrate.local.pyfetch", None)
 
     with pytest.raises(LocalExecutionError) as caught:
         run(local(), "await pyfetch('https://example.invalid')")
@@ -124,7 +120,7 @@ def test_a_fetch_that_raises_surfaces_like_any_other_failure(monkeypatch):
     async def refusing(url, **kwargs):
         raise OSError("Failed to fetch")
 
-    monkeypatch.setattr("olite.substrate.local.pyfetch", refusing)
+    monkeypatch.setattr("olit.substrate.local.pyfetch", refusing)
 
     with pytest.raises(LocalExecutionError) as caught:
         run(local(), "print('before')\nawait pyfetch('https://no-cors.invalid')")
@@ -148,16 +144,12 @@ def test_failure_points_at_the_line_in_the_submitted_code():
     with pytest.raises(LocalExecutionError) as caught:
         run(local(), "a = 1\nb = 2\nmissing_name\n")
     text = str(caught.value)
-    assert 'File "<olite>", line 3' in text
+    assert 'File "<olit>", line 3' in text
     assert "local.py" not in text
 
 
 def test_a_failure_inside_an_awaited_call_still_points_at_the_code():
-    code = (
-        "async def boom():\n"
-        "    raise ValueError('no rows')\n"
-        "await boom()"
-    )
+    code = "async def boom():\n" "    raise ValueError('no rows')\n" "await boom()"
     with pytest.raises(LocalExecutionError) as caught:
         run(local(), code)
     text = str(caught.value)

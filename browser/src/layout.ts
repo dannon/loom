@@ -7,7 +7,7 @@ export const LAYOUT = `
           <div id="input-area">
             <div class="composer-row">
               <textarea id="input" rows="1" aria-label="Chat input"
-                placeholder="Ask OLite to run something..."></textarea>
+                placeholder="Ask Olit to run something..."></textarea>
               <button id="send-btn" title="Send" aria-label="Send message">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
@@ -33,6 +33,7 @@ export const LAYOUT = `
         </div>
       </div>
       <div id="app-footer">
+        <button id="save-btn" class="footer-control is-interactive" title="Save this conversation as a Galaxy visualization">Save</button>
         <button id="model-btn" class="footer-control is-interactive" title="Change the model provider">Model</button>
         <button id="artifact-btn" class="footer-control is-interactive" title="Show or hide the artifact pane (Ctrl/Cmd+\\)">Artifact</button>
         <div id="usage-bar" class="footer-control hidden" title="Session token usage">
@@ -56,28 +57,30 @@ export const LAYOUT = `
       </div>`;
 
 export interface Elements {
-    chat: HTMLElement;
-    messages: HTMLElement;
-    input: HTMLTextAreaElement;
-    send: HTMLButtonElement;
-    abort: HTMLButtonElement;
-    reset: HTMLButtonElement;
-    model: HTMLButtonElement;
-    artifactContent: HTMLElement;
+  chat: HTMLElement;
+  messages: HTMLElement;
+  input: HTMLTextAreaElement;
+  send: HTMLButtonElement;
+  abort: HTMLButtonElement;
+  reset: HTMLButtonElement;
+  save: HTMLButtonElement;
+  model: HTMLButtonElement;
+  artifactContent: HTMLElement;
 }
 
 /** Write the layout into `container` and hand back the parts the shell drives. */
 export function mountLayout(container: HTMLElement): Elements {
-    container.innerHTML = LAYOUT;
-    const find = <T extends HTMLElement>(id: string) => container.querySelector<T>(id)!;
-    return {
-        chat: find("#chat-pane"),
-        messages: find("#messages"),
-        input: find<HTMLTextAreaElement>("#input"),
-        send: find<HTMLButtonElement>("#send-btn"),
-        abort: find<HTMLButtonElement>("#abort-btn"),
-        reset: find<HTMLButtonElement>("#reset-btn"),
-        model: find<HTMLButtonElement>("#model-btn"),
-        artifactContent: find("#artifact-content"),
-    };
+  container.innerHTML = LAYOUT;
+  const find = <T extends HTMLElement>(id: string) => container.querySelector<T>(id)!;
+  return {
+    chat: find("#chat-pane"),
+    messages: find("#messages"),
+    input: find<HTMLTextAreaElement>("#input"),
+    send: find<HTMLButtonElement>("#send-btn"),
+    abort: find<HTMLButtonElement>("#abort-btn"),
+    reset: find<HTMLButtonElement>("#reset-btn"),
+    save: find<HTMLButtonElement>("#save-btn"),
+    model: find<HTMLButtonElement>("#model-btn"),
+    artifactContent: find("#artifact-content"),
+  };
 }

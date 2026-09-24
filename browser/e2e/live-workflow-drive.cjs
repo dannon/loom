@@ -29,7 +29,7 @@ const api = async (path) => {
     // The record accumulates across sessions, so ids written by earlier runs are legitimate.
     // Baseline it now and only validate what this run adds.
     const priorPage = (await api("api/pages?limit=500")) || [];
-    const priorBound = priorPage.find((p) => p.slug === `olite-${HISTORY}`);
+    const priorBound = priorPage.find((p) => p.slug === `olit-${HISTORY}`);
     const recordBefore = priorBound
         ? ((await api(`api/pages/${priorBound.id}`)) || {}).content || ""
         : "";
@@ -52,7 +52,7 @@ const api = async (path) => {
     };
 
     await page.goto(`${APP}?history_id=${HISTORY}`, { waitUntil: "domcontentloaded" });
-    check("booted", await wait(() => /olite ready|Resumed this history/i.test(document.body.innerText), 300000));
+    check("booted", await wait(() => /olit ready|Resumed this history/i.test(document.body.innerText), 300000));
 
     // A restored conversation replays its plan cards, and they are clickable. Start clean or
     // the driver approves a plan from a previous run.
@@ -116,20 +116,20 @@ const api = async (path) => {
     const pages = (await api("api/pages?limit=500")) || [];
     const read = async (p) => ((await api(`api/pages/${p.id}`)) || {}).content || "";
 
-    const bound = pages.find((p) => p.slug === `olite-${HISTORY}`);
-    check("bound history has a record", !!bound, bound ? bound.id : `no olite-${HISTORY}`);
+    const bound = pages.find((p) => p.slug === `olit-${HISTORY}`);
+    check("bound history has a record", !!bound, bound ? bound.id : `no olit-${HISTORY}`);
     if (bound) {
         const content = await read(bound);
-        check("shell wrote the session block", content.includes("```olite-session"),
+        check("shell wrote the session block", content.includes("```olit-session"),
               `${content.length} chars`);
         require("fs").writeFileSync(`${OUT}/live-record-bound.md`, content);
     }
 
     // Only records touched during this run count; a leftover page from an earlier run
     // otherwise satisfies the check and hides a failure.
-    const olitePages = pages.filter((p) => (p.slug || "").startsWith("olite-"));
+    const olitPages = pages.filter((p) => (p.slug || "").startsWith("olit-"));
     let narrated = null;
-    for (const p of olitePages) {
+    for (const p of olitPages) {
         const c = await read(p);
         const fresh = invoked && c.includes(invoked.id);
         if (fresh && /invocation|workflow/i.test(c)) narrated = { page: p, content: c };
@@ -139,7 +139,7 @@ const api = async (path) => {
     if (narrated) require("fs").writeFileSync(`${OUT}/live-record.md`, narrated.content);
 
     check("the work stayed in the bound history",
-          !!(narrated && narrated.page.slug === `olite-${HISTORY}`),
+          !!(narrated && narrated.page.slug === `olit-${HISTORY}`),
           narrated ? `wrote to ${narrated.page.slug}` : "n/a");
 
     // A record can name the work and still be wrong: the ids are the reproducibility

@@ -2,14 +2,14 @@
 
 A run asked for a plotly chart and searched for 'vintent', 'vintent_dataset', 'plotly'
 and 'visualization' in turn. Each search was answered once, so no repeat guard fired;
-the catalog simply does not hold OLite tools or visualizations, and never said so.
+the catalog simply does not hold Olit tools or visualizations, and never said so.
 """
 
 import asyncio
 
-from olite.drivers.loop.galaxy_tools import _search_tools_by_name
-from olite.drivers.loop.tools import ToolSurface
-from olite.registry import ProcessRegistry
+from olit.drivers.loop.galaxy_tools import _search_tools_by_name
+from olit.drivers.loop.tools import ToolSurface
+from olit.registry import ProcessRegistry
 
 
 class _Manifest:
@@ -47,7 +47,7 @@ def _search(query, tools=None, plugins=None):
     return asyncio.run(_search_tools_by_name(g, {"query": query})), g
 
 
-def test_searching_for_an_olite_tool_says_where_it_lives_without_directing_a_call():
+def test_searching_for_an_olit_tool_says_where_it_lives_without_directing_a_call():
     """The directive form sent one run to vintent when the user had asked for plotly.
 
     A search is the model orienting itself, so naming the tool is the answer; telling it to
@@ -55,18 +55,18 @@ def test_searching_for_an_olite_tool_says_where_it_lives_without_directing_a_cal
     """
     outcome = asyncio.run(_surface().dispatch("search_tools_by_name", {"query": "vintent_dataset"}))
     assert outcome.is_error
-    assert "is an OLite tool" in outcome.text
+    assert "is an Olit tool" in outcome.text
     assert "Call vintent_dataset directly" not in outcome.text
 
 
-def test_asking_to_run_an_olite_tool_by_id_still_names_the_route():
+def test_asking_to_run_an_olit_tool_by_id_still_names_the_route():
     """A tool_id is the model trying to run that exact tool, so the directive belongs there."""
     outcome = asyncio.run(_surface().dispatch("get_tool_details", {"tool_id": "vintent_dataset"}))
     assert outcome.is_error
     assert "Call vintent_dataset directly" in outcome.text
 
 
-def test_a_partial_name_still_reaches_the_olite_tool():
+def test_a_partial_name_still_reaches_the_olit_tool():
     """The run searched 'vintent' before it searched 'vintent_dataset'."""
     outcome = asyncio.run(_surface().dispatch("search_tools_by_name", {"query": "vintent"}))
     assert outcome.is_error and "vintent_dataset" in outcome.text
@@ -76,12 +76,12 @@ def test_a_partial_name_still_reaches_the_olite_tool():
 def test_a_short_query_is_left_to_the_catalog():
     """'lin' must not be read as a reach for lineage_report."""
     surface = _surface()
-    assert surface._olite_tool_named({"query": "lin"})[0] is None
+    assert surface._olit_tool_named({"query": "lin"})[0] is None
 
 
 def test_an_ordinary_tool_search_is_untouched():
     surface = _surface()
-    assert surface._olite_tool_named({"query": "bowtie2"})[0] is None
+    assert surface._olit_tool_named({"query": "bowtie2"})[0] is None
 
 
 def test_a_visualization_name_is_answered_with_where_it_lives():
@@ -92,7 +92,7 @@ def test_a_visualization_name_is_answered_with_where_it_lives():
 
 
 def test_neither_this_agent_nor_the_frozen_plugin_is_named_back():
-    result, _ = _search("olite", tools=[], plugins=[{"name": "olite"}])
+    result, _ = _search("olit", tools=[], plugins=[{"name": "olit"}])
     assert "visualization" not in result["hint"]
 
 
@@ -173,7 +173,7 @@ def test_an_unknown_tool_is_named_without_its_control_token():
 
 
 def test_a_body_keeps_its_words_while_losing_the_token():
-    from olite.drivers.loop.tools import without_control_tokens
+    from olit.drivers.loop.tools import without_control_tokens
 
     assert without_control_tokens("before<|channel|>final<|message|>after") == "beforefinalafter"
     assert without_control_tokens("nothing to strip") == "nothing to strip"
@@ -182,10 +182,9 @@ def test_a_body_keeps_its_words_while_losing_the_token():
 
 def test_the_tool_message_carries_neither_a_contaminated_name_nor_body():
     """The name field poisons the transcript as surely as the content does."""
-    from olite.drivers.loop.tools import plain_tool_name, without_control_tokens
+    from olit.drivers.loop.tools import plain_tool_name, without_control_tokens
 
     name, body = "get_page<|channel|>commentary", "Unknown tool: get_page<|channel|>commentary"
-    message = {"role": "tool", "name": plain_tool_name(name),
-               "content": without_control_tokens(body)}
+    message = {"role": "tool", "name": plain_tool_name(name), "content": without_control_tokens(body)}
     assert "<|" not in message["name"] and "<|" not in message["content"]
     assert message["name"] == "get_page"

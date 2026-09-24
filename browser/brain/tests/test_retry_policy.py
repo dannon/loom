@@ -4,8 +4,8 @@ import asyncio
 
 import pytest
 
-from olite.exceptions import HttpError
-from olite.substrate.http import HttpClient
+from olit.exceptions import HttpError
+from olit.substrate.http import HttpClient
 
 
 class Recording(HttpClient):
