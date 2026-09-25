@@ -422,9 +422,9 @@ ready, authorized work. Do not spend a turn in a polling/sleep loop.
 **The harness records the run; you name the step it belongs to.** Loom
 writes the notebook block itself the moment a Galaxy submission answers,
 reading the id out of Galaxy's own response, so the poller is already
-watching the run before your next turn starts. What it cannot know is which
-plan step the run is for when you submit outside an \`/execute\`, so bind it
-immediately after submission: workflow runs with \`galaxy_invocation_record({
+watching the run before your next turn starts. What it cannot reliably know
+is which plan step the run is for, so bind every run immediately after
+submission, inside an \`/execute\` or not: workflow runs with \`galaxy_invocation_record({
 invocationId, notebookAnchor, label })\` and tool runs with
 \`galaxy_job_record({ jobId, notebookAnchor, label })\`. The call sets the
 label and anchor on the block Loom already wrote, and writes a new block only

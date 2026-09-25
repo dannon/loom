@@ -60,7 +60,7 @@ import {
   writeNotebook,
   type InvocationYaml,
 } from "./notebook-writer";
-import { getCurrentStepAnchor, getNotebookPath } from "./state";
+import { getCurrentStepAnchor, getNotebookPath, setCurrentStepAnchor } from "./state";
 import { ulid } from "./ulid";
 
 /** What a block carries when nothing pointed the submission at a plan step. */
@@ -573,6 +573,15 @@ export async function handleSubmissionResult(
   const wroteNothing =
     !written.wroteInvocation && written.wroteJobs.length === 0 && !written.wroteUdt;
   if (wroteNothing) return;
+
+  // /execute's step anchor names the step it started on, but one /execute now
+  // carries on through the authorized plan. Only the first run it lands is
+  // known to be for that step; leaving the anchor armed filed step 2 and 3
+  // under step 1, which the evidence gate then read as step 1's evidence.
+  // Later runs come out unattributed until the model binds them.
+  if (!dispatch.replayed && dispatch.stepAnchor === getCurrentStepAnchor()) {
+    setCurrentStepAnchor(null);
+  }
 
   record("submission.registered", {
     tool: toolName,

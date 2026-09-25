@@ -13,7 +13,12 @@ import {
 import { findInvocationBlocks } from "../extensions/loom/notebook-writer";
 import { findJobBlocks } from "../extensions/loom/galaxy-job-block";
 import { findUdtBlocks } from "../extensions/loom/galaxy-udt-block";
-import { resetState, setCurrentStepAnchor, setNotebookPath } from "../extensions/loom/state";
+import {
+  getCurrentStepAnchor,
+  resetState,
+  setCurrentStepAnchor,
+  setNotebookPath,
+} from "../extensions/loom/state";
 import { isUlid } from "../extensions/loom/ulid";
 
 let tmpDir: string;
@@ -338,6 +343,69 @@ describe("submission capture: attribution is captured at dispatch", () => {
     );
 
     expect(findInvocationBlocks(notebook())[0].notebookAnchor).toBe("plan-a-step-3");
+  });
+
+  // One /execute now carries on through the authorized plan, so the anchor it
+  // armed is only known to be right for the first run. Keeping it for the
+  // whole agent run filed step 2's work under step 1.
+  it("gives the /execute step to the first run only", async () => {
+    setCurrentStepAnchor("plan-a-step-1");
+    await submit(
+      "galaxy_invoke_workflow",
+      { workflow_id: "c0ffee1234567890" },
+      mcpResult(INVOCATION),
+    );
+    await submit("galaxy_run_tool", { tool_id: "fastp" }, mcpResult(THREE_JOBS));
+
+    expect(findInvocationBlocks(notebook())[0].notebookAnchor).toBe("plan-a-step-1");
+    expect(findJobBlocks(notebook()).map((b) => b.notebookAnchor)).toEqual([
+      "unattributed",
+      "unattributed",
+      "unattributed",
+    ]);
+  });
+
+  it("keeps the step for the retry when the first attempt failed", async () => {
+    // A gate-blocked or rejected call created nothing, so it must not use up
+    // the step: the retry that does land is still that step's run.
+    setCurrentStepAnchor("plan-a-step-1");
+    await submit(
+      "galaxy_run_tool",
+      { tool_id: "fastp" },
+      { content: [{ type: "text", text: "blocked" }] },
+      true,
+    );
+    await submit(
+      "galaxy_invoke_workflow",
+      { workflow_id: "c0ffee1234567890" },
+      mcpResult(INVOCATION),
+    );
+    expect(findInvocationBlocks(notebook())[0].notebookAnchor).toBe("plan-a-step-1");
+  });
+
+  it("does not clear a step that moved on while an earlier run was answering", async () => {
+    const handlers: Record<string, ((event: any, ctx: any) => Promise<unknown>)[]> = {};
+    registerSubmissionCapture({
+      on: (event: string, h: (event: any, ctx: any) => Promise<unknown>) =>
+        (handlers[event] ??= []).push(h),
+    } as any);
+    setCurrentStepAnchor("plan-a-step-1");
+    await handlers.tool_execution_start[0](
+      { toolCallId: "early", toolName: "galaxy_invoke_workflow", args: {} },
+      {},
+    );
+    setCurrentStepAnchor("plan-a-step-2");
+    await handlers.tool_execution_end[0](
+      {
+        toolCallId: "early",
+        toolName: "galaxy_invoke_workflow",
+        result: mcpResult(INVOCATION),
+        isError: false,
+      },
+      {},
+    );
+    expect(findInvocationBlocks(notebook())[0].notebookAnchor).toBe("plan-a-step-1");
+    expect(getCurrentStepAnchor()).toBe("plan-a-step-2");
   });
 
   it("stays unattributed when the start event was never seen", async () => {
