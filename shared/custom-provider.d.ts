@@ -17,6 +17,13 @@ export interface ModelsConfig {
   >;
 }
 
+export type EndpointApi = "openai-completions" | "anthropic-messages";
+
+export const ENDPOINT_APIS: readonly EndpointApi[];
+export const DEFAULT_ENDPOINT_API: EndpointApi;
+/** Throws on any value outside ENDPOINT_APIS; empty/absent resolves to the default. */
+export function normalizeEndpointApi(value: string | undefined | null): EndpointApi;
+
 export const ACTIVE_LLM_API_KEY_ENV: "LOOM_ACTIVE_LLM_API_KEY";
 export function isCustomProvider(entry: LlmProviderConfig | undefined): boolean;
 export function synthesizeModelDef(entry: LlmProviderConfig): CustomModelDef;

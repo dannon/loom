@@ -30,7 +30,9 @@ describe("discoverProviderModels", () => {
       probe,
     });
     expect(res).toEqual({ ok: true, models: ["a/one", "b/two"] });
-    expect(probe).toHaveBeenCalledWith("https://openrouter.ai/api/v1/", "sk-stored");
+    // Third arg is the stored wire format -- absent on this entry, so the
+    // probe falls back to the OpenAI-compatible shape.
+    expect(probe).toHaveBeenCalledWith("https://openrouter.ai/api/v1/", "sk-stored", undefined);
   });
 
   it("dedupes and drops blank ids the endpoint reports", async () => {

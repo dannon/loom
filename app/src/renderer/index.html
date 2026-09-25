@@ -19,6 +19,16 @@
     />
     <title>orbit</title>
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./dashboard/dashboard.css" />
+    <!-- After dashboard.css on purpose: a widget rule and a shared rule are often
+         both one class on the same element, so the widget sheet has to come last
+         to win the tie. -->
+    <link rel="stylesheet" href="./dashboard/widgets/jobs.css" />
+    <link rel="stylesheet" href="./dashboard/widgets/plan.css" />
+    <link rel="stylesheet" href="./dashboard/widgets/activity.css" />
+    <link rel="stylesheet" href="./dashboard/widgets/results.css" />
+    <link rel="stylesheet" href="./dashboard/widgets/galaxy-history.css" />
+    <link rel="stylesheet" href="./dashboard/editor/editor.css" />
   </head>
   <body>
     <div id="app">
@@ -345,6 +355,7 @@
           <div class="pane-title pane-tabs" id="artifact-tabs">
             <button class="pane-tab active" data-tab="notebook">Notebook</button>
             <button class="pane-tab" data-tab="activity">Activity</button>
+            <button class="pane-tab" data-tab="dashboard">Dashboard</button>
             <button class="pane-tab pane-tab-closeable" data-tab="file" hidden>
               <span class="pane-tab-label">File</span>
               <span class="pane-tab-close" id="file-tab-close" title="Close file">×</span>
@@ -364,6 +375,7 @@
                 </p>
               </div>
             </div>
+            <div id="dashboard-view" class="pane-body hidden"></div>
             <div id="activity-view" class="pane-body hidden">
               <div id="activity-galaxy-history-section" class="hidden">
                 <div class="activity-section-header">
@@ -550,6 +562,15 @@
               <label for="prefs-model">Model</label>
               <div class="prefs-row-with-btn">
                 <select id="prefs-model"></select>
+                <input
+                  id="prefs-model-custom"
+                  class="hidden"
+                  type="text"
+                  list="prefs-model-options"
+                  placeholder="model id, e.g. claudeopus5"
+                  autocomplete="off"
+                />
+                <datalist id="prefs-model-options"></datalist>
                 <button
                   id="prefs-model-refresh"
                   class="plan-btn hidden"
@@ -573,14 +594,17 @@
                 Prices in the dropdown are per 1M tokens (input/output).
               </span>
             </div>
+            <div class="prefs-row hidden" id="prefs-api-shape-row">
+              <label for="prefs-api-shape">API shape</label>
+              <select id="prefs-api-shape">
+                <option value="openai-completions">OpenAI-compatible</option>
+                <option value="anthropic-messages">Anthropic-compatible</option>
+              </select>
+            </div>
             <div class="prefs-row hidden" id="prefs-base-url-row">
               <label for="prefs-base-url">Base URL</label>
               <div class="prefs-row-with-btn">
-                <input
-                  id="prefs-base-url"
-                  type="text"
-                  placeholder="https://host/v1 (OpenAI-compatible)"
-                />
+                <input id="prefs-base-url" type="text" placeholder="https://host/v1" />
                 <button
                   id="prefs-jetstream-preset"
                   class="plan-btn"
@@ -767,15 +791,27 @@
             <div class="prefs-row">
               <label for="welcome-model">Model</label>
               <select id="welcome-model"></select>
+              <input
+                id="welcome-model-custom"
+                class="hidden"
+                type="text"
+                list="welcome-model-options"
+                placeholder="model id, e.g. claudeopus5"
+                autocomplete="off"
+              />
+              <datalist id="welcome-model-options"></datalist>
+            </div>
+            <div class="prefs-row hidden" id="welcome-api-shape-row">
+              <label for="welcome-api-shape">API shape</label>
+              <select id="welcome-api-shape">
+                <option value="openai-completions">OpenAI-compatible</option>
+                <option value="anthropic-messages">Anthropic-compatible</option>
+              </select>
             </div>
             <div class="prefs-row hidden" id="welcome-base-url-row">
               <label for="welcome-base-url">Base URL</label>
               <div class="prefs-row-with-btn">
-                <input
-                  id="welcome-base-url"
-                  type="text"
-                  placeholder="https://host/v1 (OpenAI-compatible)"
-                />
+                <input id="welcome-base-url" type="text" placeholder="https://host/v1" />
                 <button
                   id="welcome-jetstream-preset"
                   class="plan-btn"

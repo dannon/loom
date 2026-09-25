@@ -40,6 +40,7 @@ describe("providerStateFor", () => {
       typedKey: "sk-openai",
       model: "gpt-5.4",
       baseUrl: "",
+      api: "",
       savedBaseUrl: "",
     });
   });
@@ -101,6 +102,7 @@ describe("captureProviderState", () => {
       typedKey: "",
       model: "claude-sonnet-5",
       baseUrl: "",
+      api: "",
       savedBaseUrl: "",
     });
   });
@@ -292,7 +294,7 @@ describe("ProviderFieldStore", () => {
     const store = new ProviderFieldStore("openai");
     store.select("deepseek", openaiFields);
     expect(store.select("openai", { typedKey: "", model: "deepseek-v4-pro", baseUrl: "" })).toEqual(
-      { hadKey: false, ...openaiFields, savedBaseUrl: "" },
+      { hadKey: false, ...openaiFields, api: "", savedBaseUrl: "" },
     );
   });
 
@@ -301,6 +303,7 @@ describe("ProviderFieldStore", () => {
     expect(store.select("openai", openaiFields)).toEqual({
       hadKey: false,
       ...openaiFields,
+      api: "",
       savedBaseUrl: "",
     });
   });

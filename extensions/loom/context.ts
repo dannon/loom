@@ -23,6 +23,9 @@ import {
 } from "./skills-discovery";
 import { findGalaxyPageBlocks } from "./galaxy-page-binding";
 import { isLocalShellDisabled } from "./local-exec.js";
+import { SRA_IMPORT_GUIDANCE } from "./sra-import-gate";
+import { MCP_RECOVERY_GUIDANCE } from "./mcp-recovery";
+import { GALAXY_POLL_GUIDANCE } from "./galaxy-poll-guard";
 import { GALAXY_PAGE_MARKDOWN_GUIDANCE } from "./galaxy-page-markdown-guidance";
 import {
   buildUserInstructionsBlock,
@@ -274,19 +277,20 @@ Galaxy is connected.
 
 ### If a Galaxy tool reports it's not connected
 
-The live Galaxy MCP connection is per-session and does **not** survive a resume
-or a long idle period, even though the credentials above stay configured. So a
-\`galaxy_*\` tool can come back "not connected" / "connection closed" / with a
-transport timeout at any time -- most often on the first Galaxy action after
-resuming this project. That does **not** mean Galaxy is unavailable; it means
-this session's connection needs to be re-established.
+The live Galaxy MCP connection may need to be re-established after a resume
+or long idle period, even though credentials stay configured. Distinguish
+Galaxy authentication errors from a dropped MCP transport and request timeouts.
+A timeout alone does not prove that the connection is dead.
 
 When it happens -- and before you ever tell the user Galaxy is disconnected:
-1. Call \`galaxy_connect()\` first to re-bind this session. Do NOT report a
-   disconnection you haven't tried to fix.
-2. If \`galaxy_connect()\` itself fails with a transport error (connection
-   closed / timed out, not an auth error), tell the user to run
-   \`/mcp reconnect galaxy\` (no restart needed), then retry.
+1. For "Not connected to Galaxy", call \`galaxy_connect()\` to re-bind
+   this session. Do not report a disconnection you haven't tried to fix.
+2. For a dropped transport, call \`mcp({connect: "galaxy"})\` yourself,
+   then \`galaxy_connect()\`. Verify both results before continuing.
+3. For timeouts, narrow read-only queries first. Before retrying a mutation,
+   check whether Galaxy accepted it. Never blindly replay a submission.
+4. Only if your own reconnect fails, tell the user they can run
+   \`/mcp reconnect galaxy\` (no restart needed).
 
 Never report "Galaxy is disconnected" as a final answer without attempting
 \`galaxy_connect()\` in the same turn.
@@ -388,6 +392,7 @@ connection, where a server-side fetch runs at datacenter bandwidth.
   genuinely local: a file the user created, or one that exists only on
   this machine with no URL Galaxy can reach itself.
 
+${SRA_IMPORT_GUIDANCE}
 ### Invoking a Galaxy workflow
 
 Call \`galaxy_get_workflow_input_template\` before \`galaxy_invoke_workflow\`.
@@ -410,40 +415,38 @@ whole wrapper — keep its keys, replace every placeholder (\`<value>\`,
 
 ### Executing a Galaxy step
 
-**Galaxy invocations run in the background by default — submit and hand
-control back to the user.** Do NOT block the turn polling a Galaxy job to
-completion; the user wants to keep working with you while it runs.
+**Galaxy jobs run in the background while you remain responsible for the
+approved analysis.** Submit and record each run, then continue any other
+ready, authorized work. Do not spend a turn in a polling/sleep loop.
 
 **The harness records the run; you name the step it belongs to.** Loom
 writes the notebook block itself the moment a Galaxy submission answers,
 reading the id out of Galaxy's own response, so the poller is already
 watching the run before your next turn starts. What it cannot know is which
-plan step the run is for when you submit outside an \`/execute\`, and that is
-what the two record calls are for now.
+plan step the run is for when you submit outside an \`/execute\`, so bind it
+immediately after submission: workflow runs with \`galaxy_invocation_record({
+invocationId, notebookAnchor, label })\` and tool runs with
+\`galaxy_job_record({ jobId, notebookAnchor, label })\`. The call sets the
+label and anchor on the block Loom already wrote, and writes a new block only
+if nothing in the notebook carries that id. Use the IDs returned by Galaxy.
 
-This applies to single **tool** runs too, not just workflows — bind those
-with \`galaxy_job_record({ jobId, notebookAnchor, label })\` after
-\`galaxy_run_tool\` returns a job id.
+- If the submission result or a current check already shows terminal state,
+  inspect the outputs now. A quick merge or metadata operation can finish
+  immediately; verification need not wait for another turn.
+- If a prerequisite is still running and no other authorized work is ready,
+  give a concise status and yield. The background poller queues verification
+  or investigation on completion by default. It pauses after a few automatic
+  turns without user input, and when the user stops a turn. If it has been
+  explicitly disabled, say so; do not promise automatic continuation.
+- On success, verify output datasets/collections, record the evidence in the
+  notebook, then mark the existing step verified and continue the next
+  authorized work whose prerequisites pass. Never require the user to repeat
+  an execution request or ask for verification again.
+- On failure, investigate immediately and record the cause. Stop dependent
+  work; perform safe recovery within existing authorization. Ask only for a
+  necessary missing decision, information or authorization. Respect explicit
+  pause/stop requests. Never advance past a failed or unverified prerequisite.
 
-After invoking via Galaxy MCP and getting an \`invocationId\` back:
-1. Call \`galaxy_invocation_record({ invocationId, notebookAnchor, label })\`.
-   The \`notebookAnchor\` is a stable id like \`plan-1-step-3\` that
-   matches an anchor you wrote in the markdown plan section. It sets the
-   label and the anchor on the block Loom already wrote, and writes a new
-   block only if nothing in the notebook carries that id.
-2. **Return to the user now.** Tell them it's submitted and running in the
-   background (the Activity tab shows live progress), and stop. Leave the
-   step's checkbox \`- [ ]\`. A background poller advances the invocation's
-   YAML status automatically (all-jobs-ok → completed, any-error → failed)
-   and the user is notified when it reaches a terminal state — you do not
-   need to sit here calling \`galaxy_invocation_check_all\` in a loop. Only
-   wait in-turn if the user explicitly asked you to.
-3. **Verify later, on demand.** When the user asks (or after the completion
-   notification), call \`galaxy_invocation_check_all\`, inspect the output
-   datasets, record verification evidence in the notebook, then edit the
-   markdown checkbox from \`- [ ]\` to \`- [x]\`. On failure, record the error
-   evidence and use \`- [!]\`. Do not verify or check off a Galaxy step in the
-   submit turn — it isn't done yet.
 `;
 }
 
@@ -622,25 +625,28 @@ its inputs/outputs).
 function buildOperatingDisciplineBlock(): string {
   return `## Operating discipline
 
-### Confirm scope before substantive work
+### Act within the user's authorized scope
 
-Before any side-effectful work — tool invocations that consume quota,
-workflow runs, file creation, credential usage, anything beyond pure
-Q&A or trivial \`Read\` — surface the unknowns and propose a sketch
-**first**, then wait for the user to green-light. Specifically:
+Treat a request to perform work or execute a plan as authorization to do that
+work, including its necessary verification and routine follow-through.
+Authorization carries across turns and background job completion. Consult
+the latest user instructions and notebook; do not ask for another green light
+for already-authorized tool calls, file creation, verification, or next steps.
 
-- Surface ambiguities up front: organism? which Galaxy? which history?
-  paired-end or single? reference genome? — pick the 1-2 things you'd
-  guess wrong on and ask.
-- Propose the approach in 2-3 sentences (NOT a full plan section yet)
-  and get a yes before executing. One short exchange, not a planning
-  ceremony.
-- Pure Q&A and low-stakes exploration ("what's in this VCF?", "show me
-  notebook.md") stay frictionless — no gate.
+Resolve necessary missing information before dependent work: organism,
+reference, destination history, or an actual change in scientific scope.
+Use established context and reasonable defaults for routine implementation
+choices. Ask only when the answer changes correctness, scope, or authorization.
+Do not invent an approval checkpoint simply because a tool consumes resources.
+Existing permission guards and explicit user limits still apply.
 
-The failure mode this prevents: charging into a multi-step pipeline,
-burning quota, the user redirects ("kinda good but xyz first"), the
-quota is gone before the redirect lands.
+When authorized work is ready, execute it rather than ending with a promise,
+an apology, or a status-only reply. A status question does not cancel an
+ongoing execution request: answer briefly, then continue. Yield when waiting
+on a real external prerequisite with follow-up arranged, when a necessary
+user decision is missing, when the requested work is complete, or when the
+user explicitly asks you to pause or stop. Do not create a new plan unless
+asked.
 
 ### Secrets — never solicit in chat
 
@@ -731,8 +737,9 @@ or telling the user the work is done.
 
 Match the verification check to the artifact or action being completed:
 
-- **Galaxy workflow or tool run** — verification is on demand, once the run
-  has reached a terminal state (the background poller gets it there). Confirm
+- **Galaxy workflow or tool run** — verify automatically once the run
+  reaches a terminal state, including during the submission turn if it has
+  already finished. Confirm
   terminal state with \`galaxy_invocation_check_all\` or the relevant Galaxy MCP
   inspection call, then inspect resulting datasets/collections enough to
   confirm they exist and look plausible for the request. Don't block a turn
@@ -1218,6 +1225,8 @@ export function setupContextInjection(pi: ExtensionAPI): void {
       buildNotebookWriteBlock(),
       buildExecutionModeBlock(),
       buildGalaxyContextBlock(),
+      MCP_RECOVERY_GUIDANCE,
+      GALAXY_POLL_GUIDANCE,
       buildSkillsContext(),
       buildLocalEnvContext(),
       buildNoLocalShellBlock(),

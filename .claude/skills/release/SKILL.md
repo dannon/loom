@@ -57,7 +57,13 @@ silently truncates at 30 without `--limit`:
 
 ```bash
 # Authoritative PR set: merge commits since the last tag.
-git log "$LAST_TAG"..HEAD --merges --oneline | grep -oE '#[0-9]+' | sort -un
+# Strip the "#" before sorting: BSD/macOS `sort -n` reads "#464" as 0, so every
+# entry compares equal and `-u` collapses the whole list to one PR. That fails
+# silently and looks like a quiet release -- v0.7.0 reported 1 PR against 107
+# commits. Anchoring on "Merge pull request #" also drops the "Merge branch ..."
+# commits, which carry no PR number.
+git log "$LAST_TAG"..HEAD --merges --oneline \
+  | grep -oE 'Merge pull request #[0-9]+' | grep -oE '[0-9]+' | sort -un
 # Titles/authors/labels for those PRs (--limit: default is 30, which silently drops PRs):
 gh pr list --repo galaxyproject/loom --state merged --base main --limit 200 \
   --search "merged:>=$LAST_DATE" --json number,title,author,labels,mergedAt
@@ -95,10 +101,16 @@ Prepend a new block to `CHANGELOG.md`, immediately above the most recent `## [` 
 
 Then commit (do NOT tag yet):
 
+`npm version` rewrites the version field in **both** `package.json` and
+`package-lock.json`, so all four manifests go in the commit. Leaving the
+lockfiles out tags a dirty tree whose published lockfile still claims the old
+version:
+
 ```bash
-git add package.json app/package.json CHANGELOG.md
+git add package.json package-lock.json app/package.json app/package-lock.json CHANGELOG.md
 git commit -m "release: v$NEW"
 git --no-pager show --stat HEAD             # show what was committed
+git status --porcelain                      # must be empty -- nothing left behind
 ```
 
 Reversible: `git reset --hard HEAD~1` undoes everything so far.
@@ -119,6 +131,15 @@ So reproduce publish-npm faithfully before tagging -- root deps only, no app ins
 # from a throwaway clone/checkout at the release commit (so app/node_modules is absent):
 npm ci
 npm run typecheck && npm test && npm run smoke:pack
+```
+
+Check `app/node_modules` is genuinely gone first. A worktree under
+`.worktrees/` usually has it as a symlink into the root checkout, which makes
+this test silently pass for the wrong reason -- the thing it exists to catch is
+exactly "app deps present when publish-npm won't have them":
+
+```bash
+test -e app/node_modules && echo "NOT a faithful test -- remove the symlink first"
 ```
 
 If it fails, the tag push will fail the same way and **nothing will publish** -- fix on
@@ -226,6 +247,8 @@ The core value -- match the voice of the existing `CHANGELOG.md` entries.
 - Skipped `check-version-lockstep.mjs`, or bumped only one `package.json` -> CI will fail; fix before tagging.
 - About to tag without the Phase 2.5 root-only dry-run -> the publish-npm gate can fail on a root test that imports app-only code, and a local `npm test` won't have caught it.
 - CI failed but proceeding to promote -> never promote a failed build.
+- Phase 1 reported a suspiciously small PR set (one or two PRs against a big commit range) -> the `sort -un` trap above; re-check before writing highlights from it.
+- `git status` not empty after the release commit -> the lockfiles were left out; amend before tagging.
 - Re-tagging after a *flaky* leg instead of `gh run rerun --failed` -> wasteful, and risks republish errors if npm already succeeded on the first attempt.
 
 ## Common mistakes

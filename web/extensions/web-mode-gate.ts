@@ -41,7 +41,8 @@ const PATH_GATED_TOOLS = new Set(["edit", "write", "read"]);
 const ALLOWED_PREFIXES = ["galaxy_", "brc_analytics_", "gtn_", "notebook_"];
 
 // Allowed tool names that don't share one of the prefixes above.
-const ALLOWED_EXACT = new Set(["skills_fetch"]);
+// The MCP output reader only inspects registered artifacts from this session.
+const ALLOWED_EXACT = new Set(["skills_fetch", "mcp_read_output"]);
 
 // The curated MCP servers reachable through the `mcp` proxy gateway. On a
 // cold-cache container -- every fresh remote launch -- pi-mcp-adapter never

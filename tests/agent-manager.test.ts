@@ -209,6 +209,54 @@ describe("AgentManager", () => {
       }
     });
 
+    it.each([false, true])(
+      "preserves an active turn across sleep (recovers after wake: %s)",
+      async (recovers) => {
+        vi.useFakeTimers();
+        try {
+          const proc = makeProcess(101);
+          spawnMock.mockReturnValue(proc);
+          const { AgentManager, TURN_SILENCE_TIMEOUT_MS } =
+            await import("../app/src/main/agent.js");
+          const window = {
+            isDestroyed: () => false,
+            setTitle: vi.fn(),
+            webContents: { send: vi.fn() },
+          };
+          const manager = new AgentManager(window as any, "/analysis");
+          manager.start();
+          manager.send({ type: "prompt", message: "continue" });
+          lineHandler?.(JSON.stringify({ type: "agent_start" }));
+          vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS - 1);
+
+          manager.suspendWatchdog();
+          // A buffered event after suspend must not restart the timer.
+          lineHandler?.(JSON.stringify({ type: "message_start" }));
+          vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS * 5);
+          expect(errorEvents(window)).toHaveLength(0);
+          expect(manager.getStatusSnapshot().turnActive).toBe(true);
+          expect(proc.stdin.write).not.toHaveBeenCalledWith(
+            expect.stringMatching(/"type":"abort"/),
+          );
+          expect(proc.kill).not.toHaveBeenCalled();
+
+          manager.resumeWatchdog();
+          vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS - 1);
+          expect(errorEvents(window)).toHaveLength(0);
+          if (recovers) lineHandler?.(JSON.stringify({ type: "agent_end" }));
+          vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS * 2);
+          expect(errorEvents(window)).toHaveLength(recovers ? 0 : 1);
+          const aborts = proc.stdin.write.mock.calls.filter(([line]: [string]) =>
+            line.includes('"type":"abort"'),
+          );
+          expect(aborts).toHaveLength(recovers ? 0 : 1);
+          expect(manager.getStatusSnapshot().turnActive).toBe(false);
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
     it("disarms on agent_end so a completed turn never false-fires", async () => {
       vi.useFakeTimers();
       try {

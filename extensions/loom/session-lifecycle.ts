@@ -6,7 +6,12 @@ import {
   stopWatchingNotebook,
 } from "./state.js";
 import { startGalaxyPoller, stopGalaxyPoller } from "./galaxy-poller.js";
-import { isAutoResumeEnabled } from "./auto-resume.js";
+import { armGalaxyLivePanel, disarmGalaxyLivePanel } from "./galaxy-live-source.js";
+import {
+  createFollowUpDelivery,
+  isAutoResumeEnabled,
+  setActiveFollowUpDelivery,
+} from "./auto-resume.js";
 import { initGalaxyPageSync, flushNotebookToGalaxy } from "./galaxy-page-sync.js";
 import {
   upsertSessionSummaryBlock,
@@ -27,6 +32,34 @@ import * as path from "path";
 let sessionStart: { id: string; startedAt: string } | null = null;
 
 export function registerSessionLifecycle(pi: ExtensionAPI): void {
+  // Refreshed each session_start; a no-op until then.
+  let notifyUser: (text: string) => void = () => {};
+  const followUps = createFollowUpDelivery(
+    (text) => {
+      // Fired from a timer, so a rejected/throwing send must not escape.
+      try {
+        void pi.sendUserMessage(text, { deliverAs: "followUp" });
+      } catch (err) {
+        console.error("[galaxy-poller] auto-resume send failed:", err);
+      }
+    },
+    { onPaused: (text) => notifyUser(text) },
+  );
+  setActiveFollowUpDelivery(followUps);
+  pi.on("agent_start", async () => followUps.agentStarted());
+  pi.on("agent_settled", async () => followUps.agentSettled());
+  // Our own follow-ups (and other brain-sent prompts) arrive as "extension";
+  // only what a person typed counts as permission to keep going.
+  pi.on("input", async (event) => {
+    if (event.source !== "extension") followUps.userInput();
+    return { action: "continue" };
+  });
+  // Every shell's Stop ends in Pi's abort, which lands here as an aborted turn.
+  pi.on("agent_end", async (event) => {
+    const last = [...event.messages].reverse().find((m) => m.role === "assistant");
+    if (last && "stopReason" in last && last.stopReason === "aborted") followUps.aborted();
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     ctx.ui.setToolsExpanded(false);
 
@@ -48,30 +81,28 @@ export function registerSessionLifecycle(pi: ExtensionAPI): void {
     // ctx may be headless (rpc/--print/web) or stale after a session swap —
     // ctx.ui/hasUI assert an active context and can throw. Guard like the
     // compaction notifier (see registerCommand("compact") in index.ts).
-    // Auto-resume (opt-in) hands a finished run straight back to the agent as a
+    // Auto-resume (on unless explicitly disabled) hands changed runs back as a
     // queued follow-up, so it verifies outputs itself instead of the toast
-    // asking the user to relay (#413 part B). `followUp` is required, not
+    // asking the user to relay. `followUp` is required, not
     // cosmetic: a plain send to a brain that is mid-turn is rejected with
     // "Agent is already processing".
-    const resumeFn = isAutoResumeEnabled()
-      ? (text: string) => {
-          // Fired from a 15s timer, so a rejected/throwing send must not take
-          // the tick down with it.
-          try {
-            void pi.sendUserMessage(text, { deliverAs: "followUp" });
-          } catch (err) {
-            console.error("[galaxy-poller] auto-resume send failed:", err);
-          }
-        }
-      : undefined;
+    const resumeFn = isAutoResumeEnabled() ? (text: string) => followUps.deliver(text) : undefined;
 
-    startGalaxyPoller((text, level) => {
+    const toast = (text: string, level: "info" | "warning" | "error") => {
       try {
         if (ctx.hasUI) ctx.ui.notify(text, level);
       } catch {
         /* stale/headless context — a dropped completion toast is fine */
       }
-    }, resumeFn);
+    };
+    notifyUser = (text) => toast(text, "info");
+    startGalaxyPoller(toast, resumeFn);
+
+    // Live Galaxy history for the dashboard panel, pushed from the poller tick
+    // above rather than a timer of its own. A no-op outside a shell that draws
+    // a dashboard, so the terminal pays nothing for it -- and inside one it
+    // asks Galaxy nothing until some dashboard actually holds the panel.
+    armGalaxyLivePanel(ctx);
 
     sessionStart = {
       id: ctx.sessionManager?.getSessionId?.() ?? `session-${Date.now()}`,
@@ -105,6 +136,8 @@ export function registerSessionLifecycle(pi: ExtensionAPI): void {
 
   pi.on("session_shutdown", async () => {
     stopGalaxyPoller();
+    disarmGalaxyLivePanel();
+    followUps.clear();
     // Close the notebook FSWatcher before the summary write below. The watcher
     // otherwise keeps the event loop alive (so --print never exits) and, since
     // writeSessionSummary() writes to notebook.md, would fire its callback

@@ -175,6 +175,7 @@ describe("shouldBlockTool", () => {
     "gtn_fetch",
     "notebook_push_to_galaxy",
     "skills_fetch",
+    "mcp_read_output",
   ])("permits curated remote-surface tool %s", (toolName) => {
     expect(shouldBlockTool(toolName, { foo: "bar" }, allowlist, cwd)).toBeUndefined();
   });

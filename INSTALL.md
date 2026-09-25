@@ -4,22 +4,23 @@ Installers ship from the
 [Releases page](https://github.com/galaxyproject/loom/releases) — pick the
 latest release and download the artifact for your machine.
 
-The macOS build is Developer ID signed and notarized by Apple, so it opens
-with a normal double-click. Linux ships `.deb` / `.rpm` / `.zip`. Windows ships
-a native `Setup.exe` installer (remote-only) -- see the
-[Windows (native, remote-only)](#windows-native-remote-only) section below.
+The macOS builds are Developer ID signed and notarized by Apple, so they open
+with a normal double-click, and ship for both Apple Silicon and Intel. Linux
+ships `.deb` / `.rpm` / `.zip` for x64 and arm64. Windows ships a portable
+`.zip` (remote-only) rather than an installer -- see the
+[Windows (portable, remote-only)](#windows-portable-remote-only) section below.
 
 ## macOS
 
-The macOS installer is built for Apple Silicon:
+Both architectures are packaged, signed and notarized:
 
 | File                        | When to pick it                                                   |
 | --------------------------- | ----------------------------------------------------------------- |
 | `Orbit-<version>-arm64.dmg` | Apple Silicon Macs (M1/M2/M3/M4) — anything from late 2020 onward |
+| `Orbit-<version>-x64.dmg`   | Intel Macs                                                        |
 
-Intel Macs aren't packaged yet — use the developer install (build from source)
-in the [README](README.md#developer-install-build-from-source). Not sure which
-you have? Apple menu → About This Mac: "Chip: Apple M..." is Apple Silicon.
+Not sure which you have? Apple menu → About This Mac: "Chip: Apple M..." is
+Apple Silicon, "Processor: Intel..." is Intel.
 
 ### Install
 
@@ -103,23 +104,29 @@ Per-user state lives under `~/.orbit/` and `~/.loom/` — remove those to fully 
 
 ---
 
-## Windows (native, remote-only)
+## Windows (portable, remote-only)
 
-Download `Orbit-<version> Setup.exe` from the
-[Releases page](https://github.com/galaxyproject/loom/releases) and run it.
-The installer is a standard Squirrel setup -- it installs and launches Orbit
-automatically.
+Download `Orbit-win32-x64-<version>.zip` from the
+[Releases page](https://github.com/galaxyproject/loom/releases), unzip it
+anywhere you like, and run `orbit.exe` from the extracted folder. There is no
+installer: the Squirrel installer trips Win32's 260-character path limit while
+staging the bundled Loom CLI, which ships as real files rather than inside an
+asar because it runs as a subprocess. Until that is solved, the portable `.zip`
+is the Windows build.
+
+Nothing is written outside the folder you extracted plus your per-user state
+(below), so "uninstalling" is deleting the folder.
 
 ### SmartScreen warning
 
-The beta build is unsigned. Windows SmartScreen will show "Windows protected
+The build is unsigned, so the first run of `orbit.exe` shows "Windows protected
 your PC -- Unknown publisher". This is expected.
 
 1. Click **More info**.
 2. Click **Run anyway**.
 
-Signing the installer with an Authenticode certificate (planned, not yet in
-place) would remove this prompt.
+Signing with an Authenticode certificate (planned, not yet in place) would
+remove this prompt.
 
 ### What works
 
@@ -133,8 +140,9 @@ place) would remove this prompt.
 
 ### Updates
 
-Orbit shows a banner when a newer release is available. Click the link to go
-to the Releases page, download the new `Setup.exe`, and run it to update.
+Orbit shows a banner when a newer release is available. Click the link to go to
+the Releases page, download the new `.zip`, and replace your extracted folder
+with the new one. Per-user state lives outside that folder, so it survives.
 
 ---
 

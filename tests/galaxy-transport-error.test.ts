@@ -116,8 +116,10 @@ describe("transportNudgeDecision", () => {
     expect(second.nudge).toBe(GALAXY_TIMEOUT_NUDGE);
   });
 
-  it("exposes an actionable nudge message pointing at /mcp reconnect galaxy", () => {
-    expect(GALAXY_RECONNECT_NUDGE).toMatch(/\/mcp reconnect galaxy/);
+  it("leads with the agent's reconnect and keeps /mcp reconnect as the user's fallback", () => {
+    expect(GALAXY_RECONNECT_NUDGE).toContain("agent can reconnect");
+    expect(GALAXY_RECONNECT_NUDGE).toContain("if that fails, run /mcp reconnect galaxy");
+    expect(GALAXY_RECONNECT_NUDGE).not.toContain("Orbit");
   });
 
   // The timeout advice must stay followable: no mcp.json path (loom rewrites
@@ -125,6 +127,7 @@ describe("transportNudgeDecision", () => {
   it("keeps the timeout advice actionable and honest", () => {
     expect(GALAXY_TIMEOUT_NUDGE).not.toMatch(/mcp\.json/);
     expect(GALAXY_TIMEOUT_NUDGE).not.toMatch(/is responding/);
-    expect(GALAXY_TIMEOUT_NUDGE).toMatch(/asking for less/);
+    expect(GALAXY_TIMEOUT_NUDGE).toContain("result is unknown");
+    expect(GALAXY_TIMEOUT_NUDGE).not.toMatch(/Try asking|restart it/);
   });
 });

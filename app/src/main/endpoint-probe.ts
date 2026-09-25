@@ -1,6 +1,6 @@
 /**
- * Decision logic for the OpenAI-compatible endpoint probe -- the `/models`
- * call behind live API-key validation and `models:discover`.
+ * Decision logic for the custom-endpoint probe -- the `/models` call behind
+ * live API-key validation and `models:discover`.
  *
  * Split out from ipc-handlers so the parts that decide *what to tell the user*
  * are reachable from tests without an Electron main process or a live server.
@@ -8,6 +8,42 @@
  */
 
 export type ProbeOutcome = { valid: boolean; error?: string; models?: string[] };
+
+/** The dated version header every Anthropic Messages endpoint requires. */
+export const ANTHROPIC_VERSION = "2023-06-01";
+
+/** A model-list request: where to send it and how to authenticate. */
+export interface ModelsProbeRequest {
+  url: string;
+  headers: Record<string, string>;
+}
+
+/**
+ * Build the `/models` request for a custom endpoint of the given wire format.
+ *
+ * The two shapes disagree about both halves, which is why this cannot be one
+ * URL with a swapped header. An OpenAI-compatible base URL already carries its
+ * version segment (`https://host/v1`) because the OpenAI client appends only
+ * `/chat/completions`, so the model list hangs directly off it and a bearer
+ * token authenticates. The Anthropic client appends `/v1/messages` itself, so
+ * its base URL stops at the host and the probe has to put the segment back --
+ * and Anthropic authenticates with `x-api-key` plus a dated version header,
+ * never a bearer. Probing an Anthropic gateway the OpenAI way 404s against a
+ * base URL that is perfectly correct.
+ */
+export function modelsProbeRequest(
+  api: string | undefined,
+  baseUrl: string,
+  key: string,
+): ModelsProbeRequest {
+  if (api === "anthropic-messages") {
+    return {
+      url: `${baseUrl}/v1/models`,
+      headers: { "x-api-key": key, "anthropic-version": ANTHROPIC_VERSION },
+    };
+  }
+  return { url: `${baseUrl}/models`, headers: { authorization: `Bearer ${key}` } };
+}
 
 /**
  * Undici reports every transport failure as `TypeError: fetch failed`. The
@@ -190,7 +226,8 @@ export function interpretModelsResponse(status: number, body: string): ProbeOutc
     }
     return { valid: false, error: `Endpoint did not return a model list: ${text}` };
   }
-  // Parseable but not an OpenAI-shaped list: the key got through, so stay out
-  // of the way and let the saved model stand.
+  // Parseable but not a `{ data: [...] }` list: the key got through, so stay
+  // out of the way and let the saved model stand. Both shapes answer in that
+  // form, so one extractor covers them.
   return { valid: true, models: extractModelIds(parsed) };
 }

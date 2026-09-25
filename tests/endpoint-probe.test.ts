@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  ANTHROPIC_VERSION,
   checkBaseUrl,
   describeNetworkError,
   interpretModelsResponse,
+  modelsProbeRequest,
 } from "../app/src/main/endpoint-probe.js";
 
 /** The shape undici actually throws: a bare TypeError with the reason on cause. */
@@ -164,5 +166,45 @@ describe("interpretModelsResponse", () => {
     });
     expect(interpretModelsResponse(403, "").error).toContain("403");
     expect(interpretModelsResponse(500, "").error).toBe("Unexpected response: HTTP 500");
+  });
+});
+
+describe("modelsProbeRequest", () => {
+  it("hangs /models off an OpenAI-compatible base URL, with a bearer token", () => {
+    expect(modelsProbeRequest("openai-completions", "https://llm.example/api", "sk-key")).toEqual({
+      url: "https://llm.example/api/models",
+      headers: { authorization: "Bearer sk-key" },
+    });
+  });
+
+  it("falls back to the OpenAI shape when no api is given", () => {
+    // Every provider entry written before the `api` field existed.
+    expect(modelsProbeRequest(undefined, "https://llm.example/api", "sk-key").url).toBe(
+      "https://llm.example/api/models",
+    );
+  });
+
+  it("adds the version segment and x-api-key for an Anthropic gateway", () => {
+    // The Anthropic client appends /v1 itself, so the stored base URL stops at
+    // the host -- the probe has to put it back or it 404s on a correct URL.
+    // And an Anthropic endpoint ignores a bearer: probing one the OpenAI way
+    // reports a perfectly good key as invalid.
+    expect(
+      modelsProbeRequest("anthropic-messages", "https://gateway.example/argoapi", "ac.key"),
+    ).toEqual({
+      url: "https://gateway.example/argoapi/v1/models",
+      headers: { "x-api-key": "ac.key", "anthropic-version": ANTHROPIC_VERSION },
+    });
+  });
+
+  it("reads both shapes' model lists with one extractor", () => {
+    // Anthropic's /v1/models answers { data: [{ id, type: "model" }] }, the
+    // same envelope OpenAI uses, which is why the shape only changes the
+    // request and never the interpretation.
+    const anthropic = interpretModelsResponse(
+      200,
+      JSON.stringify({ data: [{ id: "claudeopus5", type: "model" }] }),
+    );
+    expect(anthropic).toEqual({ valid: true, models: ["claudeopus5"] });
   });
 });

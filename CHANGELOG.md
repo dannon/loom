@@ -4,6 +4,18 @@ Notable, user-facing changes to Loom and Orbit. Each release lists a short set o
 highlights; the full commit-level notes live on the GitHub release pages. Add a
 new `## [<version>] - <date>` block with a `### Highlights` list at release time.
 
+## [0.7.0] - 2026-09-17
+
+### Highlights
+
+- Loom now talks to Anthropic-compatible gateways -- an institutional proxy, LiteLLM in anthropic mode -- by picking an API shape next to the base URL, and a custom endpoint's model can be typed rather than only chosen from what it advertises, so a gateway that serves no model list is still usable. Custom endpoints also re-fetch their model list from the stored key, and a connection failure says what actually went wrong instead of "fetch failed"
+- A finished Galaxy run can wake the agent and carry on by itself (opt-in), and job tracking got harder to fool: the poller reads the invocation's own state, refuses to be silenced, and leaves an audit row behind -- and a failed invocation points the agent at vendored Galaxy reference material instead of leaving it to guess
+- The agent can no longer quietly mark a plan step done while Galaxy still says the run is in flight: a new evidence gate watches for that contradiction and records it, and the override is yours to give with a reason rather than something the model can grant itself
+- Standing instructions in a `LOOM.md` file load into every conversation, so preferences you'd otherwise repeat every session stay put
+- Provider setup stops losing things: the first-run screen keeps each provider's key with that provider instead of the one you last looked at, sign-in-capable providers are no longer treated as key-less, models too small to run Loom stay out of the picker, and a startup failure the brain already diagnosed is shown rather than retried into a generic crash box
+- Orbit and safety polish: the classic Galaxy mark in the title bar, the chat pane takes its full width back when the artifact pane is hidden, the exec-guard approval prompt shows the whole command instead of its first 200 characters, two exec-guard gaps close (an alternate file-path spelling, and writes into Orbit's own analyses directory being denied outright), and WSL shows up as WSL in feedback reports
+- pi moves to 0.85.1 and pi-mcp-adapter to 2.34.0, which lines up what a fresh install resolves with what we actually test -- a new install used to end up running two different versions of pi-ai side by side
+
 ## [0.6.0] - 2026-08-14
 
 ### Highlights

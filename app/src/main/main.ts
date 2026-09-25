@@ -18,6 +18,7 @@ import { registerIpcHandlers, confirmCwdChange } from "./ipc-handlers.js";
 import { primeOAuthProviders } from "./oauth-handler.js";
 import { AgentManager } from "./agent.js";
 import { registerFilesIpc, startFilesWatcher, stopFilesWatcher } from "./files-handler.js";
+import { registerDashboardIpc } from "./dashboard-handler.js";
 import { ProcMonitor } from "./proc-monitor.js";
 import { migratePlaintextSecrets, isAvailable as safeStorageAvailable } from "./secure-config.js";
 import { getConfigDir, getConfigPath } from "../../../shared/loom-config.js";
@@ -293,6 +294,7 @@ function createWindow(cwd: string): void {
   void primeOAuthProviders().catch(() => {});
   registerIpcHandlers(agentManager);
   registerFilesIpc(() => agentManager?.getCwd() ?? cwd);
+  registerDashboardIpc(() => agentManager?.getCwd() ?? cwd);
   startFilesWatcher(mainWindow, cwd);
 
   procMonitor = new ProcMonitor(mainWindow, () => agentManager?.getPid() ?? null);
@@ -515,9 +517,13 @@ app.whenReady().then(() => {
   createWindow(cwd);
   initAutoUpdate();
 
-  powerMonitor.on("suspend", () => log("[diag] powerMonitor suspend"));
+  powerMonitor.on("suspend", () => {
+    log("[diag] powerMonitor suspend");
+    agentManager?.suspendWatchdog();
+  });
   powerMonitor.on("resume", () => {
     log("[diag] powerMonitor resume");
+    agentManager?.resumeWatchdog();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     // Force GPU compositor repaint — macOS resets the GPU process on wake.
     mainWindow.webContents.invalidate();

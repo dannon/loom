@@ -6,11 +6,26 @@ export interface LlmProviderConfig {
   apiKeyEncrypted?: string;
   model?: string;
   /**
-   * Base URL for an OpenAI-compatible endpoint (e.g. Jetstream, vLLM, Ollama).
-   * Presence marks this entry as a custom provider: the brain registers it in
-   * ~/.pi/agent/models.json and supplies the key at runtime via --api-key.
+   * Base URL for a user-supplied endpoint (e.g. Jetstream, vLLM, Ollama, an
+   * Anthropic-compatible gateway). Presence marks this entry as a custom
+   * provider: the brain registers it in ~/.pi/agent/models.json and supplies
+   * the key at runtime via --api-key.
+   *
+   * What the URL should include depends on `api` -- see there.
    */
   baseUrl?: string;
+  /**
+   * Wire format the endpoint speaks. `openai-completions` (the default, and
+   * the only shape Loom used to support) or `anthropic-messages`, for a gateway
+   * that fronts the Anthropic Messages API -- Argo, LiteLLM in anthropic mode,
+   * a Bedrock proxy. Ignored unless `baseUrl` is set.
+   *
+   * The two want different base URLs, because their SDKs append different
+   * paths: `openai-completions` wants the version segment included
+   * (`https://host/v1`), `anthropic-messages` wants it left off
+   * (`https://host`, and the client appends `/v1/messages`).
+   */
+  api?: string;
 }
 
 export interface LoomConfig {
@@ -64,18 +79,23 @@ export interface LoomConfig {
     repos: Array<SkillRepo>;
   };
   /**
-   * Opt-in flags for experimental subsystems. Off by default; set the
-   * matching env var (e.g. LOOM_TEAM_DISPATCH=1) to override per-session.
+   * Subsystem flags (including legacy settings). Defaults are documented per
+   * field; matching env vars override per-session.
    */
   experiments?: {
     /** Register the experimental team_dispatch tool and its prompt guidance. */
     teamDispatch?: boolean;
     /**
      * Hand a finished Galaxy run back to the agent automatically instead of
-     * only toasting the user. Off by default: it makes the agent take turns
-     * and spend tokens with nobody watching.
+     * only toasting the user. On by default; false (or LOOM_AUTO_RESUME=0)
+     * disables automatic verification and investigation turns.
      */
     autoResume?: boolean;
+    /**
+     * Consecutive automatic follow-up turns allowed without user input before
+     * they pause (default 3). Stopping a turn also pauses them.
+     */
+    autoResumeMaxTurns?: number;
     /**
      * Register the experimental session-index tools (chat_search,
      * chat_session_context, chat_find_tool_calls) that query Pi's JSONL

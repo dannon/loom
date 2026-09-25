@@ -12,7 +12,8 @@
  * silence timer, resets it on every byte of brain activity, and fires if the
  * brain goes completely silent for `timeoutMs`. It deliberately pauses for the
  * whole tool-execution window and while a UI modal is open, since those are
- * legitimate long/indefinite waits rather than a stalled provider call.
+ * legitimate long/indefinite waits rather than a stalled provider call. System
+ * sleep is excluded too; waking starts a fresh silence window for recovery.
  */
 export interface TurnWatchdogConfig {
   /** How long the brain may stay silent mid-turn before we treat it as stalled. */
@@ -28,13 +29,32 @@ export class TurnWatchdog {
   // The brain is legitimately blocked (running a tool, or awaiting a modal),
   // so silence is expected and must not be mistaken for a stall.
   private paused = false;
+  // Power state is independent of tool/modal waits and survives stop(). Brain
+  // events can still arrive after the OS announces suspend; none may rearm us.
+  private suspended = false;
 
   constructor(private readonly config: TurnWatchdogConfig) {}
 
   /** A user prompt was dispatched to the brain; begin watching for a stall. */
   promptSent(): void {
+    // A fresh user prompt means the machine is awake. Clearing here keeps a
+    // dropped powerMonitor `resume` from disabling the watchdog for good.
+    this.suspended = false;
     this.active = true;
     this.paused = false;
+    this.arm();
+  }
+
+  /** Exclude system sleep without losing the current turn or tool/modal wait. */
+  suspend(): void {
+    this.suspended = true;
+    this.clearTimer();
+  }
+
+  /** Give an active model request a full silence window to recover after wake. */
+  resume(): void {
+    if (!this.suspended) return;
+    this.suspended = false;
     this.arm();
   }
 
@@ -85,6 +105,7 @@ export class TurnWatchdog {
 
   private arm(): void {
     this.clearTimer();
+    if (!this.active || this.paused || this.suspended) return;
     this.timer = setTimeout(() => {
       this.timer = null;
       this.active = false;

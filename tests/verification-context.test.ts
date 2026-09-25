@@ -39,6 +39,12 @@ describe("buildVerificationDisciplineBlock", () => {
     const result = (await handlers.get("before_agent_start")!({}, {})) as { systemPrompt: string };
 
     expect(result.systemPrompt).toContain("## Operating discipline");
+    expect(result.systemPrompt).toContain(
+      "Authorization carries across turns and background job completion",
+    );
+    expect(result.systemPrompt).toContain("A status question does not cancel");
+    expect(result.systemPrompt).not.toContain("wait for the user to green-light");
+    expect(result.systemPrompt).not.toContain("verification is on demand");
     expect(result.systemPrompt).toContain("## Verification before completion");
     expect(result.systemPrompt).toContain("## Project model and plan sections");
     expect(result.systemPrompt.indexOf("## Operating discipline")).toBeLessThan(

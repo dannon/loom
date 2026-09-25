@@ -28,7 +28,13 @@ import { normalizeGalaxyUrl, validateGalaxyUrl } from "./galaxy-url.js";
 import { getProviders, getModels } from "@earendil-works/pi-ai/compat";
 import { isDeprecatedModelId } from "./model-catalog.js";
 import { flagUnusableContextWindows } from "./model-context-window.js";
-import { checkBaseUrl, describeNetworkError, interpretModelsResponse } from "./endpoint-probe.js";
+import {
+  ANTHROPIC_VERSION,
+  checkBaseUrl,
+  describeNetworkError,
+  interpretModelsResponse,
+  modelsProbeRequest,
+} from "./endpoint-probe.js";
 import { discoverProviderModels } from "./model-discovery.js";
 import { checkLatestVersion } from "./version-check.js";
 import { resolveReleasePageUrl } from "./release-page.js";
@@ -56,7 +62,10 @@ export const UNCHANGED_SECRET = "__loom_unchanged_secret__";
 interface MaskedLoomConfig extends Omit<LoomConfig, "llm" | "galaxy"> {
   llm?: {
     active: string;
-    providers: Record<string, { model?: string; baseUrl?: string; hasApiKey: boolean }>;
+    providers: Record<
+      string,
+      { model?: string; baseUrl?: string; api?: string; hasApiKey: boolean }
+    >;
   };
   galaxy?: {
     active: string | null;
@@ -77,6 +86,7 @@ function maskConfig(cfg: LoomConfig): MaskedLoomConfig {
           {
             model: v.model,
             baseUrl: v.baseUrl,
+            api: v.api,
             // OAuth-ONLY providers authenticate via ~/.pi/agent/auth.json -- an
             // orphan apiKey on the entry (manual edit, or the legacy-shape
             // migrator) is dead weight, not a real credential. Don't surface
@@ -131,7 +141,7 @@ function reconcileIncomingConfig(incoming: Record<string, unknown>): LoomConfig 
   // LLM multi-provider reconciliation. The renderer sends:
   //   { active, providers: { [name]: { apiKey?, model? } } }
   // where apiKey may be UNCHANGED_SECRET (preserve), "" (clear), or a new value.
-  type IncomingProvider = { apiKey?: string; model?: string; baseUrl?: string };
+  type IncomingProvider = { apiKey?: string; model?: string; baseUrl?: string; api?: string };
   type IncomingLlm = { active?: string; providers?: Record<string, IncomingProvider> };
   const incomingLlm = (incoming as { llm?: IncomingLlm }).llm;
   if (incomingLlm) {
@@ -143,14 +153,21 @@ function reconcileIncomingConfig(incoming: Record<string, unknown>): LoomConfig 
     for (const [name, p] of Object.entries(incomingLlm.providers ?? {})) {
       const existing = current.llm?.providers?.[name];
       const rawKey = p.apiKey;
-      const entry: { apiKey?: string; apiKeyEncrypted?: string; model?: string; baseUrl?: string } =
-        {};
+      const entry: {
+        apiKey?: string;
+        apiKeyEncrypted?: string;
+        model?: string;
+        baseUrl?: string;
+        api?: string;
+      } = {};
       // Preserve existing model if the incoming entry doesn't carry one --
       // a partial save (e.g. rotate-just-the-key) shouldn't wipe the model.
       if (p.model !== undefined) entry.model = p.model;
       else if (existing?.model) entry.model = existing.model;
       if (p.baseUrl !== undefined) entry.baseUrl = p.baseUrl;
       else if (existing?.baseUrl) entry.baseUrl = existing.baseUrl;
+      if (p.api !== undefined) entry.api = p.api;
+      else if (existing?.api) entry.api = existing.api;
       if (rawKey === UNCHANGED_SECRET || rawKey === undefined) {
         if (existing?.apiKeyEncrypted) entry.apiKeyEncrypted = existing.apiKeyEncrypted;
         else if (existing?.apiKey) entry.apiKey = existing.apiKey;
@@ -379,8 +396,9 @@ export function registerIpcHandlers(agent: AgentManager): void {
       provider: string,
       key: string,
       baseUrl?: string,
+      api?: string,
     ): Promise<{ valid: boolean; error?: string; models?: string[] }> => {
-      return validateApiKey(provider, key, baseUrl);
+      return validateApiKey(provider, key, baseUrl, api);
     },
   );
 
@@ -402,7 +420,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
     return discoverProviderModels(name, {
       config: loadConfig(),
       resolveKey: resolveProviderApiKey,
-      probe: (baseUrl, key) => validateApiKey(name, key, baseUrl),
+      probe: (baseUrl, key, api) => validateApiKey(name, key, baseUrl, api),
     });
   });
 
@@ -887,6 +905,7 @@ async function validateApiKey(
   provider: string,
   key: string,
   baseUrl?: string,
+  api?: string,
 ): Promise<{ valid: boolean; error?: string; models?: string[] }> {
   const trimmed = key.trim();
   if (!trimmed) return { valid: false, error: "Key is empty" };
@@ -896,10 +915,8 @@ async function validateApiKey(
     if (baseUrl) {
       const checked = checkBaseUrl(baseUrl);
       if (!checked.ok) return { valid: false, error: checked.error };
-      const res = await fetch(`${checked.url}/models`, {
-        headers: { authorization: `Bearer ${trimmed}` },
-        signal: controller.signal,
-      });
+      const req = modelsProbeRequest(api, checked.url, trimmed);
+      const res = await fetch(req.url, { headers: req.headers, signal: controller.signal });
       // Read as text, not res.json(): a body that isn't JSON is a result we
       // have to report, not an exception to swallow. See endpoint-probe.ts.
       return interpretModelsResponse(res.status, await res.text());
@@ -912,7 +929,7 @@ async function validateApiKey(
         method: "POST",
         headers: {
           "x-api-key": trimmed,
-          "anthropic-version": "2023-06-01",
+          "anthropic-version": ANTHROPIC_VERSION,
           "content-type": "application/json",
         },
         body: JSON.stringify({

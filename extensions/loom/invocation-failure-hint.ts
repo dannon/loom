@@ -1,9 +1,9 @@
 /**
  * Failed-invocation triage hint.
  *
- * The background poller already toasts the user when an invocation transitions
- * to `failed` ("ask me to investigate"), but that toast is shell-side -- the
- * agent never sees it. The agent-facing moment is the tool result from
+ * The background poller queues automatic investigation when an invocation
+ * fails. A manual check can observe the transition first, so it also needs
+ * an agent-facing nudge in the tool result from
  * `galaxy_invocation_check_all` / `_check_one`, which carries `autoAction:
  * "failed"` for anything that just transitioned. Hook it the same way
  * `confusables-hint.ts` does and append a triage nudge.

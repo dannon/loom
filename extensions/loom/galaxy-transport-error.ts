@@ -2,8 +2,8 @@
 // galaxy-mcp subprocess. After that every galaxy_* call comes back as
 // "Failed to call tool: <transport error>", and the adapter never self-heals
 // because it still thinks the connection is up. The fix on the user's side is
-// to reconnect the MCP server (/mcp reconnect galaxy), not to re-authenticate
-// Galaxy -- so we detect that specific failure and surface an actionable hint.
+// to reconnect the MCP server, not to re-authenticate Galaxy. mcp-recovery.ts
+// supplies the agent-callable repair; this module classifies and notifies.
 //
 // Crucially this must NOT match galaxy-mcp's own "Not connected to Galaxy.
 // Authenticate via OAuth or run connect()..." error, which is an auth problem
@@ -16,10 +16,8 @@ const DROPPED_ERROR_PATTERNS: RegExp[] = [
   /-32000/,
 ];
 
-// A timeout: the server is alive and answering, just not within the request
-// budget. Reconnecting is useless here -- the new connection inherits the same
-// budget, so the next slow call times out identically. Splitting these out is
-// the whole point of this file's second half.
+// A timeout proves only that no response arrived within the request budget.
+// Narrow reads first; reconnect can help a wedge but not an oversized query.
 const TIMEOUT_ERROR_PATTERNS: RegExp[] = [
   /request timed out/i, // -32001
   /-32001/,
@@ -28,19 +26,18 @@ const TIMEOUT_ERROR_PATTERNS: RegExp[] = [
 const TRANSPORT_ERROR_PATTERNS: RegExp[] = [...DROPPED_ERROR_PATTERNS, ...TIMEOUT_ERROR_PATTERNS];
 
 export const GALAXY_RECONNECT_NUDGE =
-  "Galaxy MCP connection dropped mid-session. Run /mcp reconnect galaxy to restore it (no restart needed).";
+  "Galaxy MCP connection dropped. The agent can reconnect it; if that fails, run /mcp reconnect galaxy (no restart needed).";
 
 // Deliberately does not claim the server is healthy: a timeout only proves that
 // no response arrived before the timer, so a wedged server looks identical to a
 // slow one. It also doesn't send the user to mcp.json -- loom rewrites that
 // file's galaxy entry on every launch, the path moves with PI_CODING_AGENT_DIR,
 // and /mcp reconnect reuses the already-loaded config rather than re-reading it.
-// Lead with the action that always helps, and keep reconnect as the fallback for
-// the wedge case this cannot rule out.
+// Agent-facing recovery instructions live in mcp-recovery.ts. The UI notice
+// states the uncertainty, with /mcp reconnect as the user's fallback once the
+// agent's single reconnect attempt is spent.
 export const GALAXY_TIMEOUT_NUDGE =
-  "Galaxy MCP call timed out -- no response within the request budget. Try asking for less in " +
-  "one call (narrower query, fewer datasets). If it keeps timing out the server may be wedged " +
-  "rather than slow, and /mcp reconnect galaxy will restart it.";
+  "Galaxy MCP request timed out. Its result is unknown; this does not mean a Galaxy job failed.";
 
 /** Which kind of failure this is, so callers can give advice that can work. */
 export type GalaxyFailureKind = "dropped" | "timeout" | null;

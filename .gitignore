@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 
 # Production Vite build output for the web shell
 web/dist/

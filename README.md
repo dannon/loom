@@ -76,6 +76,7 @@ Implemented and locally tested.
 - **Chat**: streaming responses with thinking indicator; markdown-rendered with proper tables; `team_dispatch` rich card; queue-while-streaming; numbered prompt turns (`/summarize 3 5` works against those numbers).
 - **Slash-command popup** appears as you type `/`. Tab to autocomplete; Enter still submits past it; Esc dismisses.
 - **Prompt history**: ↑ / ↓ in the input recalls previously-submitted prompts (per-cwd, persistent).
+- **Batched SRA imports**: Loom catches compatible per-accession `fastq_dump`/`fasterq_dump` calls before submission and directs the agent to one collection-producing run. Always-loaded guidance covers accession deduplication, history reuse, and output verification.
 - **Galaxy connection indicator** in the footer (RED dot if no API key, GREEN dot if connected). Click to open Preferences.
 - **Cost / token header**: live in-flight cost (computed from Pi-reported `usage.cost`) and token totals.
 - **Preferences dialog** (`Cmd/Ctrl+,`): provider / model / API key, Galaxy credentials, default working directory, package manager, and a configurable list of **skill repositories** (galaxy-skills shipped as default).
@@ -83,6 +84,7 @@ Implemented and locally tested.
 - **Responsive layout**: at narrow widths the file tree (<900 px) and artifact pane (<700 px) auto-collapse so the chat stays usable. Toolbar buttons re-expand them.
 - **Keyboard accessibility**: `Cmd/Ctrl+\` toggles the artifact pane; `Cmd/Ctrl+B` toggles the file tree; `Cmd/Ctrl+,` opens Preferences; `Cmd/Ctrl+O` switches working directory; `Esc` dismisses modals; gold focus-ring on every Tab-reachable control.
 - **Galaxy brand dark theme** with Inter (body) + JetBrains Mono (code) bundled locally.
+- **Automatic Galaxy follow-up**: Loom queues output verification for completed jobs and workflows, and investigates failures without waiting for another prompt. Changes from one poll are batched; a busy agent finishes its current turn first. Verification evidence goes in the notebook, then already-authorized work can continue. Follow-ups pause after 3 automatic turns in a row without user input (`experiments.autoResumeMaxTurns`) or when you stop a turn, until you next say something. Set `LOOM_AUTO_RESUME=0` or `experiments.autoResume: false` in `~/.loom/config.json` to disable automatic follow-up.
 - **Session continuity**: `--continue` on restart preserves chat history; `/new` starts a clean slate; first launch in a directory with an existing Pi session auto-resumes.
 
 ### What the Loom CLI ships today
@@ -255,7 +257,7 @@ Three paths, depending on what you want.
 
 ### Desktop app (Orbit)
 
-Orbit ships as a native installer that bundles its own Node runtime, `uv`, and Loom -- no separate prerequisites. The macOS (Apple Silicon) build is Developer ID signed + notarized, so it opens with a normal double-click; Linux ships `.deb`/`.rpm`/`.zip`; Windows ships a native `Orbit-<version> Setup.exe` (remote-only -- no local bash shell). All installers are attached to each [release](https://github.com/galaxyproject/loom/releases). See [INSTALL.md](INSTALL.md) for per-platform steps and [RELEASING.md](RELEASING.md) for how a release is cut. Intel Macs and other unpackaged targets can use the developer install below.
+Orbit ships as a native build that bundles its own Node runtime, `uv`, and Loom -- no separate prerequisites. The macOS builds are Developer ID signed + notarized for both Apple Silicon and Intel, so they open with a normal double-click; Linux ships `.deb`/`.rpm`/`.zip` for x64 and arm64; Windows ships a portable `Orbit-win32-x64-<version>.zip` (remote-only -- no local bash shell, and no installer yet). All builds are attached to each [release](https://github.com/galaxyproject/loom/releases). See [INSTALL.md](INSTALL.md) for per-platform steps and [RELEASING.md](RELEASING.md) for how a release is cut. Targets we don't package can use the developer install below.
 
 ### Loom CLI from npm
 
@@ -463,11 +465,11 @@ If you have a tester ID, you can set it like this:
 
 Run `/tester-id` with no argument to see the current value. It writes only the `testerId` key to `~/.loom/config.json` (the rest of the file is left untouched), and Orbit attaches it to any feedback you send so reports can be traced back to your session. It can also be supplied via the `LOOM_TESTER_ID` environment variable.
 
-### Local LLMs
+### Custom endpoints (local LLMs, gateways, proxies)
 
-Loom works with any OpenAI-compatible API -- a hosted service like [Jetstream](https://docs.jetstream-cloud.org/inference-service/overview/), or a local backend like [LiteLLM](https://litellm.ai/) or [Ollama](https://ollama.com/).
+Loom works with any OpenAI-compatible API -- a hosted service like [Jetstream](https://docs.jetstream-cloud.org/inference-service/overview/), or a local backend like [LiteLLM](https://litellm.ai/) or [Ollama](https://ollama.com/) -- and with Anthropic-compatible gateways that front the Messages API, such as an institutional proxy or LiteLLM in anthropic mode.
 
-In **Orbit**, open Preferences, set the provider to **OpenAI-compatible endpoint**, enter the base URL + API key (or click the **Jetstream** preset), and pick a model. The key is stored encrypted.
+In **Orbit**, open Preferences, set the provider to **OpenAI-compatible endpoint**, pick the **API shape**, enter the base URL + API key (or click the **Jetstream** preset), and choose a model. The key is stored encrypted.
 
 For the **CLI**, add a provider entry with a `baseUrl` to `~/.loom/config.json`:
 
@@ -487,6 +489,26 @@ For the **CLI**, add a provider entry with a `baseUrl` to `~/.loom/config.json`:
 ```
 
 The `baseUrl` marks the entry as a custom endpoint: Loom registers it with Pi for you (writing the matching `~/.pi/agent/models.json` entry, with sensible metadata defaults) and passes the key to Pi at runtime, so the key never lands in `models.json`. The provider name is yours to choose -- `"openai-compatible"` is just a convention.
+
+An optional `api` field picks the wire format. It defaults to `openai-completions`, so existing entries need no change; set it to `anthropic-messages` for a gateway that speaks the Anthropic Messages API:
+
+```json
+{
+  "llm": {
+    "active": "argo",
+    "providers": {
+      "argo": {
+        "baseUrl": "https://gateway.example/argoapi",
+        "api": "anthropic-messages",
+        "model": "claudeopus5",
+        "apiKey": "your-key"
+      }
+    }
+  }
+}
+```
+
+**The two shapes want different base URLs**, because their clients append different paths. An `openai-completions` URL includes the version segment (`https://host/v1`); an `anthropic-messages` URL stops at the host (`https://host`) because the client adds `/v1/messages` itself. A `/v1` in the wrong place is a 404 against a URL that looks correct.
 
 ### Standing instructions (`LOOM.md`)
 

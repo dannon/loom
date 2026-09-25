@@ -19,6 +19,8 @@ import {
   isCustomProvider,
   syncCustomProviderModelsFile,
   resolveActiveLlmApiKey,
+  ENDPOINT_APIS,
+  DEFAULT_ENDPOINT_API,
 } from "../shared/custom-provider.js";
 import { GALAXY_MCP_SPEC } from "../shared/galaxy-mcp-spec.js";
 
@@ -256,13 +258,25 @@ if (
   }
 }
 
-// Custom OpenAI-compatible provider: register it in ~/.pi/agent/models.json so
-// pi can resolve --provider/--model. The key is NOT written here; it's supplied
-// at runtime via --api-key below.
+// Custom endpoint: register it in ~/.pi/agent/models.json so pi can resolve
+// --provider/--model. The key is NOT written here; it's supplied at runtime via
+// --api-key below.
 if (!isInformationalCommand && activeLlmProvider && isCustomProvider(activeLlmConfig)) {
   try {
     syncCustomProviderModelsFile(join(agentDir, "models.json"), activeLlmProvider, activeLlmConfig);
   } catch (err) {
+    // A rejected `api` is a config problem the user has to fix, not a transient
+    // one: limping on would leave models.json without the provider and surface
+    // as an unexplained "--provider/--model failed to resolve" from pi. Exit
+    // EX_CONFIG so a shell shows this message instead of retrying (#439).
+    if (err instanceof Error && err.message.startsWith("unsupported endpoint api")) {
+      console.error(`loom: provider "${activeLlmProvider}" -- ${err.message}.
+
+  Set "llm.providers.${activeLlmProvider}.api" in ~/.loom/config.json to one of
+  ${ENDPOINT_APIS.join(" / ")}, or remove it to use ${DEFAULT_ENDPOINT_API}.
+`);
+      process.exit(EX_CONFIG);
+    }
     console.error(`loom: failed to sync custom provider into models.json: ${err}`);
   }
 }

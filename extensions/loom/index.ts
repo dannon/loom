@@ -16,11 +16,14 @@ import { registerSkillsCommand } from "./skills-command";
 import { setupContextInjection, formatConnectionStatus } from "./context";
 import { setupUIBridge } from "./ui-bridge";
 import { registerSessionLifecycle } from "./session-lifecycle";
+import { registerCommandsAsUserInput } from "./auto-resume";
 import { recordGalaxyConnected } from "./galaxy-cred-drift";
 import { registerActivityHooks } from "./activity-hooks";
 import { registerSubmissionCapture } from "./galaxy-submission-capture";
 import { isSubmissionReplayEnabled, registerSubmissionReplay } from "./submission-replay";
 import { registerExecutionCommands } from "./execution-commands";
+import { registerDashboardTools } from "./dashboard-tools";
+import { registerDashboardCommands } from "./dashboard-commands";
 import { registerFeedbackCommand } from "./feedback-command";
 import { registerTesterIdCommand } from "./tester-id-command";
 import { registerInstructionsCommand } from "./instructions-command";
@@ -30,12 +33,17 @@ import { registerSessionIndexTools } from "./session-index/tools";
 import { isSessionIndexEnabled } from "./session-index/is-enabled";
 import { registerConfusablesHint } from "./confusables-hint";
 import { registerInvocationFailureHint } from "./invocation-failure-hint";
+import { registerSraImportGate } from "./sra-import-gate";
 import { registerEvidenceGate } from "./evidence-gate";
 import { registerEvidenceOverrideCommand } from "./evidence-override-command";
 import { registerExecGuard } from "./exec-guard";
 import { registerSandbox } from "./sandbox";
 import { isLocalExecDisabled } from "./local-exec";
 import { registerSecretRedaction } from "./secret-redaction";
+import { registerMcpOutputRecovery } from "./mcp-output";
+import { galaxyCall, registerMcpRecovery } from "./mcp-recovery";
+import { registerGalaxyPollGuard } from "./galaxy-poll-guard";
+import { registerProgressUpdates } from "./progress-updates";
 import {
   ALL_NUDGES_ARMED,
   transportNudgeDecision,
@@ -60,6 +68,9 @@ import {
 import { LoomWidgetKey, encodeMarkdownWidget } from "../../shared/loom-shell-contract.js";
 
 export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
+  // Before anything registers a command, so every one of them counts as user
+  // input for the automatic follow-up cap.
+  registerCommandsAsUserInput(pi);
   // Local-execution safety gate + opt-in bash sandbox. Both only make sense
   // when the brain has a local execution surface. A shell that runs the brain
   // with no local exec -- the web/container remote shell (and eventually native
@@ -84,6 +95,12 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // (or an `env` dump) can't push API keys into the provider's logs (#183).
   // Passive and prompt-free, so it stays on even when a remote shell owns the
   // tool_call boundary and the gate above is skipped.
+  // Inspect saved MCP output before redaction so its previews receive the same
+  // secret scrubbing as ordinary tool results (including in remote shells).
+  registerMcpOutputRecovery(pi);
+  registerMcpRecovery(pi);
+  registerGalaxyPollGuard(pi);
+  registerProgressUpdates(pi);
   registerSecretRedaction(pi);
 
   setupUIBridge(pi);
@@ -108,12 +125,15 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerSyncCommand(pi);
   registerSkillsCommand(pi);
   registerExecutionCommands(pi);
+  registerDashboardTools(pi);
+  registerDashboardCommands(pi);
   registerFeedbackCommand(pi);
   registerTesterIdCommand(pi);
   registerInstructionsCommand(pi);
   registerConfusablesHint(pi);
   registerInvocationFailureHint(pi);
   registerEvidenceGate(pi);
+  registerSraImportGate(pi);
   registerEvidenceOverrideCommand(pi);
   if (isTeamDispatchEnabled()) {
     registerTeamTools(pi);
@@ -466,24 +486,23 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_result", async (event, ctx) => {
-    // Surface an actionable hint when a galaxy_* call fails at the transport
-    // layer. Two different failures with two different fixes: a dropped pipe
-    // ("Not connected" / -32000) is recovered with /mcp reconnect galaxy, while
-    // a timeout (-32001) means the call outran its budget and wants a smaller
-    // request first (#410). This is the deterministic backstop for the
-    // connection-liveness steer in
-    // buildGalaxyContextBlock: even a model that ignores the steer produces the
-    // recovery incantation for the user. hasUI-guard + try/catch mirror the
-    // galaxy poller notifier -- a headless/stale ctx must not throw here.
+    // Human-facing status only. mcp-recovery attaches the actual recovery
+    // steps to the agent's result, including on direct/proxy MCP surfaces.
     try {
-      const firstContent = event.content?.[0];
-      const resultText = firstContent && "text" in firstContent ? firstContent.text : undefined;
+      const name = galaxyCall(event.toolName, event.input)?.name;
+      const failed = event.isError || Boolean((event.details as { error?: unknown })?.error);
+      const resultText = failed
+        ? event.content
+            .filter((c) => c.type === "text")
+            .map((c) => c.text)
+            .join("\n")
+        : undefined;
 
       // A launcher failure (`spawn uvx ENOENT`) must win over the reconnect
       // nudge and suppress it: the server never started, so there is nothing to
       // reconnect to, and sending the user to /mcp reconnect wastes their time.
       // Fire once per outage on the same armed flag, so a retry loop can't spam.
-      if (isGalaxyLauncherError(event.toolName, resultText)) {
+      if (isGalaxyLauncherError(name, resultText)) {
         if (uvxNudgeArmed && ctx.hasUI) {
           uvxNudgeArmed = false;
           ctx.ui.notify(GALAXY_UVX_MISSING_NUDGE, "warning");
@@ -491,7 +510,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      const decision = transportNudgeDecision(transportNudgeArmed, event.toolName, resultText);
+      const decision = transportNudgeDecision(transportNudgeArmed, name, resultText);
       transportNudgeArmed = decision.armed;
       if (decision.nudge && ctx.hasUI) ctx.ui.notify(decision.nudge, "warning");
     } catch {

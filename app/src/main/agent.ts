@@ -23,8 +23,8 @@ import { isOAuthOnlyProvider } from "./oauth-handler.js";
 /**
  * How long the brain may stay completely silent mid-turn before Orbit treats the
  * turn as stalled and recovers the UI (#185). Generous on purpose: tool runs and
- * UI modals are excluded by the watchdog, so the only window this guards is
- * "waiting on the model", where multi-minute silence is unambiguously a failure.
+ * UI modals and system sleep are excluded by the watchdog. A waking system gets
+ * a fresh window so the provider connection has time to recover.
  */
 export const TURN_SILENCE_TIMEOUT_MS = 120_000;
 
@@ -202,6 +202,15 @@ export class AgentManager {
       onTimeout: () => this.handleTurnStalled(),
     });
     this.refreshWindowTitle();
+  }
+
+  /** Called by the shell's power monitor; this does not stop the brain. */
+  suspendWatchdog(): void {
+    this.watchdog.suspend();
+  }
+
+  resumeWatchdog(): void {
+    this.watchdog.resume();
   }
 
   /**
@@ -684,8 +693,8 @@ export class AgentManager {
       this.window.webContents.send("agent:event", {
         type: "error",
         message:
-          "The assistant stopped responding. The request may have failed or " +
-          "been blocked -- please try again.",
+          "The assistant stopped responding for two minutes, so Orbit cancelled " +
+          "the request. Please try again.",
       });
     }
     // Best-effort: unstick pi's streaming state so the next prompt runs. If the

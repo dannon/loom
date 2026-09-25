@@ -27,14 +27,18 @@ describe("buildGalaxyContextBlock reconnect steer", () => {
     expect(block).toMatch(/never report.*disconnected/i);
   });
 
-  it("names the /mcp reconnect galaxy fallback for a dead transport", () => {
+  it("gives the agent the callable reconnect operation", () => {
     const block = buildGalaxyContextBlock();
-    expect(block).toContain("/mcp reconnect galaxy");
+    expect(block).toContain('mcp({connect: "galaxy"})');
+    // The manual command is a fallback, never the first step.
+    expect(block.indexOf("/mcp reconnect galaxy")).toBeGreaterThan(
+      block.indexOf('mcp({connect: "galaxy"})'),
+    );
   });
 
-  it("explains the connection does not survive resume/idle", () => {
+  it("distinguishes an idle connection from an unknown timeout outcome", () => {
     const block = buildGalaxyContextBlock();
-    expect(block).toMatch(/does \*\*not\*\* survive a resume/i);
+    expect(block).toContain("timeout alone does not prove");
   });
 
   it("does not add reconnect guidance when Galaxy is not connected", () => {

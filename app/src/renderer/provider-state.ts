@@ -19,6 +19,12 @@ export interface ProviderFieldValues {
   typedKey: string;
   model: string;
   baseUrl: string;
+  /**
+   * Wire format for a custom endpoint. Optional where the others are not:
+   * it only means anything alongside a base URL, and absent reads as "the
+   * default shape" rather than as a field nobody filled in.
+   */
+  api?: string;
 }
 
 /** Alias for ProviderFieldValues for backwards compatibility. */
@@ -33,6 +39,8 @@ export interface ProviderState {
   model: string;
   /** Base URL as it sits in the editable field. */
   baseUrl: string;
+  /** Wire format as it sits in the editable field; absent means the default. */
+  api?: string;
   /**
    * Base URL as it sits in config -- what main would actually contact for a
    * discovery probe. Not editable, so a form snapshot must not overwrite it.
@@ -47,10 +55,11 @@ export interface ProviderConfigEntry {
   apiKey?: string;
   model?: string;
   baseUrl?: string;
+  api?: string;
 }
 
 export function emptyProviderState(): ProviderState {
-  return { hadKey: false, typedKey: "", model: "", baseUrl: "", savedBaseUrl: "" };
+  return { hadKey: false, typedKey: "", model: "", baseUrl: "", api: "", savedBaseUrl: "" };
 }
 
 /**
@@ -72,6 +81,7 @@ export function snapshotProviderState(
     typedKey: fields.typedKey,
     model: fields.model,
     baseUrl: fields.baseUrl.trim(),
+    api: fields.api?.trim() ?? "",
     savedBaseUrl: prev?.savedBaseUrl ?? "",
     discoveredModels: prev?.discoveredModels,
   };
@@ -144,6 +154,9 @@ export function buildOnboardingProviders(
     if (key) entry.apiKey = key;
     if (state.model) entry.model = state.model;
     if (state.baseUrl) entry.baseUrl = state.baseUrl;
+    // Only meaningful alongside a base URL, and an empty string would be
+    // persisted as an explicit value rather than "unset".
+    if (state.baseUrl && state.api) entry.api = state.api;
     providers[name] = entry;
   }
   return providers;

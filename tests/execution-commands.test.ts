@@ -68,11 +68,13 @@ describe("registerExecutionCommands", () => {
     await commands.get("execute")!.handler(undefined, { ui: { notify: vi.fn() } });
 
     const prompt = sendUserMessage.mock.calls[0][0] as string;
-    // Async-dominant: Galaxy steps submit and hand control back — no in-turn polling.
+    // Background execution must not become a new user approval checkpoint.
     expect(prompt).toContain("Galaxy steps run in the BACKGROUND");
-    expect(prompt).toContain("hand control back to the user");
+    expect(prompt).toContain("Continue other ready, authorized work");
+    expect(prompt).toContain("If the run already finished, verify it in this turn");
+    expect(prompt).toContain("Do not wait for the user to ask again");
     expect(prompt).toContain("Do NOT sit in this turn polling the invocation to completion");
-    // Verify-before-complete still enforced (local now; Galaxy on demand, later).
+    // Evidence still gates continuation.
     expect(prompt).toContain("use the step's `Verification:` sub-bullet");
     expect(prompt).toContain("verification happens");
     expect(prompt).toContain("Write the verification evidence into the notebook");

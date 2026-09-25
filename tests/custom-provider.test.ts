@@ -5,6 +5,9 @@ import * as os from "os";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   ACTIVE_LLM_API_KEY_ENV,
+  DEFAULT_ENDPOINT_API,
+  ENDPOINT_APIS,
+  normalizeEndpointApi,
   isCustomProvider,
   synthesizeModelDef,
   mergeCustomProviderIntoModelsConfig,
@@ -176,5 +179,120 @@ describe("resolveActiveLlmApiKey", () => {
     );
     expect(resolveActiveLlmApiKey({ apiKey: "cfg" }, {})).toBe("cfg");
     expect(resolveActiveLlmApiKey({}, {})).toBeUndefined();
+  });
+});
+
+describe("normalizeEndpointApi", () => {
+  it("treats absent, null and empty as the default shape", () => {
+    expect(normalizeEndpointApi(undefined)).toBe(DEFAULT_ENDPOINT_API);
+    expect(normalizeEndpointApi(null)).toBe(DEFAULT_ENDPOINT_API);
+    expect(normalizeEndpointApi("")).toBe(DEFAULT_ENDPOINT_API);
+    // The default has to stay openai-completions: every entry written before
+    // this field existed carries no api and must keep working unchanged.
+    expect(DEFAULT_ENDPOINT_API).toBe("openai-completions");
+  });
+
+  it("accepts every advertised shape, case- and whitespace-insensitively", () => {
+    for (const api of ENDPOINT_APIS) {
+      expect(normalizeEndpointApi(api)).toBe(api);
+      expect(normalizeEndpointApi(`  ${api.toUpperCase()}  `)).toBe(api);
+    }
+    expect(ENDPOINT_APIS).toContain("anthropic-messages");
+  });
+
+  it("rejects anything else, and names the valid values", () => {
+    // Silently defaulting would send OpenAI JSON at an Anthropic endpoint;
+    // passing it through would have pi drop the provider with no explanation.
+    expect(() => normalizeEndpointApi("anthropic")).toThrow(/unsupported endpoint api "anthropic"/);
+    expect(() => normalizeEndpointApi("bedrock-converse-stream")).toThrow(
+      /openai-completions, anthropic-messages/,
+    );
+  });
+});
+
+describe("wire format reaches the synthesized provider entry", () => {
+  it("defaults to openai-completions when the entry says nothing", () => {
+    const merged = mergeCustomProviderIntoModelsConfig({}, "openai-compatible", {
+      baseUrl: "https://llm.jetstream-cloud.org/api",
+      model: "gpt-oss-120b",
+    });
+    expect(merged.providers?.["openai-compatible"]?.api).toBe("openai-completions");
+  });
+
+  it("carries anthropic-messages through to models.json", () => {
+    const merged = mergeCustomProviderIntoModelsConfig({}, "argo", {
+      baseUrl: "https://gateway.example/argoapi",
+      model: "claudeopus5",
+      api: "anthropic-messages",
+    });
+    expect(merged.providers?.argo).toMatchObject({
+      baseUrl: "https://gateway.example/argoapi",
+      api: "anthropic-messages",
+      apiKey: ACTIVE_LLM_API_KEY_ENV,
+    });
+  });
+
+  it("throws rather than writing a provider pi would drop", () => {
+    expect(() =>
+      mergeCustomProviderIntoModelsConfig({}, "argo", {
+        baseUrl: "https://gateway.example",
+        model: "claudeopus5",
+        api: "anthropic",
+      }),
+    ).toThrow(/unsupported endpoint api/);
+  });
+
+  it("declares a context window that clears both model-picker floors", () => {
+    const openai = synthesizeModelDef({ baseUrl: "https://x/v1", model: "gpt-oss-120b" });
+    const anthropic = synthesizeModelDef({
+      baseUrl: "https://x",
+      model: "claudeopus5",
+      api: "anthropic-messages",
+    });
+    expect(openai.contextWindow).toBe(128000);
+    // Under-declaring makes pi compact a conversation that had room left.
+    expect(anthropic.contextWindow).toBe(200000);
+    // 50K hides the model from the picker (#418), 16K trips "window too small"
+    // (#419). Neither shape may fall under either.
+    for (const def of [openai, anthropic]) expect(def.contextWindow).toBeGreaterThan(50000);
+  });
+});
+
+describe("an anthropic-messages endpoint loads through pi's ModelRegistry", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-cp-anthropic-"));
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  // The whole point of the `api` field: pi has to accept the provider and hand
+  // back a model bound to the Anthropic wire format at the URL we gave it. If
+  // pi ever stopped registering this shape from models.json, an Argo-style
+  // gateway would fail at the first request with nothing pointing here.
+  it("registers the model against the gateway URL, not api.anthropic.com", async () => {
+    const file = path.join(dir, "models.json");
+    syncCustomProviderModelsFile(file, "argo", {
+      baseUrl: "https://gateway.example/argoapi",
+      model: "claudeopus5",
+      api: "anthropic-messages",
+      apiKey: "ac.super-secret-should-never-be-written",
+    });
+
+    expect(fs.readFileSync(file, "utf-8")).not.toContain("super-secret");
+
+    const runtime = await ModelRuntime.create({
+      modelsPath: file,
+      credentials: emptyCredentialStore(),
+    });
+    const reg = new ModelRegistry(runtime);
+    expect(reg.getError()).toBeUndefined();
+    const model = reg.find("argo", "claudeopus5");
+    expect(model).toBeDefined();
+    expect(model).toMatchObject({
+      api: "anthropic-messages",
+      baseUrl: "https://gateway.example/argoapi",
+    });
   });
 });

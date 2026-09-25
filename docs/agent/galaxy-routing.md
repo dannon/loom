@@ -147,3 +147,65 @@ Useful verification examples:
   expected identifiers in a small preview.
 - CSV/TSV/JSON/YAML/config: parse with a real parser, check required
   columns/keys, and compare row/object counts to the request.
+
+## Automatic follow-up
+
+Loom queues a follow-up by default when a tracked job or workflow completes or
+fails, including the first job failure in a workflow that is still running.
+Check the latest notebook and user instructions before acting on a queued event.
+Verify completed outputs and investigate failures without asking the researcher
+to request those checks again. Record evidence in the notebook. Continue work
+already authorized by the researcher only after its prerequisites are verified;
+respect explicit pause/stop requests and do not create a new plan. Diagnose a
+failure before repairing it, avoid blind or repeated retries, and ask only when
+a necessary decision, information, or authorization is missing. Cancelled and
+conditionally skipped runs do not trigger a follow-up.
+
+Follow-ups pause after 3 consecutive automatic turns with no user input
+(`experiments.autoResumeMaxTurns`), and when the user stops a turn; the user is
+notified and the next message or command resumes them. Results that arrive
+while paused are still recorded in the notebook.
+
+Automatic follow-up can be disabled with `LOOM_AUTO_RESUME=0` or
+`experiments.autoResume: false` in `~/.loom/config.json`.
+
+## Batch SRA/ENA imports
+
+Gather and deduplicate all run accessions requested for the current analysis
+before submitting downloads. Inspect the notebook and destination history first:
+reuse verified inputs, wait for matching jobs already running, and retry only
+missing or demonstrated failures. Do not expand a request to every run in a
+study or replace already verified inputs without that scope being requested.
+
+For IUC `fastq_dump` / `fasterq_dump`, use one submission per compatible set of
+accessions. Inspect the installed template and either:
+
+- Set `input|input_select=accession_number` and provide a comma-separated string
+  in `input|accession`; this avoids uploading an extra manifest dataset.
+- Set `input|input_select=file_list` and point `input|file_list` at one text HDA
+  containing one accession per line. Do not map over a collection of lists.
+
+For paired-end runs, use the wrapper's native `list:paired` output instead of
+creating per-run collections and merging them. Preserve requested parameters,
+compression, and singleton/other outputs. Verify collection population, expected
+accession identifiers/counts, both mates, dataset states, and suitable content
+checks before downstream analysis. Job success alone is not output verification.
+Batching reduces submission overhead and collection clutter; it does not remove
+the need to extract each run. Different parameters or demonstrated server/resource
+limits may justify separate batches. ENA URLs should similarly use a batched
+server-side fetch into a paired collection, with checksums when supported.
+
+Loom's `sra-import-gate` blocks sibling single-accession calls to the known IUC
+wrappers when history, tool version, and other settings match. It blocks the
+entire group before dispatch, gives the model a combined accession list, and
+keeps the rejected batch together during tool-error recovery. It also blocks
+explicit Galaxy mapping/batch expansion and repeated accessions within one
+literal list. The gate does not ask the user for approval or silently rewrite
+parameters. Its scope is structured `galaxy_run_tool` calls (including the MCP
+proxy), not opaque scripts, workflow internals, or unknown custom wrappers.
+Single-accession requests and later targeted retries remain available. Accessions
+introduced one at a time without an observed sibling group and cross-session
+history reuse rely on the always-loaded guidance; this is an efficiency guard,
+not a complete scheduler or duplicate-download registry.
+
+Reference: [IUC SRA wrapper input modes and accession loop](https://github.com/galaxyproject/tools-iuc/blob/main/tools/sra-tools/macros.xml).

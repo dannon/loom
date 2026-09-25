@@ -71,6 +71,30 @@ export interface OrbitAPI {
     | { ok: false; error: string; size?: number }
   >;
   writeFile(relPath: string, content: string): Promise<{ ok: true } | { ok: false; error: string }>;
+  /**
+   * Per-analysis dashboard layout, read and written as JSON text so that
+   * shared/dashboard-contract is the only thing that validates it. `raw: null`
+   * means no layout has been saved for this workspace yet. `revision` is the
+   * compare-and-swap token: hand it back on the save that was based on it, and
+   * a save whose base no longer matches the file comes back `conflict: true`
+   * carrying whatever is there now, rather than overwriting it.
+   */
+  loadDashboard(): Promise<
+    { ok: true; raw: string | null; revision: string | null } | { ok: false; error: string }
+  >;
+  saveDashboard(
+    raw: string,
+    baseRevision?: string | null,
+  ): Promise<
+    | { ok: true; revision: string | null }
+    | {
+        ok: false;
+        error: string;
+        conflict?: boolean;
+        raw?: string | null;
+        revision?: string | null;
+      }
+  >;
   // changedPaths is the batch of changed cwd-relative paths, or null when the
   // watcher couldn't name what changed (#313).
   onFilesChanged(callback: (changedPaths: string[] | null) => void): () => void;
@@ -89,11 +113,12 @@ export interface OrbitAPI {
     provider: string,
     key: string,
     baseUrl?: string,
+    api?: string,
   ): Promise<{ valid: boolean; error?: string; models?: string[] }>;
   /**
-   * Re-list an OpenAI-compatible provider's models using the key already
-   * stored in main. Takes only the provider name -- the renderer never holds
-   * the credential (#432).
+   * Re-list a custom endpoint's models using the key already stored in main.
+   * Takes only the provider name -- the renderer never holds the credential
+   * (#432), and the endpoint's wire format is read from the same stored entry.
    */
   discoverModels(
     provider: string,
@@ -193,6 +218,8 @@ const api: OrbitAPI = {
   listFiles: (opts) => ipcRenderer.invoke("files:list", opts),
   readFile: (relPath, opts) => ipcRenderer.invoke("files:read", relPath, opts),
   writeFile: (relPath, content) => ipcRenderer.invoke("files:write", relPath, content),
+  loadDashboard: () => ipcRenderer.invoke("dashboard:load"),
+  saveDashboard: (raw, baseRevision) => ipcRenderer.invoke("dashboard:save", raw, baseRevision),
   onFilesChanged: (callback) => {
     const handler = (_e: unknown, changedPaths: string[] | null) => callback(changedPaths ?? null);
     ipcRenderer.on("files:changed", handler);
@@ -203,8 +230,8 @@ const api: OrbitAPI = {
   refreshSkills: () => ipcRenderer.invoke("skills:refresh"),
   getGalaxyUser: () => ipcRenderer.invoke("galaxy:current-user"),
   setBypassPermissions: (enabled) => ipcRenderer.invoke("guardian:set-bypass", enabled),
-  validateApiKey: (provider, key, baseUrl) =>
-    ipcRenderer.invoke("apiKey:validate", provider, key, baseUrl),
+  validateApiKey: (provider, key, baseUrl, api) =>
+    ipcRenderer.invoke("apiKey:validate", provider, key, baseUrl, api),
   discoverModels: (provider) => ipcRenderer.invoke("models:discover", provider),
   oauthProviders: () => ipcRenderer.invoke("oauth:providers"),
   oauthStatus: (provider) => ipcRenderer.invoke("oauth:status", provider),

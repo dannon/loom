@@ -11,12 +11,18 @@ export interface DiscoverModelsDeps {
   probe: (
     baseUrl: string,
     key: string,
+    api?: string,
   ) => Promise<{ valid: boolean; error?: string; models?: string[] }>;
 }
 
 /**
- * Re-run OpenAI-compatible model discovery for an already-configured provider,
- * using the credential that main already holds.
+ * Re-run model discovery for an already-configured provider, using the
+ * credential that main already holds.
+ *
+ * The endpoint's wire format comes from the stored entry rather than the
+ * caller, for the same reason the key does: the renderer passes only a provider
+ * name. That also keeps the probe consistent with what the brain will actually
+ * speak to, since both read the same `api` field.
  *
  * The renderer never sees a stored key (config:get is masked), so it cannot
  * make this call itself -- it only passes the provider *name*, which indexes
@@ -59,7 +65,7 @@ export async function discoverProviderModels(
     };
   }
   try {
-    const res = await deps.probe(baseUrl, key);
+    const res = await deps.probe(baseUrl, key, entry.api);
     if (!res.valid) return { ok: false, error: res.error || "Endpoint rejected the stored key" };
     const seen = new Set<string>();
     for (const raw of res.models ?? []) {
