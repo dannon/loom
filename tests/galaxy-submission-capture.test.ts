@@ -235,6 +235,52 @@ describe("submission capture: work that finished before the call returned", () =
   });
 });
 
+describe("submission capture: the mcp proxy tool", () => {
+  // Reconnect guidance steers the model to pi's `mcp` proxy, where the Galaxy
+  // tool's name and args are nested inside the call. Matching only the bare
+  // tool names let those submissions through with no record at all.
+  it("registers a tool run made through the proxy, with its args", async () => {
+    setCurrentStepAnchor("plan-a-step-2");
+    await submit(
+      "mcp",
+      { server: "galaxy", tool: "galaxy_run_tool", args: JSON.stringify({ tool_id: "fastp" }) },
+      {
+        content: [{ type: "text", text: "preview" }],
+        details: { mcpResult: { structuredContent: THREE_JOBS, content: [] } },
+      },
+    );
+    const blocks = findJobBlocks(notebook());
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0].notebookAnchor).toBe("plan-a-step-2");
+    const [row] = activity().filter((r) => r.kind === "submission.registered");
+    expect(row.payload.tool).toBe("galaxy_run_tool");
+  });
+
+  it("registers the mcp__galaxy__ spelling too", async () => {
+    await submit(
+      "mcp__galaxy__invoke_workflow",
+      { workflow_id: "c0ffee1234567890" },
+      mcpResult(INVOCATION),
+    );
+    expect(findInvocationBlocks(notebook())).toHaveLength(1);
+  });
+
+  it("ignores a proxied read and a non-Galaxy server", async () => {
+    const before = notebook();
+    await submit(
+      "mcp",
+      { server: "galaxy", tool: "galaxy_get_history_contents", args: {} },
+      mcpResult(THREE_JOBS),
+    );
+    await submit(
+      "mcp",
+      { server: "other", tool: "galaxy_run_tool", args: {} },
+      mcpResult(THREE_JOBS),
+    );
+    expect(notebook()).toBe(before);
+  });
+});
+
 describe("submission capture: refusing to guess", () => {
   it("logs submission.unparsed and writes no block", async () => {
     const before = notebook();

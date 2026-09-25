@@ -33,6 +33,7 @@ import * as path from "path";
 import { stringify as stringifyYaml } from "yaml";
 import { appendActivityEvent } from "./activity";
 import { getGalaxyConfig } from "./galaxy-api";
+import { galaxyCall } from "./mcp-recovery";
 import {
   isTerminalJobState,
   jobStatusFromGalaxyState,
@@ -607,16 +608,27 @@ export async function handleSubmissionResult(
 
 export function registerSubmissionCapture(pi: ExtensionAPI): void {
   pi.on("tool_execution_start", async (event) => {
-    if (!isSubmissionTool(event.toolName)) return;
-    rememberDispatch(event.toolCallId, event.toolName, event.args);
+    // The same submission can arrive as `galaxy_run_tool`, as
+    // `mcp__galaxy__run_tool`, or through pi's `mcp` proxy tool with the real
+    // name and args nested inside -- the proxy is what the reconnect guidance
+    // steers the model to. Record it under its real name either way.
+    const call = galaxyCall(
+      event.toolName,
+      (event.args && typeof event.args === "object" ? event.args : {}) as Record<string, unknown>,
+    );
+    if (!call || !isSubmissionTool(call.name)) return;
+    rememberDispatch(event.toolCallId, call.name, call.args);
   });
 
   pi.on("tool_execution_end", async (event) => {
-    if (!isSubmissionTool(event.toolName)) return;
+    // The end event has no args, so a proxied call is only recognisable by the
+    // dispatch its start left behind.
+    const toolName = inFlight.get(event.toolCallId)?.toolName ?? event.toolName;
+    if (!isSubmissionTool(toolName)) return;
     try {
       await handleSubmissionResult(
         event.toolCallId,
-        event.toolName,
+        toolName,
         event.result,
         event.isError === true,
       );
