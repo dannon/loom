@@ -33,7 +33,13 @@ import * as path from "path";
 import { stringify as stringifyYaml } from "yaml";
 import { appendActivityEvent } from "./activity";
 import { getGalaxyConfig } from "./galaxy-api";
-import { locateJobBlock, upsertJobBlock, type JobYaml } from "./galaxy-job-block";
+import {
+  isTerminalJobState,
+  jobStatusFromGalaxyState,
+  locateJobBlock,
+  upsertJobBlock,
+  type JobYaml,
+} from "./galaxy-job-block";
 import { hasUdtBlock, upsertUdtBlock } from "./galaxy-udt-block";
 import {
   isSubmissionTool,
@@ -316,7 +322,12 @@ async function writeBlocks(
         label: submission.label,
         ...(job.toolId ? { toolId: job.toolId } : {}),
         submittedAt: dispatch.submittedAt,
-        status: "in_progress",
+        // A job that was already terminal when the call returned must not be
+        // written as in_progress: the poller would "discover" it finished on
+        // its next tick and wake the agent to verify work it already saw.
+        ...(isTerminalJobState(job.state)
+          ? { status: jobStatusFromGalaxyState(job.state), galaxyState: job.state }
+          : { status: "in_progress" as const }),
         ...(dispatch.replayed ? {} : { serverVerified: true }),
       };
       // tool_version is only ever in the submission response -- GET

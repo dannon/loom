@@ -318,6 +318,28 @@ describe("parse: uploads", () => {
     expect(out.submission.label).toBe("Upload sample.fastq.gz");
   });
 
+  it("carries the finished state of an upload whose ingest was already waited out", () => {
+    const out = parse(
+      "galaxy_upload_local_file",
+      { path: "/data/x.txt" },
+      { content: [], details: { historyId: "h1", state: "ok", jobs: ["upjob00000000003"] } },
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.submission.jobs?.[0].state).toBe("ok");
+  });
+
+  it("leaves the state unset when the ingest wait gave up before Galaxy finished", () => {
+    const out = parse(
+      "galaxy_upload_local_file",
+      { path: "/data/x.txt" },
+      { content: [], details: { historyId: "h1", state: "queued", jobs: ["upjob00000000004"] } },
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.submission.jobs?.[0].state).toBeUndefined();
+  });
+
   it("does not register a Loom upload that failed ingest", () => {
     const out = parse(
       "galaxy_upload_local_file",

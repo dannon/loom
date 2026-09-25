@@ -79,6 +79,12 @@ export interface SubmittedJob {
    */
   toolVersion?: string;
   historyId?: string;
+  /**
+   * Galaxy's job state when the submission call returned. Only set when the
+   * caller already waited the work out -- Loom's uploader blocks until ingest
+   * finishes, so an `ok` upload is done before its block is ever written.
+   */
+  state?: string;
 }
 
 export interface ParsedSubmission {
@@ -404,6 +410,9 @@ function parseLocalUpload(
     if (!jobId) return fail("upload details.jobs has an entry that is not an id-shaped string");
     jobs.push({ jobId, toolId: "__DATA_FETCH__" });
   }
+  // The uploader waited ingest out, so a dataset in `ok` means its upload job
+  // already finished. Anything else (the wait timed out) stays for the poller.
+  if (details.state === "ok") for (const job of jobs) job.state = "ok";
   if (jobs.length === 0) return fail("upload details.jobs is empty");
 
   const fileName = str(args.file_name) ?? (str(args.path) ? path.basename(String(args.path)) : "");

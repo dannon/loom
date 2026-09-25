@@ -201,6 +201,35 @@ describe("submission capture: registration", () => {
   });
 });
 
+describe("submission capture: work that finished before the call returned", () => {
+  const upload = (state: string) => ({
+    content: [{ type: "text", text: JSON.stringify({ uploaded: true }) }],
+    details: { historyId: "0a248a1f62a0cc04", datasetId: "ds1", state, jobs: ["upjob00000000005"] },
+  });
+
+  // The poller only watches in_progress blocks. Writing a finished upload as
+  // in_progress made the next tick "discover" it and wake the agent to verify
+  // data it had already checked -- enough uploads used up the follow-up cap.
+  it("writes an upload that ingested ok as already completed", async () => {
+    await submit("galaxy_upload_local_file", { path: "/data/a.fastq" }, upload("ok"));
+    const [block] = findJobBlocks(notebook());
+    expect(block.status).toBe("completed");
+    expect(block.galaxyState).toBe("ok");
+  });
+
+  it("leaves an upload whose ingest wait timed out for the poller", async () => {
+    await submit("galaxy_upload_local_file", { path: "/data/a.fastq" }, upload("queued"));
+    const [block] = findJobBlocks(notebook());
+    expect(block.status).toBe("in_progress");
+    expect(block.galaxyState).toBeUndefined();
+  });
+
+  it("still writes a freshly submitted tool run as in_progress", async () => {
+    await submit("galaxy_run_tool", { tool_id: "fastp" }, mcpResult(THREE_JOBS));
+    expect(findJobBlocks(notebook()).every((b) => b.status === "in_progress")).toBe(true);
+  });
+});
+
 describe("submission capture: refusing to guess", () => {
   it("logs submission.unparsed and writes no block", async () => {
     const before = notebook();
