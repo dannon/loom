@@ -7,6 +7,7 @@
  */
 
 import { createReadStream } from "fs";
+import { parse as parseLegacyUrl } from "url";
 // FileUrlStorage is exported by the Node build but missing from the type defs --
 // import via namespace and cast to avoid the spurious TS2724 error.
 import * as tusClient from "tus-js-client";
@@ -83,6 +84,28 @@ const DEFAULT_CHUNK = 10 * 1024 * 1024;
 function originOf(url: string | null | undefined): string | null {
   try {
     return new URL(String(url)).origin;
+  } catch {
+    return null;
+  }
+}
+
+const DEFAULT_PORTS: Record<string, string> = { "http:": "80", "https:": "443" };
+
+/**
+ * The origin tus-js-client will actually connect to. Its Node transport builds
+ * request options with the legacy `url.parse`, which disagrees with WHATWG
+ * `URL` on some hosts: `https://usegalaxy.org%2eau/x` is `usegalaxy.org.au`
+ * to `URL` but `usegalaxy.org` to `url.parse`. Checking only the WHATWG origin
+ * would pass that URL and then send the key to the other host.
+ */
+function transportOriginOf(url: string | null | undefined): string | null {
+  try {
+    const { protocol, hostname, port } = parseLegacyUrl(String(url));
+    if (!protocol || !hostname) return null;
+    const effectivePort = port && port !== DEFAULT_PORTS[protocol] ? `:${port}` : "";
+    // url.parse drops the brackets from an IPv6 literal; the WHATWG origin keeps them.
+    const host = hostname.includes(":") ? `[${hostname}]` : hostname.toLowerCase();
+    return `${protocol}//${host}${effectivePort}`;
   } catch {
     return null;
   }
@@ -203,7 +226,9 @@ export function tusUpload(opts: TusUploadOpts): Promise<TusUploadResult> {
 
     function sameOriginAsGalaxy(url: string | null | undefined): boolean {
       const actual = originOf(url);
-      return actual !== null && actual === expectedOrigin;
+      return (
+        actual !== null && actual === expectedOrigin && transportOriginOf(url) === expectedOrigin
+      );
     }
 
     function foreignUploadUrlMessage(url: string | null | undefined): string {

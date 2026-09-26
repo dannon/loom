@@ -363,6 +363,49 @@ describe("tusUpload", () => {
     expect(inst.abortTerminated).toBe(false);
   });
 
+  it("refuses an upload URL whose host tus would parse differently", async () => {
+    // WHATWG URL decodes %2e and sees galaxy.test; tus's url.parse stops the host at
+    // the '%' and would connect to evil.galaxy -- with the key.
+    const uploadPromise = tusUpload({ ...baseOpts, baseUrl: "https://evil.galaxy.test" });
+    await new Promise((r) => setTimeout(r, 0));
+
+    const inst = FakeUpload.lastInstance!;
+    inst.triggerUploadUrlAvailable("https://evil.galaxy%2etest/api/upload/resumable_upload/SID");
+
+    await expect(uploadPromise).rejects.toThrow(/different origin/);
+    expect(inst.abortCalled).toBe(true);
+    expect(inst.abortTerminated).toBe(false);
+  });
+
+  it("prunes a stored partial whose host tus would parse differently", async () => {
+    FakeFileUrlStorage.entries["k"] = {
+      uploadUrl: "https://evil.galaxy%2etest/api/upload/resumable_upload/OLD",
+    };
+
+    const uploadPromise = tusUpload({ ...baseOpts, baseUrl: "https://evil.galaxy.test" });
+    await new Promise((r) => setTimeout(r, 0));
+
+    const inst = FakeUpload.lastInstance!;
+    expect(FakeUpload.resumeCalls).toBe(0);
+    expect(FakeFileUrlStorage.entries).toEqual({});
+
+    inst.url = "https://evil.galaxy.test/api/upload/resumable_upload/NEW";
+    inst.triggerSuccess();
+    await expect(uploadPromise).resolves.toEqual({ sessionId: "NEW" });
+  });
+
+  it("accepts a same-origin upload URL spelled with the default port or upper case", async () => {
+    const uploadPromise = tusUpload(baseOpts);
+    await new Promise((r) => setTimeout(r, 0));
+
+    const inst = FakeUpload.lastInstance!;
+    inst.triggerUploadUrlAvailable("https://GALAXY.test:443/api/upload/resumable_upload/SID-8");
+    expect(inst.abortCalled).toBe(false);
+
+    inst.triggerSuccess();
+    await expect(uploadPromise).resolves.toEqual({ sessionId: "SID-8" });
+  });
+
   it("accepts an upload URL that stays on the configured origin", async () => {
     const uploadPromise = tusUpload(baseOpts);
     await new Promise((r) => setTimeout(r, 0));

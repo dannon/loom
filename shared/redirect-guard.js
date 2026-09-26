@@ -136,7 +136,9 @@ export async function fetchSameOriginOnly(url, init = {}, options = {}) {
   // Resolved per call, not per module load, so a test (or a caller that
   // injects one) can swap the implementation.
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
-  const maxHops = options.maxHops ?? DEFAULT_MAX_HOPS;
+  // NaN or Infinity here would quietly turn the hop limit off.
+  const maxHops =
+    Number.isInteger(options.maxHops) && options.maxHops >= 0 ? options.maxHops : DEFAULT_MAX_HOPS;
   const serverLabel = options.serverLabel ?? "The server";
   const urlSettingLabel = options.urlSettingLabel ?? "the configured URL";
   const startOrigin = originOf(url) ?? String(url);

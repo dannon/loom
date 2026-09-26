@@ -165,6 +165,17 @@ describe("fetchSameOriginOnly against real servers", () => {
     expect(a.seen).toHaveLength(2);
   });
 
+  it("keeps the default hop limit when handed a non-integer one", async () => {
+    reset(302, "loop");
+    const err = await fetchSameOriginOnly(
+      `${a.origin}/api/histories`,
+      { headers: { "x-api-key": KEY } },
+      { maxHops: Number.POSITIVE_INFINITY },
+    ).catch((e: unknown) => e);
+    expect((err as RedirectRefusedError).kind).toBe("too-many-hops");
+    expect(a.seen).toHaveLength(4);
+  });
+
   it("does not replay a POST body to another origin", async () => {
     reset(307, "b");
     const err = await fetchSameOriginOnly(
