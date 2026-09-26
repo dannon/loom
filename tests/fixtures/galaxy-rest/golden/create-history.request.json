@@ -1,0 +1,5 @@
+{
+  "method": "POST",
+  "url": "https://g.example/api/histories",
+  "body": { "name": "AlphaGenome rerun" }
+}

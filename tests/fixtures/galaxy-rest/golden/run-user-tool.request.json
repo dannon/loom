@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "url": "https://g.example/api/tools",
+  "body": {
+    "history_id": "df8fe5ddadbf3ab1",
+    "tool_uuid": "61d15277-a911-45ef-aa66-5385146578cc",
+    "tool_version": "0.1.0",
+    "inputs": {
+      "scorer_output": { "src": "hda", "id": "59ace41fc068d3ad" },
+      "top_tracks_per_variant": 5
+    },
+    "input_format": "legacy"
+  }
+}

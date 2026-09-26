@@ -268,3 +268,204 @@ export async function galaxyGetMostRecentHistory(
   const res = await galaxyGet<GalaxyHistorySummary | null>("/histories/most_recently_used", signal);
   return res && typeof res.id === "string" && res.id.length > 0 ? res : null;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Submission and template endpoints
+//
+// The calls the harness needs to make a gated submission itself, instead of
+// asking galaxy-mcp to. Payloads mirror what galaxy-mcp 1.10.0 sends through
+// BioBlend 1.9.0 for the same tool, with two deliberate differences: the tool
+// version is always sent (a Spec never runs "whatever is newest"), and nothing
+// is optional that changes what runs. The golden-payload tests pin each shape.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A dataset reference as Galaxy's run APIs take it. */
+export interface GalaxyDatasetRef {
+  src: "hda" | "hdca" | "ldda";
+  id: string;
+}
+
+/** What POST /api/tools answers, for both installed and user-defined tools. */
+export interface GalaxyToolRunResponse {
+  jobs: Array<{ id: string; state: string; tool_id: string }>;
+  outputs: Array<{ id: string; output_name?: string; hid?: number; file_ext?: string }>;
+  output_collections: Array<{ id: string; output_name?: string }>;
+  implicit_collections: Array<{ id: string; output_name?: string }>;
+}
+
+export interface GalaxyInvocationSummary {
+  id: string;
+  state: string;
+  workflow_id: string;
+  history_id: string;
+}
+
+export interface GalaxyCreatedHistory {
+  id: string;
+  name: string;
+}
+
+export interface GalaxyRunToolRequest {
+  historyId: string;
+  toolId: string;
+  toolVersion: string;
+  /** Flat legacy-format inputs: `section|param`, `repeat_0|param`, dataset refs as values. */
+  inputs: Record<string, unknown>;
+}
+
+export interface GalaxyRunUserToolRequest {
+  historyId: string;
+  toolUuid: string;
+  toolVersion: string;
+  inputs: Record<string, unknown>;
+}
+
+export interface GalaxyInvokeWorkflowRequest {
+  /** A StoredWorkflow id, the kind `list_workflows` hands back. */
+  workflowId: string;
+  historyId: string;
+  /** Keyed by step index, matching `inputs_by: "step_index"`. */
+  inputs: Record<string, GalaxyDatasetRef | unknown>;
+  /** Per-step tool parameter overrides, keyed by step index. */
+  parameters?: Record<string, Record<string, unknown>>;
+  /** Workflow version to run; omitted means the latest. The registry always sets it. */
+  version?: number;
+}
+
+/** The exact body POST /api/tools receives for an installed tool. */
+export function buildRunToolPayload(req: GalaxyRunToolRequest): Record<string, unknown> {
+  return {
+    history_id: req.historyId,
+    tool_id: req.toolId,
+    tool_version: req.toolVersion,
+    inputs: req.inputs,
+    input_format: "legacy",
+  };
+}
+
+/**
+ * The exact body POST /api/tools receives for a user-defined tool. Galaxy
+ * resolves the tool by uuid here, and `tool_id` and `tool_uuid` are mutually
+ * exclusive, so the id is never sent.
+ */
+export function buildRunUserToolPayload(req: GalaxyRunUserToolRequest): Record<string, unknown> {
+  return {
+    history_id: req.historyId,
+    tool_uuid: req.toolUuid,
+    tool_version: req.toolVersion,
+    inputs: req.inputs,
+    input_format: "legacy",
+  };
+}
+
+/**
+ * The exact body POST /api/workflows/{id}/invocations receives.
+ *
+ * `instance: false` because the id is a StoredWorkflow id; `true` would read it
+ * as a Workflow-version id and silently run a different workflow (galaxy-mcp
+ * #57). `require_exact_tool_versions` and no state corrections because the
+ * point is to run what was approved, not something close to it.
+ */
+export function buildInvokeWorkflowPayload(
+  req: GalaxyInvokeWorkflowRequest,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    history: `hist_id=${req.historyId}`,
+    inputs: req.inputs,
+    inputs_by: "step_index",
+    no_add_to_history: true,
+    allow_tool_state_corrections: false,
+    require_exact_tool_versions: true,
+    use_cached_job: false,
+    instance: false,
+  };
+  if (req.parameters && Object.keys(req.parameters).length > 0) {
+    payload.parameters = req.parameters;
+  }
+  if (req.version !== undefined) payload.version = req.version;
+  return payload;
+}
+
+export async function galaxyRunTool(
+  req: GalaxyRunToolRequest,
+  signal?: AbortSignal,
+): Promise<GalaxyToolRunResponse> {
+  return galaxyPost<GalaxyToolRunResponse>("/tools", buildRunToolPayload(req), signal);
+}
+
+/**
+ * Run a user-defined tool through POST /api/tools, not POST /api/jobs: the
+ * latter is Celery-only and 500s for UDTs on Galaxy 26.0.
+ */
+export async function galaxyRunUserTool(
+  req: GalaxyRunUserToolRequest,
+  signal?: AbortSignal,
+): Promise<GalaxyToolRunResponse> {
+  return galaxyPost<GalaxyToolRunResponse>("/tools", buildRunUserToolPayload(req), signal);
+}
+
+export async function galaxyInvokeWorkflow(
+  req: GalaxyInvokeWorkflowRequest,
+  signal?: AbortSignal,
+): Promise<GalaxyInvocationSummary> {
+  return galaxyPost<GalaxyInvocationSummary>(
+    `/workflows/${encodeURIComponent(req.workflowId)}/invocations`,
+    buildInvokeWorkflowPayload(req),
+    signal,
+  );
+}
+
+export async function galaxyCreateHistory(
+  name: string,
+  signal?: AbortSignal,
+): Promise<GalaxyCreatedHistory> {
+  return galaxyPost<GalaxyCreatedHistory>("/histories", { name }, signal);
+}
+
+/**
+ * A tool's full input schema, the source galaxy-mcp's
+ * `get_tool_input_template` builds its skeleton from. The registry freezes
+ * this body, not the skeleton: the skeleton is a rendering, the schema is
+ * what Galaxy validates against.
+ */
+export async function galaxyGetToolInputTemplate(
+  toolId: string,
+  toolVersion?: string,
+  signal?: AbortSignal,
+): Promise<Record<string, unknown>> {
+  const query = new URLSearchParams({ io_details: "true" });
+  if (toolVersion) query.set("tool_version", toolVersion);
+  return galaxyGet<Record<string, unknown>>(
+    `/tools/${encodeURIComponent(toolId)}?${query.toString()}`,
+    signal,
+  );
+}
+
+/**
+ * The workflow run form (`style=run`), the same model Galaxy's own run page
+ * and galaxy-mcp's `get_workflow_input_template` read. `instance=false` for
+ * the reason given on `buildInvokeWorkflowPayload`.
+ */
+export async function galaxyGetWorkflowInputTemplate(
+  workflowId: string,
+  historyId?: string,
+  signal?: AbortSignal,
+): Promise<Record<string, unknown>> {
+  const query = new URLSearchParams({ style: "run", instance: "false" });
+  if (historyId) query.set("history_id", historyId);
+  return galaxyGet<Record<string, unknown>>(
+    `/workflows/${encodeURIComponent(workflowId)}/download?${query.toString()}`,
+    signal,
+  );
+}
+
+/** A user-defined tool's stored definition, by uuid. */
+export async function galaxyGetUserToolDefinition(
+  toolUuid: string,
+  signal?: AbortSignal,
+): Promise<Record<string, unknown>> {
+  return galaxyGet<Record<string, unknown>>(
+    `/unprivileged_tools/${encodeURIComponent(toolUuid)}`,
+    signal,
+  );
+}

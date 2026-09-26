@@ -1,0 +1,22 @@
+{
+  "active": true,
+  "create_time": "2026-09-25T13:58:20.004511",
+  "hidden": false,
+  "id": "1e8b3f5a7c9d0b24",
+  "representation": {
+    "class": "GalaxyUserTool",
+    "command": "python3 '$__tool_directory__/top.py' '$(inputs.scorer_output.path)' $(inputs.top_tracks_per_variant) > '$(outputs.top_tracks.path)'",
+    "container": "python:3.12-slim",
+    "id": "loom_top_tracks",
+    "inputs": [
+      { "format": "tabular", "name": "scorer_output", "type": "data" },
+      { "default": 5, "name": "top_tracks_per_variant", "type": "integer" }
+    ],
+    "name": "Top tracks per variant",
+    "outputs": [{ "format": "tabular", "name": "top_tracks", "type": "data" }],
+    "version": "0.1.0"
+  },
+  "tool_format": "GalaxyUserTool",
+  "tool_id": "loom_top_tracks",
+  "uuid": "61d15277-a911-45ef-aa66-5385146578cc"
+}

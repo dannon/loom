@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "url": "https://g.example/api/tools",
+  "body": {
+    "history_id": "df8fe5ddadbf3ab1",
+    "tool_id": "cat1",
+    "tool_version": "1.0.0",
+    "inputs": {
+      "input1": { "src": "hda", "id": "4b6e2f1a9c3d5e70" },
+      "queries_0|input2": { "src": "hda", "id": "8c1d3e5f7a9b0c21" }
+    },
+    "input_format": "legacy"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "create_time": "2026-09-25T14:05:40.118202",
+  "history_id": "df8fe5ddadbf3ab1",
+  "id": "c2a7f40e9b1d3856",
+  "inputs": {},
+  "model_class": "WorkflowInvocation",
+  "output_collections": {},
+  "output_values": {},
+  "outputs": {},
+  "state": "new",
+  "steps": [],
+  "update_time": "2026-09-25T14:05:40.118215",
+  "uuid": "3d6b0c52-9a4e-4f1a-8b7e-2c5f9e0a1d47",
+  "workflow_id": "43277cb7101617ab"
+}

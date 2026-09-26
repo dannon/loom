@@ -1,0 +1,21 @@
+{
+  "method": "POST",
+  "url": "https://g.example/api/workflows/97ed37bc0e78b990/invocations",
+  "body": {
+    "history": "hist_id=df8fe5ddadbf3ab1",
+    "inputs": {
+      "0": { "src": "hdca", "id": "a3f0c9e18b2d4c67" },
+      "1": 1000
+    },
+    "inputs_by": "step_index",
+    "no_add_to_history": true,
+    "allow_tool_state_corrections": false,
+    "require_exact_tool_versions": true,
+    "use_cached_job": false,
+    "instance": false,
+    "parameters": {
+      "3": { "outFileFormat": "bigwig" }
+    },
+    "version": 1
+  }
+}

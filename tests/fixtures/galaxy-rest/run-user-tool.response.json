@@ -1,0 +1,29 @@
+{
+  "implicit_collections": [],
+  "jobs": [
+    {
+      "create_time": "2026-09-25T14:02:11.402118",
+      "exit_code": null,
+      "id": "5a1b9c3d7e2f4a60",
+      "model_class": "Job",
+      "state": "new",
+      "tool_id": "loom_top_tracks",
+      "update_time": "2026-09-25T14:02:11.402133"
+    }
+  ],
+  "output_collections": [],
+  "outputs": [
+    {
+      "file_ext": "tabular",
+      "hid": 7,
+      "history_content_type": "dataset",
+      "history_id": "df8fe5ddadbf3ab1",
+      "id": "0f3e9a1c2b4d6e87",
+      "model_class": "HistoryDatasetAssociation",
+      "name": "top_tracks",
+      "output_name": "top_tracks",
+      "state": "new",
+      "visible": true
+    }
+  ]
+}
