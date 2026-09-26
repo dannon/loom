@@ -175,3 +175,19 @@ describe("normalizeServerUrl", () => {
     expect(normalizeServerUrl("UseGalaxy.example/")).toBe(normalizeServerUrl(SERVER));
   });
 });
+
+describe("prototype keys", () => {
+  it("rejects __proto__ as an evaluation assertion key or a frozen assertion id", () => {
+    const doc = registryWith() as Record<string, any>;
+    const id = Object.keys(doc.attempts)[0];
+    const text = JSON.stringify(doc).replace(
+      '"assertions":{}',
+      '"assertions":{"__proto__":"pass"}',
+    );
+    expect(() => parseRegistry(JSON.parse(text))).toThrow(RegistryFormatError);
+    const spec = doc.attempts[id].approval.spec_snapshot;
+    spec.assertions = [{ id: "__proto__", definition_digest: HEX("1"), definition: {} }];
+    doc.attempts[id].approval.spec_revision = specRevision(spec);
+    expect(() => parseRegistry(doc)).toThrow(RegistryFormatError);
+  });
+});

@@ -291,6 +291,17 @@ function oneOf<T extends string>(v: unknown, allowed: readonly T[], path: string
   return v as T;
 }
 
+/**
+ * A string that becomes an object key somewhere. `__proto__` as a key is
+ * silently swallowed by plain-object assignment, so a result recorded under it
+ * would vanish; refuse it outright.
+ */
+function keyStr(v: unknown, path: string): string {
+  const s = str(v, path);
+  if (s === "__proto__") fail(path, "reserved key");
+  return s;
+}
+
 function attemptId(v: unknown, path: string): AttemptId {
   const s = str(v, path);
   if (!isUlid(s)) fail(path, "not an attempt id");
@@ -360,7 +371,7 @@ export function parseSpec(v: unknown, path = "spec"): Spec {
     const ap = `${path}.assertions[${i}]`;
     const ao = rec(a, ap);
     return {
-      id: str(ao.id, `${ap}.id`),
+      id: keyStr(ao.id, `${ap}.id`),
       definition_digest: digest(ao.definition_digest, `${ap}.definition_digest`),
       definition: jsonValue(ao.definition, `${ap}.definition`),
     };
@@ -524,7 +535,7 @@ function parseAttempt(v: unknown, path: string): Attempt {
     const e = rec(o.evaluation, p);
     const assertions: Record<string, "pass" | "fail" | "inconclusive" | "excepted"> = {};
     for (const [k, val] of Object.entries(rec(e.assertions, `${p}.assertions`))) {
-      assertions[str(k, `${p}.assertions key`)] = oneOf(
+      assertions[keyStr(k, `${p}.assertions key`)] = oneOf(
         val,
         ["pass", "fail", "inconclusive", "excepted"],
         `${p}.assertions.${k}`,
