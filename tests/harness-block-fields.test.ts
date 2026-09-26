@@ -262,6 +262,57 @@ describe("harness block fields: pollers preserve provenance", () => {
   });
 });
 
+describe("harness block fields: orbit- fences (Loom -> Orbit rename)", () => {
+  const toOrbit = (content: string) =>
+    content.replace(/^```loom-(invocation|job)$/gm, "```orbit-$1");
+
+  it("finds and rewrites an orbit- block, keeping its provenance", () => {
+    const recorded = toOrbit(upsertJobBlock("", AGENT_JOB, HARNESS));
+    expect(recorded).toContain("```orbit-job");
+
+    const rewritten = upsertJobBlock(recorded, { ...AGENT_JOB, label: "relabelled" });
+    const blocks = findJobBlocks(rewritten);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].label).toBe("relabelled");
+    expect(blocks[0].attemptId).toBe(HARNESS.attemptId);
+    expect(blocks[0].submittedBy).toBe("harness");
+  });
+
+  it("folds a provenance-free duplicate under the other prefix into one block", () => {
+    const recorded = upsertInvocationBlock("", AGENT_INVOCATION, HARNESS);
+    const olderCopy = toOrbit(upsertInvocationBlock("", AGENT_INVOCATION));
+    const rewritten = upsertInvocationBlock(`${recorded}\n${olderCopy}`, {
+      ...AGENT_INVOCATION,
+      label: "annotated",
+    });
+
+    const blocks = findInvocationBlocks(rewritten);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].attemptId).toBe(HARNESS.attemptId);
+    expect(rewritten).not.toContain("```orbit-invocation");
+  });
+
+  it("never folds away a duplicate that carries its own attempt id", () => {
+    const recorded = upsertJobBlock("", AGENT_JOB, HARNESS);
+    const other = toOrbit(
+      upsertJobBlock("", AGENT_JOB, { ...HARNESS, attemptId: "01OTHEROTHEROTHEROTHEROTHE" }),
+    );
+    const rewritten = upsertJobBlock(`${recorded}\n${other}`, { ...AGENT_JOB, label: "x" });
+
+    expect(findJobBlocks(rewritten).map((b) => b.attemptId)).toEqual([
+      HARNESS.attemptId,
+      "01OTHEROTHEROTHEROTHEROTHE",
+    ]);
+  });
+
+  it("appends ahead of an unclosed orbit- fence, as it does for loom-", () => {
+    const orphan = "# Notes\n\n```orbit-job\njob_id: aa11bb22cc33dd44\n\nprose the user wrote";
+    const next = upsertInvocationBlock(orphan, AGENT_INVOCATION, HARNESS);
+    expect(next.indexOf("```loom-invocation")).toBeLessThan(next.indexOf("```orbit-job"));
+    expect(next).toContain("prose the user wrote");
+  });
+});
+
 describe("harness block fields: hostile values", () => {
   function blockWith(...extra: string[]): string {
     return [

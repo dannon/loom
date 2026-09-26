@@ -27,6 +27,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "fs";
 import * as path from "path";
+import { readEnv } from "../../shared/orbit-env.js";
 import { appendActivityEvent } from "./activity";
 import { handleSubmissionResult } from "./galaxy-submission-capture";
 import { getNotebookPath, setCurrentStepAnchor } from "./state";
@@ -41,7 +42,7 @@ export interface ReplayEntry {
 }
 
 export function isSubmissionReplayEnabled(): boolean {
-  return !!process.env.LOOM_SUBMISSION_REPLAY?.trim();
+  return !!readEnv("SUBMISSION_REPLAY")?.trim();
 }
 
 /** Parse a replay file, skipping blank and malformed lines. */
@@ -86,7 +87,7 @@ export function resolveReplayPath(sessionDir: string, configured: string): strin
 
 export function registerSubmissionReplay(pi: ExtensionAPI): void {
   pi.on("session_start", async () => {
-    const configured = process.env.LOOM_SUBMISSION_REPLAY?.trim();
+    const configured = readEnv("SUBMISSION_REPLAY")?.trim();
     if (!configured) return;
 
     const notebookPath = getNotebookPath();

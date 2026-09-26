@@ -28,9 +28,11 @@
  * ```
  */
 
+import { notebookFenceOpen, replaceNotebookBlocks } from "../../shared/notebook-fences.js";
 import { appendBlock, isUnambiguousRange } from "./notebook-writer";
 import {
   blockLine,
+  isFoldableDuplicate,
   scanFencedBlocks,
   mergeHarnessFields,
   parseHarnessFields,
@@ -60,7 +62,7 @@ export interface JobYaml extends HarnessBlockFields {
   lastPolledAt?: string;
 }
 
-const JOB_FENCE_OPEN = "```loom-job";
+const JOB_FENCE_OPEN = notebookFenceOpen("job");
 const JOB_FENCE_CLOSE = "```";
 
 /**
@@ -221,7 +223,7 @@ interface BlockRange {
 function findJobBlockRanges(content: string): BlockRange[] {
   const lines = content.split("\n");
   const ranges: BlockRange[] = [];
-  for (const range of scanFencedBlocks(lines, JOB_FENCE_OPEN)) {
+  for (const range of scanFencedBlocks(lines, "job")) {
     const parsed = parseJobBlock(lines.slice(range.start + 1, range.end));
     if (parsed) ranges.push({ jobId: parsed.jobId, start: range.start, end: range.end });
   }
@@ -232,7 +234,7 @@ function findJobBlockRanges(content: string): BlockRange[] {
 export function findJobBlocks(content: string): JobYaml[] {
   const lines = content.split("\n");
   const result: JobYaml[] = [];
-  for (const range of scanFencedBlocks(lines, JOB_FENCE_OPEN)) {
+  for (const range of scanFencedBlocks(lines, "job")) {
     const parsed = parseJobBlock(lines.slice(range.start + 1, range.end));
     if (parsed) result.push(parsed);
   }
@@ -271,8 +273,12 @@ export function upsertJobBlock(
   const lines = content.split("\n");
 
   // Only a range no unclosed fence precedes can be replaced -- see
-  // isUnambiguousRange.
-  const existing = ranges.find((b) => b.jobId === job.jobId && isUnambiguousRange(lines, b.start));
+  // isUnambiguousRange. More than one can match when an older writer used the
+  // other fence prefix; foldable duplicates collapse into the rewritten block.
+  const matching = ranges.filter(
+    (b) => b.jobId === job.jobId && isUnambiguousRange(lines, b.start),
+  );
+  const existing = matching[0];
   // Read off the block this write replaces, not a second scan of the file --
   // see the same comment in `upsertInvocationBlock`.
   const onDiskRaw = existing ? rawJobFields(lines.slice(existing.start + 1, existing.end)) : null;
@@ -284,9 +290,15 @@ export function upsertJobBlock(
   const newBlock = renderJobYaml(merged).trimEnd().split("\n");
 
   if (existing) {
-    const before = lines.slice(0, existing.start);
-    const after = lines.slice(existing.end + 1);
-    return [...before, ...newBlock, ...after].join("\n");
+    const replaced = matching.filter(
+      (b) =>
+        b === existing ||
+        isFoldableDuplicate(
+          onDiskRaw?.get("attempt_id"),
+          rawJobFields(lines.slice(b.start + 1, b.end)).get("attempt_id"),
+        ),
+    );
+    return replaceNotebookBlocks(content, replaced, newBlock);
   }
 
   return appendBlock(content, newBlock);

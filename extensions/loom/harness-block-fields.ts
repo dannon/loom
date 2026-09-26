@@ -32,6 +32,8 @@
  * reconcile those two first.
  */
 
+import { isNotebookFenceOpen, type NotebookFenceKind } from "../../shared/notebook-fences.js";
+
 export type SubmittedBy = "harness" | "agent" | "unknown";
 export type EnrichmentState = "pending" | "complete" | "unavailable";
 
@@ -191,13 +193,13 @@ function isOneLine(value: string): boolean {
  * an unterminated `loom-job` opener swallows an appended `loom-invocation`
  * just as well as another job block would.
  */
-const LOOM_FENCE_OPENERS = [
-  "```loom-invocation",
-  "```loom-job",
-  "```loom-udt",
-  "```loom-session",
-  "```loom-galaxy-page",
-] as const;
+const LOOM_FENCE_KINDS: readonly NotebookFenceKind[] = [
+  "invocation",
+  "job",
+  "udt",
+  "session",
+  "galaxy-page",
+];
 
 const FENCE_CLOSE = "```";
 
@@ -254,11 +256,12 @@ export interface FenceRange {
  * is then invisible rather than rewritable: a fresh one is appended ahead of
  * the orphan and the user's lines stay put.
  */
-export function scanFencedBlocks(lines: readonly string[], opener: string): FenceRange[] {
+export function scanFencedBlocks(lines: readonly string[], kind: NotebookFenceKind): FenceRange[] {
   const ranges: FenceRange[] = [];
   let i = 0;
   while (i < lines.length) {
-    if (lines[i].trim() !== opener) {
+    // Either fence prefix opens one: notebooks outlive the Loom -> Orbit rename.
+    if (!isNotebookFenceOpen(lines[i], kind)) {
       i++;
       continue;
     }
@@ -275,6 +278,20 @@ export function scanFencedBlocks(lines: readonly string[], opener: string): Fenc
     }
   }
   return ranges;
+}
+
+/**
+ * Whether a second block with the same id can be folded into the one being
+ * rewritten. Same-id duplicates are normally one record written twice (an
+ * older build that didn't know the other fence prefix), and collapsing them
+ * is what keeps the id unique. A duplicate carrying its own attempt id is a
+ * separate harness record, though, and dropping it would delete provenance.
+ */
+export function isFoldableDuplicate(
+  keptAttemptId: string | undefined,
+  otherAttemptId: string | undefined,
+): boolean {
+  return !otherAttemptId || otherAttemptId === keptAttemptId;
 }
 
 /**
@@ -298,12 +315,12 @@ export function scanFencedBlocks(lines: readonly string[], opener: string): Fenc
  */
 export function appendIndexOutsideOpenFence(lines: readonly string[]): number {
   const closed = new Set<number>();
-  for (const opener of LOOM_FENCE_OPENERS) {
-    for (const range of scanFencedBlocks(lines, opener)) closed.add(range.start);
+  for (const kind of LOOM_FENCE_KINDS) {
+    for (const range of scanFencedBlocks(lines, kind)) closed.add(range.start);
   }
   for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].trim();
-    if ((LOOM_FENCE_OPENERS as readonly string[]).includes(trimmed) && !closed.has(i)) return i;
+    const opensBlock = LOOM_FENCE_KINDS.some((kind) => isNotebookFenceOpen(lines[i], kind));
+    if (opensBlock && !closed.has(i)) return i;
   }
   return lines.length;
 }

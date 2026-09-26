@@ -33,10 +33,11 @@ export interface UdtYaml {
   attemptId?: string;
 }
 
+import { notebookFenceOpen } from "../../shared/notebook-fences.js";
 import { appendBlock, isUnambiguousRange } from "./notebook-writer";
 import { scanFencedBlocks } from "./harness-block-fields";
 
-const UDT_FENCE_OPEN = "```loom-udt";
+const UDT_FENCE_OPEN = notebookFenceOpen("udt");
 const UDT_FENCE_CLOSE = "```";
 
 function escapeYaml(value: string): string {
@@ -95,7 +96,7 @@ function parseUdtBlock(blockLines: string[]): UdtYaml | null {
 export function findUdtBlocks(content: string): UdtYaml[] {
   const lines = content.split("\n");
   const out: UdtYaml[] = [];
-  for (const range of scanFencedBlocks(lines, UDT_FENCE_OPEN)) {
+  for (const range of scanFencedBlocks(lines, "udt")) {
     const parsed = parseUdtBlock(lines.slice(range.start + 1, range.end));
     if (parsed) out.push(parsed);
   }
@@ -112,7 +113,7 @@ export function upsertUdtBlock(content: string, udt: UdtYaml): string {
   const lines = content.split("\n");
   const newBlock = renderUdtYaml(udt).trimEnd().split("\n");
 
-  for (const range of scanFencedBlocks(lines, UDT_FENCE_OPEN)) {
+  for (const range of scanFencedBlocks(lines, "udt")) {
     if (!isUnambiguousRange(lines, range.start)) continue;
     const parsed = parseUdtBlock(lines.slice(range.start + 1, range.end));
     if (parsed && parsed.toolUuid === udt.toolUuid) {
