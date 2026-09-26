@@ -195,7 +195,11 @@ export class RegistryStore {
       } catch (err) {
         return this.reject(`own registry failed validation: ${(err as Error).message}`, fromFile);
       }
-      if (own.revision < this.#registry.revision) {
+      // Equal counts as stale when what we hold came from an import: the
+      // import carried the revision forward, so an own copy at that number
+      // predates it.
+      const current = this.#registry.revision;
+      if (own.revision < current || (own.revision === current && !this.#ownState && current > 0)) {
         this.notices.push(
           `Ignored an older copy of this session's registry (revision ${own.revision}, current ${this.#registry.revision}).`,
         );
@@ -276,7 +280,8 @@ export class RegistryStore {
     try {
       this.persist();
     } catch (err) {
-      this.#registry = previous;
+      // A fence already reloaded the new writer's state; don't paper over it.
+      if (!(err instanceof RegistryFencedError)) this.#registry = previous;
       throw err;
     }
     return this.snapshot();

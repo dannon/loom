@@ -383,3 +383,74 @@ describe("templates store", () => {
     expect(s.getTemplate("../registry")).toBeUndefined();
   });
 });
+
+describe("review follow-ups", () => {
+  it("an own copy at the same revision as imported state is stale, not own", () => {
+    const s = store();
+    s.open();
+    const a = addAttempt(s);
+    const ownText = fs.readFileSync(s.registryPath, "utf-8");
+    s.close();
+    // read-only now, so a foreign document replaces what we hold
+    const foreign = JSON.parse(ownText);
+    foreign.revision = 0;
+    foreign.session_sig = "0".repeat(64);
+    expect(s.ingestText(JSON.stringify(foreign)).kind).toBe("imported");
+    expect(s.snapshot().revision).toBe(1);
+    expect(s.ingestText(ownText).kind).toBe("stale");
+    expect(s.snapshot().attempts[a.attempt_id].approval?.status).toBe("restored");
+  });
+
+  it("a writer fenced between its checks keeps the new writer's state, not its own", () => {
+    const s = store("s-a", 100);
+    s.open();
+    addAttempt(s, eligibleAttempt({ id: ulid(T0) }));
+    const theirs = eligibleAttempt({ id: ulid(T0 + 7) });
+    expect(() =>
+      s.update(() => {
+        // Another session takes the lock and writes while we're mid-update.
+        const lockPath = path.join(dir, ".loom", "state", "lock");
+        fs.writeFileSync(
+          lockPath,
+          JSON.stringify({
+            pid: 200,
+            session_id: "s-b",
+            writer_token: "b".repeat(32),
+            heartbeat: new Date(now).toISOString(),
+          }),
+        );
+        const doc = onDisk();
+        doc.attempts = { [theirs.attempt_id]: theirs };
+        doc.revision = 7;
+        writeRaw(JSON.stringify(doc));
+      }),
+    ).toThrow(RegistryFencedError);
+    expect(s.mode).toBe("read-only");
+    expect(Object.keys(s.snapshot().attempts)).toEqual([theirs.attempt_id]);
+  });
+
+  it("accepts a registry exactly at the size cap", () => {
+    fs.mkdirSync(path.join(dir, ".loom", "state"), { recursive: true });
+    const a = eligibleAttempt();
+    const doc: Record<string, unknown> = {
+      version: 3,
+      revision: 1,
+      writer_token: "x",
+      session_sig: "",
+      analysis_id: "an",
+      server_url: SERVER,
+      attempts: { [a.attempt_id]: a },
+      exceptions: [],
+      supervision: { active_at_shutdown: [] },
+      padding: "",
+    };
+    const base = Buffer.byteLength(JSON.stringify(doc), "utf-8");
+    doc.padding = "x".repeat(MAX_REGISTRY_BYTES - base);
+    const text = JSON.stringify(doc);
+    expect(Buffer.byteLength(text, "utf-8")).toBe(MAX_REGISTRY_BYTES);
+    writeRaw(text);
+    expect(store().open().kind).toBe("imported");
+    writeRaw(text + " ");
+    expect(store("s-c", 300).load().kind).toBe("rejected");
+  });
+});
