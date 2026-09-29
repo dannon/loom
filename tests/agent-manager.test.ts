@@ -87,6 +87,40 @@ describe("AgentManager", () => {
     readdirSyncMock.mockReturnValue([]);
   });
 
+  it("reports prompt preflight rejection and refuses commands without a brain", async () => {
+    const proc = makeProcess(101);
+    spawnMock.mockReturnValue(proc);
+    const { AgentManager } = await import("../app/src/main/agent.js");
+    const window = {
+      isDestroyed: () => false,
+      setTitle: vi.fn(),
+      webContents: { send: vi.fn() },
+    };
+    const manager = new AgentManager(window as any, "/analysis");
+
+    await expect(manager.sendCommand({ type: "prompt", message: "are we done?" })).rejects.toThrow(
+      "Agent is not running",
+    );
+    manager.start();
+    const reply = manager.sendCommand({
+      type: "prompt",
+      message: "are we done?",
+      streamingBehavior: "followUp",
+    });
+    const sent = JSON.parse(proc.stdin.write.mock.calls.at(-1)![0]);
+    lineHandler?.(
+      JSON.stringify({
+        type: "response",
+        id: sent.id,
+        command: "prompt",
+        success: false,
+        error: "Preflight failed",
+      }),
+    );
+    await expect(reply).rejects.toThrow("Preflight failed");
+    manager.stop();
+  });
+
   it("restarts in the new cwd without using --continue", async () => {
     const firstProc = makeProcess(101);
     const secondProc = makeProcess(202);

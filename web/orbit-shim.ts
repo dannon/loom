@@ -134,7 +134,8 @@ async function fetchMode(): Promise<"remote" | "desktop"> {
 
 // Expose the same OrbitAPI shape the renderer expects.
 (window as unknown as Record<string, unknown>).orbit = {
-  prompt: (message: string) => invoke("agent:prompt", message),
+  prompt: (message: string, options?: { streamingBehavior?: "steer" | "followUp" }) =>
+    invoke("agent:prompt", message, options),
   abort: () => invoke("agent:abort"),
   newSession: () => invoke("agent:new-session"),
   getState: () => invoke("agent:get-state"),

@@ -36,6 +36,7 @@ import {
   writeEnv,
 } from "../shared/orbit-env.js";
 import { resolveConfigPath, resolveDefaultAnalysesDir } from "../shared/state-dir.js";
+import { agentPromptPayload } from "../shared/agent-prompt.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // In dev this file runs from web/; the container bundles it to web/build/ and
@@ -662,7 +663,12 @@ wss.on("connection", (socket) => {
 
     // Everything else forwards to loom subprocess
     if (channel === "agent:prompt") {
-      sendToLoom({ type: "prompt", message: args[0] });
+      sendToLoom(
+        agentPromptPayload(
+          args[0] as string,
+          args[1] as { streamingBehavior?: "steer" | "followUp" } | undefined,
+        ),
+      );
       if (id) respond(id, null);
       return;
     }
