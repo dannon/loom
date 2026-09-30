@@ -292,6 +292,47 @@ describe("copy button dismissal after clicking it (#377)", () => {
   });
 });
 
+describe("copy button dismissal on keyboard copy (#534)", () => {
+  function keyboardCopy(container: HTMLElement): { setData: ReturnType<typeof vi.fn> } {
+    const setData = vi.fn();
+    const e = new Event("copy", { bubbles: true, cancelable: true });
+    Object.defineProperty(e, "clipboardData", { value: { setData } });
+    container.dispatchEvent(e);
+    return { setData };
+  }
+
+  it("hides the button on Cmd/Ctrl+C but keeps the selection", () => {
+    const { container, btn } = setup();
+    const sel = (currentSelection = makeSelection(container, "copy me"));
+    selectionchange();
+    expect(btn.hidden).toBe(false);
+
+    const { setData } = keyboardCopy(container);
+    expect(setData).toHaveBeenCalledWith("text/plain", "copy me");
+    expect(btn.hidden).toBe(true);
+    expect(sel.removeAllRanges).not.toHaveBeenCalled();
+
+    // The copied selection survives, and later re-validation must not bring
+    // the button back for it.
+    selectionchange();
+    fire(document.body, "mouseup");
+    container.dispatchEvent(new Event("scroll"));
+    expect(btn.hidden).toBe(true);
+  });
+
+  it("re-shows once the selection actually changes after a keyboard copy", () => {
+    const { container, btn } = setup();
+    currentSelection = makeSelection(container, "first");
+    selectionchange();
+    keyboardCopy(container);
+    expect(btn.hidden).toBe(true);
+
+    currentSelection = makeSelection(container, "first and more");
+    selectionchange();
+    expect(btn.hidden).toBe(false);
+  });
+});
+
 describe("copy button stylesheet (#534)", () => {
   // .chat-copy-btn sets display:inline-flex, an author rule that beats the UA
   // [hidden] { display: none }. Without an explicit override every
