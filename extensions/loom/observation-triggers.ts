@@ -107,13 +107,22 @@ export function decideToolResultObservation(
 let state = newTriggerState();
 const pending: ObservationFacts[] = [];
 
+let lastFacts: ObservationFacts | null = null;
+
+/** The most recent thing a trigger saw, so `mode auto` can show a real sample. */
+export function lastObservationFacts(): ObservationFacts | null {
+  return lastFacts;
+}
+
 export function resetObservationTriggers(): void {
   state = newTriggerState();
   pending.length = 0;
+  lastFacts = null;
   resetGalaxyVersion();
 }
 
 export function enqueueObservation(facts: ObservationFacts): void {
+  lastFacts = facts;
   pending.push(facts);
 }
 
