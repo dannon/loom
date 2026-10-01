@@ -154,9 +154,17 @@ function isPlainObject(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+// An unknown key is named in the error only when it looks like an identifier.
+// Anything else is reported as <unknown>, the same string the intake Worker
+// uses, so the error lists stay diffable and a key can't smuggle a value into
+// an error message.
+const REPORTABLE_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]{0,39}$/;
+
 function pushUnknownKeys(obj, allowed, prefix, errors) {
   for (const k of Object.keys(obj)) {
-    if (!allowed.has(k)) errors.push(`${prefix ? prefix + "." : ""}${k}:unknown-key`);
+    if (allowed.has(k)) continue;
+    const name = REPORTABLE_KEY_RE.test(k) ? k : "<unknown>";
+    errors.push(`${prefix ? prefix + "." : ""}${name}:unknown-key`);
   }
 }
 

@@ -138,6 +138,15 @@ describe("validateObservation", () => {
     expect(errs({ tools: [{ id: "x", owner: "alice" }] })).toContain("tools[0].owner:unknown-key");
   });
 
+  it("names an odd-shaped unknown key as <unknown>, never by its value", () => {
+    expect(errs({ "alice@institute.edu": 1 })).toContain("<unknown>:unknown-key");
+    expect(errs({ ["x".repeat(41)]: 1 })).toContain("<unknown>:unknown-key");
+    expect(errs({ client: { ...valid.client, "/Users/alice": 1 } })).toContain(
+      "client.<unknown>:unknown-key",
+    );
+    expect(JSON.stringify(errs({ "alice@institute.edu": 1 }))).not.toContain("alice");
+  });
+
   it("rejects a wrong schemaVersion", () => {
     expect(errs({ schemaVersion: 2 })).toContain("schemaVersion:unsupported");
   });
