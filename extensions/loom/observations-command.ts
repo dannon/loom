@@ -262,7 +262,7 @@ async function doObserve(args: string | undefined, ctx: ExtensionContext): Promi
     kind,
     // The user asked for this explicitly; nothing here was inferred from their
     // words. `user_correction` stays reserved in the contract for an automatic
-    // detector, which this chunk deliberately does not build.
+    // detector, which nothing here builds on purpose.
     trigger: "explicit",
     ...(last?.mcpTool ? { mcpTool: last.mcpTool } : {}),
     toolIds: last?.toolIds ?? [],
