@@ -41,6 +41,7 @@ import { registerSandbox } from "./sandbox";
 import { isLocalExecDisabled } from "./local-exec";
 import { registerSecretRedaction } from "./secret-redaction";
 import { registerLessonHint } from "./lesson-hint";
+import { registerLessonsSearchTool } from "./lessons/search-tool";
 import { registerMcpOutputRecovery } from "./mcp-output";
 import { galaxyCall, registerMcpRecovery } from "./mcp-recovery";
 import { registerGalaxyPollGuard } from "./galaxy-poll-guard";
@@ -132,6 +133,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerSkillsCommand(pi);
   registerExecutionCommands(pi);
   registerDashboardTools(pi);
+  registerLessonsSearchTool(pi);
   registerDashboardCommands(pi);
   registerFeedbackCommand(pi);
   registerTesterIdCommand(pi);

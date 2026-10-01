@@ -29,6 +29,7 @@ import {
   type LessonToolResultContent,
 } from "./lessons/pi-event-contract";
 import { getLessonStore, resetLessonStore } from "./lessons/store";
+import type { SearchHit } from "./lessons/search";
 import { clip, collapse, firstSentence } from "./lessons/text";
 import type { Lesson, Match, SurfaceKind } from "./lessons/types";
 import { wrapLessons } from "./lessons/wrapper";
@@ -161,4 +162,55 @@ export function buildStepLessonNote(stepText: string): string {
   return wrapLessons(
     `Recorded lessons whose triggers match the wording of the next step:\n\n${rows.join("\n")}`,
   );
+}
+
+/**
+ * One lesson, in full. No URL anywhere: the id is enough to find the canonical
+ * page, while a link in agent-facing text is a thing to auto-follow. The
+ * provenance line is what lets the model weigh the advice -- a draft somebody
+ * recorded last week and a reviewed stable lesson are not the same claim.
+ */
+export function renderFullLesson(lesson: Lesson): string {
+  const rows: string[] = [`${lesson.id} -- ${collapse(lesson.title)}`];
+  if (lesson.description) rows.push(collapse(lesson.description));
+
+  const section = (name: string, body?: string): void => {
+    if (body && body.trim()) rows.push(`## ${name}\n${body.trim()}`);
+  };
+  section("Symptom", lesson.sections.symptom);
+  section("Cause", lesson.sections.cause);
+  section("Check first", lesson.sections.check_first);
+  section("Intervention", lesson.sections.intervention);
+  section("Validate", lesson.sections.validate);
+  section("Does NOT apply when", lesson.sections.not_when);
+
+  rows.push(
+    [
+      `status: ${lesson.status ?? "unstated"}`,
+      `stale after: ${lesson.stale_after ?? "unstated"}`,
+      lesson.origin === "user"
+        ? "source: your own local lessons (not reviewed)"
+        : "source: the lesson corpus shipped with Loom",
+    ].join(" | "),
+  );
+  return rows.join("\n\n");
+}
+
+/**
+ * The search result. Top hit in full, the rest as id + title, so a broad query
+ * cannot push a corpus of prose into the context. Anything summarized is one
+ * more call away by its id.
+ */
+export function renderLessonSearchResult(hits: readonly SearchHit[]): string {
+  const [top, ...rest] = hits;
+  const parts = [renderFullLesson(top.lesson)];
+  if (rest.length > 0) {
+    parts.push(
+      [
+        "Also matched -- read one in full by passing its id as the lessons_search query:",
+        ...rest.map((h) => `- ${h.lesson.id} -- ${collapse(h.lesson.title)}`),
+      ].join("\n"),
+    );
+  }
+  return wrapLessons(parts.join("\n\n"));
 }
