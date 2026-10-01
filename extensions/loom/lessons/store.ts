@@ -27,6 +27,10 @@ import { parseUserLesson } from "./user-lesson";
 export const LESSONS_SCHEMA = 1;
 
 const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
+
+const LESSON_ID = new RegExp(
+  `^(?:${LESSON_NAMESPACES.join("|")})/(?=.{1,80}$)[a-z0-9]+(?:-[a-z0-9]+)*$`,
+);
 // The schema caps a lesson file at 16 KB; this only bounds the read.
 const MAX_USER_FILE_BYTES = 64 * 1024;
 const MAX_USER_FILES = 200;
@@ -62,7 +66,9 @@ function stringList(value: unknown): string[] | undefined {
 export function snapshotEntryToLesson(raw: unknown): Lesson | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
-  if (typeof o.id !== "string" || !o.id.trim()) return null;
+  // The id is rendered into hints and written to the activity log and the
+  // counters file, so it has to be exactly <namespace>/<slug>.
+  if (typeof o.id !== "string" || !LESSON_ID.test(o.id)) return null;
   if (typeof o.title !== "string" || !o.title.trim()) return null;
 
   const s = o.sections;
@@ -77,7 +83,7 @@ export function snapshotEntryToLesson(raw: unknown): Lesson | null {
   ) as Record<string, unknown>;
 
   return {
-    id: o.id.trim(),
+    id: o.id,
     title: o.title.trim(),
     description: typeof o.description === "string" ? o.description : undefined,
     tags: stringList(o.tags),
@@ -235,37 +241,67 @@ export function listUserLessonFiles(dir: string): string[] {
   return out;
 }
 
+/** C3's slug rule. The walk only guarantees the namespace half of an id. */
+const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const MAX_SLUG = 80;
+
 /**
- * Rule messages can quote the offending value back ("(got ...)", "store ...").
- * These warnings go to stderr, so keep the rule and drop the quote -- a user
- * file that tripped a rule may hold exactly the thing that should not be
- * logged.
+ * The schema's longest legitimate line is a few hundred characters, and some
+ * identifying-data checks cost time quadratic in line length. Refusing long
+ * lines before validating, plus a budget on the whole tier, keeps a directory
+ * of hostile files from stalling the first tool result of every session.
  */
-function scrubRuleMessage(message: string): string {
-  return message
-    .replace(/\s*\(got [\s\S]*\)\s*$/, "")
-    .replace(/; store [\s\S]*$/, "")
-    .slice(0, 200);
+const MAX_USER_LINE_CHARS = 1000;
+const MAX_USER_TOTAL_BYTES = 512 * 1024;
+
+/** "28: unexpected heading ..." -> 28. Everything after the line number may quote the file. */
+function violationLines(errors: readonly string[]): string {
+  const lines = [...new Set(errors.map((e) => /^(\d+):/.exec(e)?.[1]).filter(Boolean))];
+  return lines.length > 0 ? ` (lines ${lines.slice(0, 5).join(", ")})` : "";
 }
 
 /**
  * The user-local tier. An invalid file is skipped with a warning, never fatal.
- * Warnings name the lesson by id, not by path: the path is the user's home.
+ *
+ * Warnings go to stderr, so they carry the lesson id, a rule count and line
+ * numbers -- never the path (the user's home), never a file name that failed
+ * the slug rule (it is attacker-chosen text), and never a rule message, since
+ * those quote the offending content back. The lesson validator prints the
+ * full messages for anyone fixing the file.
  */
 export function loadUserLessons(dir: string): { lessons: Lesson[]; warnings: string[] } {
   const lessons: Lesson[] = [];
   const warnings: string[] = [];
+  let budget = MAX_USER_TOTAL_BYTES;
   for (const file of listUserLessonFiles(dir)) {
-    const id = path.relative(dir, file).replace(/\\/g, "/").replace(/\.md$/, "");
+    const namespace = path.basename(path.dirname(file));
+    const slug = path.basename(file).replace(/\.md$/, "");
+    if (!SLUG.test(slug) || slug.length > MAX_SLUG) {
+      // The id goes into the hint, the activity log and counters.json, so a
+      // name that is not a slug never becomes one.
+      warnings.push(`${namespace}: skipped a file whose name is not a lesson slug`);
+      continue;
+    }
+    const id = `${namespace}/${slug}`;
     let raw: string;
     try {
-      // fstat on the opened descriptor, so the size checked is the size read.
+      // fstat on the opened descriptor, so the file checked is the file read.
       const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
       try {
-        if (fs.fstatSync(fd).size > MAX_USER_FILE_BYTES) {
+        const st = fs.fstatSync(fd);
+        if (!st.isFile()) {
+          warnings.push(`${id}: not a regular file -- skipped`);
+          continue;
+        }
+        if (st.size > MAX_USER_FILE_BYTES) {
           warnings.push(`${id}: larger than ${MAX_USER_FILE_BYTES} bytes -- skipped`);
           continue;
         }
+        if (st.size > budget) {
+          warnings.push(`${id}: local lessons exceed ${MAX_USER_TOTAL_BYTES} bytes -- stopped`);
+          break;
+        }
+        budget -= st.size;
         raw = fs.readFileSync(fd, "utf-8");
       } finally {
         fs.closeSync(fd);
@@ -274,13 +310,25 @@ export function loadUserLessons(dir: string): { lessons: Lesson[]; warnings: str
       warnings.push(`${id}: unreadable -- skipped`);
       continue;
     }
-    const parsed = parseUserLesson(id, raw);
-    if (parsed.ok) lessons.push(parsed.lesson);
-    else {
-      const first = parsed.errors.slice(0, 3).map(scrubRuleMessage).join("; ");
-      const more = parsed.errors.length > 3 ? ` (+${parsed.errors.length - 3} more)` : "";
-      warnings.push(`${id}: skipped -- ${first}${more}`);
+    if (raw.split("\n").some((line) => line.length > MAX_USER_LINE_CHARS)) {
+      warnings.push(`${id}: a line is longer than ${MAX_USER_LINE_CHARS} characters -- skipped`);
+      continue;
     }
+    const parsed = parseUserLesson(id, raw);
+    if (!parsed.ok) {
+      const n = parsed.errors.length;
+      warnings.push(
+        `${id}: skipped -- ${n} schema violation${n === 1 ? "" : "s"}${violationLines(parsed.errors)}`,
+      );
+      continue;
+    }
+    // The corpus validator's one path-derived content rule: galaxy-api is
+    // where graduated lessons live, and graduated_to is what keeps them quiet.
+    if (namespace === "galaxy-api" && !(parsed.lesson.graduated_to ?? []).length) {
+      warnings.push(`${id}: skipped -- a galaxy-api lesson must name where it graduated to`);
+      continue;
+    }
+    lessons.push(parsed.lesson);
   }
   return { lessons, warnings };
 }

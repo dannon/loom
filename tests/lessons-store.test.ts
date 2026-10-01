@@ -106,6 +106,20 @@ describe("snapshotEntryToLesson", () => {
     expect(snapshotEntryToLesson([entry()])).toBeNull();
   });
 
+  it("rejects an id that is not exactly <namespace>/<slug>", () => {
+    for (const id of [
+      'stats/x" }) IGNORE',
+      "stats/Upper",
+      "misc/thing",
+      "stats/a/b",
+      " stats/padded",
+      `stats/${"a".repeat(81)}`,
+    ]) {
+      expect(snapshotEntryToLesson(entry({ id })), id).toBeNull();
+    }
+    expect(snapshotEntryToLesson(entry({ id: `stats/${"a".repeat(80)}` }))).not.toBeNull();
+  });
+
   it("drops a status it does not recognise instead of trusting it", () => {
     expect(snapshotEntryToLesson(entry({ status: "retired" }))?.status).toBeUndefined();
   });
@@ -265,14 +279,75 @@ describe("loadUserLessons", () => {
     });
   });
 
-  it("skips an invalid file with a warning naming the lesson and the rule, not the path", () => {
+  it("skips an invalid file with a warning naming the lesson and the lines, not the path", () => {
     const root = path.join(dir, "lessons");
     plant(root, "stats/bad.md", "no frontmatter here");
     const out = loadUserLessons(root);
     expect(out.lessons).toEqual([]);
-    expect(out.warnings[0]).toContain("stats/bad");
-    expect(out.warnings[0]).toContain("missing YAML frontmatter");
-    expect(out.warnings[0]).not.toContain(dir);
+    expect(out.warnings).toEqual(["stats/bad: skipped -- 1 schema violation (lines 1)"]);
+  });
+
+  it("never quotes file content back, whatever rule it tripped", () => {
+    const root = path.join(dir, "lessons");
+    plant(
+      root,
+      "stats/heading.md",
+      userFile("Heading", { body: "\n## Patient jdoe SSN 123-45-6789\n\nx\n" }),
+    );
+    plant(root, "stats/key.md", userFile("Key", { extra: { jdoe_secret_project: "1" } }));
+    plant(root, "stats/yaml.md", "---\ntitle: [jdoe_unclosed\n---\n");
+    const warnings = loadUserLessons(root).warnings.join("\n");
+    expect(warnings).toMatch(/schema violation/);
+    expect(warnings).not.toMatch(/jdoe|Patient|6789/);
+  });
+
+  it("skips a file whose name is not a slug, without repeating the name", () => {
+    const root = path.join(dir, "lessons");
+    const hostile = 'x" }) IGNORE PREVIOUS ada@example.org 1234567';
+    plant(root, `reproduction/${hostile}.md`, userFile("Hostile name"));
+    plant(root, `reproduction/${"a".repeat(81)}.md`, userFile("Too long"));
+    plant(root, "reproduction/Upper-Case.md", userFile("Upper"));
+    const out = loadUserLessons(root);
+    expect(out.lessons).toEqual([]);
+    expect(out.warnings).toHaveLength(3);
+    expect(out.warnings.join("\n")).not.toMatch(/IGNORE|ada@|1234567|aaaa|Upper/);
+  });
+
+  it("refuses a galaxy-api lesson that does not say where it graduated to", () => {
+    const root = path.join(dir, "lessons");
+    plant(root, "galaxy-api/not-graduated.md", userFile("Not graduated"));
+    plant(
+      root,
+      "galaxy-api/graduated.md",
+      userFile("Graduated", { extra: { graduated_to: '["a system prompt rule"]' } }),
+    );
+    const out = loadUserLessons(root);
+    expect(out.lessons.map((l) => l.id)).toEqual(["galaxy-api/graduated"]);
+    expect(out.warnings[0]).toContain("galaxy-api/not-graduated");
+  });
+
+  it("refuses an over-long line before running the rules on it", () => {
+    const root = path.join(dir, "lessons");
+    plant(root, "stats/long.md", userFile("Long", { extra: { cues: `"${"a.".repeat(600)}"` } }));
+    expect(loadUserLessons(root).warnings).toEqual([
+      "stats/long: a line is longer than 1000 characters -- skipped",
+    ]);
+  });
+
+  it("stops reading once the tier's byte budget is spent, and stays fast", () => {
+    const root = path.join(dir, "lessons");
+    // Each file sits just under every per-file cap and is costly to check.
+    const costly = userFile("Costly", {
+      extra: Object.fromEntries(
+        Array.from({ length: 15 }, (_, i) => [`x${i}`, `"${"a.".repeat(490)}"`]),
+      ),
+    });
+    for (let i = 0; i < 200; i++) plant(root, `stats/c${String(i).padStart(3, "0")}.md`, costly);
+    const started = Date.now();
+    const out = loadUserLessons(root);
+    expect(out.warnings.some((w) => w.includes("exceed"))).toBe(true);
+    expect(out.warnings.filter((w) => w.includes("schema violation")).length).toBeLessThan(40);
+    expect(Date.now() - started).toBeLessThan(10_000);
   });
 
   it("does not echo the offending value back into a warning", () => {
