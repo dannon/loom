@@ -242,22 +242,15 @@ describe("deliverObservation", () => {
         throw new Error("must not send");
       },
     });
-    const dirty: ObservationFacts = {
-      ...facts,
-      toolIds: [],
-      datatypes: ["bed"],
-      rawSignature: "x",
-    };
-    // A tool id admitted by shape can still be the thing that trips the scan,
-    // so force one past the extractor to prove the gate fires.
+    // Legal under the wire validator, caught only by the client-side table.
     const outcome = await deliverObservation(
-      { ...dirty, toolIds: ["/home/alice/tool.xml"] },
+      { ...facts, rawSignature: "connection refused by 10.12.4.7 port 8080" },
       ctx,
       d,
     );
     expect(outcome).toBe("invalid");
     expect(String(d.rows.find(([k]) => k === "observation.invalid")?.[1].leaks)).toContain(
-      "tools[0].id:home-path",
+      "signature:ipv4",
     );
   });
 

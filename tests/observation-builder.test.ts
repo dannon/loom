@@ -347,3 +347,63 @@ describe("buildObservation signature fallback", () => {
     expect(validateObservation(obs)).toEqual({ ok: true });
   });
 });
+
+describe("shape checks on model-authored fields", () => {
+  const base = {
+    kind: "tool-error" as const,
+    trigger: "tool_error" as const,
+    toolIds: [],
+    datatypes: [],
+    rawSignature: "x",
+  };
+
+  it("drops a tool id that is a relative path, a private toolshed or an IP", () => {
+    for (const id of [
+      "home/alice/secret_project/run.sh",
+      "toolshed.corp-internal.example/repos/alice/x/y/1.0",
+      "10.0.0.5/repos/iuc/x/y",
+    ]) {
+      expect(extractToolIds({ tool_id: id }), id).toEqual([]);
+      expect(buildObservation({ ...base, toolIds: [id] }, envelope).tools, id).toEqual([]);
+    }
+    expect(
+      extractToolIds({ tool_id: "testtoolshed.g2.bx.psu.edu/repos/iuc/x/y/1.0" }),
+    ).toHaveLength(1);
+  });
+
+  it("drops an mcp tool name that isn't galaxy-mcp's shape", () => {
+    for (const name of [
+      "galaxy_Users/alice/secret_project",
+      "galaxy.corp-internal.example",
+      "galaxy_alice smith thesis",
+    ]) {
+      const obs = buildObservation({ ...base, mcpTool: name }, envelope);
+      expect("mcpTool" in obs, name).toBe(false);
+      expect(obs.stage).toBe("unknown");
+    }
+  });
+
+  it("drops a hyphenated or upper-case file stem posing as a datatype", () => {
+    expect(extractDatatypes({ file_type: "jsmith-cohort.brca" })).toEqual([]);
+    expect(buildObservation({ ...base, datatypes: ["Patient07.csv"] }, envelope).datatypes).toEqual(
+      [],
+    );
+  });
+
+  it("keeps a free-form site suffix out of the galaxy version", () => {
+    resetGalaxyVersion();
+    recordGalaxyVersionFromConnect('{"version": "24.1.2+cancer.ctr"}');
+    expect(getGalaxyVersion()).toBeUndefined();
+    recordGalaxyVersionFromConnect('{"version": "26.1.rc1"}');
+    expect(getGalaxyVersion()).toBe("26.1.rc1");
+    resetGalaxyVersion();
+  });
+
+  it("drops a description that only the client-side table catches", () => {
+    const obs = buildObservation(
+      { ...base, description: "failed against postgres-prod.lab.example.edu" },
+      envelope,
+    );
+    expect(obs.description).toBe("");
+  });
+});

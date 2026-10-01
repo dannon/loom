@@ -29,6 +29,7 @@ import {
   capObservation,
   normalizeSignature,
   observationByteLength,
+  textLeaks,
   validateObservation,
 } from "../../shared/observation-contract.js";
 import type {
@@ -88,15 +89,41 @@ export function stageForTool(mcpTool: string | undefined): ObservationStage {
 // -----------------------------------------------------------------------------
 
 // A Galaxy tool id is a public identifier, but it arrives from model-authored
-// arguments, so it is admitted by shape rather than trusted. Either a bare id
-// (Filter1, __FILTER_FROM_FILE__) or a toolshed path
-// (host/repos/owner/repo/tool[/version]). Every segment must START with a word
-// character, which is what rejects `../../etc/passwd` and `C:/Users/bob` --
-// a flat character-class allowlist would admit both, because a path and a
-// toolshed id are made of the same characters. `+` is in the body set because
-// toolshed versions carry it (2.2.1+galaxy1).
-const TOOL_ID_SHAPE = /^\w[\w.+-]*(?:\/\w[\w.+-]*)*$/;
-const DATATYPE_SHAPE = /^[A-Za-z0-9._-]{1,40}$/;
+// arguments, so it is admitted by shape rather than trusted. Either a bare,
+// single-segment id (Filter1, __FILTER_FROM_FILE__) or a path on one of the
+// PUBLIC toolsheds (host/repos/owner/repo/tool[/version]). Anything else with
+// a slash in it -- `home/alice/run.sh`, a private toolshed's hostname, an IP --
+// is dropped: a path and a toolshed id are made of the same characters, so
+// only the host can tell them apart. `+` is in the body set because toolshed
+// versions carry it (2.2.1+galaxy1).
+const BARE_TOOL_ID_SHAPE = /^\w[\w.+-]*$/;
+const TOOLSHED_TOOL_ID_SHAPE =
+  /^(?:toolshed\.g2\.bx\.psu\.edu|testtoolshed\.g2\.bx\.psu\.edu)\/repos\/\w[\w.+-]*\/\w[\w.+-]*\/\w[\w.+-]*(?:\/\w[\w.+-]*)?$/;
+// Galaxy datatypes are lowercase words with at most a couple of dotted
+// suffixes (fastqsanger.gz, vcf_bgzip). No hyphen and no upper case, which
+// keeps out the commonest shape of a file stem posing as a datatype; a stem
+// that happens to be datatype-shaped still gets through, since there is no
+// registry here to check against.
+const DATATYPE_SHAPE = /^[a-z0-9_]+(?:\.[a-z0-9_]+){0,2}$/;
+// galaxy-mcp's own tool names. The proxy shape builds this from model-authored
+// text, so it is checked rather than passed through.
+const MCP_TOOL_SHAPE = /^galaxy_[a-z0-9_]{1,73}$/;
+
+export function isAdmissibleToolId(v: string): boolean {
+  return (
+    v.length > 0 &&
+    v.length <= TOOL_ID_MAX &&
+    (BARE_TOOL_ID_SHAPE.test(v) || TOOLSHED_TOOL_ID_SHAPE.test(v))
+  );
+}
+
+export function isAdmissibleDatatype(v: string): boolean {
+  return !DATATYPE_SENTINELS.has(v) && v.length <= DATATYPE_MAX && DATATYPE_SHAPE.test(v);
+}
+
+export function isAdmissibleMcpTool(v: string | undefined): v is string {
+  return typeof v === "string" && MCP_TOOL_SHAPE.test(v);
+}
 const TOOL_ID_KEYS = ["tool_id", "tool_ids"] as const;
 const DATATYPE_KEYS = ["file_type", "ext", "extension", "datatype"] as const;
 // Galaxy's "work it out for me" sentinel is not a datatype signal.
@@ -135,16 +162,14 @@ function dedupeCap(values: string[], max: number): string[] {
 export function extractToolIds(input: Record<string, unknown> | undefined): string[] {
   const admitted = collectStrings(input, TOOL_ID_KEYS)
     .map((v) => v.trim())
-    .filter((v) => v.length > 0 && v.length <= TOOL_ID_MAX && TOOL_ID_SHAPE.test(v));
+    .filter(isAdmissibleToolId);
   return dedupeCap(admitted, TOOLS_MAX);
 }
 
 export function extractDatatypes(input: Record<string, unknown> | undefined): string[] {
   const admitted = collectStrings(input, DATATYPE_KEYS)
     .map((v) => v.trim().toLowerCase())
-    .filter(
-      (v) => !DATATYPE_SENTINELS.has(v) && v.length <= DATATYPE_MAX && DATATYPE_SHAPE.test(v),
-    );
+    .filter(isAdmissibleDatatype);
   return dedupeCap(admitted, DATATYPES_MAX);
 }
 
@@ -185,17 +210,24 @@ export function currentGalaxyUrl(env: NodeJS.ProcessEnv = process.env): string |
 // Nothing in the brain asks Galaxy for its version, and adding a probe is its
 // own change with its own auth question. What we can have for free is the
 // version galaxy-mcp already reports on a successful connect -- shape-checked
-// hard, so a hostile or absent value just leaves the field off.
-let galaxyVersion: string | undefined;
+// hard (a release number, optionally devN/rcN/postN, nothing free-form that
+// could carry a site name), so a hostile or absent value just leaves the field
+// off. It is remembered against the server it came from, so switching servers
+// mid-session can't label one server's failure with another's version.
+const GALAXY_VERSION_SHAPE = /^\d{2}\.\d{1,2}(?:\.\d{1,3})?(?:\.?(?:dev|rc|post)\d{1,3})?$/;
+let galaxyVersion: { version: string; url: string | undefined } | undefined;
 
 export function recordGalaxyVersionFromConnect(resultText: string | undefined): void {
   if (!resultText) return;
-  const m = resultText.match(/"version"\s*:\s*"(\d+\.\d+(?:\.\d+)?[A-Za-z0-9.+-]{0,16})"/);
-  if (m) galaxyVersion = m[1].slice(0, VERSION_MAX);
+  const m = resultText.match(/"version"\s*:\s*"([^"]{1,40})"/);
+  if (m && GALAXY_VERSION_SHAPE.test(m[1])) {
+    galaxyVersion = { version: m[1], url: currentGalaxyUrl() };
+  }
 }
 
 export function getGalaxyVersion(): string | undefined {
-  return galaxyVersion;
+  if (!galaxyVersion || galaxyVersion.url !== currentGalaxyUrl()) return undefined;
+  return galaxyVersion.version;
 }
 
 export function resetGalaxyVersion(): void {
@@ -234,6 +266,7 @@ export interface ObservationEnvelope {
 const PLATFORMS = new Set<ObservationPlatform>(["darwin", "linux", "win32"]);
 
 export function buildObservation(facts: ObservationFacts, env: ObservationEnvelope): Observation {
+  const mcpTool = isAdmissibleMcpTool(facts.mcpTool) ? facts.mcpTool : undefined;
   const candidate = {
     schemaVersion: OBSERVATION_SCHEMA_VERSION,
     id: env.id,
@@ -246,11 +279,13 @@ export function buildObservation(facts: ObservationFacts, env: ObservationEnvelo
     },
     installToken: env.installToken,
     kind: facts.kind,
-    stage: facts.stage ?? stageForTool(facts.mcpTool),
+    stage: facts.stage ?? stageForTool(mcpTool),
     trigger: facts.trigger,
-    tools: facts.toolIds.map(splitToolId),
-    ...(facts.mcpTool ? { mcpTool: facts.mcpTool } : {}),
-    datatypes: facts.datatypes,
+    // Re-admitted here as well as in the extractors: facts can arrive from a
+    // caller that never went through them.
+    tools: facts.toolIds.filter(isAdmissibleToolId).map(splitToolId),
+    ...(mcpTool ? { mcpTool } : {}),
+    datatypes: facts.datatypes.filter(isAdmissibleDatatype),
     signature: normalizeSignature(facts.rawSignature),
     galaxy: {
       server: env.server,
@@ -266,7 +301,8 @@ export function buildObservation(facts: ObservationFacts, env: ObservationEnvelo
   if (capped.description) {
     const probe = validateObservation({ ...capped, description: "" });
     const full = validateObservation(capped);
-    if (!full.ok && probe.ok) return { ...capped, description: "" };
+    const leaky = textLeaks(capped.description).length > 0;
+    if ((!full.ok || leaky) && probe.ok) return { ...capped, description: "" };
   }
   return capped;
 }

@@ -134,6 +134,8 @@ describe("describeWithModel", () => {
       "dataset 42 was empty",
       "résultat manquant",
       "mail alice@institute.edu",
+      "the run on galaxy.cancer-center.internal timed out",
+      "job 3f2b8c1a-1234-4abc-8def-a123b56c89ab was lost",
     ]) {
       expect(await describeWithModel(facts, async () => bad), bad).toBe("");
     }

@@ -87,6 +87,7 @@ import {
   capObservation,
   observationByteLength,
   OBSERVATION_MAX_BYTES,
+  textLeaks,
   PUBLIC_GALAXY_SERVERS,
 } from "../shared/observation-contract.js";
 
@@ -363,5 +364,53 @@ describe("contract addendum: printable ASCII on every string field", () => {
 
   it("does not flag an ordinary payload", () => {
     expect(validateObservation(valid)).toEqual({ ok: true });
+  });
+});
+
+describe("client-side leak table", () => {
+  // Every one of these is legal under the wire validator, and every one names a
+  // machine, a person or a record. Only the client-side table stands between
+  // them and the wire.
+  const LEAKS: Array<[string, string]> = [
+    ["hostname", "Connection refused: galaxy.cancer-center.internal:8080"],
+    ["hostname", "could not connect to server postgres-prod.lab.example.edu"],
+    ["ipv4", "connection refused by 10.12.4.7"],
+    ["ipv6", "ECONNREFUSED [fd00::1:2]:443"],
+    ["uuid", "Job for uuid 3f2b8c1a-1234-4abc-8def-a123b56c89ab not found"],
+    ["relative-path", "read <path> Documents/patient_jsmith_cohort.csv"],
+    ["relative-path", "alice\\Desktop\\cohort.xlsx"],
+    ["relative-path", "\\\\fileserver\\alice\\cohort.csv"],
+    ["tilde-user", "~alice<path>"],
+    ["id-phrase", "history_id=1234 or dataset_id:42"],
+    ["id-phrase", "datasets 12 were empty"],
+  ];
+
+  for (const [name, text] of LEAKS) {
+    it(`${name}: ${text}`, () => {
+      expect(validateObservation({ ...valid, signature: text }), "wire-legal").toEqual({
+        ok: true,
+      });
+      expect(textLeaks(text)).toContain(name);
+      expect(scanObservationForLeaks({ ...valid, signature: text })).toContain(`signature:${name}`);
+      expect(scanObservationForLeaks({ ...valid, description: text })).toContain(
+        `description:${name}`,
+      );
+    });
+  }
+
+  it("leaves ordinary Galaxy messages alone", () => {
+    for (const text of [
+      "ToolExecutionError: dataset <id> in history <n> failed; wrote <path> see <url> mail <email>",
+      "Galaxy 24.2.1 rejected input/output mapping",
+      "expected fastqsanger.gz input",
+      "pass and/or fail at 12:30:45",
+      "tool hisat2 2.2.1+galaxy1 failed",
+    ]) {
+      expect(textLeaks(text), text).toEqual([]);
+    }
+  });
+
+  it("does not apply the hostname rule to a toolshed tool id", () => {
+    expect(scanObservationForLeaks(valid)).toEqual([]);
   });
 });

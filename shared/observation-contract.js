@@ -296,6 +296,58 @@ export function validateObservation(obj) {
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
 }
 
+// Client-side only, on top of LEAK_PATTERNS, and deliberately NOT part of the
+// wire validator the intake Worker mirrors: these are the shapes the contract
+// table lets through that still name a machine, a person or a record. They
+// apply to the two free-text fields, where they belong; a toolshed id would
+// trip the hostname rule. Known false positives, all in the fail-closed
+// direction: a dotted Python module path, a filename with an extension after a
+// slash, any `job 42`-style phrase.
+const COMMON_TLDS =
+  "com|org|net|edu|gov|mil|int|io|ai|co|us|uk|de|fr|eu|au|ca|ch|nl|se|no|cz|es|it|jp|cn|in|br|internal|local|lan|corp|home|test|example|localhost";
+export const CLIENT_LEAK_PATTERNS = Object.freeze([
+  Object.freeze([
+    "hostname",
+    new RegExp(
+      // Three or more labels ending in a letter (so 24.2.1 is a version, not a
+      // host), or two labels ending in a common TLD (so fastqsanger.gz isn't).
+      `\\b[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+\\.[A-Za-z][A-Za-z0-9-]*\\b|\\b[A-Za-z0-9-]+\\.(?:${COMMON_TLDS})\\b`,
+      "i",
+    ),
+  ]),
+  Object.freeze(["ipv4", /\b\d{1,3}(?:\.\d{1,3}){3}\b/]),
+  Object.freeze([
+    "ipv6",
+    /\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*\]|[0-9A-Fa-f]{0,4}::[0-9A-Fa-f]{0,4}|(?:[0-9A-Fa-f]{1,4}:){3,}[0-9A-Fa-f]{1,4}/,
+  ]),
+  Object.freeze(["uuid", /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i]),
+  // Relative and UNC paths: two separators, or one separator before a
+  // filename with an extension. The normalizer's path rule needs a leading
+  // root, so `Users/alice/x` and `alice\\Desktop\\x.xlsx` reach here intact.
+  Object.freeze([
+    "relative-path",
+    /[\w.~-]+[\\/][\w.-]+[\\/]|[\w-]+[\\/][\w-]+\.[A-Za-z][A-Za-z0-9]{0,4}\b|\\\\/,
+  ]),
+  Object.freeze(["tilde-user", /~[A-Za-z_]/]),
+  // The contract's id phrase misses `history_id=12`, plurals and job or
+  // invocation numbers.
+  Object.freeze([
+    "id-phrase",
+    /\b(?:history|dataset|hid|job|invocation|workflow|collection|hda|hdca)s?(?:_?ids?)?\b[^A-Za-z0-9]{0,4}\d/i,
+  ]),
+]);
+
+const FREE_TEXT_FIELDS = new Set(["signature", "description"]);
+
+/** Names of every leak pattern (contract and client-side) that `text` trips. */
+export function textLeaks(text) {
+  const hits = [];
+  if (typeof text !== "string") return hits;
+  for (const [name, re] of LEAK_PATTERNS) if (re.test(text)) hits.push(name);
+  for (const [name, re] of CLIENT_LEAK_PATTERNS) if (re.test(text)) hits.push(name);
+  return hits;
+}
+
 /**
  * Belt-and-braces: run the leak table over EVERY string in the payload, at any
  * depth, not just the two free-text fields. Structured fields are shape-checked
@@ -310,6 +362,11 @@ export function scanObservationForLeaks(obs) {
       if (path === "installToken") return;
       for (const [name, re] of LEAK_PATTERNS) {
         if (re.test(value)) hits.push(`${path}:${name}`);
+      }
+      if (FREE_TEXT_FIELDS.has(path)) {
+        for (const [name, re] of CLIENT_LEAK_PATTERNS) {
+          if (re.test(value)) hits.push(`${path}:${name}`);
+        }
       }
       return;
     }

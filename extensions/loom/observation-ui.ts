@@ -23,6 +23,7 @@ import { completeSimple } from "@earendil-works/pi-ai/compat";
 import {
   DESCRIPTION_MAX,
   normalizeSignature,
+  textLeaks,
   validateObservation,
 } from "../../shared/observation-contract.js";
 import type { Observation } from "../../shared/observation-contract.js";
@@ -144,7 +145,7 @@ function acceptDescription(candidate: string): string {
     galaxy: { server: "private" },
     description: text,
   };
-  return validateObservation(probe).ok ? text : "";
+  return validateObservation(probe).ok && textLeaks(text).length === 0 ? text : "";
 }
 
 export async function describeWithModel(

@@ -82,6 +82,8 @@ export declare const LEAK_PATTERNS: ReadonlyArray<readonly [string, RegExp]>;
 export declare function validateObservation(
   obj: unknown,
 ): { ok: true } | { ok: false; errors: string[] };
+export declare const CLIENT_LEAK_PATTERNS: ReadonlyArray<readonly [string, RegExp]>;
+export declare function textLeaks(text: unknown): string[];
 export declare function scanObservationForLeaks(obs: unknown): string[];
 export declare function capObservation(obs: unknown): Observation;
 export declare function observationByteLength(obs: unknown): number;
