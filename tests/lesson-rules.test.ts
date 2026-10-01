@@ -65,7 +65,7 @@ describe("validateLessonMarkdown", () => {
     ["markdown link", (t) => swap(t, "## Validate\n", "## Validate\nSee [this](x).\n")],
     ["YAML comment", (t) => swap(t, /^kind: (.*)$/m, "kind: $1 # note")],
     ["YAML alias", (t) => swap(t, /^cues: (.*)$/m, "cues: &c $1\nupstream_copy: *c")],
-    ["non-ASCII", (t) => swap(t, "## Validate\n", "## Validate\nA — dash.\n")],
+    ["non-ASCII", (t) => swap(t, "## Validate\n", "## Validate\nA \u2014 dash.\n")],
     ["escaped control char", (t) => swap(t, /^title: .*$/m, 'title: "ok\\u202e reversed"')],
     ["status outside the enum", (t) => swap(t, /^status: .*$/m, "status: trusted")],
     ["missing required section", (t) => swap(t, /## Intervention\n[\s\S]*?(?=## Validate)/, "")],
