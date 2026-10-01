@@ -298,3 +298,36 @@ describe("observationByteLength", () => {
     expect(observationByteLength(valid)).toBeLessThan(OBSERVATION_MAX_BYTES);
   });
 });
+
+import { UNKNOWN_SIGNATURE } from "../shared/observation-contract.js";
+
+describe("contract addendum: printable ASCII on every string field", () => {
+  it("exposes the non-empty-signature fallback literal", () => {
+    expect(UNKNOWN_SIGNATURE).toBe("unknown");
+    expect(validateObservation({ ...valid, signature: UNKNOWN_SIGNATURE })).toEqual({ ok: true });
+  });
+
+  it("rejects a non-ascii tool id, datatype, version or server-adjacent string", () => {
+    expect(errs({ tools: [{ id: "résumé-tool" }] })).toContain("tools[0].id:non-ascii");
+    expect(errs({ tools: [{ id: "ok", version: "1.0-é" }] })).toContain(
+      "tools[0].version:non-ascii",
+    );
+    expect(errs({ datatypes: ["béd"] })).toContain("datatypes[0]:non-ascii");
+    expect(errs({ mcpTool: "galaxy_run_töol" })).toContain("mcpTool:non-ascii");
+    expect(errs({ client: { ...valid.client, version: "0.8.0-é" } })).toContain(
+      "client.version:non-ascii",
+    );
+    expect(errs({ galaxy: { server: "usegalaxy.org", version: "24.2.1-é" } })).toContain(
+      "galaxy.version:non-ascii",
+    );
+  });
+
+  it("still reports the single non-ascii error for signature and description", () => {
+    expect(errs({ signature: "résultat" })).toContain("signature:non-ascii");
+    expect(errs({ description: "résultat" })).toContain("description:non-ascii");
+  });
+
+  it("does not flag an ordinary payload", () => {
+    expect(validateObservation(valid)).toEqual({ ok: true });
+  });
+});

@@ -42,6 +42,7 @@ export declare const MCP_TOOL_MAX: number;
 export declare const DATATYPES_MAX: number;
 export declare const DATATYPE_MAX: number;
 export declare const VERSION_MAX: number;
+export declare const UNKNOWN_SIGNATURE: "unknown";
 
 export interface ObservationToolRef {
   /** Galaxy tool id, version segment split off when the id is a toolshed path. */

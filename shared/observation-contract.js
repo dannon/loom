@@ -69,6 +69,12 @@ export const DATATYPES_MAX = 5;
 export const DATATYPE_MAX = 40;
 export const VERSION_MAX = 40;
 
+// `signature` is half the intake route's cluster key, so it is never empty.
+// Normalization can legitimately reduce a line to nothing (a line that was only
+// a path, or only an id); the builder substitutes this instead of shipping a
+// payload the intake route would refuse.
+export const UNKNOWN_SIGNATURE = "unknown";
+
 // Ordered. Broadest, most leak-prone forms first, so a narrower rule can never
 // carve a URL or an email in half and leave the remnant looking harmless.
 // Deviation from C1's listed order (which put paths before URLs) -- see the
@@ -154,6 +160,26 @@ function badString(v, max, { allowEmpty = false } = {}) {
   if (typeof v !== "string") return true;
   if (!allowEmpty && v.length === 0) return true;
   return v.length > max;
+}
+
+const NON_ASCII_RE = /[^\x20-\x7E]/;
+
+/** Every string in `value`, at any depth, that matches `re`, as `path:name`. */
+function scanStrings(value, re, name, path = "", hits = []) {
+  if (typeof value === "string") {
+    if (path !== "installToken" && re.test(value)) hits.push(`${path}:${name}`);
+    return hits;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((v, i) => scanStrings(v, re, name, `${path}[${i}]`, hits));
+    return hits;
+  }
+  if (isPlainObject(value)) {
+    for (const [k, v] of Object.entries(value)) {
+      scanStrings(v, re, name, path ? `${path}.${k}` : k, hits);
+    }
+  }
+  return hits;
 }
 
 export function validateObservation(obj) {
@@ -244,6 +270,15 @@ export function validateObservation(obj) {
     for (const [name, re] of LEAK_PATTERNS) {
       if (re.test(value)) errors.push(`${field}:${name}`);
     }
+  }
+
+  // EVERY string is printable ASCII, not just the free-text pair. Tool ids and
+  // datatypes arrive from model-authored arguments, so the structured half
+  // needs the same floor. Only the ASCII rule is applied here -- the rest of
+  // the table would be wrong for a field like a toolshed path. installToken is
+  // skipped for the same reason as in scanObservationForLeaks.
+  for (const hit of scanStrings(o, NON_ASCII_RE, "non-ascii")) {
+    if (!errors.includes(hit)) errors.push(hit);
   }
 
   return errors.length === 0 ? { ok: true } : { ok: false, errors };

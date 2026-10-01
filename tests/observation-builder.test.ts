@@ -322,3 +322,28 @@ describe("buildObservation", () => {
     expect(validateObservation(obs)).toEqual({ ok: true });
   });
 });
+
+import { UNKNOWN_SIGNATURE } from "../shared/observation-contract.js";
+
+describe("buildObservation signature fallback", () => {
+  const facts = {
+    kind: "other" as const,
+    trigger: "explicit" as const,
+    toolIds: [],
+    datatypes: [],
+  };
+
+  it("substitutes the literal unknown when normalization empties the line", () => {
+    for (const raw of ["", "   ", "\n\n"]) {
+      const obs = buildObservation({ ...facts, rawSignature: raw }, envelope);
+      expect(obs.signature, JSON.stringify(raw)).toBe(UNKNOWN_SIGNATURE);
+      expect(validateObservation(obs)).toEqual({ ok: true });
+    }
+  });
+
+  it("does not substitute when normalization leaves a placeholder behind", () => {
+    const obs = buildObservation({ ...facts, rawSignature: "/Users/alice/run.log" }, envelope);
+    expect(obs.signature).toBe("<path>");
+    expect(validateObservation(obs)).toEqual({ ok: true });
+  });
+});
