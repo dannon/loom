@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getNotebookPath, setCurrentStepAnchor } from "./state.js";
 import { checkPreconditions, renderFailures } from "./init-gate.js";
+import { buildStepLessonNote } from "./lesson-hint.js";
 
 /**
  * Plan/execution commands. Plans live as markdown sections in `notebook.md`;
@@ -64,6 +65,11 @@ export function registerExecutionCommands(pi: ExtensionAPI): void {
     // to attribute and arming would only strand the anchor.
     pendingAnchor = runActive ? null : (gate.plan?.nextStep?.anchor ?? null);
 
+    // Recorded lessons matching the next step's wording, framed as data and
+    // placed last. Not built while a run is streaming: pi drops that message,
+    // and a surfacing the model never saw shouldn't be counted.
+    const lessonNote = runActive ? "" : buildStepLessonNote(gate.plan?.nextStep?.raw ?? "");
+
     pi.sendUserMessage(
       `The user typed /execute (or /run). Read \`${nbPath}\`, locate the most ` +
         `recent plan section that has unchecked steps (\`- [ ]\`), and execute ` +
@@ -90,7 +96,8 @@ export function registerExecutionCommands(pi: ExtensionAPI): void {
         `Give concise progress updates while executing; status questions do not revoke authorization to continue. ` +
         `Do NOT claim the artifact or step is done in chat unless verification evidence is recorded. ` +
         `On failure, stop dependent work and investigate; do not advance past errors or unverified results. ` +
-        `Respect explicit pause/stop requests.`,
+        `Respect explicit pause/stop requests.` +
+        (lessonNote ? `\n\n${lessonNote}` : ""),
     );
   };
 
