@@ -24,6 +24,7 @@
 
 import path from "node:path";
 import { isAlias, parseDocument, visit } from "yaml";
+import { normalizeSignature, UNKNOWN_SIGNATURE } from "./observation-contract.js";
 
 /** `galaxy-api` holds lessons that graduated upstream and are kept unsurfaced. */
 export const NAMESPACES = ["stats", "reproduction", "data", "galaxy-tools", "galaxy-api"];
@@ -107,37 +108,10 @@ export const LIMITS = {
   fileBytes: 16384,
 };
 
-export const UNKNOWN_SIGNATURE = "unknown";
-
-/**
- * The signature normalizer, in the locked order: url, email, path, id, n, then
- * truncate, then the empty fallback. The observation contract holds the same
- * table, and a lesson's signatures and a tool result's signature have to
- * normalize byte for byte the same or the matcher never fires. Change both
- * together, or better, make one import the other.
- *
- * URL before path matters: the other way round, the path rule eats a URL's
- * `//host/a/b` and leaves an `https:` stub behind.
- */
-const NORMALIZERS = Object.freeze([
-  [/https?:\/\/\S+/g, "<url>"],
-  [/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "<email>"],
-  // Two separators required, so ordinary prose ("and/or") is not read as a
-  // path. A single-segment absolute path like /etc is not identifying.
-  [/(?:[A-Za-z]:[\\/]|~[\\/]|\/)[^\s"'`<>|]*[\\/][^\s"'`<>|]*/g, "<path>"],
-  [/[0-9a-fA-F]{16,}/g, "<id>"],
-  [/\d{5,}/g, "<n>"],
-]);
-
-export function normalizeSignature(text) {
-  let s = String(text ?? "")
-    .split(/\r?\n/)[0]
-    .replace(/\s+/g, " ")
-    .trim();
-  for (const [re, repl] of NORMALIZERS) s = s.replace(re, repl);
-  s = s.slice(0, LIMITS.signature).trim();
-  return s || UNKNOWN_SIGNATURE;
-}
+// One normalizer, not a copy: a lesson's signatures and a tool result's
+// signature have to normalize byte for byte the same or the matcher never
+// fires, and the observation contract is where the locked order lives.
+export { normalizeSignature, UNKNOWN_SIGNATURE };
 
 /**
  * Shapes that point at a person, a machine or a dataset. The observation
