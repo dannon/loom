@@ -11,6 +11,7 @@ let hardDisabled = false;
 let acknowledged = false;
 let sentRows: any[] = [];
 let token: string | undefined = "b".repeat(32);
+let lastFacts: any = null;
 
 vi.mock("../extensions/loom/observations-config.js", () => ({
   resolveObservationsMode: () => mode,
@@ -39,11 +40,15 @@ vi.mock("../extensions/loom/observation-triggers.js", () => ({
   deliverObservation: (...a: unknown[]) => deliverObservation(...a),
   liveDeliverDeps: () => ({ mode }),
   recordObservationActivity: vi.fn(),
-  lastObservationFacts: () => null,
+  lastObservationFacts: () => lastFacts,
 }));
 
-const { registerObservationsCommand, formatObservationsStatus, sentLogSummary } =
-  await import("../extensions/loom/observations-command.js");
+const {
+  registerObservationsCommand,
+  formatObservationsStatus,
+  sentLogSummary,
+  sampleObservationFacts,
+} = await import("../extensions/loom/observations-command.js");
 
 function makeApi() {
   const commands = new Map<
@@ -71,6 +76,7 @@ beforeEach(() => {
   acknowledged = false;
   sentRows = [];
   token = "b".repeat(32);
+  lastFacts = null;
 });
 
 describe("formatObservationsStatus", () => {
@@ -351,5 +357,30 @@ describe("/observe", () => {
     const ui = uiMock({ input: vi.fn().mockResolvedValue("") });
     await commands.get("observe")!.handler(undefined, { hasUI: true, ui });
     expect(deliverObservation).not.toHaveBeenCalled();
+  });
+});
+
+describe("sampleObservationFacts", () => {
+  const seen = {
+    kind: "tool-error",
+    trigger: "tool_error",
+    mcpTool: "galaxy_run_tool",
+    toolIds: ["Filter1"],
+    datatypes: ["tabular"],
+    rawSignature: "ToolExecutionError: header-only table",
+  };
+
+  it("shows what a trigger actually saw when it would be sent", () => {
+    lastFacts = seen;
+    expect(sampleObservationFacts()).toBe(seen);
+  });
+
+  it("never shows a refused observation as the sample", () => {
+    lastFacts = { ...seen, rawSignature: "refused dataset 42 for this run" };
+    expect(sampleObservationFacts().rawSignature).not.toContain("dataset 42");
+  });
+
+  it("falls back to a representative sample with nothing seen yet", () => {
+    expect(sampleObservationFacts().mcpTool).toBe("galaxy_run_tool");
   });
 });

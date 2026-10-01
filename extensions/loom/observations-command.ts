@@ -40,6 +40,7 @@ import {
   liveDeliverDeps,
 } from "./observation-triggers.js";
 import { PRIVACY_STATEMENT, renderObservationForConfirm } from "./observation-ui.js";
+import { scanObservationForLeaks, validateObservation } from "../../shared/observation-contract.js";
 
 export const OBSERVATIONS_USAGE =
   "Usage: /observations [status | mode <off|ask|auto> | sent | retract <id>]";
@@ -93,27 +94,34 @@ export function sentLogSummary(rows: ObservationSentEntry[]): string {
   return lines.join("\n");
 }
 
-/**
- * A sample that is honest about this install. When a trigger has already seen
- * something this session that is what gets shown; otherwise a representative
- * signature carries the same real client and server fields.
- */
-export function sampleObservationFacts(): ObservationFacts {
-  return (
-    lastObservationFacts() ?? {
-      kind: "tool-error",
-      trigger: "tool_error",
-      mcpTool: "galaxy_run_tool",
-      toolIds: ["toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2"],
-      datatypes: ["fastqsanger.gz"],
-      rawSignature: "ToolExecutionError: input dataset is in state 'error'",
-    }
-  );
-}
-
 // The confirm never prints the token, so the sample doesn't need the real one
 // -- and building it shouldn't write a token to disk before the user says yes.
 const SAMPLE_INSTALL_TOKEN = "0".repeat(32);
+
+const REPRESENTATIVE_FACTS: ObservationFacts = {
+  kind: "tool-error",
+  trigger: "tool_error",
+  mcpTool: "galaxy_run_tool",
+  toolIds: ["toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2"],
+  datatypes: ["fastqsanger.gz"],
+  rawSignature: "ToolExecutionError: input dataset is in state 'error'",
+};
+
+/**
+ * A sample that is honest about this install. When a trigger has already seen
+ * something this session that is what gets shown -- but only if it would
+ * actually be sent; a refused one would show the user text that never leaves
+ * the machine. Otherwise a representative signature carries the same real
+ * client and server fields.
+ */
+export function sampleObservationFacts(): ObservationFacts {
+  const last = lastObservationFacts();
+  if (last) {
+    const probe = buildObservation(last, collectObservationEnvelope(SAMPLE_INSTALL_TOKEN));
+    if (validateObservation(probe).ok && scanObservationForLeaks(probe).length === 0) return last;
+  }
+  return REPRESENTATIVE_FACTS;
+}
 
 export async function confirmAutoMode(ctx: ExtensionContext): Promise<boolean> {
   const sample = buildObservation(
