@@ -15,7 +15,8 @@
  * lesson ships inside the package to every install, and the published snapshot
  * goes into a public index, so a lesson must not carry anything to follow (no
  * URLs, no markdown links), anything to run (no fenced code), or anything
- * identifying (no paths, ids or hosts outside the declared trigger lists).
+ * identifying (no home-directory or Windows paths, hex ids or email addresses
+ * anywhere, and no URLs outside the fields the schema says may hold a link).
  */
 
 import fs from "node:fs";
@@ -137,6 +138,36 @@ export function normalizeSignature(text) {
   for (const [re, repl] of NORMALIZERS) s = s.replace(re, repl);
   s = s.slice(0, LIMITS.signature).trim();
   return s || UNKNOWN_SIGNATURE;
+}
+
+/**
+ * Shapes that point at a person, a machine or a dataset. The observation
+ * validator's list, minus its hid/dataset/history-followed-by-a-number rule:
+ * lessons talk about hids in the abstract and that rule would reject them.
+ */
+const IDENTIFYING = [
+  ["a URL", /[A-Za-z][A-Za-z0-9+.-]*:\/\//],
+  ["a home-directory path", /\/Users\/|\/home\/|~[\\/]/],
+  ["a Windows path", /\b[A-Za-z]:[\\/]/],
+  ["a hex id of 16+ characters", /[0-9a-fA-F]{16,}/],
+  ["an email address", /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/],
+];
+
+/** Fields C3 allows to carry a link. Everything else in a lesson may not. */
+const LINK_FIELDS = ["graduated_to", "upstream", "sources.resource"];
+
+/** Names of the identifying shapes in `text`; URLs are dropped first when allowed. */
+export function identifyingShapes(text, { allowUrls = false } = {}) {
+  const s = allowUrls ? text.replace(/[A-Za-z][A-Za-z0-9+.-]*:\/\/\S*/g, " ") : text;
+  return IDENTIFYING.filter(([, re]) => re.test(s)).map(([name]) => name);
+}
+
+function eachString(value, label, visit) {
+  if (typeof value === "string") visit(label, value);
+  else if (Array.isArray(value)) value.forEach((v, i) => eachString(v, `${label}[${i}]`, visit));
+  else if (value !== null && typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) eachString(v, label ? `${label}.${k}` : k, visit);
+  }
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -536,6 +567,15 @@ export function validateLessonFile(relPath, raw) {
     );
   }
 
+  // Every string, not just the prose fields: a title, a cue or a source id
+  // reaches the snapshot and the public index exactly like the body does.
+  eachString(fm, "", (label, value) => {
+    const allowUrls = LINK_FIELDS.includes(label.replace(/\[\d+\]/g, ""));
+    for (const shape of identifyingShapes(value, { allowUrls })) {
+      add(at(label.split(/[.[]/)[0]), `${label} contains ${shape}; lessons carry none`);
+    }
+  });
+
   out.push(...validateBody(rel, split));
   return out;
 }
@@ -587,7 +627,10 @@ function validateBody(rel, split) {
     if (/^ {0,3}(?:`{3,}|~{3,})/.test(line)) {
       add(at, "no fenced code blocks in a lesson body; a short inline span is fine");
     }
-    if (/https?:\/\//.test(line)) add(at, "no URLs in a lesson body; put provenance in sources");
+    for (const shape of identifyingShapes(line)) {
+      if (shape === "a URL") add(at, "no URLs in a lesson body; put provenance in sources");
+      else add(at, `${shape} in a lesson body; lessons carry none`);
+    }
     if (/\[[^\]\n]*\]\([^)\n]*\)/.test(line)) add(at, "no markdown links in a lesson body");
   });
 

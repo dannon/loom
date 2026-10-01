@@ -461,6 +461,67 @@ describe("the body", () => {
   });
 });
 
+// A lesson reaches every install and a public index, so nothing in it may
+// point at a person, a machine or a dataset -- in the body or the frontmatter.
+describe("identifying data", () => {
+  const BODY_LINE = "Exclude the missing values explicitly before comparing.";
+
+  it.each([
+    ["a home-directory path", "Check /Users/alice/run1/counts.tsv first."],
+    ["a home-directory path", "Check /home/alice/counts.tsv first."],
+    ["a home-directory path", "Check ~/runs/counts.tsv first."],
+    ["a Windows path", "Check C:\\Users\\alice first."],
+    ["a hex id of 16+ characters", "Dataset 0123456789abcdef0123 was the bad one."],
+    ["an email address", "Ask alice@example.org about it."],
+  ])("rejects %s in the body", (shape, line) => {
+    expect(check(swap(BODY_LINE, line)).join("\n")).toContain(`${shape} in a lesson body`);
+  });
+
+  it("rejects a URL with any scheme in the body, not just http", () => {
+    expect(check(swap(BODY_LINE, "Fetch it from ftp://mirror.example.org/x.")).join("\n")).toMatch(
+      /no URLs in a lesson body/,
+    );
+  });
+
+  it("rejects identifying data in a frontmatter field", () => {
+    const titled = swap(
+      "title: A good lesson about a thing that goes quietly wrong",
+      "title: What went wrong in /Users/alice/project",
+    );
+    expect(check(titled).join("\n")).toMatch(/:3: title contains a home-directory path/);
+  });
+
+  it("looks inside nested frontmatter values", () => {
+    const cued = swap(
+      '- { id: "loom#1" }',
+      '- { id: "loom#1", title: "thread by bob@example.org" }',
+    );
+    expect(check(cued).join("\n")).toMatch(/sources\[0\]\.title contains an email address/);
+  });
+
+  it("rejects a URL in a field that is not allowed a link", () => {
+    expect(check(swap('cues: "When', 'cues: "See https://example.org when')).join("\n")).toMatch(
+      /cues contains a URL/,
+    );
+  });
+
+  it("allows a link where the schema allows one", () => {
+    const linked = swap(
+      "graduated_to: []",
+      'graduated_to: ["https://github.com/galaxyproject/galaxy/pull/21994"]',
+    );
+    expect(check(linked)).toEqual([]);
+  });
+
+  it("still rejects a path or an email riding along with an allowed link", () => {
+    const linked = swap(
+      "upstream: []",
+      'upstream: ["https://example.org/x and /home/alice/notes"]',
+    );
+    expect(check(linked).join("\n")).toMatch(/upstream\[0\] contains a home-directory path/);
+  });
+});
+
 describe("normalizeSignature", () => {
   // The lesson side of the matcher. Chunk B's observation collector computes
   // the same function over a tool result; if the two disagree, nothing matches.

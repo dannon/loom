@@ -73,6 +73,11 @@ them, and they are part of the schema.
   required key must be present; `verified` is the only optional one.
 - **Printable ASCII only, in the whole file.** A Unicode em-dash, a smart quote
   or a non-breaking space is an error, reported by codepoint. Write `--`.
+- **Nothing identifying, anywhere.** No home-directory paths (`/Users/`,
+  `/home/`, `~/`), Windows paths, hex ids of 16 or more characters or email
+  addresses in the body or in any frontmatter string. No URL of any scheme in
+  the body or in a frontmatter field, except `graduated_to`, `upstream` and
+  `sources[].resource`, which may hold a link.
 - **Dates** are `YYYY-MM-DD` strings that are also real calendar dates.
 - **`generated.by`** matches `agent:<something>` or `human:<something>`;
   **`verified[].by`** must be `human:<pseudonym>`. It is the one identity field
