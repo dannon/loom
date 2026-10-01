@@ -10,7 +10,14 @@ const indexPath = path.resolve(
   "loom",
   "index.ts",
 );
-const source = fs.readFileSync(indexPath, "utf-8");
+// Comments stripped, so a mention of a register call in prose can't satisfy
+// (or spoil) the ordering check.
+const source = fs
+  .readFileSync(indexPath, "utf-8")
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .split("\n")
+  .filter((line) => !line.trim().startsWith("//"))
+  .join("\n");
 
 describe("observation collector registration", () => {
   it("registers the triggers and the commands", () => {
@@ -26,6 +33,11 @@ describe("observation collector registration", () => {
     const triggers = source.indexOf("registerObservationTriggers(pi)");
     expect(redaction).toBeGreaterThan(-1);
     expect(triggers).toBeGreaterThan(redaction);
+    // And unconditionally: nothing between them can return early or branch the
+    // trigger registration away.
+    const between = source.slice(redaction, triggers);
+    expect(between).not.toMatch(/\breturn\b|\bif\s*\(/);
+    expect(source.match(/registerObservationTriggers\(pi\)/g)).toHaveLength(1);
   });
 });
 
