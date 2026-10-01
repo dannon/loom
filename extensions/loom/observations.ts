@@ -25,7 +25,6 @@ import {
   DATATYPE_MAX,
   TOOLS_MAX,
   TOOL_ID_MAX,
-  UNKNOWN_SIGNATURE,
   VERSION_MAX,
   capObservation,
   normalizeSignature,
@@ -252,7 +251,7 @@ export function buildObservation(facts: ObservationFacts, env: ObservationEnvelo
     tools: facts.toolIds.map(splitToolId),
     ...(facts.mcpTool ? { mcpTool: facts.mcpTool } : {}),
     datatypes: facts.datatypes,
-    signature: normalizeSignature(facts.rawSignature) || UNKNOWN_SIGNATURE,
+    signature: normalizeSignature(facts.rawSignature),
     galaxy: {
       server: env.server,
       ...(env.galaxyVersion ? { version: env.galaxyVersion } : {}),

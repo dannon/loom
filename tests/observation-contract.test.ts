@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { normalizeSignature, SIGNATURE_MAX } from "../shared/observation-contract.js";
+import {
+  normalizeSignature,
+  SIGNATURE_MAX,
+  UNKNOWN_SIGNATURE,
+} from "../shared/observation-contract.js";
 
 // One row per normalization rule, plus the interactions that bit when the rules
 // were applied in C1's originally-listed order (paths before URLs carved a URL
@@ -19,9 +23,15 @@ const NORMALIZATION_TABLE: Array<[string, string, string]> = [
   ["15 hex is left alone", "code 2a56fb8e4c1d9f7 x", "code 2a56fb8e4c1d9f7 x"],
   ["5+ digit int", "history 1203847 gone", "history <n> gone"],
   ["4 digit int survives the int rule", "exit 4096 raised", "exit 4096 raised"],
-  ["short hid phrase is neutralised", "dataset 42 is in error", "dataset <n> is in error"],
-  ["hid phrase with punctuation", "hid=7 unavailable", "hid=<n> unavailable"],
-  ["non-ascii run", "bad\u00e9\u00e9 input", "bad<x> input"],
+  // Left alone on purpose -- the validator rejects both shapes instead, which
+  // drops the observation rather than reshaping it.
+  [
+    "short hid phrase is left for the validator",
+    "dataset 42 is in error",
+    "dataset 42 is in error",
+  ],
+  ["hid phrase with punctuation is left alone", "hid=7 unavailable", "hid=7 unavailable"],
+  ["non-ascii is left for the validator", "bad\u00e9\u00e9 input", "bad\u00e9\u00e9 input"],
   ["url wins over the path inside it", "GET https://h/Users/a/b failed", "GET <url> failed"],
 ];
 
@@ -36,10 +46,27 @@ describe("normalizeSignature", () => {
     expect(out).toBe("x".repeat(SIGNATURE_MAX));
   });
 
-  it("is total over junk input", () => {
-    expect(normalizeSignature(undefined)).toBe("");
-    expect(normalizeSignature(null)).toBe("");
+  it("returns the unknown literal rather than an empty signature", () => {
+    for (const input of [undefined, null, "", "   ", "\n\n", "/Users/alice/"]) {
+      expect(normalizeSignature(input), JSON.stringify(input)).not.toBe("");
+    }
+    expect(normalizeSignature(undefined)).toBe(UNKNOWN_SIGNATURE);
+    expect(normalizeSignature("")).toBe(UNKNOWN_SIGNATURE);
+    expect(normalizeSignature("   ")).toBe(UNKNOWN_SIGNATURE);
     expect(normalizeSignature(12345)).toBe("<n>");
+  });
+
+  it("applies the five replacements in the locked order", () => {
+    // Paths before URLs used to turn this into `https:<path>`, which then
+    // slipped past the validator's https?:// check with the host still gone but
+    // the scheme left behind. URL first is why this is one placeholder.
+    expect(normalizeSignature("GET https://host/a/b?x=1 failed")).toBe("GET <url> failed");
+    // An email inside a path: email first. The path class excludes < and >,
+    // so the placeholder splits it into two path runs -- ugly, but nothing of
+    // the original survives.
+    expect(normalizeSignature("stat /home/alice@x.com/f/g")).toBe("stat <path><email><path>");
+    // A hex id inside a path never survives as an id, because the path went first.
+    expect(normalizeSignature("read /tmp/2a56fb8e4c1d9f70/x")).toBe("read <path>");
   });
 
   it("scrubs a whole hostile line", () => {
@@ -298,8 +325,6 @@ describe("observationByteLength", () => {
     expect(observationByteLength(valid)).toBeLessThan(OBSERVATION_MAX_BYTES);
   });
 });
-
-import { UNKNOWN_SIGNATURE } from "../shared/observation-contract.js";
 
 describe("contract addendum: printable ASCII on every string field", () => {
   it("exposes the non-empty-signature fallback literal", () => {

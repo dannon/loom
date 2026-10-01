@@ -75,10 +75,18 @@ export const VERSION_MAX = 40;
 // payload the intake route would refuse.
 export const UNKNOWN_SIGNATURE = "unknown";
 
-// Ordered. Broadest, most leak-prone forms first, so a narrower rule can never
-// carve a URL or an email in half and leave the remnant looking harmless.
-// Deviation from C1's listed order (which put paths before URLs) -- see the
-// contracts.md amendment that accompanies this module.
+// Locked order. The lesson validator and the lesson matcher reuse this exact
+// sequence, so a change here is a change to the shared contract first.
+//
+// URL before path is the reason the order is written down at all: paths-first
+// turned `https://host/a/b` into `https:<path>`, which left the scheme behind
+// and slipped past the validator's https?:// check.
+//
+// Deliberately NOT here: a rewrite for the crude
+// hid/dataset/history-followed-by-a-number shape, and one for non-ASCII. The
+// validator rejects both, so a line carrying either is DROPPED rather than
+// reshaped. That loses some legitimate signal (a Galaxy message about a
+// two-digit hid, a non-English message) and it is the fail-closed direction.
 const NORMALIZERS = Object.freeze([
   [/https?:\/\/\S+/g, "<url>"],
   [/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "<email>"],
@@ -87,13 +95,6 @@ const NORMALIZERS = Object.freeze([
   [/(?:[A-Za-z]:[\\/]|~[\\/]|\/)[^\s"'`<>|]*[\\/][^\s"'`<>|]*/g, "<path>"],
   [/[0-9a-fA-F]{16,}/g, "<id>"],
   [/\d{5,}/g, "<n>"],
-  // The crude hid/dataset/history-followed-by-a-number shape the validator
-  // rejects. Neutralising it here means an ordinary Galaxy message about a
-  // two-digit hid still produces a usable signature instead of being dropped.
-  [/\b(history|dataset|hid)\b([^A-Za-z0-9]{0,4})\d+/gi, "$1$2<n>"],
-  // Last: the validator requires printable ASCII, and a non-English Galaxy
-  // message should still cluster on its ASCII skeleton rather than be dropped.
-  [/[^\x20-\x7E]+/g, "<x>"],
 ]);
 
 export function normalizeSignature(text) {
@@ -104,7 +105,10 @@ export function normalizeSignature(text) {
   for (const [re, repl] of NORMALIZERS) s = s.replace(re, repl);
   // Plain slice: appending an ellipsis would make the result non-ASCII and the
   // validator would then reject every truncated signature.
-  return s.slice(0, SIGNATURE_MAX);
+  s = s.slice(0, SIGNATURE_MAX).trim();
+  // The intake route clusters on (kind, signature), so empty is not a legal
+  // value. One owner of the fallback, here rather than in each caller.
+  return s || UNKNOWN_SIGNATURE;
 }
 
 // The leak table. No `g` flags: `test()` on a global regex is stateful and

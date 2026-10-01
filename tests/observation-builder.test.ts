@@ -333,7 +333,7 @@ describe("buildObservation signature fallback", () => {
     datatypes: [],
   };
 
-  it("substitutes the literal unknown when normalization empties the line", () => {
+  it("carries the normalizer's unknown literal through", () => {
     for (const raw of ["", "   ", "\n\n"]) {
       const obs = buildObservation({ ...facts, rawSignature: raw }, envelope);
       expect(obs.signature, JSON.stringify(raw)).toBe(UNKNOWN_SIGNATURE);
@@ -341,7 +341,7 @@ describe("buildObservation signature fallback", () => {
     }
   });
 
-  it("does not substitute when normalization leaves a placeholder behind", () => {
+  it("keeps a placeholder-only signature as the placeholder", () => {
     const obs = buildObservation({ ...facts, rawSignature: "/Users/alice/run.log" }, envelope);
     expect(obs.signature).toBe("<path>");
     expect(validateObservation(obs)).toEqual({ ok: true });
