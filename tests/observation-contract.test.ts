@@ -374,6 +374,8 @@ describe("client-side leak table", () => {
   const LEAKS: Array<[string, string]> = [
     ["hostname", "Connection refused: galaxy.cancer-center.internal:8080"],
     ["hostname", "could not connect to server postgres-prod.lab.example.edu"],
+    ["host-port", "galaxyprod:8080 refused the connection"],
+    ["user-at-host", "login alice@localhost failed"],
     ["ipv4", "connection refused by 10.12.4.7"],
     ["ipv6", "ECONNREFUSED [fd00::1:2]:443"],
     ["uuid", "Job for uuid 3f2b8c1a-1234-4abc-8def-a123b56c89ab not found"],
@@ -405,6 +407,13 @@ describe("client-side leak table", () => {
       "expected fastqsanger.gz input",
       "pass and/or fail at 12:30:45",
       "tool hisat2 2.2.1+galaxy1 failed",
+      // Real Galaxy and Python error shapes that an earlier, looser hostname
+      // rule dropped.
+      "Error: sample.fastq.gz is empty",
+      "galaxy.tools.parameters.basic.ParameterValueError: parameter 'x': an invalid option",
+      "No module named numpy.core.multiarray",
+      "Job 3 is in error state",
+      "HTTPError:400 Bad Request at line:42",
     ]) {
       expect(textLeaks(text), text).toEqual([]);
     }

@@ -28,6 +28,7 @@ import {
   VERSION_MAX,
   capObservation,
   normalizeSignature,
+  looksLikeHost,
   observationByteLength,
   scanObservationForLeaks,
   textLeaks,
@@ -91,22 +92,23 @@ export function stageForTool(mcpTool: string | undefined): ObservationStage {
 // -----------------------------------------------------------------------------
 
 // A Galaxy tool id is a public identifier, but it arrives from model-authored
-// arguments, so it is admitted by shape rather than trusted. Either a bare,
-// single-segment id (Filter1, __FILTER_FROM_FILE__) or a path on one of the
+// arguments, so it is admitted by shape rather than trusted. Either a bare id
+// of word characters only (Filter1, __FILTER_FROM_FILE__) -- no dots or dashes,
+// so a hostname, an IP or a UUID can't pose as one -- or a path on one of the
 // PUBLIC toolsheds (host/repos/owner/repo/tool[/version]). Anything else with
 // a slash in it -- `home/alice/run.sh`, a private toolshed's hostname, an IP --
 // is dropped: a path and a toolshed id are made of the same characters, so
 // only the host can tell them apart. `+` is in the body set because toolshed
 // versions carry it (2.2.1+galaxy1).
-const BARE_TOOL_ID_SHAPE = /^\w[\w.+-]*$/;
+const BARE_TOOL_ID_SHAPE = /^\w+$/;
 const TOOLSHED_TOOL_ID_SHAPE =
   /^(?:toolshed\.g2\.bx\.psu\.edu|testtoolshed\.g2\.bx\.psu\.edu)\/repos\/\w[\w.+-]*\/\w[\w.+-]*\/\w[\w.+-]*(?:\/\w[\w.+-]*)?$/;
-// Galaxy datatypes are lowercase words with at most a couple of dotted
-// suffixes (fastqsanger.gz, vcf_bgzip). No hyphen and no upper case, which
-// keeps out the commonest shape of a file stem posing as a datatype; a stem
-// that happens to be datatype-shaped still gets through, since there is no
-// registry here to check against.
-const DATATYPE_SHAPE = /^[a-z0-9_]+(?:\.[a-z0-9_]+){0,2}$/;
+// Galaxy datatypes are lowercase words with at most one dotted suffix
+// (fastqsanger.gz, vcf_bgzip). No hyphen, no upper case and nothing that reads
+// as a host, which keeps out the commonest shapes of a file stem or a server
+// posing as a datatype; a stem that happens to be datatype-shaped still gets
+// through, since there is no registry here to check against.
+const DATATYPE_SHAPE = /^[a-z0-9_]+(?:\.[a-z0-9_]+)?$/;
 // galaxy-mcp's own tool names. The proxy shape builds this from model-authored
 // text, so it is checked rather than passed through.
 const MCP_TOOL_SHAPE = /^galaxy_[a-z0-9_]{1,73}$/;
@@ -120,7 +122,12 @@ export function isAdmissibleToolId(v: string): boolean {
 }
 
 export function isAdmissibleDatatype(v: string): boolean {
-  return !DATATYPE_SENTINELS.has(v) && v.length <= DATATYPE_MAX && DATATYPE_SHAPE.test(v);
+  return (
+    !DATATYPE_SENTINELS.has(v) &&
+    v.length <= DATATYPE_MAX &&
+    DATATYPE_SHAPE.test(v) &&
+    !looksLikeHost(v)
+  );
 }
 
 export function isAdmissibleMcpTool(v: string | undefined): v is string {
@@ -507,8 +514,12 @@ export async function drainObservationOutbox(
   if (lines.length === 0) return counts;
 
   const keep: string[] = [];
+  let unreachable = false;
   for (const [i, line] of lines.entries()) {
-    if (i >= OUTBOX_DRAIN_MAX) {
+    // Past the per-drain cap, or once the route has proved unreachable this
+    // round, the rest just wait: on a black-holed network each try costs the
+    // full timeout, and this runs before the turn's own prompts appear.
+    if (i >= OUTBOX_DRAIN_MAX || unreachable) {
       keep.push(line);
       continue;
     }
@@ -530,17 +541,24 @@ export async function drainObservationOutbox(
       counts.sent += 1;
     } else if (res.queueable) {
       keep.push(line);
+      if (res.status === undefined) unreachable = true;
     } else {
       counts.dropped += 1;
     }
   }
-  counts.kept = keep.length;
 
-  // Rewrite in place via a temp file, so a crash mid-write can't truncate rows
-  // that are still owed.
+  // Rows appended while the sends were in flight (a queued /observe, an
+  // overlapping settle) are past the ones read above; carry them over rather
+  // than overwrite them. Then rewrite via a temp file, so a crash mid-write
+  // can't truncate rows that are still owed.
+  const now = readFileSync(file, "utf-8")
+    .split("\n")
+    .filter((l) => l.trim());
+  keep.push(...now.slice(lines.length));
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, keep.map((l) => l + "\n").join(""), { mode: 0o600 });
   renameSync(tmp, file);
+  counts.kept = keep.length;
   return counts;
 }
 

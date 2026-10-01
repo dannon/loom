@@ -299,22 +299,35 @@ export function validateObservation(obj) {
 // Client-side only, on top of LEAK_PATTERNS, and deliberately NOT part of the
 // wire validator the intake Worker mirrors: these are the shapes the contract
 // table lets through that still name a machine, a person or a record. They
-// apply to the two free-text fields, where they belong; a toolshed id would
-// trip the hostname rule. Known false positives, all in the fail-closed
-// direction: a dotted Python module path, a filename with an extension after a
-// slash, any `job 42`-style phrase.
-const COMMON_TLDS =
-  "com|org|net|edu|gov|mil|int|io|ai|co|us|uk|de|fr|eu|au|ca|ch|nl|se|no|cz|es|it|jp|cn|in|br|internal|local|lan|corp|home|test|example|localhost";
+// apply to the two free-text fields; structured fields get shape checks in the
+// builder instead. Known false positive, in the fail-closed direction: a
+// filename with an extension after a slash.
+//
+// Real top-level domains plus the usual private suffixes. A dotted run counts
+// as a host only when its LAST label is one of these: that is what keeps
+// `sample.fastq.gz`, `galaxy.tools.parameters.basic.ParameterValueError` and
+// version numbers in, and it is also the rule's blind spot -- a host under a
+// suffix not listed here (`galaxy.inrae`) gets through.
+const HOST_SUFFIXES = [
+  // generic
+  "com|org|net|edu|gov|mil|int|info|biz|name|pro|io|ai|co|app|dev|cloud|bio|science|tech",
+  "online|site|xyz|me|tv|cc|ws|eus|cat|asia|museum",
+  // country codes in common research use
+  "us|uk|de|fr|eu|au|nz|ca|ch|at|be|nl|lu|se|no|dk|fi|is|ie|cz|sk|pl|hu|si|hr|rs|ro|bg|gr|pt|es|it",
+  "ee|lv|lt|ua|ru|tr|il|za|eg|ng|ke|in|cn|jp|kr|tw|hk|sg|my|th|vn|id|ph|br|ar|cl|mx|co|pe|uy",
+  // private and reserved
+  "internal|local|lan|corp|intranet|private|home|test|example|invalid|localhost|localdomain",
+].join("|");
 export const CLIENT_LEAK_PATTERNS = Object.freeze([
   Object.freeze([
     "hostname",
-    new RegExp(
-      // Three or more labels ending in a letter (so 24.2.1 is a version, not a
-      // host), or two labels ending in a common TLD (so fastqsanger.gz isn't).
-      `\\b[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+\\.[A-Za-z][A-Za-z0-9-]*\\b|\\b[A-Za-z0-9-]+\\.(?:${COMMON_TLDS})\\b`,
-      "i",
-    ),
+    new RegExp(`\\b[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.(?:${HOST_SUFFIXES})\\b`, "i"),
   ]),
+  // A single-label host with a port: galaxyprod:8080, localhost:8443. Four or
+  // five digits, so `line:42` and `HTTPError:400` stay out.
+  Object.freeze(["host-port", /\b[A-Za-z][A-Za-z0-9-]*:\d{4,5}\b/]),
+  // The contract's email rule needs a dotted domain; alice@localhost doesn't.
+  Object.freeze(["user-at-host", /[A-Za-z0-9._%+-]+@[A-Za-z][A-Za-z0-9-]*/]),
   Object.freeze(["ipv4", /\b\d{1,3}(?:\.\d{1,3}){3}\b/]),
   Object.freeze([
     "ipv6",
@@ -323,19 +336,28 @@ export const CLIENT_LEAK_PATTERNS = Object.freeze([
   Object.freeze(["uuid", /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i]),
   // Relative and UNC paths: two separators, or one separator before a
   // filename with an extension. The normalizer's path rule needs a leading
-  // root, so `Users/alice/x` and `alice\\Desktop\\x.xlsx` reach here intact.
+  // root, so `Users/alice/x` and `alice\Desktop\x.xlsx` reach here intact.
   Object.freeze([
     "relative-path",
     /[\w.~-]+[\\/][\w.-]+[\\/]|[\w-]+[\\/][\w-]+\.[A-Za-z][A-Za-z0-9]{0,4}\b|\\\\/,
   ]),
   Object.freeze(["tilde-user", /~[A-Za-z_]/]),
-  // The contract's id phrase misses `history_id=12`, plurals and job or
-  // invocation numbers.
+  // The contract's id phrase misses `history_id=12` and plurals. Job and
+  // invocation numbers are left alone: Galaxy's own messages say "Job 3 is in
+  // error state", and a small decoded job number names nothing.
   Object.freeze([
     "id-phrase",
-    /\b(?:history|dataset|hid|job|invocation|workflow|collection|hda|hdca)s?(?:_?ids?)?\b[^A-Za-z0-9]{0,4}\d/i,
+    /\b(?:history|dataset|hid|collection|hda|hdca)s?(?:_?ids?)?\b[^A-Za-z0-9]{0,4}\d/i,
   ]),
 ]);
+
+/** True when `text` contains something host-shaped. Used on structured fields too. */
+export function looksLikeHost(text) {
+  if (typeof text !== "string") return false;
+  return ["hostname", "host-port", "ipv4", "ipv6", "uuid"].some((name) =>
+    CLIENT_LEAK_PATTERNS.find(([n]) => n === name)[1].test(text),
+  );
+}
 
 const FREE_TEXT_FIELDS = new Set(["signature", "description"]);
 

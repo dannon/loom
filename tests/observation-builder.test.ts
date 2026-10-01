@@ -362,6 +362,9 @@ describe("shape checks on model-authored fields", () => {
       "home/alice/secret_project/run.sh",
       "toolshed.corp-internal.example/repos/alice/x/y/1.0",
       "10.0.0.5/repos/iuc/x/y",
+      "galaxy.corp-internal.example",
+      "10.0.0.5",
+      "3f2b8c1a-1234-4abc-8def-a123b56c89ab",
     ]) {
       expect(extractToolIds({ tool_id: id }), id).toEqual([]);
       expect(buildObservation({ ...base, toolIds: [id] }, envelope).tools, id).toEqual([]);
@@ -385,6 +388,9 @@ describe("shape checks on model-authored fields", () => {
 
   it("drops a hyphenated or upper-case file stem posing as a datatype", () => {
     expect(extractDatatypes({ file_type: "jsmith-cohort.brca" })).toEqual([]);
+    expect(extractDatatypes({ file_type: "corp.example.org" })).toEqual([]);
+    expect(extractDatatypes({ file_type: "example.com" })).toEqual([]);
+    expect(extractDatatypes({ file_type: "fastqsanger.gz" })).toEqual(["fastqsanger.gz"]);
     expect(buildObservation({ ...base, datatypes: ["Patient07.csv"] }, envelope).datatypes).toEqual(
       [],
     );

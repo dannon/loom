@@ -361,6 +361,26 @@ describe("drainObservationOutbox", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it("keeps rows appended while the sends were in flight", async () => {
+    const m = await load();
+    m.appendToObservationOutbox(obs);
+    const late = { ...obs, id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" };
+    const submit = vi.fn(async () => {
+      m.appendToObservationOutbox(late);
+      return { ok: true, status: 202, queueable: false };
+    });
+    expect((await m.drainObservationOutbox(submit)).sent).toBe(1);
+    expect(lines("observations-outbox.jsonl").map((l) => JSON.parse(l).id)).toEqual([late.id]);
+  });
+
+  it("stops trying once the route is unreachable this round", async () => {
+    const m = await load();
+    for (let i = 0; i < 3; i++) m.appendToObservationOutbox(obs);
+    const submit = vi.fn().mockResolvedValue({ ok: false, error: "offline", queueable: true });
+    expect(await m.drainObservationOutbox(submit)).toEqual({ sent: 0, kept: 3, dropped: 0 });
+    expect(submit).toHaveBeenCalledOnce();
+  });
+
   it("is a no-op with no outbox", async () => {
     const m = await load();
     expect(await m.drainObservationOutbox(vi.fn())).toEqual({ sent: 0, kept: 0, dropped: 0 });
