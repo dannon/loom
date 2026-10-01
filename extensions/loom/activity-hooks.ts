@@ -15,8 +15,11 @@ import { collectSecretValues, redactSecrets } from "./secret-redaction";
 import { loadConfig } from "../../shared/loom-config.js";
 
 // Read-only / filesystem-traversal tools clutter the log without telling the
-// user anything they'd want to re-read later. Omit them.
-const NOISY_TOOLS = new Set(["read", "grep", "glob", "ls", "find"]);
+// user anything they'd want to re-read later. Omit them. lessons_search is
+// here for a different reason: its query says what the user is stuck on and
+// its result is lesson prose, and the lesson.surfaced row already records
+// which lesson surfaced.
+const NOISY_TOOLS = new Set(["read", "grep", "glob", "ls", "find", "lessons_search"]);
 
 // Tools whose argument shape is known to carry credentials. activity.jsonl
 // lives in the project cwd and users may share the dir (commit it, send it
