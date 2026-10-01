@@ -187,47 +187,79 @@ function build() {
   for (const s of skipped) console.log(`  left out ${s.id} (${s.why})`);
 }
 
-function check() {
-  const violations = validateLessonsDir(LESSONS_DIR);
-  if (violations.length > 0) reportViolations("check:lessons", violations);
-
-  if (!fs.existsSync(SNAPSHOT_PATH)) {
-    console.error("check:lessons FAILED -- lessons/snapshot.json is missing");
-    console.error("\nRun `npm run build:lessons` and commit the result.");
-    process.exit(1);
+/**
+ * The drift gate as a function, so it can be exercised against any corpus.
+ * `failure` is the lines to print when it fails; `warnings` never fail it.
+ */
+export function checkSnapshot({
+  dir = LESSONS_DIR,
+  snapshotPath = SNAPSHOT_PATH,
+  nowMs = Date.now(),
+} = {}) {
+  const violations = validateLessonsDir(dir);
+  if (violations.length > 0) {
+    return {
+      ok: false,
+      failure: [
+        `check:lessons FAILED -- ${violations.length} schema violation(s)`,
+        ...violations.map((v) => `  ${v}`),
+      ],
+    };
   }
-  const committedText = fs.readFileSync(SNAPSHOT_PATH, "utf8").replace(/\r\n/g, "\n");
+  if (!fs.existsSync(snapshotPath)) {
+    return {
+      ok: false,
+      failure: [
+        "check:lessons FAILED -- lessons/snapshot.json is missing",
+        "\nRun `npm run build:lessons` and commit the result.",
+      ],
+    };
+  }
+  const committedText = fs.readFileSync(snapshotPath, "utf8").replace(/\r\n/g, "\n");
   let committed;
   try {
     committed = JSON.parse(committedText);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`check:lessons FAILED -- lessons/snapshot.json is not valid JSON: ${message}`);
-    process.exit(1);
+    return {
+      ok: false,
+      failure: [`check:lessons FAILED -- lessons/snapshot.json is not valid JSON: ${message}`],
+    };
   }
-  const builtAt = typeof committed.built_at === "string" ? committed.built_at : "";
-  const commit = typeof committed.source?.commit === "string" ? committed.source.commit : "";
-  const { snapshot } = buildSnapshot({ builtAt, commit });
+  const builtAt = typeof committed?.built_at === "string" ? committed.built_at : "";
+  const commit = typeof committed?.source?.commit === "string" ? committed.source.commit : "";
+  const { snapshot } = buildSnapshot({ dir, builtAt, commit });
   const rebuilt = serializeSnapshot(snapshot);
   if (rebuilt !== committedText) {
-    console.error("check:lessons FAILED -- lessons/snapshot.json does not match lessons/");
-    for (const line of firstDiff(committedText, rebuilt)) console.error(`  ${line}`);
-    console.error("\nRun `npm run build:lessons` and commit lessons/snapshot.json.");
-    process.exit(1);
+    return {
+      ok: false,
+      failure: [
+        "check:lessons FAILED -- lessons/snapshot.json does not match lessons/",
+        ...firstDiff(committedText, rebuilt).map((line) => `  ${line}`),
+        "\nRun `npm run build:lessons` and commit lessons/snapshot.json.",
+      ],
+    };
   }
 
   // Not fatal: a lesson that has aged out should be re-verified or dropped
   // deliberately, and a date is a bad reason to turn somebody else's CI red.
-  const nowMs = Date.now();
-  const expired = snapshot.lessons.filter((l) => isStale(l.stale_after, nowMs));
-  for (const l of expired) {
-    console.warn(
-      `  warning: ${l.id} is past stale_after ${l.stale_after} -- re-verify it, or rebuild to drop it`,
+  const warnings = snapshot.lessons
+    .filter((l) => isStale(l.stale_after, nowMs))
+    .map(
+      (l) =>
+        `  warning: ${l.id} is past stale_after ${l.stale_after} -- re-verify it, or rebuild to drop it`,
     );
+  return { ok: true, count: snapshot.lessons.length, warnings };
+}
+
+function check() {
+  const result = checkSnapshot();
+  if (!result.ok) {
+    for (const line of result.failure) console.error(line);
+    process.exit(1);
   }
-  console.log(
-    `check:lessons OK -- ${snapshot.lessons.length} lesson(s) match lessons/snapshot.json`,
-  );
+  for (const w of result.warnings) console.warn(w);
+  console.log(`check:lessons OK -- ${result.count} lesson(s) match lessons/snapshot.json`);
 }
 
 function isDirectInvocation() {

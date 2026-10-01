@@ -11,12 +11,13 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { collectLessonFiles, parseLesson } from "../lessons/validate.mjs";
+import { collectLessonFiles, parseLesson, validateLessonsDir } from "../lessons/validate.mjs";
 import {
   SNAPSHOT_LICENCE,
   SNAPSHOT_REPO,
   SNAPSHOT_SCHEMA,
   buildSnapshot,
+  checkSnapshot,
   isStale,
   serializeSnapshot,
 } from "../lessons/build-snapshot.mjs";
@@ -187,5 +188,91 @@ describe("the committed snapshot", () => {
 
   it("exits 2 on bad arguments", () => {
     expect(run("--nope").status).toBe(2);
+  });
+});
+
+describe("the drift gate on a corpus of its own", () => {
+  /** A corpus plus a snapshot built from it, ready to be tampered with. */
+  function builtCorpus(): { dir: string; snapshotPath: string } {
+    const dir = corpusOf({ keeper: (t) => t });
+    const snapshotPath = join(dir, "snapshot.json");
+    const { snapshot } = buildSnapshot({ dir, builtAt: BUILT_AT, commit: COMMIT });
+    writeFileSync(snapshotPath, serializeSnapshot(snapshot), "utf8");
+    return { dir, snapshotPath };
+  }
+  const NOW = Date.parse("2026-10-01T00:00:00Z");
+
+  it("passes when the snapshot matches", () => {
+    const { dir, snapshotPath } = builtCorpus();
+    expect(checkSnapshot({ dir, snapshotPath, nowMs: NOW })).toMatchObject({ ok: true, count: 1 });
+  });
+
+  it("fails when a lesson changed without a rebuild, and says where", () => {
+    const { dir, snapshotPath } = builtCorpus();
+    const lesson = join(dir, "stats", "keeper.md");
+    writeFileSync(
+      lesson,
+      readFileSync(lesson, "utf8").replace("Nothing errors.", "Nothing errors at all."),
+    );
+    const result = checkSnapshot({ dir, snapshotPath, nowMs: NOW });
+    expect(result.ok).toBe(false);
+    expect(result.failure.join("\n")).toMatch(/does not match[\s\S]*Nothing errors at all\./);
+  });
+
+  it("fails when a lesson was added without a rebuild", () => {
+    const { dir, snapshotPath } = builtCorpus();
+    const base = readFileSync(join(dir, "stats", "keeper.md"), "utf8");
+    writeFileSync(join(dir, "stats", "another.md"), base);
+    expect(checkSnapshot({ dir, snapshotPath, nowMs: NOW }).ok).toBe(false);
+  });
+
+  it("fails on a schema violation before it looks at the snapshot", () => {
+    const { dir, snapshotPath } = builtCorpus();
+    const lesson = join(dir, "stats", "keeper.md");
+    writeFileSync(lesson, readFileSync(lesson, "utf8").replace("type: Lesson", "type: Note"));
+    const result = checkSnapshot({ dir, snapshotPath, nowMs: NOW });
+    expect(result.failure.join("\n")).toMatch(/schema violation[\s\S]*type must be exactly/);
+  });
+
+  it("fails on a hand-edited snapshot", () => {
+    const { dir, snapshotPath } = builtCorpus();
+    writeFileSync(snapshotPath, readFileSync(snapshotPath, "utf8").replace('"draft"', '"stable"'));
+    expect(checkSnapshot({ dir, snapshotPath, nowMs: NOW }).ok).toBe(false);
+  });
+
+  it("only warns about a lesson that went stale after the build", () => {
+    const { dir, snapshotPath } = builtCorpus();
+    const later = Date.parse("2028-01-01T00:00:00Z");
+    const result = checkSnapshot({ dir, snapshotPath, nowMs: later });
+    expect(result.ok).toBe(true);
+    expect(result.warnings.join("\n")).toMatch(/stats\/keeper is past stale_after/);
+  });
+});
+
+describe("the optional fields", () => {
+  // No committed lesson uses these yet, so without this nothing exercises how
+  // the build copies them.
+  it("carries verified, sources.resource and sources.title through", () => {
+    const dir = corpusOf({
+      full: (t) =>
+        t
+          .replace(
+            "stale_after:",
+            'verified:\n  - { by: "human:reviewer-one", at: "2026-09-30" }\nstale_after:',
+          )
+          .replace(
+            /sources:\n {2}- \{ id: "([^"]+)" \}/,
+            'sources:\n  - { id: "$1", resource: "https://github.com/galaxyproject/loom/issues/355", title: "the original report" }',
+          ),
+    });
+    expect(validateLessonsDir(dir)).toEqual([]);
+    const { snapshot } = buildSnapshot({ dir, builtAt: BUILT_AT, commit: COMMIT });
+    const [lesson] = snapshot.lessons;
+    expect(lesson.verified).toEqual([{ by: "human:reviewer-one", at: "2026-09-30" }]);
+    expect(lesson.sources[0]).toEqual({
+      id: expect.any(String),
+      resource: "https://github.com/galaxyproject/loom/issues/355",
+      title: "the original report",
+    });
   });
 });
