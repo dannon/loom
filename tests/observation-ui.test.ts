@@ -148,6 +148,13 @@ describe("describeWithModel", () => {
     expect(long).toHaveLength(500);
   });
 
+  it("gives up at the deadline even if the provider ignores the abort", async () => {
+    const started = Date.now();
+    const out = await describeWithModel(facts, () => new Promise<string>(() => {}), 50);
+    expect(out).toBe("");
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
   it("returns empty on a model failure or an empty answer", async () => {
     expect(
       await describeWithModel(facts, async () => {

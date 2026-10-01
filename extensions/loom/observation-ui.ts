@@ -151,14 +151,29 @@ function acceptDescription(candidate: string): string {
 export async function describeWithModel(
   facts: ObservationFacts,
   complete: CompleteFn,
-  signal: AbortSignal = AbortSignal.timeout(DESCRIPTION_TIMEOUT_MS),
+  timeoutMs: number = DESCRIPTION_TIMEOUT_MS,
 ): Promise<string> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // The signal asks the provider to stop; the race is what actually bounds the
+  // wait, because not every provider honours an abort promptly and this runs
+  // inside the settle handler.
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error("description timed out"));
+    }, timeoutMs);
+  });
   try {
-    return acceptDescription(
-      await complete(DESCRIPTION_SYSTEM_PROMPT, describeFactsPrompt(facts), signal),
-    );
+    const text = await Promise.race([
+      complete(DESCRIPTION_SYSTEM_PROMPT, describeFactsPrompt(facts), controller.signal),
+      deadline,
+    ]);
+    return acceptDescription(text);
   } catch {
     return "";
+  } finally {
+    clearTimeout(timer);
   }
 }
 
