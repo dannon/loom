@@ -141,6 +141,15 @@ describe("submitObservation", () => {
     expect((await m.submitObservation(obs)).ok).toBe(true);
   });
 
+  it("never follows a redirect, and doesn't queue one", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 307, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    const m = await load();
+    const res = await m.submitObservation(obs);
+    expect(fetchMock.mock.calls[0][1].redirect).toBe("manual");
+    expect(res.queueable).toBe(false);
+  });
+
   it("returns ok:false and queueable on a transport failure", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     const m = await load();
@@ -305,5 +314,55 @@ describe("retract-token store", () => {
     expect(m.readRetractToken(obs.id)).toBeUndefined();
     m.saveRetractToken(obs.id, "c".repeat(32));
     expect(m.readRetractToken(obs.id)).toBe("c".repeat(32));
+  });
+});
+
+describe("drainObservationOutbox", () => {
+  const ok = async () => ({
+    ok: true,
+    status: 202,
+    retractToken: "c".repeat(32),
+    queueable: false,
+  });
+
+  it("sends what the outbox holds, logs it as sent and empties the file", async () => {
+    const m = await load();
+    m.appendToObservationOutbox(obs);
+    const submit = vi.fn(ok);
+    expect(await m.drainObservationOutbox(submit)).toEqual({ sent: 1, kept: 0, dropped: 0 });
+    expect(submit).toHaveBeenCalledOnce();
+    expect(lines("observations-outbox.jsonl")).toEqual([]);
+    expect(m.readSentLog().at(-1)?.status).toBe("sent");
+    expect(m.readRetractToken(obs.id)).toBe("c".repeat(32));
+    const file = path.join(tmpHome, ".loom", "observations-outbox.jsonl");
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it("keeps a row that is still queueable and drops one refused for good", async () => {
+    const m = await load();
+    m.appendToObservationOutbox(obs);
+    m.appendToObservationOutbox({ ...obs, id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" });
+    const submit = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503, queueable: true })
+      .mockResolvedValueOnce({ ok: false, status: 500, queueable: false });
+    expect(await m.drainObservationOutbox(submit)).toEqual({ sent: 0, kept: 1, dropped: 1 });
+    expect(JSON.parse(lines("observations-outbox.jsonl")[0]).id).toBe(obs.id);
+  });
+
+  it("re-validates every row and never sends one that was edited to leak", async () => {
+    const m = await load();
+    fs.writeFileSync(
+      path.join(tmpHome, ".loom", "observations-outbox.jsonl"),
+      JSON.stringify({ ...obs, signature: "failed on 10.12.4.7" }) + "\n{ broken\n",
+    );
+    const submit = vi.fn(ok);
+    expect(await m.drainObservationOutbox(submit)).toEqual({ sent: 0, kept: 0, dropped: 2 });
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op with no outbox", async () => {
+    const m = await load();
+    expect(await m.drainObservationOutbox(vi.fn())).toEqual({ sent: 0, kept: 0, dropped: 0 });
   });
 });

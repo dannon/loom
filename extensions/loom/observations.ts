@@ -29,6 +29,7 @@ import {
   capObservation,
   normalizeSignature,
   observationByteLength,
+  scanObservationForLeaks,
   textLeaks,
   validateObservation,
 } from "../../shared/observation-contract.js";
@@ -46,6 +47,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -388,8 +390,12 @@ export async function submitObservation(obs: Observation): Promise<SubmitObserva
         headers,
         body: JSON.stringify(obs),
         signal: AbortSignal.timeout(TIMEOUT_MS),
+        // A redirect would replay the body and the shared key to wherever it
+        // points. The route never redirects, so one is a refusal, not a hop.
+        redirect: "manual",
       });
       if (res.status !== 500) break;
+      if (attempt < ATTEMPTS_ON_500) await res.body?.cancel().catch(() => {});
     }
     if (!res) throw new Error("no response");
     const data = (await res.json().catch(() => ({}))) as {
@@ -434,6 +440,7 @@ export async function retractObservation(id: string, retractToken: string): Prom
       method: "DELETE",
       headers,
       signal: AbortSignal.timeout(TIMEOUT_MS),
+      redirect: "manual",
     });
     await res.json().catch(() => ({}));
     // Idempotent by contract: a repeat retract is a 404, and reporting that as
@@ -477,6 +484,64 @@ export function appendToObservationOutbox(obs: Observation): string | null {
   // 0600: this file carries the install token, which is the thing that ties
   // rows together. Nothing else in it is sensitive, but that is enough.
   return appendLine(OUTBOX_FILE, obs, 0o600);
+}
+
+export const OUTBOX_DRAIN_MAX = 10;
+
+/**
+ * Retry what the outbox holds, oldest first, at most OUTBOX_DRAIN_MAX per call.
+ * Each row is re-validated before it goes -- the file is local and could have
+ * been edited -- and anything that fails, or that the route now refuses for
+ * good, is dropped rather than kept to fail forever. Only queueable failures
+ * stay.
+ */
+export async function drainObservationOutbox(
+  submit: (obs: Observation) => Promise<SubmitObservationResult>,
+): Promise<{ sent: number; kept: number; dropped: number }> {
+  const file = observationsFilePath(OUTBOX_FILE);
+  const counts = { sent: 0, kept: 0, dropped: 0 };
+  if (!existsSync(file)) return counts;
+  const lines = readFileSync(file, "utf-8")
+    .split("\n")
+    .filter((l) => l.trim());
+  if (lines.length === 0) return counts;
+
+  const keep: string[] = [];
+  for (const [i, line] of lines.entries()) {
+    if (i >= OUTBOX_DRAIN_MAX) {
+      keep.push(line);
+      continue;
+    }
+    let obs: Observation;
+    try {
+      obs = JSON.parse(line) as Observation;
+    } catch {
+      counts.dropped += 1;
+      continue;
+    }
+    if (!validateObservation(obs).ok || scanObservationForLeaks(obs).length > 0) {
+      counts.dropped += 1;
+      continue;
+    }
+    const res = await submit(obs);
+    if (res.ok) {
+      if (res.retractToken) saveRetractToken(obs.id, res.retractToken);
+      appendSentLog(sentLogEntryFor(obs, "sent"));
+      counts.sent += 1;
+    } else if (res.queueable) {
+      keep.push(line);
+    } else {
+      counts.dropped += 1;
+    }
+  }
+  counts.kept = keep.length;
+
+  // Rewrite in place via a temp file, so a crash mid-write can't truncate rows
+  // that are still owed.
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, keep.map((l) => l + "\n").join(""), { mode: 0o600 });
+  renameSync(tmp, file);
+  return counts;
 }
 
 export interface ObservationSentEntry {
