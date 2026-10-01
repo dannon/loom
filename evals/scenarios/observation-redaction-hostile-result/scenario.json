@@ -1,0 +1,74 @@
+{
+  "name": "nothing identifying survives the observation validator",
+  "description": "A hostile galaxy_run_tool failure -- absolute path, project directory name, 32-hex dataset id, five-digit history number, dataset URL and email address, all on the one line the normalizer reads -- plus hostile tool arguments, replayed through the real build-and-validate path with no model attached. Asserts the exact scrubbed signature, that the shape allowlist drops a path posing as a tool id, that the collector's own whole-payload leak scan comes back clean, and that the same signature three times is reported once as a retry-loop. The replay reaches the build step only, so nothing may be sent.",
+  "tier": 1,
+  "inputs": ["/observations status"],
+  "env": {
+    "ANTHROPIC_API_KEY": "fake-eval-key",
+    "LOOM_OBSERVATION_REPLAY": "observations.jsonl",
+    "GALAXY_URL": "https://usegalaxy.org",
+    "GALAXY_API_KEY": "fake-eval-galaxy-key"
+  },
+  "timeoutMs": 15000,
+  "assertions": {
+    "events": {
+      "mustNotInclude": ["agent_start", "tool_execution_start", "turn_start"]
+    },
+    "activity": {
+      "mustNotIncludeKinds": [
+        "observation.sent",
+        "observation.queued",
+        "observation.invalid",
+        "observation.declined",
+        "observation.skipped"
+      ],
+      "mustInclude": [
+        {
+          "kind": "observation.replay",
+          "source": "observation-replay",
+          "payloadContains": { "file": "observations.jsonl", "entries": "4" }
+        },
+        {
+          "kind": "observation.built",
+          "source": "observation-replay",
+          "payloadContains": {
+            "kind": "tool-error",
+            "trigger": "tool_error",
+            "stage": "tool-parameterization",
+            "signature": "ToolExecutionError: dataset <id> in history <n> failed; wrote <path> see <url> mail <email>",
+            "mcpTool": "galaxy_run_tool",
+            "toolIds": "toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2",
+            "datatypes": "fastqsanger.gz",
+            "server": "usegalaxy.org",
+            "descriptionLength": "0",
+            "valid": "true",
+            "leakScan": "clean"
+          }
+        },
+        {
+          "kind": "observation.built",
+          "source": "observation-replay",
+          "payloadContains": {
+            "kind": "tool-error",
+            "signature": "HTTPError: 400 Bad Request from <path>",
+            "toolIds": "",
+            "datatypes": "",
+            "valid": "true",
+            "leakScan": "clean"
+          }
+        },
+        {
+          "kind": "observation.built",
+          "source": "observation-replay",
+          "payloadContains": {
+            "kind": "retry-loop",
+            "trigger": "retry_loop",
+            "signature": "ToolExecutionError: dataset <id> in history <n> failed; wrote <path> see <url> mail <email>",
+            "valid": "true",
+            "leakScan": "clean"
+          }
+        }
+      ]
+    }
+  }
+}

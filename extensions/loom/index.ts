@@ -21,6 +21,7 @@ import { recordGalaxyConnected } from "./galaxy-cred-drift";
 import { registerActivityHooks } from "./activity-hooks";
 import { registerSubmissionCapture } from "./galaxy-submission-capture";
 import { isSubmissionReplayEnabled, registerSubmissionReplay } from "./submission-replay";
+import { isObservationReplayEnabled, registerObservationReplay } from "./observation-replay";
 import { registerExecutionCommands } from "./execution-commands";
 import { registerDashboardTools } from "./dashboard-tools";
 import { registerDashboardCommands } from "./dashboard-commands";
@@ -124,6 +125,12 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // unless LOOM_SUBMISSION_REPLAY names a file inside the session directory.
   if (isSubmissionReplayEnabled()) {
     registerSubmissionReplay(pi);
+  }
+  // Eval-only seam, same shape and the same containment rule as the submission
+  // replay above. Registered here rather than with the triggers because its
+  // session_start handler needs the notebook path the session lifecycle sets.
+  if (isObservationReplayEnabled()) {
+    registerObservationReplay(pi);
   }
 
   registerPlanTools(pi);

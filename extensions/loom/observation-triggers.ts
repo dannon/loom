@@ -178,6 +178,47 @@ export interface DeliverDeps {
   record(kind: string, payload: Record<string, unknown>): void;
 }
 
+export interface BuiltObservation {
+  obs: Observation;
+  valid: boolean;
+  errors: string[];
+  leaks: string[];
+}
+
+/**
+ * Build, check, and record -- and nothing else. Split out of
+ * deliverObservation so the eval replay can exercise exactly the half that
+ * matters for privacy with no transport anywhere in its call graph: a dry run
+ * that cannot send because there is nothing to send with, not because a stub
+ * refused.
+ */
+export function buildAndRecordObservation(
+  facts: ObservationFacts,
+  description: string,
+  deps: Pick<DeliverDeps, "installToken" | "record">,
+): BuiltObservation {
+  const obs = buildObservation(
+    { ...facts, description },
+    collectObservationEnvelope(deps.installToken()),
+  );
+  const validity = validateObservation(obs);
+  const leaks = scanObservationForLeaks(obs);
+  deps.record("observation.built", {
+    kind: obs.kind,
+    trigger: obs.trigger,
+    stage: obs.stage,
+    signature: obs.signature,
+    mcpTool: obs.mcpTool ?? "",
+    toolIds: obs.tools.map((t) => t.id).join(","),
+    datatypes: obs.datatypes.join(","),
+    server: obs.galaxy.server,
+    descriptionLength: obs.description.length,
+    valid: validity.ok,
+    leakScan: leaks.length === 0 ? "clean" : "dirty",
+  });
+  return { obs, valid: validity.ok, errors: validity.ok ? [] : validity.errors, leaks };
+}
+
 export async function deliverObservation(
   facts: ObservationFacts,
   ctx: ExtensionContext,
@@ -208,33 +249,14 @@ export async function deliverObservation(
   // The install token is written to config here, before any confirm, because a
   // valid payload needs one and the confirm has to show the real payload. It
   // is local state until the user says send.
-  const obs = buildObservation(
-    { ...facts, description },
-    { ...collectObservationEnvelope(deps.installToken()) },
-  );
+  const { obs, valid, errors, leaks } = buildAndRecordObservation(facts, description, deps);
 
-  const validity = validateObservation(obs);
-  const leaks = scanObservationForLeaks(obs);
-  deps.record("observation.built", {
-    kind: obs.kind,
-    trigger: obs.trigger,
-    stage: obs.stage,
-    signature: obs.signature,
-    mcpTool: obs.mcpTool ?? "",
-    toolIds: obs.tools.map((t) => t.id).join(","),
-    datatypes: obs.datatypes.join(","),
-    server: obs.galaxy.server,
-    descriptionLength: obs.description.length,
-    valid: validity.ok,
-    leakScan: leaks.length === 0 ? "clean" : "dirty",
-  });
-
-  if (!validity.ok || leaks.length > 0) {
+  if (!valid || leaks.length > 0) {
     // Fail closed. Nothing is sent, and only field and pattern names are
     // recorded -- the offending value stays out of the log too.
     deps.record("observation.invalid", {
       kind: obs.kind,
-      errors: (validity.ok ? [] : validity.errors).join(","),
+      errors: errors.join(","),
       leaks: leaks.join(","),
     });
     return "invalid";
