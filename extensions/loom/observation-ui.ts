@@ -38,9 +38,9 @@ export const PRIVACY_STATEMENT =
   "Rows expire after 180 days and `/observations retract <id>` deletes one at any time. " +
   "`/observations mode off` stops collection entirely.";
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // The confirm
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 function orNone(value: string): string {
   return value.length > 0 ? value : "(none)";
@@ -82,9 +82,9 @@ export async function confirmObservation(
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // The description
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 export const DESCRIPTION_SYSTEM_PROMPT = [
   "You write one sentence describing a Galaxy failure pattern for a public",

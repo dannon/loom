@@ -55,9 +55,9 @@ import { loadProfiles } from "./profiles.js";
 import { isWsl } from "../../shared/wsl.js";
 import { isDesktopShell, readEnv } from "../../shared/orbit-env.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Stage
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 // Ordered; first match wins. The question each row answers is "what was the
 // session trying to do when this call failed", not "what does the tool read",
@@ -83,9 +83,9 @@ export function stageForTool(mcpTool: string | undefined): ObservationStage {
   return "unknown";
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Tool ids and datatypes
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 // A Galaxy tool id is a public identifier, but it arrives from model-authored
 // arguments, so it is admitted by shape rather than trusted. Either a bare id
@@ -148,9 +148,9 @@ export function extractDatatypes(input: Record<string, unknown> | undefined): st
   return dedupeCap(admitted, DATATYPES_MAX);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Server and version
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 /**
  * Exact hostname match against the C7 allowlist, else "private". Never a
@@ -202,9 +202,9 @@ export function resetGalaxyVersion(): void {
   galaxyVersion = undefined;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Build
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 export interface ObservationFacts {
   kind: ObservationKind;
@@ -289,9 +289,9 @@ export function collectObservationEnvelope(installToken: string): ObservationEnv
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Transport
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 // ORBIT_OBSERVATIONS_URL points this at `wrangler dev` for local work, the same
 // way LOOM_FEEDBACK_URL does for /feedback.
@@ -413,9 +413,9 @@ export async function retractObservation(id: string, retractToken: string): Prom
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Local logs
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 function appendLine(name: string, value: unknown, mode?: number): string | null {
   try {
@@ -508,9 +508,9 @@ export function readSentLog(): ObservationSentEntry[] {
   return out;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Retract tokens
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 function readTokenStore(): Record<string, string> {
   const file = observationsFilePath(TOKEN_STORE_FILE);
