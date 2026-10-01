@@ -48,36 +48,35 @@ export function isCorrectionObservation(event: ActivityEvent): boolean {
 
 let nudged = false;
 let cursor = 0;
-let sinceMs = 0;
+let seen: ActivityEvent[] | null = null;
 let unsubscribe: (() => void) | null = null;
 
 export function resetLessonNudge(): void {
   nudged = false;
   cursor = 0;
-  sinceMs = 0;
+  seen = null;
   unsubscribe?.();
   unsubscribe = null;
 }
 
-/** A row from before this session started is history, not news. */
-function isRecent(event: ActivityEvent): boolean {
-  const at = Date.parse(event?.timestamp);
-  return Number.isFinite(at) && at >= sinceMs;
-}
-
 export function registerLessonNudge(pi: ExtensionAPI): void {
   resetLessonNudge();
-  cursor = getActivityEvents().length;
-  sinceMs = Date.now();
-  // onActivityChange hands over the WHOLE array each time, so new rows are
-  // found by cursor. resetActivity() and loadActivityLog() replace the array
-  // outright; a cursor past its end means it was swapped, so rewind -- and the
-  // timestamp floor keeps a hydrated log's old rows from counting as new.
+  seen = getActivityEvents();
+  cursor = seen.length;
+  // onActivityChange hands over the WHOLE array each time; appends push onto
+  // the same array, while resetActivity() and loadActivityLog() replace it. A
+  // replaced array is a baseline, never news: a hydrated log is history, and
+  // activity.jsonl sits in the workspace where anything with file access
+  // could have planted a "correction" row in it.
   unsubscribe = onActivityChange((events) => {
-    if (cursor > events.length) cursor = 0;
+    if (events !== seen) {
+      seen = events;
+      cursor = events.length;
+      return;
+    }
     const fresh = events.slice(cursor);
     cursor = events.length;
-    if (nudged || !fresh.some((e) => isCorrectionObservation(e) && isRecent(e))) return;
+    if (nudged || !fresh.some(isCorrectionObservation)) return;
     // Once per session. A correction loop -- the user pushing back three times
     // on one thing -- is where nagging is likeliest and least welcome.
     nudged = true;
@@ -94,6 +93,5 @@ export function registerLessonNudge(pi: ExtensionAPI): void {
 
   pi.on("session_start", async () => {
     nudged = false;
-    sinceMs = Date.now();
   });
 }

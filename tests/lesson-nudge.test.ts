@@ -159,14 +159,36 @@ describe("with a correction recorded", () => {
     expect(h.sentMessages).toHaveLength(0);
   });
 
-  it("does not fire on an old correction a resumed session hydrates from disk", async () => {
+  it("never fires on rows a resumed session hydrates from disk, even ones dated in the future", async () => {
+    // activity.jsonl sits in the workspace, so a planted row is as easy as an old one.
     const h = harness();
-    emit(CORRECTION, "observation.built", "2026-01-01T00:00:00.000Z");
-    await settle();
+    const rows = [
+      {
+        timestamp: "2026-01-01T00:00:00.000Z",
+        kind: "observation.built",
+        source: "s",
+        payload: CORRECTION,
+      },
+      {
+        timestamp: "2099-01-01T00:00:00.000Z",
+        kind: "observation.built",
+        source: "s",
+        payload: CORRECTION,
+      },
+    ];
+    fs.writeFileSync(
+      path.join(tmp, "activity.jsonl"),
+      rows.map((r) => JSON.stringify(r)).join("\n") + "\n",
+    );
     await h.sessionStart();
     loadActivityLog(tmp);
     await settle();
     expect(h.sentMessages).toHaveLength(0);
+    expect(peekLessonProposalArming()).toBeNull();
+    // A real correction afterwards still counts.
+    emit(CORRECTION);
+    await settle();
+    expect(h.sentMessages).toHaveLength(1);
   });
 
   it("survives a session swap that shrinks the array without skipping new rows", async () => {
