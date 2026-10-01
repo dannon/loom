@@ -6,10 +6,22 @@ import { LESSON_NAMESPACES, parseLesson, validateLessonMarkdown } from "../share
 import { validateLessonFile } from "../lessons/validate.mjs";
 import { LESSON_BODY, lessonFile } from "./lessons-fixture";
 
-const errorsFor = (raw: string): string => {
+/**
+ * A refusal, checked by shape and line rather than by message wording: the
+ * shared rule module is replaced at merge time and its messages may differ.
+ */
+function expectRefused(raw: string, line?: number): void {
   const out = parseUserLesson("a/b", raw);
-  return out.ok ? "" : out.errors.join("\n");
-};
+  expect(out.ok).toBe(false);
+  if (out.ok) return;
+  expect(out.errors.length).toBeGreaterThan(0);
+  for (const e of out.errors) expect(e).toMatch(/^\d+: \S/);
+  if (line !== undefined) expect(out.errors.map((e) => Number(e.split(":")[0]))).toContain(line);
+}
+
+/** 1-based line of the first line of `raw` containing `needle`. */
+const lineOf = (raw: string, needle: string): number =>
+  raw.split("\n").findIndex((l) => l.includes(needle)) + 1;
 
 describe("parseUserLesson -- the happy path", () => {
   it("builds a Lesson with the id it was given and origin user", () => {
@@ -51,55 +63,52 @@ describe("parseUserLesson -- the happy path", () => {
 });
 
 describe("parseUserLesson -- refusals", () => {
-  it("needs frontmatter", () => {
-    expect(errorsFor(LESSON_BODY)).toContain("missing YAML frontmatter");
-  });
-
-  it("refuses frontmatter that is not valid YAML or not a mapping", () => {
-    expect(errorsFor("---\n: : :\n---\n" + LESSON_BODY)).toMatch(/not valid YAML|mapping/);
-    expect(errorsFor("---\n- a\n---\n" + LESSON_BODY)).toContain("must be a YAML mapping");
+  it("needs frontmatter, and frontmatter that is a YAML mapping", () => {
+    expectRefused(LESSON_BODY);
+    expectRefused("---\n: : :\n---\n" + LESSON_BODY);
+    expectRefused("---\n- a\n---\n" + LESSON_BODY);
   });
 
   it("refuses a missing required key, an unknown key, and a bad status", () => {
-    expect(errorsFor(lessonFile().replace(/^stale_after:.*\n/m, ""))).toContain(
-      'missing required frontmatter key "stale_after"',
-    );
-    expect(errorsFor(lessonFile({ extra: { run_this: "yes" } }))).toContain(
-      'unknown frontmatter key "run_this"',
-    );
-    expect(errorsFor(lessonFile({ status: "retired" }))).toContain("status must be one of");
+    expectRefused(lessonFile().replace(/^stale_after:.*\n/m, ""));
+    const unknown = lessonFile({ extra: { run_this: "yes" } });
+    expectRefused(unknown, lineOf(unknown, "run_this"));
+    const status = lessonFile({ status: "retired" });
+    expectRefused(status, lineOf(status, "status:"));
   });
 
   it("refuses a missing required section and an unknown heading", () => {
-    expect(errorsFor(lessonFile({ body: "\n## Symptom\n\nonly this one\n" }))).toContain(
-      'missing required section "## Check first"',
-    );
-    expect(errorsFor(lessonFile({ body: LESSON_BODY + "\n## Workaround\n\nnope\n" }))).toContain(
-      "unexpected heading",
-    );
+    expectRefused(lessonFile({ body: "\n## Symptom\n\nonly this one\n" }));
+    const extra = lessonFile({ body: LESSON_BODY + "\n## Workaround\n\nnope\n" });
+    expectRefused(extra, lineOf(extra, "## Workaround"));
   });
 
   it("caps a section at 600 chars", () => {
+    const ok = LESSON_BODY.replace(
+      "A filter silently reads blank cells as zero.",
+      "x ".repeat(300),
+    );
+    expect(parseUserLesson("a/b", lessonFile({ body: ok })).ok).toBe(true);
     const fat = LESSON_BODY.replace(
       "A filter silently reads blank cells as zero.",
       "x ".repeat(301),
     );
-    expect(errorsFor(lessonFile({ body: fat }))).toContain("section symptom is 601 chars, max 600");
+    expectRefused(lessonFile({ body: fat }));
   });
 
   it("refuses fenced code, URLs and markdown links in the body", () => {
-    expect(errorsFor(lessonFile({ body: LESSON_BODY + "\n```sh\nrm -rf x\n```\n" }))).toContain(
-      "no fenced code blocks",
-    );
-    expect(
-      errorsFor(lessonFile({ body: LESSON_BODY.replace("coerces", "see https://example.com") })),
-    ).toContain("no URLs in a lesson body");
-    expect(
-      errorsFor(lessonFile({ body: LESSON_BODY.replace("coerces", "[see this](elsewhere)") })),
-    ).toContain("no markdown links");
+    for (const body of [
+      LESSON_BODY + "\n```sh\nrm -rf x\n```\n",
+      LESSON_BODY.replace("coerces", "see https://example.com"),
+      LESSON_BODY.replace("coerces", "see example.com/page"),
+      LESSON_BODY.replace("coerces", "[see this](elsewhere)"),
+    ]) {
+      const raw = lessonFile({ body });
+      expectRefused(raw);
+    }
   });
 
-  it("refuses identifying data anywhere -- paths, emails, hex ids", () => {
+  it("refuses identifying data anywhere -- paths, emails, hex ids, IPs", () => {
     const leaks = [
       "read /Users/ada/data/x.tsv first",
       "mail ada@example.org about it",
@@ -107,45 +116,33 @@ describe("parseUserLesson -- refusals", () => {
       "on 10.1.2.3 it fails",
     ];
     for (const leak of leaks) {
-      expect(errorsFor(lessonFile({ body: LESSON_BODY.replace("coerces", leak) })), leak).not.toBe(
-        "",
-      );
-      expect(errorsFor(lessonFile({ title: `Title ${leak}` })), leak).not.toBe("");
+      expectRefused(lessonFile({ body: LESSON_BODY.replace("coerces", leak) }));
+      expectRefused(lessonFile({ title: `Title ${leak}` }));
     }
   });
 
   it("refuses non-ASCII text, raw or YAML-escaped", () => {
-    expect(errorsFor(lessonFile({ title: "Smart “quotes”" }))).toContain("non-ASCII");
-    expect(
-      errorsFor(lessonFile().replace(/^title:.*$/m, 'title: "right-to-left \\u202e override"')),
-    ).toContain("non-ASCII");
+    expectRefused(lessonFile({ title: "Smart \u201cquotes\u201d" }));
+    expectRefused(lessonFile().replace(/^title:.*$/m, 'title: "right-to-left \\u202e override"'));
   });
 
   it("refuses YAML aliases and comments", () => {
-    expect(errorsFor(lessonFile().replace("tags: [filtering]", "tags: &t [filtering]"))).toContain(
-      "anchors, aliases",
-    );
-    expect(
-      errorsFor(lessonFile().replace("tags: [filtering]", "tags: [filtering] # hi")),
-    ).toContain("no YAML comments");
+    expectRefused(lessonFile().replace("tags: [filtering]", "tags: &t [filtering]"));
+    expectRefused(lessonFile().replace("tags: [filtering]", "tags: [filtering] # hi"));
   });
 
   it("refuses an unknown trigger field and an unnormalized or generic signature", () => {
-    expect(errorsFor(lessonFile().replace("  signatures: []", "  error_signatures: []"))).toContain(
-      'trigger has unknown key "error_signatures"',
-    );
-    expect(errorsFor(lessonFile({ trigger: { signatures: '["failed"]' } }))).toContain(
-      "too generic",
-    );
+    expectRefused(lessonFile().replace("  signatures: []", "  error_signatures: []"));
+    expectRefused(lessonFile({ trigger: { signatures: '["failed"]' } }));
+    expectRefused(lessonFile({ trigger: { signatures: '["job 1234567 failed badly"]' } }));
     expect(
-      errorsFor(lessonFile({ trigger: { signatures: '["job 1234567 failed badly"]' } })),
-    ).toContain("is not normalized");
+      parseUserLesson("a/b", lessonFile({ trigger: { signatures: '["job <n> failed badly"]' } }))
+        .ok,
+    ).toBe(true);
   });
 
   it("refuses an oversized file before parsing it", () => {
-    expect(errorsFor(lessonFile({ extra: { cues: `"${"x".repeat(17000)}"` } }))).toContain(
-      "bytes, max 16384",
-    );
+    expectRefused(lessonFile({ extra: { cues: `"${"x".repeat(17000)}"` } }), 1);
   });
 });
 
@@ -169,7 +166,9 @@ describe("shared/lesson-rules.js against the corpus validator", () => {
     it(name, () => {
       const verdict = validateLessonMarkdown(raw);
       const errors = verdict.ok ? [] : verdict.errors;
-      expect(errors.sort()).toEqual(strip(validateLessonFile("stats/x.md", raw)));
+      const lines = (xs: string[]) => [...new Set(xs.map((e) => Number(e.split(":")[0])))].sort();
+      expect(verdict.ok).toBe(validateLessonFile("stats/x.md", raw).length === 0);
+      expect(lines(errors)).toEqual(lines(strip(validateLessonFile("stats/x.md", raw))));
     });
   }
 });
