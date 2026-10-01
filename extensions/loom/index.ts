@@ -40,6 +40,7 @@ import { registerExecGuard } from "./exec-guard";
 import { registerSandbox } from "./sandbox";
 import { isLocalExecDisabled } from "./local-exec";
 import { registerSecretRedaction } from "./secret-redaction";
+import { registerLessonHint } from "./lesson-hint";
 import { registerMcpOutputRecovery } from "./mcp-output";
 import { galaxyCall, registerMcpRecovery } from "./mcp-recovery";
 import { registerGalaxyPollGuard } from "./galaxy-poll-guard";
@@ -101,6 +102,11 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerMcpRecovery(pi);
   registerGalaxyPollGuard(pi);
   registerProgressUpdates(pi);
+  // Before redaction on purpose: pi feeds each tool_result handler the previous
+  // one's content, so a lesson hint passes through the redactor like any other
+  // result text. After the oversized-output recovery, so it lands on the preview
+  // the model actually reads.
+  registerLessonHint(pi);
   registerSecretRedaction(pi);
 
   setupUIBridge(pi);
