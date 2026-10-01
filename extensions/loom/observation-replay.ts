@@ -124,6 +124,7 @@ export function registerObservationReplay(pi: ExtensionAPI): void {
       if (!facts) continue;
       const decision = decideToolResultObservation(state, {
         mcpTool: facts.mcpTool ?? "",
+        toolIds: facts.toolIds,
         signature: normalizeSignature(facts.rawSignature),
       });
       if (!decision) continue;

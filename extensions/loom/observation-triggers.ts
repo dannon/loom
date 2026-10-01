@@ -33,6 +33,7 @@ import {
   appendToObservationOutbox,
   buildObservation,
   collectObservationEnvelope,
+  drainObservationOutbox,
   extractDatatypes,
   extractToolIds,
   recordGalaxyVersionFromConnect,
@@ -81,10 +82,13 @@ export function newTriggerState(): TriggerState {
  */
 export function decideToolResultObservation(
   state: TriggerState,
-  key: { mcpTool: string; signature: string },
+  key: { mcpTool: string; signature: string; toolIds?: string[] },
 ): { kind: ObservationKind; trigger: ObservationTrigger } | null {
   if (!key.mcpTool || !key.signature) return null;
-  const k = `${key.mcpTool}|${key.signature}`;
+  // The Galaxy tool is part of "the same tool": three different tools failing
+  // galaxy_run_tool with one message are three failures, not a loop.
+  const tools = [...(key.toolIds ?? [])].sort().join(",");
+  const k = `${key.mcpTool}|${tools}|${key.signature}`;
   const count = (state.counts.get(k) ?? 0) + 1;
   state.counts.set(k, count);
 
@@ -282,7 +286,8 @@ export async function deliverObservation(
   }
 
   if (deps.mode === "ask" && !(await deps.confirm(obs, ctx))) {
-    deps.record("observation.declined", { kind: obs.kind, signature: obs.signature });
+    // No signature: the user said no, and for /observe it is their own words.
+    deps.record("observation.declined", { kind: obs.kind });
     return "declined";
   }
 
@@ -302,7 +307,8 @@ export async function deliverObservation(
       id: obs.id,
       kind: obs.kind,
       status: res.status ?? 0,
-      reason: res.error ?? "unreachable",
+      // Never the error text: it comes from the transport or the Worker.
+      reason: res.status ? `status ${res.status}` : "unreachable",
     });
     return "queued";
   }
@@ -357,6 +363,8 @@ function errorTextOf(content: ReadonlyArray<{ type: string; text?: string }>): s
     .join("\n");
 }
 
+const EVIDENCE_MARKER = "assertion-failed|evidence-gate";
+
 export function registerObservationTriggers(pi: ExtensionAPI): void {
   pi.on("session_start", async () => {
     resetObservationTriggers();
@@ -381,6 +389,7 @@ export function registerObservationTriggers(pi: ExtensionAPI): void {
 
     const decision = decideToolResultObservation(state, {
       mcpTool: facts.mcpTool ?? "",
+      toolIds: facts.toolIds,
       signature: normalizeSignature(facts.rawSignature),
     });
     if (!decision) return;
@@ -390,6 +399,10 @@ export function registerObservationTriggers(pi: ExtensionAPI): void {
   onEvidenceDecision((info) => {
     if (info.outcome !== "blocked") return;
     if (resolveObservationsMode() === "off") return;
+    // Once per session. The agent usually retries a blocked write, and each
+    // block would otherwise cost the user another prompt for the same report.
+    if (state.emitted.has(EVIDENCE_MARKER)) return;
+    state.emitted.add(EVIDENCE_MARKER);
     enqueueObservation({
       kind: "assertion-failed",
       trigger: "assertion",
@@ -404,6 +417,19 @@ export function registerObservationTriggers(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
+    // Earlier sends that hit a transport failure, a 429 or a 5xx. They were
+    // already consented to (confirmed, or sent in auto), so they go without a
+    // prompt -- but never while collection is off.
+    if (resolveObservationsMode() !== "off") {
+      try {
+        const drained = await drainObservationOutbox(submitObservation);
+        if (drained.sent + drained.dropped > 0) {
+          recordObservationActivity("observation.outbox", { ...drained });
+        }
+      } catch (err) {
+        console.error("observation outbox drain failed:", err);
+      }
+    }
     while (pending.length > 0) {
       const facts = pending.shift();
       if (!facts) break;

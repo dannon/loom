@@ -70,6 +70,15 @@ describe("decideToolResultObservation", () => {
     }
   });
 
+  it("counts a loop per Galaxy tool, not across different tools with one message", () => {
+    const state = newTriggerState();
+    for (const id of ["Filter1", "Grep1", "Cut1"]) {
+      expect(decideToolResultObservation(state, { ...KEY, toolIds: [id] })?.kind, id).toBe(
+        "tool-error",
+      );
+    }
+  });
+
   it("reports nothing for an empty tool or signature", () => {
     const state = newTriggerState();
     expect(decideToolResultObservation(state, { mcpTool: "", signature: "x" })).toBeNull();
@@ -214,6 +223,25 @@ describe("deliverObservation", () => {
     );
     expect(d.rows.map(([k]) => k)).toEqual(["observation.built", "observation.declined"]);
     expect(d.state.delivered).toBe(0);
+  });
+
+  it("records a decline without the signature", async () => {
+    const d = deps({ mode: "ask", confirm: async () => false });
+    await deliverObservation(facts, ctx, d);
+    expect(d.rows.find(([k]) => k === "observation.declined")?.[1]).toEqual({ kind: "tool-error" });
+  });
+
+  it("records a queued send by status, never by the error text", async () => {
+    const d = deps({
+      submit: async () => ({
+        ok: false,
+        error: "getaddrinfo ENOTFOUND alice-laptop.local",
+        queueable: true,
+      }),
+    });
+    await deliverObservation(facts, ctx, d);
+    expect(JSON.stringify(d.rows)).not.toContain("alice");
+    expect(d.rows.find(([k]) => k === "observation.queued")?.[1].reason).toBe("unreachable");
   });
 
   it("sends in ask mode once confirmed", async () => {
@@ -392,6 +420,30 @@ describe("registerObservationTriggers", () => {
     expect(pendingObservationCount()).toBe(0);
     const sent = JSON.parse(String(fetchMock.mock.calls[0][1].body));
     expect(sent.signature).toBe("ToolExecutionError: dataset <id> failed");
+  });
+
+  it("raises one assertion-failed report per session however often the gate blocks", async () => {
+    const { registerObservationTriggers, pendingObservationCount } =
+      await import("../extensions/loom/observation-triggers.js");
+    const { notifyEvidenceDecision } = await import("../extensions/loom/evidence-gate.js");
+    const pi = fakePi();
+    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
+    await pi.emit("session_start", {}, {});
+    const block = {
+      outcome: "blocked" as const,
+      toolName: "edit",
+      steps: ["#s1"],
+      mode: "deny" as const,
+    };
+    notifyEvidenceDecision(block);
+    notifyEvidenceDecision(block);
+    notifyEvidenceDecision({ ...block, outcome: "warned" });
+    notifyEvidenceDecision(block);
+    expect(pendingObservationCount()).toBe(1);
+
+    await pi.emit("session_start", {}, {});
+    notifyEvidenceDecision(block);
+    expect(pendingObservationCount()).toBe(1);
   });
 
   it("enqueues nothing while the env hard-disable is set", async () => {
