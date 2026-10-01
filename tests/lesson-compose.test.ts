@@ -263,6 +263,13 @@ describe("composes verbatim, never sanitises", () => {
     expect(validateLessonMarkdown(markdown)).toEqual({ ok: true });
   });
 
+  it("trims ASCII whitespace only, so Unicode spaces still reach the validator", () => {
+    for (const odd of ["\u00a0", "\u2028", "\ufeff", "\u3000"]) {
+      const markdown = compose({ kind: `pitfall${odd}` });
+      expect(validateLessonMarkdown(markdown).ok, escape(odd)).toBe(false);
+    }
+  });
+
   it("normalises CRLF so the line-based validator sees what an editor shows", () => {
     const sections = { ...input().sections, symptom: "line one\r\nline two" };
     const markdown = compose({ sections });
@@ -276,10 +283,9 @@ describe("renderProposalPreview", () => {
     expect(renderProposalPreview(compose())).toBe(compose());
   });
 
-  it("caps a long document and says it was cut", () => {
-    const preview = renderProposalPreview("x".repeat(9000));
-    expect(preview.length).toBeLessThan(9000);
-    expect(preview).toMatch(/truncated/i);
+  it("never cuts the document, so what is approved is exactly what was seen", () => {
+    const long = "x".repeat(16000);
+    expect(renderProposalPreview(long)).toBe(long);
   });
 });
 

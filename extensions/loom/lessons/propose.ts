@@ -33,6 +33,7 @@ import {
   PROPOSABLE_NAMESPACES,
   TRIGGER_KEYS,
   isValidLessonSlug,
+  identifyingShapes,
   parseLesson,
   validateLessonMarkdown,
 } from "../../../shared/lesson-rules.js";
@@ -93,22 +94,38 @@ export interface ProposeUiContext {
  * Module-scoped and reset on session_start, so nothing carries across a
  * session swap into a conversation the user never saw.
  */
-interface Arming {
+export interface Arming {
   reason: ProposalReason;
   live: boolean;
   runsLeft: number;
   retriesLeft: number;
+  armedAt: number;
 }
 
 let armed: Arming | null = null;
 
-export function armLessonProposal(reason: ProposalReason, opts: { live?: boolean } = {}): void {
+/**
+ * How long a /lesson arming may wait for its run to start. pi swallows a
+ * refused sendUserMessage (auth, preflight), so without a deadline the arming
+ * would go live in the user's NEXT, unrelated run instead.
+ */
+export const EXPLICIT_ARMING_START_MS = 30_000;
+
+/** Returns the arming so a caller can later disarm exactly that one. */
+export function armLessonProposal(reason: ProposalReason, opts: { live?: boolean } = {}): Arming {
   armed = {
     reason,
     live: opts.live === true,
     runsLeft: reason === "user_correction" ? 2 : 1,
     retriesLeft: 1,
+    armedAt: Date.now(),
   };
+  return armed;
+}
+
+/** Disarm only if `arming` is still the current one -- never someone else's. */
+export function disarmLessonProposal(arming: Arming): void {
+  if (armed === arming) armed = null;
 }
 
 export function peekLessonProposalArming(): ProposalReason | null {
@@ -127,7 +144,14 @@ export function resetLessonProposalArming(): void {
 }
 
 export function lessonArmingRunStarted(): void {
-  if (armed) armed.live = true;
+  if (!armed || armed.live) return;
+  // The nudge's arming waits for the user's next prompt, however long that
+  // takes; an explicit one is for the run /lesson itself starts.
+  if (armed.reason === "explicit" && Date.now() - armed.armedAt > EXPLICIT_ARMING_START_MS) {
+    armed = null;
+    return;
+  }
+  armed.live = true;
 }
 
 export function lessonArmingRunEnded(): void {
@@ -179,9 +203,24 @@ function triggerSummary(input: LessonProposalInput): string {
   return TRIGGER_KEYS.map((key) => `${key}=${count(trigger[key])}`).join(" ");
 }
 
-/** Only ever a well-formed id or a fixed placeholder, so a row can't carry text. */
+/**
+ * Problems with a proposed slug beyond its shape. The slug is model-chosen
+ * text that becomes a filename and an activity-row id, so it gets the same
+ * identifying-data checks as the lesson body, plus long digit runs (record
+ * numbers) -- a name spelled in lowercase words still needs the user's eye.
+ */
+function slugProblems(slug: unknown): string[] {
+  if (!isValidLessonSlug(slug)) {
+    return ["0: slug must be lowercase words joined by hyphens, at most 80 characters"];
+  }
+  const out = identifyingShapes(slug as string).map((shape) => `0: slug contains ${shape}`);
+  if (/\d{5,}/.test(slug as string)) out.push("0: slug contains a long number");
+  return out;
+}
+
+/** An id fit for an activity row, or a fixed placeholder. */
 function safeId(namespace: unknown, slug: unknown): string {
-  return parseLessonId(`${String(namespace)}/${String(slug)}`)
+  return parseLessonId(`${String(namespace)}/${String(slug)}`) && slugProblems(slug).length === 0
     ? `${namespace}/${slug}`
     : "(invalid)";
 }
@@ -262,8 +301,10 @@ export async function proposeLesson(
 
   const arming = armed;
   if (!arming || !arming.live) {
+    // Nothing the model chose reaches the log from an unarmed call: that
+    // would hand a background injection a free row.
     return reject(
-      id,
+      "(unarmed)",
       "unarmed",
       "Lessons are only proposed when the user asks for one. Nobody did -- if something here is " +
         "worth keeping, tell the user they can run /lesson, and move on.",
@@ -284,9 +325,7 @@ export async function proposeLesson(
   if (typeof namespace !== "string" || !PROPOSABLE_NAMESPACES.includes(namespace as never)) {
     problems.push(`0: namespace must be one of ${PROPOSABLE_NAMESPACES.join(", ")}`);
   }
-  if (!isValidLessonSlug(slug)) {
-    problems.push("0: slug must be lowercase words joined by hyphens, at most 80 characters");
-  }
+  problems.push(...slugProblems(slug));
   if (problems.length > 0) return failValidation(problems);
 
   const markdown = composeLessonMarkdown(input, {
@@ -301,8 +340,9 @@ export async function proposeLesson(
   const sl = slug as string;
   record("lesson.proposed", {
     id,
+    // Validated by now, so these are enum values, not free text.
     kind: String(input.kind),
-    stages: Array.isArray(input.stage) ? input.stage.join(",") : "",
+    stages: (input.stage as string[]).join(","),
     trigger: triggerSummary(input),
     bytes: Buffer.byteLength(markdown, "utf-8"),
     armedBy: arming.reason,
@@ -388,14 +428,26 @@ export async function commitDraft(rawId: string, ctx: ProposeUiContext): Promise
   // The schema allows stable and verified because the corpus uses them, but
   // standing is granted by a human reviewer in the corpus repo, never by an
   // edit to a local file -- which a model with file access could make too.
-  const { frontmatter } = parseLesson(read.text);
-  if (frontmatter?.status !== "draft" || "verified" in (frontmatter ?? {})) {
+  const fm = (parseLesson(read.text).frontmatter ?? {}) as Record<string, unknown>;
+  const generated = fm.generated as { by?: unknown } | undefined;
+  const empty = (key: string) => Array.isArray(fm[key]) && (fm[key] as unknown[]).length === 0;
+  if (
+    fm.status !== "draft" ||
+    "verified" in fm ||
+    typeof generated?.by !== "string" ||
+    !generated.by.startsWith("agent:loom") ||
+    !empty("graduated_to") ||
+    !empty("upstream") ||
+    !empty("supersedes") ||
+    slugProblems(slug).length > 0
+  ) {
     return reject(
       id,
       "validator",
-      "A local lesson stays status: draft with no verified entries; that standing is only granted " +
-        "in review. Put those back and run /lesson save again.",
-      ["0: local lessons are drafts"],
+      "A local lesson keeps the fields Loom set when it was drafted: status: draft, no verified " +
+        "entries, generated.by as written, and empty graduated_to, upstream and supersedes. " +
+        "Those are decided in review, not by editing the file. Put them back and run /lesson save again.",
+      ["0: brain-owned fields were edited"],
     );
   }
 

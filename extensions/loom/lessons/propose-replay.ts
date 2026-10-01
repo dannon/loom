@@ -29,7 +29,7 @@ import { appendActivityEvent } from "../activity.js";
 import { getNotebookPath } from "../state.js";
 import { resolveReplayPath } from "../submission-replay.js";
 import type { LessonProposalInput } from "./compose.js";
-import { armLessonProposal, proposeLesson, resetLessonProposalArming } from "./propose.js";
+import { armLessonProposal, disarmLessonProposal, proposeLesson } from "./propose.js";
 
 export function isLessonProposalReplayEnabled(): boolean {
   return !!readEnv("LESSON_PROPOSAL_REPLAY")?.trim();
@@ -66,7 +66,7 @@ export function registerLessonProposalReplay(pi: ExtensionAPI): void {
 
     // Live straight away: there is no agent run here to start it, and the
     // replay stands in for a proposal made inside one.
-    armLessonProposal("explicit", { live: true });
+    const arming = armLessonProposal("explicit", { live: true });
     // Not awaited. pi's RPC mode emits session_start before it starts reading
     // stdin, so holding this handler open on the approval dialog would wait
     // for an answer that can never arrive -- and hang the whole session.
@@ -81,7 +81,8 @@ export function registerLessonProposalReplay(pi: ExtensionAPI): void {
       },
     })
       .catch(() => undefined)
-      // A rejected draft keeps its retry; the replay's arming must not outlive it.
-      .finally(() => resetLessonProposalArming());
+      // A rejected draft keeps its retry; the replay's arming must not outlive
+      // it -- but a /lesson typed while the dialog was open is not ours to clear.
+      .finally(() => disarmLessonProposal(arming));
   });
 }

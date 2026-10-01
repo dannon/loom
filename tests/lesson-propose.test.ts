@@ -7,6 +7,7 @@ import {
   armLessonProposal,
   commitDraft,
   lessonArmingRunEnded,
+  EXPLICIT_ARMING_START_MS,
   lessonArmingRunStarted,
   peekLessonProposalArming,
   proposeLesson,
@@ -498,5 +499,83 @@ describe("no notebook, no activity, but still no silent save", () => {
     armLive();
     const result = await proposeLesson(input(), fakeCtx({ select: "Save it" }));
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("review fixes", () => {
+  it("shows the whole draft, including sections past a long frontmatter", async () => {
+    const sources = Array.from({ length: 20 }, (_, i) => ({
+      id: `source-number-${"q".repeat(80)}-${i}`,
+      title: "t".repeat(190),
+    }));
+    const sections = { ...input().sections, not_when: "TAIL MARKER the user must see." };
+    armLive();
+    const ctx = fakeCtx({ select: "Save it" });
+    const result = await proposeLesson(input({ sources, sections }), ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(fs.statSync(result.path).size).toBeGreaterThan(6000);
+    expect(ctx.notifications.join("\n")).toContain("TAIL MARKER the user must see.");
+    expect(ctx.notifications.join("\n")).toContain(fs.readFileSync(result.path, "utf-8"));
+  });
+
+  it("refuses a slug carrying a hex id or a record number, and never logs it", async () => {
+    for (const slug of ["patient-mrn-8675309-x", "run-deadbeefcafebabe1234-x"]) {
+      armLive();
+      const result = await proposeLesson(input({ slug }), fakeCtx({ select: "Save it" }));
+      expect(result, slug).toMatchObject({ ok: false, reason: "validator" });
+      resetLessonProposalArming();
+    }
+    expect(JSON.stringify(activityRows())).not.toMatch(/8675309|deadbeef/);
+    expect(fs.existsSync(lessonsDir())).toBe(false);
+  });
+
+  it("never logs the model's id from an unarmed call", async () => {
+    await proposeLesson(input({ slug: "jane-doe-was-here" }), fakeCtx());
+    expect(activityRows()[0].payload.id).toBe("(unarmed)");
+    expect(JSON.stringify(activityRows())).not.toContain("jane-doe");
+  });
+
+  it("drops a /lesson arming whose run never started in time", () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    armLessonProposal("explicit");
+    clock.mockReturnValue(now + EXPLICIT_ARMING_START_MS + 1);
+    lessonArmingRunStarted();
+    expect(peekLessonProposalArming()).toBeNull();
+  });
+
+  it("lets the correction nudge wait as long as the user takes", () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    armLessonProposal("user_correction");
+    clock.mockReturnValue(now + 10 * EXPLICIT_ARMING_START_MS);
+    lessonArmingRunStarted();
+    expect(peekLessonProposalArming()).toBe("user_correction");
+  });
+
+  it("refuses a staged draft whose brain-owned fields were edited", async () => {
+    const edits: [string, string][] = [
+      ["by: agent:loom", "by: human:loom-maintainers-x"],
+      ["graduated_to: []", "graduated_to:\n  - https://github.com/galaxyproject/galaxy/pull/1"],
+      ["upstream: []", "upstream:\n  - https://example.org/x"],
+      ["supersedes: []", "supersedes:\n  - stats/de-contrast-direction-and-sample-labels"],
+    ];
+    const draft = draftFilePath("stats", "na-coerced-to-zero-in-filters");
+    for (const [from, to] of edits) {
+      armLive();
+      await proposeLesson(input(), fakeCtx({ select: "Keep it as a draft I can edit" }));
+      const text = fs.readFileSync(draft, "utf-8");
+      expect(text, from).toContain(from);
+      const edited = text.replace(from, to);
+      expect(validateLessonMarkdown(edited), to).toEqual({ ok: true });
+      fs.writeFileSync(draft, edited);
+      const result = await commitDraft(
+        "stats/na-coerced-to-zero-in-filters",
+        fakeCtx({ confirm: true }),
+      );
+      expect(result, to).toMatchObject({ ok: false, reason: "validator" });
+    }
+    expect(fs.existsSync(LESSON())).toBe(false);
   });
 });

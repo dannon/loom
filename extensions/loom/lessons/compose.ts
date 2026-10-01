@@ -73,7 +73,11 @@ export interface ComposeMeta {
  * validator reports it as the wrong type instead of compose papering over it.
  */
 function text(value: unknown): unknown {
-  return typeof value === "string" ? value.replace(/\r\n/g, "\n").trim() : value;
+  // ASCII whitespace only: String.trim() also eats U+2028, U+00A0 and U+FEFF,
+  // which would hide them from the validator's printable-ASCII rule.
+  return typeof value === "string"
+    ? value.replace(/\r\n/g, "\n").replace(/^[ \t\n]+|[ \t\n]+$/g, "")
+    : value;
 }
 
 function list(value: unknown): unknown {
@@ -163,16 +167,11 @@ export function composeLessonMarkdown(input: LessonProposalInput, meta: ComposeM
 }
 
 /**
- * Cap for the draft shown to the user. The preview is only rendered AFTER the
- * validator passed, so it already has no URLs, fences or invisible characters
- * and is under the file cap -- this only keeps a notify readable.
+ * The draft as shown to the user: all of it. The validator already capped the
+ * file at 16 KB and ruled out URLs, fences and invisible characters, and the
+ * approval is only a control if what is approved is exactly what was seen --
+ * a truncated preview hides the sections, which come last.
  */
-const PREVIEW_MAX = 6000;
-
 export function renderProposalPreview(markdown: string): string {
-  if (markdown.length <= PREVIEW_MAX) return markdown;
-  return (
-    markdown.slice(0, PREVIEW_MAX) +
-    `\n\n[... truncated for display; ${markdown.length - PREVIEW_MAX} more characters ...]`
-  );
+  return markdown;
 }

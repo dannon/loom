@@ -10,6 +10,7 @@ import {
 import { lessonFilePath } from "../extensions/loom/lessons/paths";
 import { resetActivity } from "../extensions/loom/activity";
 import {
+  armLessonProposal,
   peekLessonProposalArming,
   resetLessonProposalArming,
 } from "../extensions/loom/lessons/propose";
@@ -225,4 +226,28 @@ describe("startup", () => {
     expect(rows().at(-1)!.kind).toBe("lesson.saved");
     expect(peekLessonProposalArming()).toBeNull();
   });
+});
+
+it("does not clear a /lesson arming made while its dialog was open", async () => {
+  plant(GOOD);
+  const handlers: ((event: unknown, ctx: unknown) => Promise<void>)[] = [];
+  registerLessonProposalReplay({
+    on: (_e: string, h: (event: unknown, ctx: unknown) => Promise<void>) => handlers.push(h),
+  } as never);
+  let answer: (value: string) => void = () => {};
+  await handlers[0](
+    {},
+    {
+      hasUI: true,
+      ui: {
+        notify: () => {},
+        select: () => new Promise<string>((resolve) => (answer = resolve)),
+        confirm: async () => true,
+      },
+    },
+  );
+  armLessonProposal("explicit");
+  answer("Discard it");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(peekLessonProposalArming()).toBe("explicit");
 });
