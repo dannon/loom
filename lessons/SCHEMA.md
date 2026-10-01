@@ -58,10 +58,13 @@ required.
 `Symptom`, `Cause`, `Check first`, `Intervention`, `Validate`,
 `Does NOT apply when`.
 
-Each section is at most 600 characters and must not be empty. No fenced code
-blocks (a short inline backtick span is fine). No `http://` or `https://`
-anywhere in the body. No markdown links. No line starting with `#` other than
-those six headings.
+Each section is at most 600 characters and must not be empty. Nothing before
+the first heading. No fenced code blocks anywhere on a line, and no indented
+code blocks (a short inline backtick span is fine). No URLs of any scheme,
+protocol-relative or scheme-less, anywhere in the body. No markdown links,
+inline or reference-style. No HTML outside an inline code span. No heading
+other than those six, whether `#`-style at any indent or a setext underline,
+and no horizontal rules. The whole file is at most 16384 bytes.
 
 ## What the validator adds on top of the field list
 
@@ -71,18 +74,27 @@ them, and they are part of the schema.
 - **Unknown keys are rejected**, at the top level and inside `generated`,
   `verified[]`, `sources[]`, `trigger`, `applies_to` and `evidence`. Every
   required key must be present; `verified` is the only optional one.
-- **Printable ASCII only, in the whole file.** A Unicode em-dash, a smart quote
-  or a non-breaking space is an error, reported by codepoint. Write `--`.
-- **Nothing identifying, anywhere.** No home-directory paths (`/Users/`,
-  `/home/`, `~/`), Windows paths, hex ids of 16 or more characters or email
-  addresses in the body or in any frontmatter string. No URL of any scheme in
-  the body or in a frontmatter field, except `graduated_to`, `upstream` and
-  `sources[].resource`, which may hold a link.
+- **Printable ASCII only, in the whole file and in every parsed value.** A
+  Unicode em-dash, a smart quote or a non-breaking space is an error, reported
+  by codepoint. Write `--`. Parsed values are checked too, so a YAML escape like
+  `"\u202e"` cannot carry a control character past the file check.
+- **Plain YAML only.** No comments (they ship in the raw file and would
+  otherwise go unchecked), no anchors or aliases, no explicit tags.
+- **Nothing identifying, anywhere.** No absolute or home-directory paths,
+  Windows or UNC paths, hex ids of 16 or more characters, uuids, IP addresses or
+  email addresses in the body, in any frontmatter value or on any raw
+  frontmatter line. No URL in the body or in a frontmatter field, except
+  `graduated_to`, `upstream` and `sources[].resource`, which may hold an
+  `https` link with no credentials, query or fragment and no home path or email
+  in its path. These are shape checks: a private hostname written as prose, a
+  name or a copied data value still needs the contributor's own judgement.
 - **Dates** are `YYYY-MM-DD` strings that are also real calendar dates.
 - **`generated.by`** matches `agent:<something>` or `human:<something>`;
   **`verified[].by`** must be `human:<pseudonym>`. It is the one identity field
   in the schema, and the shared tier uses maintainer pseudonyms rather than
   contributor ids.
+- **Signatures must be specific.** At least 8 characters, and never the
+  normalizer's `unknown` fallback, which would match every empty error.
 - **Signatures must already be normalized.** The validator runs the same
   normalization the matcher will run over a tool result and rejects any
   signature it would change, naming the normalized form to store instead. A

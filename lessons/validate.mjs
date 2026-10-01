@@ -15,15 +15,17 @@
  * lesson ships inside the package to every install, and the published snapshot
  * goes into a public index, so a lesson must not carry anything to follow (no
  * URLs, no markdown links), anything to run (no fenced code), or anything
- * identifying (no home-directory or Windows paths, hex ids or email addresses
- * anywhere, and no URLs outside the fields the schema says may hold a link).
+ * identifying (no paths, hex ids, uuids, IPs or email addresses anywhere, and no
+ * URLs outside the fields the schema says may hold a link, which take https only).
+ * The regexes catch shapes, not meaning: a private hostname written as prose, a
+ * person's name or a copied data value still needs a human reviewer.
  */
 
 import fs from "node:fs";
 import path from "node:path";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { parse as parseYaml } from "yaml";
+import { isAlias, parseDocument, visit } from "yaml";
 
 export const LESSONS_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -105,6 +107,8 @@ export const LIMITS = {
   freeText: 200,
   section: 600,
   listItems: 20,
+  minSignature: 8,
+  fileBytes: 16384,
 };
 
 export const UNKNOWN_SIGNATURE = "unknown";
@@ -146,20 +150,95 @@ export function normalizeSignature(text) {
  * lessons talk about hids in the abstract and that rule would reject them.
  */
 const IDENTIFYING = [
-  ["a URL", /[A-Za-z][A-Za-z0-9+.-]*:\/\//],
-  ["a home-directory path", /\/Users\/|\/home\/|~[\\/]/],
-  ["a Windows path", /\b[A-Za-z]:[\\/]/],
+  [
+    "a URL",
+    // A scheme, a script-ish scheme with no slashes, a protocol-relative
+    // //host, or a scheme-less host/path.
+    /[A-Za-z][A-Za-z0-9+.-]*:\/\/|\b(?:javascript|data|vbscript|file):|(?:^|[\s(<"'=])\/\/[A-Za-z0-9]|\b(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\/\S/i,
+  ],
+  ["a home-directory path", /\/(?:Users|home|root)\/|~[A-Za-z0-9._-]*[\\/]/i],
+  ["an absolute path", /(?:^|[\s(<"'=:,])\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]/],
+  ["a Windows path", /\b[A-Za-z]:[\\/]|\\\\[A-Za-z0-9.-]+\\/],
   ["a hex id of 16+ characters", /[0-9a-fA-F]{16,}/],
+  ["a uuid", /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
+  [
+    "an IP address",
+    /\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}\b|\bfe80::/i,
+  ],
   ["an email address", /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/],
 ];
 
 /** Fields C3 allows to carry a link. Everything else in a lesson may not. */
 const LINK_FIELDS = ["graduated_to", "upstream", "sources.resource"];
 
-/** Names of the identifying shapes in `text`; URLs are dropped first when allowed. */
+/**
+ * Problems with one link in a field that may hold links. https only, nothing
+ * that identifies who fetched it (credentials, query, fragment), and the path
+ * still gets the home-directory and email checks.
+ */
+function linkProblems(link) {
+  let url;
+  try {
+    url = new URL(link);
+  } catch {
+    return ["a malformed URL"];
+  }
+  const out = [];
+  if (url.protocol !== "https:") out.push("a non-https URL");
+  if (url.username || url.password) out.push("credentials in a URL");
+  if (url.search || url.hash) out.push("a query or fragment in a URL");
+  let pathname = url.pathname;
+  try {
+    pathname = decodeURIComponent(pathname);
+  } catch {
+    out.push("a malformed URL");
+  }
+  for (const name of ["a home-directory path", "a Windows path", "an email address"]) {
+    const re = IDENTIFYING.find(([n]) => n === name)[1];
+    if (re.test(pathname)) out.push(`${name} inside a URL`);
+  }
+  return out;
+}
+
+/**
+ * Names of the identifying shapes in `text`. With `allowUrls`, each URL is
+ * checked as a link and the rest of the text is checked as usual.
+ */
 export function identifyingShapes(text, { allowUrls = false } = {}) {
-  const s = allowUrls ? text.replace(/[A-Za-z][A-Za-z0-9+.-]*:\/\/\S*/g, " ") : text;
-  return IDENTIFYING.filter(([, re]) => re.test(s)).map(([name]) => name);
+  const out = [];
+  let s = text;
+  if (allowUrls) {
+    s = text.replace(/[A-Za-z][A-Za-z0-9+.-]*:\/\/\S*/g, (link) => {
+      out.push(...linkProblems(link));
+      return " ";
+    });
+  }
+  for (const [name, re] of IDENTIFYING) if (re.test(s)) out.push(name);
+  return [...new Set(out)];
+}
+
+/**
+ * Parse frontmatter YAML strictly. Comments are refused because they ship in
+ * the raw file and nothing else checks them; anchors, aliases and explicit tags
+ * because a lesson has no use for them and each one is a way to make the
+ * parsed value differ from what a reviewer reads.
+ */
+export function loadFrontmatter(fmText) {
+  const doc = parseDocument(fmText, { uniqueKeys: true, prettyErrors: false });
+  const problems = [...doc.errors, ...doc.warnings].map(
+    (e) => `frontmatter is not valid YAML: ${e.message.split("\n")[0]}`,
+  );
+  let comments = Boolean(doc.commentBefore || doc.comment);
+  let fancy = false;
+  visit(doc, {
+    Node(_, node) {
+      if (node.commentBefore || node.comment) comments = true;
+      if (isAlias(node) || node.anchor || node.tag) fancy = true;
+    },
+  });
+  if (comments) problems.push("no YAML comments in frontmatter; they ship unchecked");
+  if (fancy) problems.push("no YAML anchors, aliases or explicit tags in frontmatter");
+  return { value: problems.length > 0 ? undefined : doc.toJS(), problems };
 }
 
 function eachString(value, label, visit) {
@@ -234,7 +313,8 @@ export function parseLesson(raw) {
   const text = raw.replace(/\r\n/g, "\n");
   const split = splitFrontmatter(text);
   if (!split) throw new Error("missing YAML frontmatter");
-  const frontmatter = parseYaml(split.fmText, { uniqueKeys: true });
+  const { value: frontmatter, problems } = loadFrontmatter(split.fmText);
+  if (problems.length > 0) throw new Error(problems[0]);
   const { sections } = parseSections(split.body, split.bodyFirstLine);
   const out = {};
   for (const spec of SECTIONS) {
@@ -325,6 +405,11 @@ export function validateLessonFile(relPath, raw) {
   // Printable ASCII only, everywhere. A smart quote or a Unicode em-dash in a
   // lesson reaches the model as whatever the consumer's encoding makes of it,
   // and the repo writes em-dashes as `--` anyway.
+  if (Buffer.byteLength(raw, "utf8") > LIMITS.fileBytes) {
+    add(1, `file is ${Buffer.byteLength(raw, "utf8")} bytes, max ${LIMITS.fileBytes}`);
+    return out;
+  }
+
   const odd = /[^\t\n\x20-\x7e]/.exec(text);
   if (odd) {
     const line = text.slice(0, odd.index).split("\n").length;
@@ -340,9 +425,23 @@ export function validateLessonFile(relPath, raw) {
     return out;
   }
 
+  // The raw lines too, so a comment or anything else the parser drops is still
+  // held to the identifying-data rules. Links are judged as links here because
+  // the line-to-field mapping is not known; the parsed check below is strict.
+  split.fmLines.forEach((line, i) => {
+    for (const shape of identifyingShapes(line, { allowUrls: true })) {
+      add(split.fmFirstLine + i, `frontmatter line contains ${shape}; lessons carry none`);
+    }
+  });
+
   let fm;
   try {
-    fm = parseYaml(split.fmText, { uniqueKeys: true });
+    const loaded = loadFrontmatter(split.fmText);
+    if (loaded.problems.length > 0) {
+      for (const p of loaded.problems) add(split.fmFirstLine, p);
+      return out;
+    }
+    fm = loaded.value;
   } catch (err) {
     const message = err instanceof Error ? err.message.split("\n")[0] : String(err);
     add(split.fmFirstLine, `frontmatter is not valid YAML: ${message}`);
@@ -395,6 +494,9 @@ export function validateLessonFile(relPath, raw) {
     const line = at("verified");
     if (!Array.isArray(fm.verified)) add(line, "verified must be a list");
     else {
+      if (fm.verified.length > LIMITS.listItems) {
+        add(line, `verified has ${fm.verified.length} entries, max ${LIMITS.listItems}`);
+      }
       fm.verified.forEach((entry, i) => {
         if (!checkExactKeys(add, line, `verified[${i}]`, entry, ["by", "at"])) return;
         // Maintainer pseudonyms only. A contributor id here would publish an
@@ -500,6 +602,12 @@ export function validateLessonFile(relPath, raw) {
       t.signatures.forEach((sig, i) => {
         if (typeof sig !== "string") return;
         const normalized = normalizeSignature(sig);
+        if (sig === UNKNOWN_SIGNATURE || sig.length < LIMITS.minSignature) {
+          add(
+            at("signatures"),
+            `trigger.signatures[${i}] is too generic to match on; quote the distinctive part of the error`,
+          );
+        }
         if (normalized !== sig) {
           add(
             at("signatures"),
@@ -570,6 +678,16 @@ export function validateLessonFile(relPath, raw) {
   // Every string, not just the prose fields: a title, a cue or a source id
   // reaches the snapshot and the public index exactly like the body does.
   eachString(fm, "", (label, value) => {
+    // The file-level ASCII check reads raw bytes, and a YAML escape like "\u202e"
+    // is ASCII on disk. This is the check that sees the decoded value.
+    const bad = /[^\x20-\x7e]/.exec(value);
+    if (bad) {
+      const point = bad[0].codePointAt(0).toString(16).toUpperCase().padStart(4, "0");
+      add(
+        at(label.split(/[.[]/)[0]),
+        `${label} contains control or non-ASCII character U+${point}`,
+      );
+    }
     const allowUrls = LINK_FIELDS.includes(label.replace(/\[\d+\]/g, ""));
     for (const shape of identifyingShapes(value, { allowUrls })) {
       add(at(label.split(/[.[]/)[0]), `${label} contains ${shape}; lessons carry none`);
@@ -622,16 +740,37 @@ function validateBody(rel, split) {
   }
 
   const bodyLines = split.body.split("\n");
+  // Everything before the first heading is dropped from the snapshot but still
+  // ships in the raw file, so it has to be empty.
+  const firstHeading = found.length > 0 ? found[0].index : bodyLines.length;
+  const preamble = bodyLines.slice(0, firstHeading).findIndex((l) => l.trim() !== "");
+  if (preamble !== -1) {
+    add(split.bodyFirstLine + preamble, "no text before the first section heading");
+  }
+
   bodyLines.forEach((line, i) => {
     const at = split.bodyFirstLine + i;
-    if (/^ {0,3}(?:`{3,}|~{3,})/.test(line)) {
+    // Anywhere on the line, so a fence inside a blockquote or a list item counts.
+    if (/`{3,}|~{3,}/.test(line)) {
       add(at, "no fenced code blocks in a lesson body; a short inline span is fine");
+    }
+    if (/^(?: {4,}|\t)\S/.test(line)) add(at, "no indented code blocks in a lesson body");
+    if (!line.startsWith("#") && /^[ \t>*+-]*#{1,6}(?:\s|$)/.test(line)) {
+      add(at, "unexpected heading; only the six lesson sections are allowed");
+    }
+    if (/^ {0,3}(?:=+|-+|\*{3,}|_{3,})\s*$/.test(line)) {
+      add(at, "no setext headings or horizontal rules in a lesson body");
+    }
+    if (/<[A-Za-z!/?]/.test(line.replace(/`[^`]*`/g, ""))) {
+      add(at, "no HTML in a lesson body");
     }
     for (const shape of identifyingShapes(line)) {
       if (shape === "a URL") add(at, "no URLs in a lesson body; put provenance in sources");
       else add(at, `${shape} in a lesson body; lessons carry none`);
     }
-    if (/\[[^\]\n]*\]\([^)\n]*\)/.test(line)) add(at, "no markdown links in a lesson body");
+    // `](` and `][` rather than a whole `[text](target)`: link text and
+    // target can be split across lines, and reference definitions stand alone.
+    if (/\]\(|\]\[|^\s*\[[^\]]+\]:/.test(line)) add(at, "no markdown links in a lesson body");
   });
 
   return out;
@@ -659,6 +798,10 @@ export function validateLessonsDir(dir) {
     .sort((a, b) => (a.name < b.name ? -1 : 1));
   for (const ns of entries) {
     if (ns.name.startsWith(".")) continue;
+    if (ns.isSymbolicLink()) {
+      out.push(`${ns.name}:1: no symlinks in the lessons directory`);
+      continue;
+    }
     if (!ns.isDirectory()) continue; // README, SCHEMA, LICENSE, log, the scripts
     if (!NAMESPACES.includes(ns.name)) {
       out.push(
