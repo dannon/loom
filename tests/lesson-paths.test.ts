@@ -195,3 +195,31 @@ describe("writing", () => {
     expect(leftovers(draftsDir())).toEqual([]);
   });
 });
+
+describe("symlinked directories", () => {
+  it("refuses to read or write through a symlinked namespace directory", () => {
+    const elsewhere = path.join(tmp, "elsewhere");
+    fs.mkdirSync(elsewhere, { recursive: true });
+    fs.writeFileSync(path.join(elsewhere, "alpha.md"), "planted");
+    fs.mkdirSync(lessonsDir(), { recursive: true });
+    fs.symlinkSync(elsewhere, path.join(lessonsDir(), "stats"));
+    expect(readLessonFile(lessonFilePath("stats", "alpha"))).toEqual({
+      ok: false,
+      detail: "inside a symlinked directory",
+    });
+    expect(writeNoClobber(lessonFilePath("stats", "beta"), "x")).toMatchObject({
+      ok: false,
+      reason: "error",
+    });
+    expect(fs.existsSync(path.join(elsewhere, "beta.md"))).toBe(false);
+  });
+
+  it("refuses to stage a draft through a symlinked drafts directory", () => {
+    const elsewhere = path.join(tmp, "elsewhere");
+    fs.mkdirSync(elsewhere, { recursive: true });
+    fs.mkdirSync(path.dirname(draftsDir()), { recursive: true });
+    fs.symlinkSync(elsewhere, draftsDir());
+    expect(writeOverwrite(draftFilePath("stats", "alpha"), "x").ok).toBe(false);
+    expect(fs.readdirSync(elsewhere)).toEqual([]);
+  });
+});

@@ -67,7 +67,7 @@ export function draftFilePath(namespace: string, slug: string): string {
 /** Split `<namespace>/<slug>` into its parts, or null if it is not a lesson id. */
 export function parseLessonId(raw: unknown): { namespace: string; slug: string } | null {
   if (typeof raw !== "string") return null;
-  const parts = raw.trim().split("/");
+  const parts = raw.replace(/^[ \t]+|[ \t]+$/g, "").split("/");
   if (parts.length !== 2) return null;
   const [namespace, slug] = parts;
   if (!isValidLessonNamespace(namespace) || !isValidLessonSlug(slug)) return null;
@@ -85,8 +85,8 @@ export function listLocalLessons(): LocalLesson[] {
       continue;
     }
     for (const entry of entries) {
-      // isFile() is false for a symlink, so a link planted in the lessons
-      // tree can't point the reader at some other file.
+      // isFile() is false for a symlink file; a symlinked directory is caught
+      // when the file is read (parentIsReal).
       if (!entry.isFile()) continue;
       const id = lessonIdFromPath(`${namespace}/${entry.name}`);
       if (!id) continue;
@@ -131,6 +131,7 @@ export type ReadResult = { ok: true; text: string } | { ok: false; detail: strin
  */
 export function readLessonFile(filePath: string): ReadResult {
   try {
+    if (!parentIsReal(filePath)) return { ok: false, detail: "inside a symlinked directory" };
     const stat = fs.lstatSync(filePath);
     if (!stat.isFile()) return { ok: false, detail: "not a regular file" };
     if (stat.size > MAX_FILE_BYTES) {
@@ -147,6 +148,26 @@ export type WriteResult = { ok: true } | { ok: false; reason: "exists" | "error"
 
 function errorDetail(err: unknown): string {
   return (err as NodeJS.ErrnoException)?.code ?? (err instanceof Error ? err.message : "error");
+}
+
+/**
+ * True when no directory between the state dir and `filePath` is a symlink.
+ * lstat on the file only covers its last component; a linked lessons/ or
+ * namespace directory would otherwise send reads and writes somewhere else.
+ * The state dir itself may be a link (dotfile setups do that).
+ */
+function parentIsReal(filePath: string): boolean {
+  const root = getConfigDir();
+  const dir = path.dirname(filePath);
+  const rel = path.relative(root, dir);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) return false;
+  try {
+    return fs.realpathSync(dir) === path.join(fs.realpathSync(root), rel);
+  } catch (err) {
+    // Nothing there yet means nothing to follow; the caller's own fs call
+    // reports the missing file.
+    return (err as NodeJS.ErrnoException)?.code === "ENOENT";
+  }
 }
 
 /** Write the bytes beside `filePath` under a name nothing else will pick. */
@@ -176,6 +197,8 @@ export function writeNoClobber(filePath: string, text: string): WriteResult {
   let tmp: string;
   try {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    if (!parentIsReal(filePath))
+      return { ok: false, reason: "error", detail: "symlinked directory" };
     tmp = writeTemp(filePath, text);
   } catch (err) {
     return { ok: false, reason: "error", detail: errorDetail(err) };
@@ -202,6 +225,7 @@ export function writeOverwrite(
 ): { ok: true } | { ok: false; detail: string } {
   try {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    if (!parentIsReal(filePath)) return { ok: false, detail: "symlinked directory" };
     const tmp = writeTemp(filePath, text);
     try {
       fs.renameSync(tmp, filePath);
