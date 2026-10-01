@@ -9,11 +9,17 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LIMITS, normalizeSignature, validateLessonsDir } from "../lessons/validate.mjs";
+import {
+  LIMITS,
+  collectLessonFiles,
+  normalizeSignature,
+  parseLesson,
+  validateLessonsDir,
+} from "../lessons/validate.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CORPUS = join(REPO_ROOT, "lessons");
@@ -522,5 +528,39 @@ describe("the CLI", () => {
 
   it("exits 2 on bad arguments", () => {
     expect(run("one", "two").status).toBe(2);
+  });
+});
+
+describe("the committed corpus", () => {
+  it("validates clean", () => {
+    expect(validateLessonsDir(CORPUS)).toEqual([]);
+  });
+
+  it("holds the thirteen ported seed lessons", () => {
+    expect(collectLessonFiles(CORPUS)).toEqual([
+      "data/downloaded-file-is-not-what-its-extension-says.md",
+      "galaxy-api/403-history-is-a-hard-stop.md",
+      "galaxy-api/collection-into-single-dataset-input.md",
+      "galaxy-api/connectedvalue-in-command-line.md",
+      "galaxy-api/hid-is-not-an-id.md",
+      "galaxy-api/invoke-workflow-inputs-not-params.md",
+      "galaxy-api/repeat-param-pipe-keys.md",
+      "galaxy-api/run-tool-returns-on-submit.md",
+      "galaxy-tools/reference-index-not-on-server.md",
+      "reproduction/input-population-mismatch.md",
+      "reproduction/methods-text-vs-executed-parameters.md",
+      "stats/de-contrast-direction-and-sample-labels.md",
+      "stats/na-coerced-to-zero-in-filters.md",
+    ]);
+  });
+
+  // galaxy-api lessons are kept but never surfaced, which is `graduated_to`
+  // being non-empty rather than a flag of its own.
+  it("gives every galaxy-api lesson somewhere its fix graduated to", () => {
+    for (const rel of collectLessonFiles(CORPUS).filter((r) => r.startsWith("galaxy-api/"))) {
+      const { frontmatter } = parseLesson(readFileSync(join(CORPUS, rel), "utf8"));
+      expect(frontmatter.graduated_to.length, rel).toBeGreaterThan(0);
+      expect(frontmatter.status, rel).toBe("stable");
+    }
   });
 });
