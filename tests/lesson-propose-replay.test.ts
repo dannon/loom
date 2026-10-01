@@ -58,8 +58,11 @@ function harness(ui: { hasUI: boolean; select?: unknown } = { hasUI: false }) {
     ui: { notify: () => {}, select: async () => ui.select, confirm: async () => true },
   };
   return {
+    ctx,
     fire: async () => {
       for (const h of handlers) await h({}, ctx);
+      // The proposal is deliberately not awaited by the handler; let it finish.
+      await new Promise((resolve) => setTimeout(resolve, 0));
     },
   };
 }
@@ -189,6 +192,37 @@ describe("replay", () => {
     plant("{not json", "bad.json");
     await harness().fire();
     expect(rows().map((r) => r.kind)).toEqual(["lesson.replay"]);
+    expect(peekLessonProposalArming()).toBeNull();
+  });
+});
+
+describe("startup", () => {
+  it("returns from session_start without waiting for the approval dialog", async () => {
+    // In RPC mode stdin is not read until session_start handlers finish, so a
+    // handler that waited on the dialog would never get its answer.
+    plant(GOOD);
+    const handlers: ((event: unknown, ctx: unknown) => Promise<void>)[] = [];
+    registerLessonProposalReplay({
+      on: (_e: string, h: (event: unknown, ctx: unknown) => Promise<void>) => handlers.push(h),
+    } as never);
+    let answer: (value: string) => void = () => {};
+    const ctx = {
+      hasUI: true,
+      ui: {
+        notify: () => {},
+        select: () => new Promise<string>((resolve) => (answer = resolve)),
+        confirm: async () => true,
+      },
+    };
+    const settled = await Promise.race([
+      handlers[0]({}, ctx).then(() => "returned"),
+      new Promise((resolve) => setTimeout(() => resolve("blocked"), 200)),
+    ]);
+    expect(settled).toBe("returned");
+    expect(rows().map((r) => r.kind)).toEqual(["lesson.replay", "lesson.proposed"]);
+    answer("Save it");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(rows().at(-1)!.kind).toBe("lesson.saved");
     expect(peekLessonProposalArming()).toBeNull();
   });
 });

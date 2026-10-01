@@ -67,15 +67,21 @@ export function registerLessonProposalReplay(pi: ExtensionAPI): void {
     // Live straight away: there is no agent run here to start it, and the
     // replay stands in for a proposal made inside one.
     armLessonProposal("explicit", { live: true });
-    await proposeLesson(proposal, {
+    // Not awaited. pi's RPC mode emits session_start before it starts reading
+    // stdin, so holding this handler open on the approval dialog would wait
+    // for an answer that can never arrive -- and hang the whole session.
+    // Everything up to the dialog (validation, the activity rows) still runs
+    // synchronously here.
+    void proposeLesson(proposal, {
       hasUI: ctx.hasUI,
       ui: {
         notify: (message, level) => ctx.ui.notify(message, level),
         select: (title, options) => ctx.ui.select(title, options),
         confirm: (title, message) => ctx.ui.confirm(title, message),
       },
-    });
-    // A rejected draft keeps its retry; the replay's arming must not outlive it.
-    resetLessonProposalArming();
+    })
+      .catch(() => undefined)
+      // A rejected draft keeps its retry; the replay's arming must not outlive it.
+      .finally(() => resetLessonProposalArming());
   });
 }
