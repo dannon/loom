@@ -21,6 +21,7 @@
   "files": [
     "bin/",
     "extensions/",
+    "lessons/",
     "shared/",
     "CHANGELOG.md",
     "README.md",
