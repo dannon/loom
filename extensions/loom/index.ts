@@ -25,6 +25,7 @@ import { registerExecutionCommands } from "./execution-commands";
 import { registerDashboardTools } from "./dashboard-tools";
 import { registerDashboardCommands } from "./dashboard-commands";
 import { registerFeedbackCommand } from "./feedback-command";
+import { registerLessonProposals } from "./lesson-command";
 import { registerTesterIdCommand } from "./tester-id-command";
 import { registerInstructionsCommand } from "./instructions-command";
 import { registerTeamTools } from "./teams/tool";
@@ -128,6 +129,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerDashboardTools(pi);
   registerDashboardCommands(pi);
   registerFeedbackCommand(pi);
+  registerLessonProposals(pi);
   registerTesterIdCommand(pi);
   registerInstructionsCommand(pi);
   registerSkillTriggers(pi);

@@ -9,8 +9,10 @@ import {
   currentSuppressions,
   formatLessonListing,
   registerLessonCommand,
+  registerLessonProposals,
   removeSuppression,
 } from "../extensions/loom/lesson-command";
+import { resetLessonNudge } from "../extensions/loom/lesson-nudge";
 import {
   peekLessonProposalArming,
   resetLessonProposalArming,
@@ -334,5 +336,44 @@ describe("unknown subcommands and usage", () => {
       expect(peekLessonProposalArming(), sub).toBeNull();
     }
     expect(h.sent).toHaveLength(0);
+  });
+});
+
+describe("registerLessonProposals", () => {
+  function registrations() {
+    const commands: string[] = [];
+    const tools: string[] = [];
+    const events: string[] = [];
+    registerLessonProposals({
+      registerCommand: (name: string) => commands.push(name),
+      registerTool: (tool: { name: string }) => tools.push(tool.name),
+      on: (event: string) => events.push(event),
+      sendMessage: () => {},
+      sendUserMessage: () => {},
+    } as never);
+    return { commands, tools, events };
+  }
+
+  afterEach(() => {
+    delete process.env.LOOM_LESSON_PROPOSAL_REPLAY;
+    resetLessonNudge();
+  });
+
+  it("registers the command, the tool and the arming lifecycle, and no replay by default", () => {
+    delete process.env.LOOM_LESSON_PROPOSAL_REPLAY;
+    const r = registrations();
+    expect(r.commands).toEqual(["lesson"]);
+    expect(r.tools).toEqual(["lesson_propose"]);
+    expect(r.events.filter((e) => e === "agent_start" || e === "agent_end")).toEqual([
+      "agent_start",
+      "agent_end",
+    ]);
+    // Arming reset and the nudge's session reset; no replay handler.
+    expect(r.events.filter((e) => e === "session_start")).toHaveLength(2);
+  });
+
+  it("adds the replay seam only when its env var is set", () => {
+    process.env.LOOM_LESSON_PROPOSAL_REPLAY = "proposal.json";
+    expect(registrations().events.filter((e) => e === "session_start")).toHaveLength(3);
   });
 });

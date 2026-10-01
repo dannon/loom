@@ -13,7 +13,12 @@ import fs from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getConfigPath, loadConfig, saveConfig, type LoomConfig } from "./config.js";
 import { parseLesson, validateLessonMarkdown } from "../../shared/lesson-rules.js";
-import { armLessonProposal, commitDraft, type ProposeUiContext } from "./lessons/propose.js";
+import {
+  armLessonProposal,
+  commitDraft,
+  registerLessonArmingLifecycle,
+  type ProposeUiContext,
+} from "./lessons/propose.js";
 import {
   lessonFilePath,
   listDrafts,
@@ -23,6 +28,12 @@ import {
   type LocalLesson,
   type ReadResult,
 } from "./lessons/paths.js";
+import { registerLessonProposeTool } from "./lessons/propose-tool.js";
+import {
+  isLessonProposalReplayEnabled,
+  registerLessonProposalReplay,
+} from "./lessons/propose-replay.js";
+import { registerLessonNudge } from "./lesson-nudge.js";
 
 const USAGE = [
   "Usage: /lesson                  draft a lesson from this session, for you to approve",
@@ -270,4 +281,16 @@ export function registerLessonCommand(pi: ExtensionAPI): void {
       );
     },
   });
+}
+
+/** Everything the lesson proposal path registers, as the one call index.ts makes. */
+export function registerLessonProposals(pi: ExtensionAPI): void {
+  registerLessonArmingLifecycle(pi);
+  registerLessonCommand(pi);
+  // Always registered, but refuses an unarmed call -- see lessons/propose.ts.
+  registerLessonProposeTool(pi);
+  registerLessonNudge(pi);
+  // Eval-only, same shape as the submission replay: off unless the env var
+  // names a file inside the session directory.
+  if (isLessonProposalReplayEnabled()) registerLessonProposalReplay(pi);
 }
