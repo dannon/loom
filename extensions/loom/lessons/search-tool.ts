@@ -2,21 +2,21 @@
  * The `lessons_search` tool: the on-demand surface, and the one the inline
  * hint, the /execute note and the reproduction index all point at.
  *
- * Retrieval is local; the query never leaves the machine. It is also never
- * echoed back or recorded -- the activity row says which lesson surfaced and
- * why, not what the model was looking for.
+ * Retrieval is local, and nothing here echoes the query back or puts it in
+ * the lesson.surfaced row. The generic tool.start activity row still records
+ * the call's arguments like any other tool's.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { recordSurfacing, renderLessonSearchResult } from "../lesson-hint";
+import { LESSONS_SEARCH_TOOL, recordSurfacing, renderLessonSearchResult } from "../lesson-hint";
 import { searchLessons } from "./search";
 import { getLessonStore } from "./store";
 
 export function registerLessonsSearchTool(pi: ExtensionAPI): void {
   pi.registerTool({
-    name: "lessons_search",
+    name: LESSONS_SEARCH_TOOL,
     label: "Search Lessons",
     description: `Search recorded lessons -- short notes on situations that go
 wrong in Galaxy and bioinformatics work, why, and what gets you past them. A

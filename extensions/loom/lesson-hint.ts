@@ -39,6 +39,8 @@ import { getNotebookPath } from "./state";
 /** Distinctive opening, so a hint can't be mistaken for the tool's own output. */
 export const LESSON_HINT_MARKER = "[loom lesson]";
 
+export const LESSONS_SEARCH_TOOL = "lessons_search";
+
 const MAX_CHECK_FIRST = 300;
 const MAX_STEP_LESSONS = 3;
 
@@ -115,6 +117,9 @@ export function decideHintForEvent(
   // Normalize the three Galaxy call surfaces to one spelling and unwrap the
   // `mcp({tool, args})` form, so a lesson's `mcp_tools` and argument matching
   // mean the same thing however the call arrived.
+  // A search result already is the lesson, framed; a hint on it would re-fire
+  // on the Symptom text it quotes and count the same surfacing twice.
+  if (event.toolName === LESSONS_SEARCH_TOOL) return null;
   const input = event.input ?? {};
   const call = galaxyCall(event.toolName, input);
   return decideToolResultHint(

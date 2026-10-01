@@ -79,9 +79,8 @@ export function registerLessonReplay(pi: ExtensionAPI): void {
       if (!decision) continue;
       armed.add(decision.match.lesson.id);
       recordSurfacing(decision.match, "tool_result");
-      console.error(
-        `[loom lesson replay] ${entry.tool}:\n${formatLessonHint(decision.match.lesson)}`,
-      );
+      // Not the entry's tool name: the replay file is arbitrary text.
+      console.error(`[loom lesson replay]\n${formatLessonHint(decision.match.lesson)}`);
     }
   });
 }

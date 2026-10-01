@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
+  decideHintForEvent,
   decideToolResultHint,
   formatLessonHint,
   LESSON_HINT_MARKER,
@@ -333,6 +334,18 @@ describe("recordSurfacing + registerLessonHint", () => {
     expect(await fire()).toBeUndefined();
     await handlers.get("session_start")![0]({}, {});
     expect(await fire()).toBeDefined();
+  });
+
+  it("never hints on a lessons_search result, though the same text fires elsewhere", () => {
+    plantRef();
+    const content = [text("## Symptom\nNo reference index registered for build mm39")];
+    expect(decideHintForEvent({ toolName: "bash", input: {}, content }, new Set())).not.toBeNull();
+    expect(
+      decideHintForEvent(
+        { toolName: "lessons_search", input: { query: "x.gtf" }, content },
+        new Set(),
+      ),
+    ).toBeNull();
   });
 
   it("hint text goes through secret redaction when registered first", async () => {
