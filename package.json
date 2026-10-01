@@ -66,6 +66,8 @@
     "prepublishOnly": "npm run typecheck && npm test && npm run smoke:pack",
     "sync:skills": "node scripts/sync-skills.mjs",
     "check:skills": "node scripts/sync-skills.mjs --check",
+    "build:lessons": "node lessons/build-snapshot.mjs",
+    "check:lessons": "node lessons/build-snapshot.mjs --check",
     "measure:context": "node scripts/measure-context.mjs",
     "sync:foundry-skills": "node scripts/sync-skills.mjs",
     "check:foundry-skills": "node scripts/sync-skills.mjs --check"
