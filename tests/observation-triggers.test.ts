@@ -261,6 +261,33 @@ describe("deliverObservation", () => {
     );
   });
 
+  it("keeps a rejected payload's fields out of the activity log", async () => {
+    const d = deps({
+      submit: async () => {
+        throw new Error("must not send");
+      },
+    });
+    await deliverObservation(
+      { ...facts, toolIds: ["/home/alice/tool.xml"], rawSignature: "refused dataset 42 for alice" },
+      ctx,
+      d,
+    );
+    const logged = JSON.stringify(d.rows);
+    expect(logged).not.toContain("alice");
+    expect(logged).not.toContain("dataset 42");
+    expect(d.rows[0][1].signature).toBe("(withheld)");
+  });
+
+  it("does not ask for a description when the structured half can't be sent", async () => {
+    const describe = vi.fn().mockResolvedValue("x");
+    const d = deps({ mode: "ask", describe, confirm: vi.fn() });
+    expect(await deliverObservation({ ...facts, rawSignature: "refused dataset 42" }, ctx, d)).toBe(
+      "invalid",
+    );
+    expect(describe).not.toHaveBeenCalled();
+    expect(d.confirm).not.toHaveBeenCalled();
+  });
+
   it("queues a queueable failure and records it as queued", async () => {
     const d = deps({
       submit: async () => ({ ok: false, status: 503, error: "unconfigured", queueable: true }),

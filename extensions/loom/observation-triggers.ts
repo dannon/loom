@@ -192,6 +192,8 @@ export interface BuiltObservation {
  * that cannot send because there is nothing to send with, not because a stub
  * refused.
  */
+const WITHHELD = "(withheld)";
+
 export function buildAndRecordObservation(
   facts: ObservationFacts,
   description: string,
@@ -203,14 +205,19 @@ export function buildAndRecordObservation(
   );
   const validity = validateObservation(obs);
   const leaks = scanObservationForLeaks(obs);
+  // A payload that failed is exactly the one whose free-form fields may carry
+  // the leak, so they are withheld from the activity log too -- the
+  // observation.invalid row that follows names the field and the pattern.
+  const clean = validity.ok && leaks.length === 0;
+  const shown = (value: string): string => (clean ? value : WITHHELD);
   deps.record("observation.built", {
     kind: obs.kind,
     trigger: obs.trigger,
     stage: obs.stage,
-    signature: obs.signature,
-    mcpTool: obs.mcpTool ?? "",
-    toolIds: obs.tools.map((t) => t.id).join(","),
-    datatypes: obs.datatypes.join(","),
+    signature: shown(obs.signature),
+    mcpTool: shown(obs.mcpTool ?? ""),
+    toolIds: shown(obs.tools.map((t) => t.id).join(",")),
+    datatypes: shown(obs.datatypes.join(",")),
     server: obs.galaxy.server,
     descriptionLength: obs.description.length,
     valid: validity.ok,
@@ -238,12 +245,24 @@ export async function deliverObservation(
     return "skipped";
   }
 
-  let description: string;
-  try {
-    description = await deps.describe(facts, ctx);
-  } catch {
-    // A description is a nice-to-have; the structured observation is the point.
-    description = "";
+  // Check the structured half before asking anyone for a description: if it
+  // can't be sent, prompting the user (or spending a model call) for one is
+  // wasted, and the build below records the refusal either way.
+  const precheck = buildObservation(
+    { ...facts, description: "" },
+    collectObservationEnvelope(deps.installToken()),
+  );
+  const sendable =
+    validateObservation(precheck).ok && scanObservationForLeaks(precheck).length === 0;
+
+  let description = "";
+  if (sendable) {
+    try {
+      description = await deps.describe(facts, ctx);
+    } catch {
+      // A description is a nice-to-have; the structured observation is the point.
+      description = "";
+    }
   }
 
   // The install token is written to config here, before any confirm, because a
