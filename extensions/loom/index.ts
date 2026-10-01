@@ -42,6 +42,7 @@ import { isLocalExecDisabled } from "./local-exec";
 import { registerSecretRedaction } from "./secret-redaction";
 import { registerLessonHint } from "./lesson-hint";
 import { registerLessonsSearchTool } from "./lessons/search-tool";
+import { isLessonReplayEnabled, registerLessonReplay } from "./lessons/replay";
 import { registerMcpOutputRecovery } from "./mcp-output";
 import { galaxyCall, registerMcpRecovery } from "./mcp-recovery";
 import { registerGalaxyPollGuard } from "./galaxy-poll-guard";
@@ -124,6 +125,11 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // unless LOOM_SUBMISSION_REPLAY names a file inside the session directory.
   if (isSubmissionReplayEnabled()) {
     registerSubmissionReplay(pi);
+  }
+  // The same eval-only seam for the lesson hint, which fires on tool_result and
+  // so needs a model turn that Tier-1 scenarios don't have.
+  if (isLessonReplayEnabled()) {
+    registerLessonReplay(pi);
   }
 
   registerPlanTools(pi);

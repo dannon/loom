@@ -104,6 +104,26 @@ export function decideToolResultHint(
   };
 }
 
+/**
+ * The live hook's decision for one pi tool result, against the session corpus.
+ * Shared with the eval replay seam so a replayed result takes the same path.
+ */
+export function decideHintForEvent(
+  event: { toolName: string; input?: Record<string, unknown>; content: LessonToolResultContent },
+  armed: ReadonlySet<string>,
+): HintDecision | null {
+  // Normalize the three Galaxy call surfaces to one spelling and unwrap the
+  // `mcp({tool, args})` form, so a lesson's `mcp_tools` and argument matching
+  // mean the same thing however the call arrived.
+  const input = event.input ?? {};
+  const call = galaxyCall(event.toolName, input);
+  return decideToolResultHint(
+    { toolName: call?.name ?? event.toolName, input: call?.args ?? input, content: event.content },
+    getLessonStore().lessons,
+    armed,
+  );
+}
+
 export function registerLessonHint(pi: ExtensionAPI): void {
   const armed = new Set<string>();
 
@@ -115,20 +135,7 @@ export function registerLessonHint(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_result", async (event) => {
-    // Normalize the three Galaxy call surfaces to one spelling and unwrap the
-    // `mcp({tool, args})` form, so a lesson's `mcp_tools` and argument matching
-    // mean the same thing however the call arrived.
-    const input = event.input ?? {};
-    const call = galaxyCall(event.toolName, input);
-    const decision = decideToolResultHint(
-      {
-        toolName: call?.name ?? event.toolName,
-        input: call?.args ?? input,
-        content: event.content,
-      },
-      getLessonStore().lessons,
-      armed,
-    );
+    const decision = decideHintForEvent(event, armed);
     if (!decision) return;
     armed.add(decision.match.lesson.id);
     recordSurfacing(decision.match, "tool_result");
