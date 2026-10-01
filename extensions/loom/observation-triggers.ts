@@ -48,6 +48,7 @@ import { onEvidenceDecision } from "./evidence-gate.js";
 import { galaxyCall } from "./mcp-recovery.js";
 import { appendActivityEvent } from "./activity.js";
 import { getNotebookPath } from "./state.js";
+import { confirmObservation, describeObservation } from "./observation-ui.js";
 
 export const RETRY_LOOP_THRESHOLD = 3;
 /**
@@ -284,17 +285,16 @@ export function recordObservationActivity(
   });
 }
 
-/**
- * The production dep set. `describe` is a stub here and is replaced in the
- * description task; everything else is the real thing.
- */
-export function liveDeliverDeps(): DeliverDeps {
+/** The production dep set. */
+export function liveDeliverDeps(
+  ctxMode: ObservationsMode = resolveObservationsMode(),
+): DeliverDeps {
   return {
-    mode: resolveObservationsMode(),
+    mode: ctxMode,
     state,
     installToken: getOrCreateInstallToken,
-    describe: async () => "",
-    confirm: async () => false,
+    describe: (facts, ctx) => describeObservation(ctxMode, facts, ctx),
+    confirm: confirmObservation,
     submit: submitObservation,
     record: (kind, payload) => recordObservationActivity(kind, payload),
   };

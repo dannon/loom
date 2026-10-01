@@ -343,6 +343,37 @@ describe("registerObservationTriggers", () => {
     details: undefined,
   };
 
+  it("only enqueues inside tool_result, and confirms and sends on settle", async () => {
+    const { registerObservationTriggers, pendingObservationCount } =
+      await import("../extensions/loom/observation-triggers.js");
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      json: async () => ({ ok: true, id: "x", retractToken: "b".repeat(32) }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const confirm = vi.fn().mockResolvedValue(true);
+    const ctx = {
+      hasUI: true,
+      ui: { confirm, input: vi.fn().mockResolvedValue(""), notify: vi.fn() },
+    };
+    const pi = fakePi();
+    registerObservationTriggers(pi.api as any);
+    await pi.emit("session_start", {}, ctx);
+
+    await pi.emit("tool_result", failure, ctx);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(pendingObservationCount()).toBe(1);
+
+    await pi.emit("agent_settled", {}, ctx);
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(pendingObservationCount()).toBe(0);
+    const sent = JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    expect(sent.signature).toBe("ToolExecutionError: dataset <id> failed");
+  });
+
   it("enqueues nothing while the env hard-disable is set", async () => {
     process.env.LOOM_OBSERVATIONS = "off";
     const { registerObservationTriggers, pendingObservationCount } =
