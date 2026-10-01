@@ -467,6 +467,36 @@ If you have a tester ID, you can set it like this:
 
 Run `/tester-id` with no argument to see the current value. It writes only the `testerId` key to `~/.loom/config.json` (the rest of the file is left untouched), and Orbit attaches it to any feedback you send so reports can be traced back to your session. It can also be supplied via the `LOOM_TESTER_ID` environment variable.
 
+#### Sharing Galaxy failure patterns
+
+Loom can report the _shape_ of a Galaxy failure -- which tool, which stage,
+which datatypes, and a normalized one-line signature -- to the Galaxy team's
+private intake queue, so recurring problems get documented or fixed upstream.
+Nothing goes without your say-so: the default `ask` mode shows you the exact
+payload after a turn that hit a Galaxy error and sends only if you confirm.
+
+```
+/observations               # mode, counts, and where the local log lives
+/observations mode ask      # show me the payload and ask, every time (default)
+/observations mode auto     # send without asking, and log what was sent
+/observations mode off      # collect nothing
+/observations sent          # everything this install has sent
+/observations retract <id>  # delete one row from the queue
+/observe <note>             # report something yourself
+```
+
+What is sent is structured signals plus one short generic description, checked
+by a validator before it leaves the machine: no transcript text, no data
+values, no file paths, no history or dataset ids, no URLs, no email addresses.
+The server is recorded as its public name (`usegalaxy.org`, `usegalaxy.eu`,
+...) or as the literal `private` for anything else -- an institutional mirror
+is never named. Rows are tied to a random per-install token, not to your
+account, and expire after 180 days.
+
+Switching to `auto` shows you a real sample payload first. For a managed
+deployment, `ORBIT_OBSERVATIONS=off` (or `LOOM_OBSERVATIONS=off`) disables the
+whole thing and cannot be overridden from the app.
+
 ### Custom endpoints (local LLMs, gateways, proxies)
 
 Loom works with any OpenAI-compatible API -- a hosted service like [Jetstream](https://docs.jetstream-cloud.org/inference-service/overview/), or a local backend like [LiteLLM](https://litellm.ai/) or [Ollama](https://ollama.com/) -- and with Anthropic-compatible gateways that front the Messages API, such as an institutional proxy or LiteLLM in anthropic mode.

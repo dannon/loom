@@ -40,6 +40,8 @@ import { registerExecGuard } from "./exec-guard";
 import { registerSandbox } from "./sandbox";
 import { isLocalExecDisabled } from "./local-exec";
 import { registerSecretRedaction } from "./secret-redaction";
+import { registerObservationTriggers } from "./observation-triggers";
+import { registerObservationsCommand } from "./observations-command";
 import { registerMcpOutputRecovery } from "./mcp-output";
 import { galaxyCall, registerMcpRecovery } from "./mcp-recovery";
 import { registerGalaxyPollGuard } from "./galaxy-poll-guard";
@@ -102,6 +104,11 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerGalaxyPollGuard(pi);
   registerProgressUpdates(pi);
   registerSecretRedaction(pi);
+  // AFTER redaction, deliberately. pi runs tool_result handlers in
+  // registration order and each sees the previous one's rewrite, so the
+  // collector reads the content the model actually gets -- reading the raw
+  // result would put an API key one normalization away from the wire.
+  registerObservationTriggers(pi);
 
   setupUIBridge(pi);
   registerSessionLifecycle(pi);
@@ -128,6 +135,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerDashboardTools(pi);
   registerDashboardCommands(pi);
   registerFeedbackCommand(pi);
+  registerObservationsCommand(pi);
   registerTesterIdCommand(pi);
   registerInstructionsCommand(pi);
   registerSkillTriggers(pi);
