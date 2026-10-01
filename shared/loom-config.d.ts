@@ -173,6 +173,20 @@ export interface LoomConfig {
   evidenceGate?: {
     mode?: "off" | "warn" | "deny";
   };
+  /**
+   * Recorded lessons -- short notes on situations that go wrong -- read from
+   * the corpus shipped with Loom plus `~/.loom/lessons/<namespace>/<slug>.md`.
+   * Retrieval is entirely local, so no query ever leaves the machine.
+   *
+   * `enabled: false` (or `LOOM_LESSONS=off`) turns every lesson surface off:
+   * no inline hints, no /execute note, no reproduction index, no
+   * `lessons_search` results. `suppress` is the per-lesson version -- a
+   * suppressed id is never matched, searched or listed.
+   */
+  lessons?: {
+    enabled?: boolean;
+    suppress?: string[];
+  };
   guardian?: {
     /** Master switch. When false the gate is fully off (advanced escape hatch). */
     enabled?: boolean;

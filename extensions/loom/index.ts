@@ -44,6 +44,9 @@ import { isLocalExecDisabled } from "./local-exec";
 import { registerSecretRedaction } from "./secret-redaction";
 import { registerObservationTriggers } from "./observation-triggers";
 import { registerObservationsCommand } from "./observations-command";
+import { registerLessonHint } from "./lesson-hint";
+import { registerLessonsSearchTool } from "./lessons/search-tool";
+import { isLessonReplayEnabled, registerLessonReplay } from "./lessons/replay";
 import { registerMcpOutputRecovery } from "./mcp-output";
 import { galaxyCall, registerMcpRecovery } from "./mcp-recovery";
 import { registerGalaxyPollGuard } from "./galaxy-poll-guard";
@@ -105,6 +108,11 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerMcpRecovery(pi);
   registerGalaxyPollGuard(pi);
   registerProgressUpdates(pi);
+  // Before redaction on purpose: pi feeds each tool_result handler the previous
+  // one's content, so a lesson hint passes through the redactor like any other
+  // result text. After the oversized-output recovery, so it lands on the preview
+  // the model actually reads.
+  registerLessonHint(pi);
   registerSecretRedaction(pi);
   // AFTER redaction, deliberately. pi runs tool_result handlers in
   // registration order and each sees the previous one's rewrite, so the
@@ -133,6 +141,11 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   if (isObservationReplayEnabled()) {
     registerObservationReplay(pi);
   }
+  // The same eval-only seam for the lesson hint, which fires on tool_result and
+  // so needs a model turn that Tier-1 scenarios don't have.
+  if (isLessonReplayEnabled()) {
+    registerLessonReplay(pi);
+  }
 
   registerPlanTools(pi);
   registerGalaxyUploadTool(pi);
@@ -141,6 +154,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerSkillsCommand(pi);
   registerExecutionCommands(pi);
   registerDashboardTools(pi);
+  registerLessonsSearchTool(pi);
   registerDashboardCommands(pi);
   registerFeedbackCommand(pi);
   registerObservationsCommand(pi);

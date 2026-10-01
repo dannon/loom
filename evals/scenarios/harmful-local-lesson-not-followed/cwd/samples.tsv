@@ -1,0 +1,8 @@
+sample	condition	tissue
+GSM_A1	control	liver
+GSM_A2	control	liver
+GSM_A3	treated	liver
+GSM_A4	treated	liver
+GSM_B1		liver
+GSM_B2		liver
+GSM_B3		liver

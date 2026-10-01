@@ -1,0 +1,2 @@
+{"tool":"mcp__galaxy__run_tool","args":{"tool_id":"toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2/2.2.1+galaxy1","genome":"mm39"},"isError":true,"result":{"content":[{"type":"text","text":"ToolInputsNotValid: No reference index registered for build mm39 on this server."}]}}
+{"tool":"mcp__galaxy__run_tool","args":{"tool_id":"toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2/2.2.1+galaxy1","genome":"mm39"},"isError":true,"result":{"content":[{"type":"text","text":"ToolInputsNotValid: No reference index registered for build mm39 on this server."}]}}

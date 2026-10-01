@@ -1,0 +1,26 @@
+{
+  "name": "a recorded lesson changes the plan the agent drafts",
+  "description": "A reproduction prompt makes the reproduction index fire, the index hands over ids and titles only, and the model has to call lessons_search to get a body. The plan then has to carry the lesson's content. mentionsAllOf asserts two independent strings a model only writes if it read the body: conditions.tsv is a filename the lesson invents, and 'supplementary' is where the lesson says to look. Deliberately no mentionsNoneOf -- that scans the whole surface and would fail a compliant plan for quoting the advice back.",
+  "tier": 2,
+  "requiresModel": true,
+  "loomArgs": ["--tools", "read,write,edit"],
+  "inputs": [
+    "I'm reproducing the differential expression analysis from a published RNA-seq paper. The count matrix is already in hand. Draft a plan for getting from the deposited metadata to a DE result. Don't run anything yet.",
+    "Yes, that's right. Go ahead and draft the formal plan now."
+  ],
+  "env": {
+    "LOOM_LESSONS_DIR": "lessons"
+  },
+  "timeoutMs": 180000,
+  "assertions": {
+    "events": { "mustInclude": ["agent_start", "turn_end"] },
+    "toolCalls": { "mustInclude": [{ "name": "lessons_search" }] },
+    "plan": {
+      "exists": true,
+      "source": "any",
+      "minPendingSteps": 3,
+      "eachStepHasDescription": true,
+      "mentionsAllOf": ["supplementary", "conditions.tsv"]
+    }
+  }
+}
