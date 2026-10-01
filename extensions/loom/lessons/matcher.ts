@@ -50,15 +50,16 @@ const MIN_SIGNATURE_CHARS = 8;
 const MIN_TOOL_CHARS = 3;
 
 /**
- * `normalizeSignature` truncates at 200 (C1's cap), so a long single line --
- * a serialized JSON blob, a stack frame -- would lose everything past that.
- * Lines longer than WINDOW are also scanned in overlapping windows. A signature
- * whose normalized form is at most STRIDE characters always falls inside some
- * window; longer ones match when they happen to. The real corpus is well under
- * that, so this is a stated bound rather than a thing to engineer around.
+ * `normalizeSignature` keeps one line and truncates at 200 (C1's cap), so a
+ * long single line -- a serialized JSON blob, a stack frame -- is scanned in
+ * overlapping windows instead. Each window's normalized text is itself cut at
+ * 200, so a window starting at most STRIDE characters before a signature
+ * holds it whole when the signature normalizes to at most 200 - STRIDE = 150
+ * characters. Longer signatures (C1 allows 200) can be missed on lines over
+ * WINDOW characters; the shipped corpus tops out well under 100.
  */
 const WINDOW = 256;
-const STRIDE = 128;
+const STRIDE = 50;
 
 /** Every line of the result, run through `normalizeSignature` and lowercased. */
 export function matchHaystack(resultText: string): string[] {
@@ -74,10 +75,9 @@ export function matchHaystack(resultText: string): string[] {
       push(line);
       continue;
     }
-    for (let i = 0; i < line.length; i += STRIDE) {
-      push(line.slice(i, i + WINDOW));
-      if (i + WINDOW >= line.length) break;
-    }
+    // Run to the very end: the window that first touches it is also cut at
+    // 200 once normalized, so the line's tail needs the shorter ones too.
+    for (let i = 0; i < line.length; i += STRIDE) push(line.slice(i, i + WINDOW));
   }
   return out;
 }

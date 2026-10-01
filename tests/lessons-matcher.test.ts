@@ -55,8 +55,20 @@ describe("matchHaystack", () => {
     expect(lines.some((l) => l.includes("no reference index registered for build"))).toBe(true);
   });
 
+  it("finds a 150-char signature wherever it sits on a long line", () => {
+    const sig = `${"z".repeat(10)} ${"q".repeat(139)}`;
+    for (let offset = 0; offset < 400; offset += 7) {
+      const line = `${"a".repeat(offset)} ${sig} ${"b ".repeat(3000)}`;
+      const l = lesson("s/long", { signatures: [sig] });
+      expect(
+        matchToolEvent({ toolName: "bash", input: {}, resultText: line }, [l]),
+        `offset ${offset}`,
+      ).toHaveLength(1);
+    }
+  });
+
   it("caps the total text it will look at", () => {
-    expect(matchHaystack("x".repeat(500_000)).length).toBeLessThan(3000);
+    expect(matchHaystack("x".repeat(500_000)).length).toBeLessThan(4100);
   });
 });
 
