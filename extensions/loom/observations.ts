@@ -13,17 +13,23 @@
  */
 
 import {
+  OBSERVATIONS_ROUTE,
+  OBSERVATIONS_ENDPOINT_URL,
+  OBSERVATION_KEY_HEADER,
+  OBSERVATION_MAX_BYTES,
+  OBSERVATION_SCHEMA_VERSION,
   PRIVATE_SERVER,
   PUBLIC_GALAXY_SERVERS,
+  RETRACT_TOKEN_HEADER,
   DATATYPES_MAX,
   DATATYPE_MAX,
-  OBSERVATION_SCHEMA_VERSION,
   TOOLS_MAX,
   TOOL_ID_MAX,
   UNKNOWN_SIGNATURE,
   VERSION_MAX,
   capObservation,
   normalizeSignature,
+  observationByteLength,
   validateObservation,
 } from "../../shared/observation-contract.js";
 import type {
@@ -34,11 +40,21 @@ import type {
   ObservationStage,
   ObservationTrigger,
 } from "../../shared/observation-contract.js";
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
+import { release } from "node:os";
+import { getConfigDir } from "./config.js";
 import { readLoomVersion } from "./feedback.js";
 import { loadProfiles } from "./profiles.js";
 import { isWsl } from "../../shared/wsl.js";
-import { isDesktopShell } from "../../shared/orbit-env.js";
-import { release } from "node:os";
+import { isDesktopShell, readEnv } from "../../shared/orbit-env.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stage
@@ -272,4 +288,265 @@ export function collectObservationEnvelope(installToken: string): ObservationEnv
     server: resolveObservationServer(currentGalaxyUrl()),
     ...(getGalaxyVersion() ? { galaxyVersion: getGalaxyVersion() } : {}),
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Transport
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ORBIT_OBSERVATIONS_URL points this at `wrangler dev` for local work, the same
+// way LOOM_FEEDBACK_URL does for /feedback.
+function endpointBase(): string {
+  return readEnv("OBSERVATIONS_URL") || OBSERVATIONS_ENDPOINT_URL;
+}
+
+const TIMEOUT_MS = 10_000;
+
+export const OUTBOX_FILE = "observations-outbox.jsonl";
+export const SENT_LOG_FILE = "observations-sent.jsonl";
+export const TOKEN_STORE_FILE = "observations-tokens.json";
+
+export function observationsFilePath(name: string): string {
+  return join(getConfigDir(), name);
+}
+
+export interface SubmitObservationResult {
+  ok: boolean;
+  status?: number;
+  id?: string;
+  retractToken?: string;
+  error?: string;
+  /** Field names only -- the route never echoes a rejected value. */
+  errors?: string[];
+  /**
+   * Whether the outbox should keep this for later. A transport failure, a 429
+   * and a 503 (the route exists but isn't configured yet) are all "try again";
+   * a 400 or a 401 would fail identically forever, so queuing them would just
+   * grow a file nobody can drain.
+   */
+  queueable: boolean;
+}
+
+function queueableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+export async function submitObservation(obs: Observation): Promise<SubmitObservationResult> {
+  if (observationByteLength(obs) > OBSERVATION_MAX_BYTES) {
+    return { ok: false, error: "observation exceeds the intake size cap", queueable: false };
+  }
+  try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const key = readEnv("FEEDBACK_KEY");
+    if (key) headers[OBSERVATION_KEY_HEADER] = key;
+    const res = await fetch(endpointBase() + OBSERVATIONS_ROUTE, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(obs),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      id?: string;
+      retractToken?: string;
+      error?: string;
+      errors?: string[];
+    };
+    return {
+      ok: res.ok,
+      status: res.status,
+      id: data.id,
+      retractToken: data.retractToken,
+      error: data.error,
+      errors: data.errors,
+      queueable: res.ok ? false : queueableStatus(res.status),
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      queueable: true,
+    };
+  }
+}
+
+export interface RetractResult {
+  ok: boolean;
+  status?: number;
+  /** A 404 means the row is not there, which is the outcome the user wanted. */
+  alreadyGone: boolean;
+  error?: string;
+}
+
+export async function retractObservation(id: string, retractToken: string): Promise<RetractResult> {
+  try {
+    const headers: Record<string, string> = { [RETRACT_TOKEN_HEADER]: retractToken };
+    const key = readEnv("FEEDBACK_KEY");
+    if (key) headers[OBSERVATION_KEY_HEADER] = key;
+    const res = await fetch(`${endpointBase()}${OBSERVATIONS_ROUTE}/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    await res.json().catch(() => ({}));
+    // Idempotent by contract: a repeat retract is a 404, and reporting that as
+    // a failure would push the user into retrying something already done.
+    if (res.status === 404) return { ok: true, status: 404, alreadyGone: true };
+    return { ok: res.ok, status: res.status, alreadyGone: false };
+  } catch (err) {
+    return {
+      ok: false,
+      alreadyGone: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Local logs
+// ─────────────────────────────────────────────────────────────────────────────
+
+function appendLine(name: string, value: unknown, mode?: number): string | null {
+  try {
+    const dir = getConfigDir();
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, name);
+    appendFileSync(file, JSON.stringify(value) + "\n", { encoding: "utf-8", mode: mode ?? 0o644 });
+    if (mode !== undefined) {
+      try {
+        chmodSync(file, mode);
+      } catch {
+        /* perm-tightening is best-effort */
+      }
+    }
+    return file;
+  } catch {
+    return null;
+  }
+}
+
+/** Durability backstop: a POST that could succeed later is never lost. */
+export function appendToObservationOutbox(obs: Observation): string | null {
+  // 0600: this file carries the install token, which is the thing that ties
+  // rows together. Nothing else in it is sensitive, but that is enough.
+  return appendLine(OUTBOX_FILE, obs, 0o600);
+}
+
+export interface ObservationSentEntry {
+  at: string;
+  id: string;
+  status: "sent" | "queued" | "retracted";
+  kind: string;
+  stage: string;
+  trigger: string;
+  signature: string;
+  tools: string[];
+  mcpTool?: string;
+  datatypes: string[];
+  server: string;
+  description: string;
+}
+
+/**
+ * The readable "what have I sent" row. Deliberately carries neither the
+ * install token nor the retract token, so `/observations sent` can show the
+ * log without handing either one over.
+ */
+export function sentLogEntryFor(
+  obs: Observation,
+  status: ObservationSentEntry["status"],
+): ObservationSentEntry {
+  return {
+    at: new Date().toISOString(),
+    id: obs.id,
+    status,
+    kind: obs.kind,
+    stage: obs.stage,
+    trigger: obs.trigger,
+    signature: obs.signature,
+    tools: obs.tools.map((t) => t.id),
+    ...(obs.mcpTool ? { mcpTool: obs.mcpTool } : {}),
+    datatypes: obs.datatypes,
+    server: obs.galaxy.server,
+    description: obs.description,
+  };
+}
+
+export function appendSentLog(entry: ObservationSentEntry): string | null {
+  // 0600 like the outbox. The rows hold no token, but what an install has
+  // reported is the user's business, not every local process's.
+  return appendLine(SENT_LOG_FILE, entry, 0o600);
+}
+
+export function readSentLog(): ObservationSentEntry[] {
+  const file = observationsFilePath(SENT_LOG_FILE);
+  if (!existsSync(file)) return [];
+  const out: ObservationSentEntry[] = [];
+  try {
+    for (const line of readFileSync(file, "utf-8").split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        out.push(JSON.parse(line) as ObservationSentEntry);
+      } catch {
+        // Skip, same as the activity log's own hydrate.
+      }
+    }
+  } catch {
+    return out;
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Retract tokens
+// ─────────────────────────────────────────────────────────────────────────────
+
+function readTokenStore(): Record<string, string> {
+  const file = observationsFilePath(TOKEN_STORE_FILE);
+  if (!existsSync(file)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf-8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    // A corrupt store costs the ability to retract older rows, which is better
+    // than throwing out of a command the user is standing in front of.
+    return {};
+  }
+}
+
+function writeTokenStore(store: Record<string, string>): void {
+  try {
+    const dir = getConfigDir();
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, TOKEN_STORE_FILE);
+    writeFileSync(file, JSON.stringify(store, null, 2) + "\n", { mode: 0o600 });
+    try {
+      chmodSync(file, 0o600);
+    } catch {
+      /* best-effort */
+    }
+  } catch {
+    /* losing a token costs retraction, not correctness */
+  }
+}
+
+/**
+ * The Worker returns a retract token once, so it has to be kept to make
+ * `/observations retract` possible. Kept out of the sent log and listed in the
+ * exec-guard's credential stores so the agent can never read it.
+ */
+export function saveRetractToken(id: string, token: string): void {
+  writeTokenStore({ ...readTokenStore(), [id]: token });
+}
+
+export function readRetractToken(id: string): string | undefined {
+  const token = readTokenStore()[id];
+  return typeof token === "string" && token.length > 0 ? token : undefined;
+}
+
+export function forgetRetractToken(id: string): void {
+  const store = readTokenStore();
+  if (!(id in store)) return;
+  delete store[id];
+  writeTokenStore(store);
 }
