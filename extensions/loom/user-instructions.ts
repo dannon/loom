@@ -291,9 +291,10 @@ export function takeShadowNotices(
  * Neutralize the delimiters we use to frame the content. Without this a file
  * containing a literal `</user_standing_instructions>` closes the wrapper early
  * and everything after it reads as top-level prompt text -- which is exactly
- * the escape the workspace wrapper exists to prevent.
+ * the escape the workspace wrapper exists to prevent. Exported so the lesson
+ * wrapper frames its content the same way.
  */
-function escapeContent(value: string): string {
+export function escapeContent(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
