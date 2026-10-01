@@ -117,6 +117,30 @@ describe("submitObservation", () => {
     expect((await m.submitObservation(obs)).queueable).toBe(false);
   });
 
+  it("retries a 500 once, then treats it as permanent rather than queueing it", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    const m = await load();
+    const res = await m.submitObservation(obs);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(res.status).toBe(500);
+    expect(res.queueable).toBe(false);
+  });
+
+  it("takes a 500 followed by a 202 as sent", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 202,
+        json: async () => ({ ok: true, id: obs.id }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const m = await load();
+    expect((await m.submitObservation(obs)).ok).toBe(true);
+  });
+
   it("returns ok:false and queueable on a transport failure", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     const m = await load();

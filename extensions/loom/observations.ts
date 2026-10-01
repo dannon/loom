@@ -326,8 +326,15 @@ export interface SubmitObservationResult {
   queueable: boolean;
 }
 
+// The intake route answers 500 when the id already exists (a primary-key
+// collision), which a resend of the same observation can never get past. So a
+// 500 gets a small bounded retry here, in case it was a blip, and then counts as
+// permanent -- queuing it would loop the outbox on a row that is already there
+// or never will be.
+const ATTEMPTS_ON_500 = 2;
+
 function queueableStatus(status: number): boolean {
-  return status === 429 || status >= 500;
+  return status === 429 || (status > 500 && status < 600);
 }
 
 export async function submitObservation(obs: Observation): Promise<SubmitObservationResult> {
@@ -338,12 +345,17 @@ export async function submitObservation(obs: Observation): Promise<SubmitObserva
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     const key = readEnv("FEEDBACK_KEY");
     if (key) headers[OBSERVATION_KEY_HEADER] = key;
-    const res = await fetch(endpointBase() + OBSERVATIONS_ROUTE, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(obs),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
+    let res: Response | undefined;
+    for (let attempt = 1; attempt <= ATTEMPTS_ON_500; attempt++) {
+      res = await fetch(endpointBase() + OBSERVATIONS_ROUTE, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(obs),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      if (res.status !== 500) break;
+    }
+    if (!res) throw new Error("no response");
     const data = (await res.json().catch(() => ({}))) as {
       ok?: boolean;
       id?: string;
