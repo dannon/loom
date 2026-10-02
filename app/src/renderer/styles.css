@@ -610,6 +610,11 @@ body.files-collapsed #files-divider {
     color 0.1s;
   white-space: nowrap;
 }
+/* display:inline-flex above is an author rule and beats the UA stylesheet's
+   [hidden] { display: none }, so without this the button never hides (#534). */
+.chat-copy-btn[hidden] {
+  display: none;
+}
 .chat-copy-btn:hover {
   background: var(--bg-hover);
   border-color: var(--accent);
