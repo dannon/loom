@@ -78,7 +78,7 @@ describe("summarizeResult", () => {
 });
 
 describe("the activity log and lessons_search", () => {
-  it("records neither the query nor the lesson prose, while other tools still log", async () => {
+  it("records neither the query nor any lesson prose, while other tools still log", async () => {
     const fs = await import("node:fs");
     const os = await import("node:os");
     const path = await import("node:path");
@@ -110,7 +110,23 @@ describe("the activity log and lessons_search", () => {
         toolName: "bash",
         args: { command: "true" },
       });
+      await handlers.get("tool_execution_end")!({
+        toolCallId: "3",
+        toolName: "galaxy_run_tool",
+        isError: true,
+        result: {
+          content: [
+            { type: "text", text: "ToolInputsNotValid: no index for mm39" },
+            {
+              type: "text",
+              text: "[loom lesson] A hinted lesson title\nCheck first: hinted prose",
+            },
+          ],
+        },
+      });
       const log = fs.readFileSync(path.join(dir, "activity.jsonl"), "utf-8");
+      expect(log).toContain("no index for mm39");
+      expect(log).not.toContain("hinted");
       expect(log).not.toContain("starsolo");
       expect(log).not.toContain("lesson prose");
       expect(log).not.toContain("lessons_search");
