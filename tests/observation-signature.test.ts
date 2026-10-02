@@ -42,6 +42,63 @@ describe("normalizeSignature", () => {
     expect(normalizeSignature(once)).toBe(once);
   });
 
+  // Character soup almost never spells a URL, an email or a 200-char line, so
+  // the random check below can't see those rules drift. These can.
+  it("agrees with the corpus validator's copy on every rule, by name", () => {
+    const fixed = [
+      ...table.map(([, input]) => input),
+      "fetch (https://usegalaxy.org/api/x) failed",
+      "see https://a.org/x, then retry",
+      "owned by ada+lab@example.org now",
+      "owned by ada.l_ab-1%x@sub.example.co.uk",
+      "a\u00a0b\u2028c\fd\ve",
+      "x".repeat(199) + " tail",
+      "y".repeat(195) + "      z",
+      "  " + "w ".repeat(150),
+      "tab\tseparated\tline   with  runs",
+      "ValueError: boom\r\nsecond",
+      "read /a/b then ~/c/d then C:/e/f",
+      "ids f2db41e1fa331b3e and 0123456789ABCDEF0123 and 12345 and 1234",
+    ];
+    for (const input of fixed) {
+      expect(normalizeSignature(input), JSON.stringify(input)).toBe(corpusNormalize(input));
+    }
+  });
+
+  it("agrees with the corpus validator's copy on random whole-token input", () => {
+    const tokens = [
+      "https://usegalaxy.org/api/datasets/1a2b",
+      "http://x.org/a,b",
+      "(https://y.org/z)",
+      "ada+lab@example.org",
+      "bo@x.io,",
+      "/home/ada/x.gtf",
+      "~/data/x",
+      "C:\\Users\\ada",
+      "and/or",
+      "f2db41e1fa331b3e",
+      "123456",
+      "42",
+      "Error:",
+      "   ",
+      "\t",
+      "\u00a0",
+      "\n",
+      "x".repeat(60),
+    ];
+    let seed = 11;
+    const rand = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+    for (let n = 0; n < 2000; n++) {
+      let s = "";
+      const count = Math.floor(rand() * 16);
+      for (let i = 0; i < count; i++) s += tokens[Math.floor(rand() * tokens.length)] + " ";
+      expect(normalizeSignature(s), JSON.stringify(s)).toBe(corpusNormalize(s));
+    }
+  });
+
   // The corpus was normalized by lessons/validate.mjs. If the two drift, a
   // lesson signature stops matching the tool result it was written from.
   it("agrees with the corpus validator's copy on random input", () => {
