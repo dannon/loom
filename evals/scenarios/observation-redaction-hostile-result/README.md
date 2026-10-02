@@ -9,20 +9,23 @@ dataset URL and an email address, all on one line -- the normalizer only ever
 sees the first line, so putting them on separate lines would prove nothing. The
 leak scan runs over that raw line before the normalizer rewrites it, so the
 observation is refused outright (`leakScan: dirty`) rather than scrubbed and
-sent, and its signature is withheld from the activity row.
+sent. No `observation.built` row carries a signature, refused or not -- it is
+written before anyone has consented to anything -- so the exact signatures are
+pinned by `tests/evals-scenarios.test.ts` over this same fixture instead.
 
 The second line carries hostile _arguments_ rather than hostile output:
 `../../etc/passwd` as a tool id and `C:/Users/bob` as a datatype, with a
-`~/bin` path in the text. The text alone refuses it.
+`~/bin` path in the text. The text alone refuses it, and the empty `toolIds`
+and `datatypes` show the allowlists dropped both arguments.
 
 Lines three and four repeat the first byte for byte, which takes that signature
 to the retry-loop threshold. So the run also pins that the loop is reported once,
 as `retry-loop`, that the silent occurrence in between stays silent, and that
 the loop report is refused for the same reason as the first.
 
-The fifth line is a clean failure, and shows what does pass: the normalized
-signature (the five-digit job number becomes `<n>`), the public toolshed id
-with its version split off, and the datatype.
+The fifth line is a clean failure, and shows what does pass: the public
+toolshed id with its version split off, the datatype, and a signature (the
+five-digit job number becomes `<n>`) that the leak scan accepts.
 
 Nothing is sent: the replay calls the build step, not the delivery path, so no
 `observation.sent`, `observation.queued`, `observation.invalid`,

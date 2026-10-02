@@ -218,10 +218,6 @@ describe("observation-redaction-hostile-result: the fixture against the real pip
 
   it("refuses every hostile line on the raw scan and passes only the clean one", () => {
     expect(entries).toHaveLength(5);
-    const scenario = loadScenario("observation-redaction-hostile-result");
-    const asserted = (scenario.assertions.activity?.mustInclude ?? [])
-      .map((e) => e.payloadContains?.signature)
-      .filter((s): s is string => typeof s === "string" && s !== "(withheld)");
 
     entries.forEach((entry, i) => {
       const facts = factsForToolResult(entry.tool, entry.args, entry.text);
@@ -236,7 +232,9 @@ describe("observation-redaction-hostile-result: the fixture against the real pip
       } else {
         expect(errors, entry.text).toEqual([]);
         expect(leaks, entry.text).toEqual([]);
-        expect(asserted).toContain(obs.signature);
+        expect(obs.signature).toBe(
+          "ToolExecutionError: Job <n> failed because an input is in state 'error'",
+        );
       }
     });
   });

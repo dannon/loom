@@ -137,6 +137,7 @@ function deps(over: Partial<DeliverDeps> = {}): DeliverDeps & {
   const rows: Array<[string, Record<string, unknown>]> = [];
   const base: DeliverDeps = {
     mode: "auto",
+    currentMode: () => over.mode ?? "auto",
     state: newTriggerState(),
     installToken: () => "a".repeat(32),
     describe: async () => "",
@@ -179,7 +180,7 @@ describe("deliverObservation", () => {
     expect(kinds).toEqual(["observation.built", "observation.sent"]);
     const built = d.rows[0][1];
     // auto is structured-only: no error text, no description, no model call.
-    expect(built.signature).toBe("unknown");
+    expect("signature" in built).toBe(false);
     expect(built.shape).toBe("structured");
     expect(describe).not.toHaveBeenCalled();
     const sent = submit.mock.calls[0][0] as Observation;
@@ -230,6 +231,89 @@ describe("deliverObservation", () => {
     expect(String(d.rows.find(([k]) => k === "observation.invalid")?.[1].leaks)).toContain(
       "signature.raw:long-hex",
     );
+  });
+
+  it("does not send when collection is turned off while the description is being written", async () => {
+    let mode: "ask" | "off" = "ask";
+    const submit = vi.fn();
+    const d = deps({
+      mode: "ask",
+      currentMode: () => mode,
+      describe: async () => {
+        mode = "off";
+        return "";
+      },
+      submit,
+    });
+    expect(await deliverObservation(facts, ctx, d)).toBe("skipped");
+    expect(submit).not.toHaveBeenCalled();
+    expect(d.rows.at(-1)).toEqual(["observation.skipped", { reason: "mode-changed" }]);
+  });
+
+  it("does not send when collection is turned off while the confirm is open", async () => {
+    let mode: "ask" | "off" = "ask";
+    const submit = vi.fn();
+    const d = deps({
+      mode: "ask",
+      currentMode: () => mode,
+      confirm: async () => {
+        mode = "off";
+        return true;
+      },
+      submit,
+    });
+    expect(await deliverObservation(facts, ctx, d)).toBe("skipped");
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("does not send an auto delivery once the user has stepped back to ask", async () => {
+    const submit = vi.fn();
+    const d = deps({ mode: "auto", currentMode: () => "ask", submit });
+    expect(await deliverObservation(facts, ctx, d)).toBe("skipped");
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("still sends what the user confirmed in ask after a switch to auto", async () => {
+    const d = deps({ mode: "ask", currentMode: () => "auto" });
+    expect(await deliverObservation(facts, ctx, d)).toBe("sent");
+  });
+
+  it("keeps a declined /observe note out of every activity row", async () => {
+    const note = "Alice Smith had BRCA1 expression 3.14";
+    const d = deps({ mode: "ask", confirm: async () => false });
+    const outcome = await deliverObservation(
+      {
+        kind: "user-correction",
+        trigger: "explicit",
+        toolIds: [],
+        datatypes: [],
+        rawSignature: note,
+      },
+      ctx,
+      d,
+    );
+    expect(outcome).toBe("declined");
+    expect(d.rows.map(([k]) => k)).toEqual(["observation.built", "observation.declined"]);
+    expect(JSON.stringify(d.rows)).not.toMatch(/Alice|Smith|BRCA1|3\.14/);
+  });
+
+  it("keeps a sent /observe note out of the activity log too", async () => {
+    const note = "The agent picked the wrong reference genome";
+    const d = deps({ mode: "ask" });
+    expect(
+      await deliverObservation(
+        {
+          kind: "user-correction",
+          trigger: "explicit",
+          toolIds: [],
+          datatypes: [],
+          rawSignature: note,
+        },
+        ctx,
+        d,
+      ),
+    ).toBe("sent");
+    expect(JSON.stringify(d.rows)).not.toContain("reference genome");
   });
 
   it("collects nothing when the mode is off", async () => {
@@ -346,7 +430,7 @@ describe("deliverObservation", () => {
     const logged = JSON.stringify(d.rows);
     expect(logged).not.toContain("alice");
     expect(logged).not.toContain("dataset 42");
-    expect(d.rows[0][1].signature).toBe("(withheld)");
+    expect("signature" in d.rows[0][1]).toBe(false);
   });
 
   it("does not ask for a description when the structured half can't be sent", async () => {

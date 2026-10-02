@@ -329,7 +329,11 @@ describe("drainObservationOutbox", () => {
     const m = await load();
     m.appendToObservationOutbox(obs);
     const submit = vi.fn(ok);
-    expect(await m.drainObservationOutbox(submit)).toEqual({ sent: 1, kept: 0, dropped: 0 });
+    expect(await m.drainObservationOutbox(submit, () => true)).toEqual({
+      sent: 1,
+      kept: 0,
+      dropped: 0,
+    });
     expect(submit).toHaveBeenCalledOnce();
     expect(lines("observations-outbox.jsonl")).toEqual([]);
     expect(m.readSentLog().at(-1)?.status).toBe("sent");
@@ -346,7 +350,11 @@ describe("drainObservationOutbox", () => {
       .fn()
       .mockResolvedValueOnce({ ok: false, status: 503, queueable: true })
       .mockResolvedValueOnce({ ok: false, status: 500, queueable: false });
-    expect(await m.drainObservationOutbox(submit)).toEqual({ sent: 0, kept: 1, dropped: 1 });
+    expect(await m.drainObservationOutbox(submit, () => true)).toEqual({
+      sent: 0,
+      kept: 1,
+      dropped: 1,
+    });
     expect(JSON.parse(lines("observations-outbox.jsonl")[0]).id).toBe(obs.id);
   });
 
@@ -357,7 +365,11 @@ describe("drainObservationOutbox", () => {
       JSON.stringify({ ...obs, signature: "failed on 10.12.4.7" }) + "\n{ broken\n",
     );
     const submit = vi.fn(ok);
-    expect(await m.drainObservationOutbox(submit)).toEqual({ sent: 0, kept: 0, dropped: 2 });
+    expect(await m.drainObservationOutbox(submit, () => true)).toEqual({
+      sent: 0,
+      kept: 0,
+      dropped: 2,
+    });
     expect(submit).not.toHaveBeenCalled();
   });
 
@@ -369,7 +381,7 @@ describe("drainObservationOutbox", () => {
       m.appendToObservationOutbox(late);
       return { ok: true, status: 202, queueable: false };
     });
-    expect((await m.drainObservationOutbox(submit)).sent).toBe(1);
+    expect((await m.drainObservationOutbox(submit, () => true)).sent).toBe(1);
     expect(lines("observations-outbox.jsonl").map((l) => JSON.parse(l).id)).toEqual([late.id]);
   });
 
@@ -377,12 +389,37 @@ describe("drainObservationOutbox", () => {
     const m = await load();
     for (let i = 0; i < 3; i++) m.appendToObservationOutbox(obs);
     const submit = vi.fn().mockResolvedValue({ ok: false, error: "offline", queueable: true });
-    expect(await m.drainObservationOutbox(submit)).toEqual({ sent: 0, kept: 3, dropped: 0 });
+    expect(await m.drainObservationOutbox(submit, () => true)).toEqual({
+      sent: 0,
+      kept: 3,
+      dropped: 0,
+    });
+    expect(submit).toHaveBeenCalledOnce();
+  });
+
+  it("stops sending as soon as collection is turned off mid-drain", async () => {
+    const m = await load();
+    m.appendToObservationOutbox(obs);
+    m.appendToObservationOutbox({ ...obs, id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" });
+    let collecting = true;
+    const submit = vi.fn(async () => {
+      collecting = false;
+      return { ok: true, status: 202, queueable: false };
+    });
+    expect(await m.drainObservationOutbox(submit, () => collecting)).toEqual({
+      sent: 1,
+      kept: 1,
+      dropped: 0,
+    });
     expect(submit).toHaveBeenCalledOnce();
   });
 
   it("is a no-op with no outbox", async () => {
     const m = await load();
-    expect(await m.drainObservationOutbox(vi.fn())).toEqual({ sent: 0, kept: 0, dropped: 0 });
+    expect(await m.drainObservationOutbox(vi.fn(), () => true)).toEqual({
+      sent: 0,
+      kept: 0,
+      dropped: 0,
+    });
   });
 });

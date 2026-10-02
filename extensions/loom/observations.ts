@@ -620,6 +620,11 @@ export const OUTBOX_DRAIN_MAX = 10;
  */
 export async function drainObservationOutbox(
   submit: (obs: Observation) => Promise<SubmitObservationResult>,
+  /**
+   * Asked again before every row, not once per drain: a drain can run for
+   * minutes on a slow network, and collection may be turned off meanwhile.
+   */
+  stillCollecting: () => boolean,
 ): Promise<{ sent: number; kept: number; dropped: number }> {
   const file = observationsFilePath(OUTBOX_FILE);
   const counts = { sent: 0, kept: 0, dropped: 0 };
@@ -632,10 +637,11 @@ export async function drainObservationOutbox(
   const keep: string[] = [];
   let unreachable = false;
   for (const [i, line] of lines.entries()) {
-    // Past the per-drain cap, or once the route has proved unreachable this
-    // round, the rest just wait: on a black-holed network each try costs the
-    // full timeout, and this runs before the turn's own prompts appear.
-    if (i >= OUTBOX_DRAIN_MAX || unreachable) {
+    // Past the per-drain cap, once the route has proved unreachable this
+    // round, or once collection has been turned off, the rest just wait: on a
+    // black-holed network each try costs the full timeout, and this runs
+    // before the turn's own prompts appear.
+    if (i >= OUTBOX_DRAIN_MAX || unreachable || !stillCollecting()) {
       keep.push(line);
       continue;
     }

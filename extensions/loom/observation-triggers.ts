@@ -176,7 +176,14 @@ export type DeliveryOutcome = "sent" | "queued" | "declined" | "invalid" | "skip
  * testable with no pi session, no filesystem and no network.
  */
 export interface DeliverDeps {
+  /** The mode this delivery started under; it decides the payload shape. */
   mode: ObservationsMode;
+  /**
+   * The mode right now. Read again immediately before the POST, because the
+   * confirm can sit open for minutes and another session (or the user, in
+   * another window) can turn collection off in the meantime.
+   */
+  currentMode(): ObservationsMode;
   state: TriggerState;
   installToken(): string;
   /** Gets the built observation, never the raw facts. */
@@ -200,8 +207,6 @@ export interface BuiltObservation {
  * that cannot send because there is nothing to send with, not because a stub
  * refused.
  */
-const WITHHELD = "(withheld)";
-
 export function buildAndRecordObservation(
   facts: ObservationFacts,
   description: string,
@@ -218,20 +223,19 @@ export function buildAndRecordObservation(
     shape === "full" ? { rawSignature: facts.rawSignature } : {},
   );
   const valid = errors.length === 0;
-  // A payload that failed is exactly the one whose free-form fields may carry
-  // the leak, so they are withheld from the activity log too -- the
-  // observation.invalid row that follows names the field and the pattern.
-  const clean = valid && leaks.length === 0;
-  const shown = (value: string): string => (clean ? value : WITHHELD);
+  // No free text in this row, ever. It is written before anyone has agreed to
+  // anything -- before the ask confirm, and for /observe the signature is the
+  // user's own sentence -- and a refused payload's text is exactly the text
+  // that may carry the leak. The structured fields are safe to show: they are
+  // admitted from allowlists by the builder.
   deps.record("observation.built", {
     kind: obs.kind,
     trigger: obs.trigger,
     stage: obs.stage,
     shape,
-    signature: shown(obs.signature),
-    mcpTool: shown(obs.mcpTool ?? ""),
-    toolIds: shown(obs.tools.map((t) => t.id).join(",")),
-    datatypes: shown(obs.datatypes.join(",")),
+    mcpTool: obs.mcpTool ?? "",
+    toolIds: obs.tools.map((t) => t.id).join(","),
+    datatypes: obs.datatypes.join(","),
     server: obs.galaxy.server,
     descriptionLength: obs.description.length,
     valid,
@@ -309,12 +313,28 @@ export async function deliverObservation(
     return "declined";
   }
 
+  // Consent is checked where it is spent. Off means off, even mid-confirm; and
+  // an auto delivery no longer goes once the user has stepped back to ask,
+  // since they never saw this one. An ask that was confirmed still goes under
+  // auto: the user has already seen it and said yes.
+  const now = deps.currentMode();
+  if (now === "off" || (deps.mode === "auto" && now !== "auto")) {
+    deps.record("observation.skipped", { reason: "mode-changed" });
+    return "skipped";
+  }
+
   const res = await deps.submit(obs);
   if (res.ok) {
     if (res.retractToken) saveRetractToken(obs.id, res.retractToken);
     appendSentLog(sentLogEntryFor(obs, "sent"));
     deps.state.delivered += 1;
-    deps.record("observation.sent", { id: obs.id, kind: obs.kind, signature: obs.signature });
+    deps.record("observation.sent", {
+      id: obs.id,
+      kind: obs.kind,
+      // After consent, so the normalized signature may be logged -- except the
+      // user's own /observe sentence, which stays in the sent log only.
+      ...(obs.trigger === "explicit" ? {} : { signature: obs.signature }),
+    });
     return "sent";
   }
   if (res.queueable) {
@@ -365,6 +385,7 @@ export function liveDeliverDeps(
 ): DeliverDeps {
   return {
     mode: ctxMode,
+    currentMode: resolveObservationsMode,
     state,
     installToken: getOrCreateInstallToken,
     describe: (obs, ctx) => describeObservation(ctxMode, obs, ctx),
@@ -440,7 +461,10 @@ export function registerObservationTriggers(pi: ExtensionAPI): void {
     // prompt -- but never while collection is off.
     if (resolveObservationsMode() !== "off") {
       try {
-        const drained = await drainObservationOutbox(submitObservation);
+        const drained = await drainObservationOutbox(
+          submitObservation,
+          () => resolveObservationsMode() !== "off",
+        );
         if (drained.sent + drained.dropped > 0) {
           recordObservationActivity("observation.outbox", { ...drained });
         }
