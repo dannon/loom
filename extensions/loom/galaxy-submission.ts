@@ -45,22 +45,22 @@ export type SubmissionKind = "invocation" | "jobs" | "udt";
 /**
  * Tools whose success means work was submitted to Galaxy.
  *
- * `galaxy_upload_file` (galaxy-mcp's local-path upload) is here alongside the
+ * `mcp__galaxy__upload_file` (galaxy-mcp's local-path upload) is here alongside the
  * URL one: the spike shows both go through `POST /api/tools` and return the
  * same envelope, so recording one and not the other would leave a silent hole
  * for anyone whose Galaxy MCP server is reachable but whose Loom-native
  * uploader is not.
  */
 export const SUBMISSION_TOOLS: Readonly<Record<string, SubmissionKind>> = {
-  galaxy_invoke_workflow: "invocation",
-  galaxy_run_tool: "jobs",
-  galaxy_run_user_tool: "jobs",
-  galaxy_upload_file_from_url: "jobs",
-  galaxy_upload_file: "jobs",
+  mcp__galaxy__invoke_workflow: "invocation",
+  mcp__galaxy__run_tool: "jobs",
+  mcp__galaxy__run_user_tool: "jobs",
+  mcp__galaxy__upload_file_from_url: "jobs",
+  mcp__galaxy__upload_file: "jobs",
   // Loom-native (galaxy-upload.ts), not an MCP passthrough: its result shape
   // is ours, so it is parsed from `details` rather than from the JSON text.
   galaxy_upload_local_file: "jobs",
-  galaxy_create_user_tool: "udt",
+  mcp__galaxy__create_user_tool: "udt",
 };
 
 export function isSubmissionTool(toolName: string | undefined): boolean {
@@ -460,28 +460,28 @@ export function parseSubmission(
   const data = envelope.data;
 
   switch (toolName) {
-    case "galaxy_invoke_workflow":
+    case "mcp__galaxy__invoke_workflow":
       return parseInvokeWorkflow(data, args);
-    case "galaxy_run_tool":
+    case "mcp__galaxy__run_tool":
       return parseToolRun(
         data,
         args,
         (jobs) => str(args.tool_id) ?? jobs[0].toolId ?? "Galaxy tool run",
       );
-    case "galaxy_run_user_tool":
+    case "mcp__galaxy__run_user_tool":
       // The uuid is the hook's own input and never appears in `data`; the
       // resolved tool id does, on each job.
       return parseToolRun(data, args, (jobs) =>
         `User tool ${jobs[0].toolId ?? str(args.tool_uuid) ?? ""}`.trim(),
       );
-    case "galaxy_upload_file_from_url":
+    case "mcp__galaxy__upload_file_from_url":
       return parseToolRun(data, args, () => `Upload ${str(args.url) ?? "from URL"}`);
-    case "galaxy_upload_file":
+    case "mcp__galaxy__upload_file":
       return parseToolRun(data, args, () => {
         const p = str(args.path);
         return p ? `Upload ${path.basename(p)}` : "Upload to Galaxy";
       });
-    case "galaxy_create_user_tool":
+    case "mcp__galaxy__create_user_tool":
       return parseCreateUserTool(data, args);
     default:
       return fail(`${toolName} has no parser`);

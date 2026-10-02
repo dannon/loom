@@ -53,7 +53,7 @@ function harness() {
 }
 function event(path: string, overrides = {}): Partial<ToolResultEvent> {
   return {
-    toolName: "galaxy_get_tool_panel",
+    toolName: "mcp__galaxy__get_tool_panel",
     toolCallId: "catalog",
     input: {},
     isError: false,
@@ -99,7 +99,7 @@ describe("bounded MCP output recovery", () => {
     const h = harness();
     const recovered = await h.result(
       event(path, {
-        toolName: "galaxy_list_user_tools",
+        toolName: "mcp__galaxy__list_user_tools",
         content: guarded.content,
         details: { outputGuard: guarded.outputGuard },
       }),

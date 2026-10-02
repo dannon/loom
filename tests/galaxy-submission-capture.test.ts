@@ -153,7 +153,7 @@ describe("submission capture: registration", () => {
   it("writes an invocation block the moment a workflow is invoked", async () => {
     setCurrentStepAnchor("plan-a-step-3");
     await submit(
-      "galaxy_invoke_workflow",
+      "mcp__galaxy__invoke_workflow",
       { workflow_id: "c0ffee1234567890" },
       mcpResult(INVOCATION),
     );
@@ -178,7 +178,7 @@ describe("submission capture: registration", () => {
   });
 
   it("writes one job block per job for a mapped-over run, sharing the attempt", async () => {
-    await submit("galaxy_run_tool", { tool_id: "fastp" }, mcpResult(THREE_JOBS));
+    await submit("mcp__galaxy__run_tool", { tool_id: "fastp" }, mcpResult(THREE_JOBS));
 
     const blocks = findJobBlocks(notebook());
     expect(blocks.map((b) => b.jobId)).toEqual([
@@ -200,7 +200,7 @@ describe("submission capture: registration", () => {
   });
 
   it("marks work with no plan step as unattributed rather than guessing", async () => {
-    await submit("galaxy_run_tool", { tool_id: "fastp" }, mcpResult(THREE_JOBS));
+    await submit("mcp__galaxy__run_tool", { tool_id: "fastp" }, mcpResult(THREE_JOBS));
     expect(findJobBlocks(notebook())[0].notebookAnchor).toBe("unattributed");
   });
 
@@ -246,7 +246,7 @@ describe("submission capture: work that finished before the call returned", () =
   });
 
   it("still writes a freshly submitted tool run as in_progress", async () => {
-    await submit("galaxy_run_tool", { tool_id: "fastp" }, mcpResult(THREE_JOBS));
+    await submit("mcp__galaxy__run_tool", { tool_id: "fastp" }, mcpResult(THREE_JOBS));
     expect(findJobBlocks(notebook()).every((b) => b.status === "in_progress")).toBe(true);
   });
 });
@@ -259,7 +259,11 @@ describe("submission capture: the mcp proxy tool", () => {
     setCurrentStepAnchor("plan-a-step-2");
     await submit(
       "mcp",
-      { server: "galaxy", tool: "galaxy_run_tool", args: JSON.stringify({ tool_id: "fastp" }) },
+      {
+        server: "galaxy",
+        tool: "mcp__galaxy__run_tool",
+        args: JSON.stringify({ tool_id: "fastp" }),
+      },
       {
         content: [{ type: "text", text: "preview" }],
         details: { mcpResult: { structuredContent: THREE_JOBS, content: [] } },
@@ -269,7 +273,7 @@ describe("submission capture: the mcp proxy tool", () => {
     expect(blocks).toHaveLength(3);
     expect(blocks[0].notebookAnchor).toBe("plan-a-step-2");
     const [row] = activity().filter((r) => r.kind === "submission.registered");
-    expect(row.payload.tool).toBe("galaxy_run_tool");
+    expect(row.payload.tool).toBe("mcp__galaxy__run_tool");
   });
 
   it("registers the mcp__galaxy__ spelling too", async () => {
@@ -285,12 +289,12 @@ describe("submission capture: the mcp proxy tool", () => {
     const before = notebook();
     await submit(
       "mcp",
-      { server: "galaxy", tool: "galaxy_get_history_contents", args: {} },
+      { server: "galaxy", tool: "mcp__galaxy__get_history_contents", args: {} },
       mcpResult(THREE_JOBS),
     );
     await submit(
       "mcp",
-      { server: "other", tool: "galaxy_run_tool", args: {} },
+      { server: "other", tool: "mcp__galaxy__run_tool", args: {} },
       mcpResult(THREE_JOBS),
     );
     expect(notebook()).toBe(before);
@@ -301,7 +305,7 @@ describe("submission capture: refusing to guess", () => {
   it("logs submission.unparsed and writes no block", async () => {
     const before = notebook();
     await submit(
-      "galaxy_run_tool",
+      "mcp__galaxy__run_tool",
       { tool_id: "fastp" },
       {
         content: [{ type: "text", text: "Started your tool, job id is probably 1a2b3c4d5e6f7a8b" }],
@@ -313,7 +317,7 @@ describe("submission capture: refusing to guess", () => {
 
     const rows = activity().filter((r) => r.kind === "submission.unparsed");
     expect(rows).toHaveLength(1);
-    expect(rows[0].payload.tool).toBe("galaxy_run_tool");
+    expect(rows[0].payload.tool).toBe("mcp__galaxy__run_tool");
     expect(typeof rows[0].payload.reason).toBe("string");
     expect(activity().filter((r) => r.kind === "submission.registered")).toHaveLength(0);
   });
@@ -321,7 +325,7 @@ describe("submission capture: refusing to guess", () => {
   it("records nothing at all when the submission itself failed", async () => {
     const before = notebook();
     await submit(
-      "galaxy_run_tool",
+      "mcp__galaxy__run_tool",
       { tool_id: "fastp" },
       { content: [{ type: "text", text: "Error calling tool 'run_tool': no such history" }] },
       true,
@@ -333,7 +337,7 @@ describe("submission capture: refusing to guess", () => {
 
   it("ignores tools that are not submissions", async () => {
     const before = notebook();
-    await submit("galaxy_get_history_contents", {}, mcpResult(THREE_JOBS));
+    await submit("mcp__galaxy__get_history_contents", {}, mcpResult(THREE_JOBS));
     expect(notebook()).toBe(before);
     expect(activity().filter((r) => r.kind.startsWith("submission."))).toHaveLength(0);
   });
@@ -356,7 +360,7 @@ describe("submission capture: writing alongside other writers", () => {
       competed = true;
     };
 
-    await submit("galaxy_run_tool", { tool_id: "fastp" }, mcpResult(THREE_JOBS));
+    await submit("mcp__galaxy__run_tool", { tool_id: "fastp" }, mcpResult(THREE_JOBS));
     expect(competed).toBe(true);
 
     const after = notebook();
@@ -388,7 +392,7 @@ describe("submission capture: attribution is captured at dispatch", () => {
       {
         type: "tool_execution_start",
         toolCallId: "slow-call",
-        toolName: "galaxy_invoke_workflow",
+        toolName: "mcp__galaxy__invoke_workflow",
         args: { workflow_id: "c0ffee1234567890" },
       },
       {},
@@ -400,7 +404,7 @@ describe("submission capture: attribution is captured at dispatch", () => {
       {
         type: "tool_execution_end",
         toolCallId: "slow-call",
-        toolName: "galaxy_invoke_workflow",
+        toolName: "mcp__galaxy__invoke_workflow",
         result: mcpResult(INVOCATION),
         isError: false,
       },
@@ -416,11 +420,11 @@ describe("submission capture: attribution is captured at dispatch", () => {
   it("gives the /execute step to the first run only", async () => {
     setCurrentStepAnchor("plan-a-step-1");
     await submit(
-      "galaxy_invoke_workflow",
+      "mcp__galaxy__invoke_workflow",
       { workflow_id: "c0ffee1234567890" },
       mcpResult(INVOCATION),
     );
-    await submit("galaxy_run_tool", { tool_id: "fastp" }, mcpResult(THREE_JOBS));
+    await submit("mcp__galaxy__run_tool", { tool_id: "fastp" }, mcpResult(THREE_JOBS));
 
     expect(findInvocationBlocks(notebook())[0].notebookAnchor).toBe("plan-a-step-1");
     expect(findJobBlocks(notebook()).map((b) => b.notebookAnchor)).toEqual([
@@ -435,13 +439,13 @@ describe("submission capture: attribution is captured at dispatch", () => {
     // the step: the retry that does land is still that step's run.
     setCurrentStepAnchor("plan-a-step-1");
     await submit(
-      "galaxy_run_tool",
+      "mcp__galaxy__run_tool",
       { tool_id: "fastp" },
       { content: [{ type: "text", text: "blocked" }] },
       true,
     );
     await submit(
-      "galaxy_invoke_workflow",
+      "mcp__galaxy__invoke_workflow",
       { workflow_id: "c0ffee1234567890" },
       mcpResult(INVOCATION),
     );
@@ -456,14 +460,14 @@ describe("submission capture: attribution is captured at dispatch", () => {
     } as any);
     setCurrentStepAnchor("plan-a-step-1");
     await handlers.tool_execution_start[0](
-      { toolCallId: "early", toolName: "galaxy_invoke_workflow", args: {} },
+      { toolCallId: "early", toolName: "mcp__galaxy__invoke_workflow", args: {} },
       {},
     );
     setCurrentStepAnchor("plan-a-step-2");
     await handlers.tool_execution_end[0](
       {
         toolCallId: "early",
-        toolName: "galaxy_invoke_workflow",
+        toolName: "mcp__galaxy__invoke_workflow",
         result: mcpResult(INVOCATION),
         isError: false,
       },
@@ -479,7 +483,7 @@ describe("submission capture: attribution is captured at dispatch", () => {
     setCurrentStepAnchor("plan-a-step-9");
     await handleSubmissionResult(
       "orphan-call",
-      "galaxy_invoke_workflow",
+      "mcp__galaxy__invoke_workflow",
       mcpResult(INVOCATION),
       false,
     );
@@ -491,7 +495,7 @@ describe("submission capture: user-defined tools", () => {
   it("preserves the definition Galaxy stored and points a block at it", async () => {
     setCurrentStepAnchor("plan-a-step-2");
     await submit(
-      "galaxy_create_user_tool",
+      "mcp__galaxy__create_user_tool",
       { representation: { id: "clean_table" } },
       mcpResult(UDT),
     );
@@ -517,7 +521,7 @@ describe("submission capture: user-defined tools", () => {
   });
 
   it("recreating a tool id under a new uuid keeps both definitions", async () => {
-    await submit("galaxy_create_user_tool", {}, mcpResult(UDT));
+    await submit("mcp__galaxy__create_user_tool", {}, mcpResult(UDT));
     const second = {
       ...UDT,
       data: {
@@ -526,7 +530,7 @@ describe("submission capture: user-defined tools", () => {
         representation: { ...UDT.data.representation, version: "0.2.0" },
       },
     };
-    await submit("galaxy_create_user_tool", {}, mcpResult(second));
+    await submit("mcp__galaxy__create_user_tool", {}, mcpResult(second));
 
     const dir = path.join(tmpDir, UDT_PROVENANCE_DIR);
     expect(fs.readdirSync(dir).sort()).toEqual([
@@ -548,7 +552,7 @@ describe("submission capture: user-defined tools", () => {
     // A uuid that sanitises away leaves nowhere to put the definition, and a
     // UDT block pointing at a file that is not there is worse than no block.
     await submit(
-      "galaxy_create_user_tool",
+      "mcp__galaxy__create_user_tool",
       {},
       mcpResult({ data: { ...UDT.data, uuid: "...", tool_id: "..." }, success: true }),
     );
@@ -559,7 +563,7 @@ describe("submission capture: user-defined tools", () => {
 
   it("keeps a hostile tool id inside the provenance directory", async () => {
     await submit(
-      "galaxy_create_user_tool",
+      "mcp__galaxy__create_user_tool",
       {},
       mcpResult({
         data: { ...UDT.data, tool_id: "../../../../etc/pwned" },
@@ -615,7 +619,7 @@ describe("a replayed submission claims nothing about a server", () => {
   it("writes the block without submitted_by or server_verified", async () => {
     await handleSubmissionResult(
       "replay-0",
-      "galaxy_invoke_workflow",
+      "mcp__galaxy__invoke_workflow",
       mcpResult(INVOCATION),
       false,
       {
@@ -642,7 +646,7 @@ describe("a replayed submission claims nothing about a server", () => {
   it("says replay on the activity row rather than harness", async () => {
     await handleSubmissionResult(
       "replay-1",
-      "galaxy_invoke_workflow",
+      "mcp__galaxy__invoke_workflow",
       mcpResult(INVOCATION),
       false,
       {
@@ -662,15 +666,21 @@ describe("a replayed submission claims nothing about a server", () => {
     // carry-forward would hand the replay the real block's `submitted_by:
     // harness` on the way through, which is the one claim a replayed block is
     // not allowed to make.
-    await handleSubmissionResult("live-0", "galaxy_invoke_workflow", mcpResult(INVOCATION), false, {
-      args: {},
-      stepAnchor: "plan-a-step-1",
-    });
+    await handleSubmissionResult(
+      "live-0",
+      "mcp__galaxy__invoke_workflow",
+      mcpResult(INVOCATION),
+      false,
+      {
+        args: {},
+        stepAnchor: "plan-a-step-1",
+      },
+    );
     const before = findInvocationBlocks(notebook())[0];
 
     await handleSubmissionResult(
       "replay-collide",
-      "galaxy_invoke_workflow",
+      "mcp__galaxy__invoke_workflow",
       mcpResult(INVOCATION),
       false,
       { args: {}, stepAnchor: "plan-a-step-9", replayed: true },
@@ -691,17 +701,29 @@ describe("a replayed submission claims nothing about a server", () => {
     // The UDT block is keyed by uuid and was outside the first collision
     // check: a replay of the same creation rewrote a real block's anchor,
     // timestamp and attempt id with fixture values.
-    await handleSubmissionResult("live-udt", "galaxy_create_user_tool", mcpResult(UDT), false, {
-      args: {},
-      stepAnchor: "plan-a-step-2",
-    });
+    await handleSubmissionResult(
+      "live-udt",
+      "mcp__galaxy__create_user_tool",
+      mcpResult(UDT),
+      false,
+      {
+        args: {},
+        stepAnchor: "plan-a-step-2",
+      },
+    );
     const before = findUdtBlocks(notebook())[0];
 
-    await handleSubmissionResult("replay-udt", "galaxy_create_user_tool", mcpResult(UDT), false, {
-      args: {},
-      stepAnchor: "plan-a-step-9",
-      replayed: true,
-    });
+    await handleSubmissionResult(
+      "replay-udt",
+      "mcp__galaxy__create_user_tool",
+      mcpResult(UDT),
+      false,
+      {
+        args: {},
+        stepAnchor: "plan-a-step-9",
+        replayed: true,
+      },
+    );
 
     const blocks = findUdtBlocks(notebook());
     expect(blocks).toHaveLength(1);
@@ -714,15 +736,21 @@ describe("a replayed submission claims nothing about a server", () => {
   });
 
   it("does not announce a registration when every id was skipped", async () => {
-    await handleSubmissionResult("live-2", "galaxy_invoke_workflow", mcpResult(INVOCATION), false, {
-      args: {},
-      stepAnchor: "plan-a-step-1",
-    });
+    await handleSubmissionResult(
+      "live-2",
+      "mcp__galaxy__invoke_workflow",
+      mcpResult(INVOCATION),
+      false,
+      {
+        args: {},
+        stepAnchor: "plan-a-step-1",
+      },
+    );
     const beforeCount = activity().filter((e) => e.kind === "submission.registered").length;
 
     await handleSubmissionResult(
       "replay-all-collide",
-      "galaxy_invoke_workflow",
+      "mcp__galaxy__invoke_workflow",
       mcpResult(INVOCATION),
       false,
       { args: {}, stepAnchor: "plan-a-step-9", replayed: true },
@@ -735,10 +763,16 @@ describe("a replayed submission claims nothing about a server", () => {
   });
 
   it("still claims both when the submission was really watched", async () => {
-    await handleSubmissionResult("live-0", "galaxy_invoke_workflow", mcpResult(INVOCATION), false, {
-      args: {},
-      stepAnchor: "plan-a-step-1",
-    });
+    await handleSubmissionResult(
+      "live-0",
+      "mcp__galaxy__invoke_workflow",
+      mcpResult(INVOCATION),
+      false,
+      {
+        args: {},
+        stepAnchor: "plan-a-step-1",
+      },
+    );
 
     const [block] = findInvocationBlocks(notebook());
     expect(block.submittedBy).toBe("harness");

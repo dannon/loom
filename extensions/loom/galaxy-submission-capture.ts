@@ -608,14 +608,14 @@ export async function handleSubmissionResult(
 
 export function registerSubmissionCapture(pi: ExtensionAPI): void {
   pi.on("tool_execution_start", async (event) => {
-    // The same submission can arrive as `galaxy_run_tool`, as
-    // `mcp__galaxy__run_tool`, or through pi's `mcp` proxy tool with the real
-    // name and args nested inside -- the proxy is what the reconnect guidance
-    // steers the model to. Record it under its real name either way.
-    const call = galaxyCall(
-      event.toolName,
-      (event.args && typeof event.args === "object" ? event.args : {}) as Record<string, unknown>,
-    );
+    // A Galaxy MCP submission can also arrive through the `mcp` proxy tool with
+    // the real name and args nested inside -- the proxy is what the reconnect
+    // guidance steers the model to. Record it under its real name either way.
+    const args = (event.args && typeof event.args === "object" ? event.args : {}) as Record<
+      string,
+      unknown
+    >;
+    const call = galaxyCall(event.toolName, args) ?? { name: event.toolName, args };
     if (!call || !isSubmissionTool(call.name)) return;
     rememberDispatch(event.toolCallId, call.name, call.args);
   });

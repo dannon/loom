@@ -16,7 +16,7 @@
     "toolCalls": {
       "mustInclude": [
         {
-          "name": "galaxy_run_tool",
+          "name": "mcp__galaxy__run_tool",
           "argsContains": {
             "tool_id": "addValue"
           }

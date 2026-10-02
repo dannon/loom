@@ -9,6 +9,8 @@
 // Authenticate via OAuth or run connect()..." error, which is an auth problem
 // that /mcp reconnect won't fix.
 
+import { isGalaxyMcpTool } from "../../shared/galaxy-mcp-tools.js";
+
 // A dropped transport: the server is gone and a new connection fixes it.
 const DROPPED_ERROR_PATTERNS: RegExp[] = [
   /not connected(?!\s+to\s+galaxy)/i, // bare SDK "Not connected"; exclude the verbose auth error
@@ -46,7 +48,7 @@ export function classifyGalaxyFailure(
   toolName: string | undefined,
   text: string | undefined,
 ): GalaxyFailureKind {
-  if (!toolName || !toolName.startsWith("galaxy_") || !text) return null;
+  if (!isGalaxyMcpTool(toolName) || !text) return null;
   // Timeout first: a -32001 body can also mention "not connected" downstream,
   // and the timeout reading is the actionable one.
   if (TIMEOUT_ERROR_PATTERNS.some((p) => p.test(text))) return "timeout";
@@ -65,7 +67,7 @@ export function isGalaxyTransportError(
   toolName: string | undefined,
   text: string | undefined,
 ): boolean {
-  if (!toolName || !toolName.startsWith("galaxy_")) return false;
+  if (!isGalaxyMcpTool(toolName)) return false;
   if (!text) return false;
   return TRANSPORT_ERROR_PATTERNS.some((pattern) => pattern.test(text));
 }
@@ -106,7 +108,7 @@ export function transportNudgeDecision(
       armed: { ...armed, [kind]: false },
     };
   }
-  if (toolName?.startsWith("galaxy_")) {
+  if (isGalaxyMcpTool(toolName)) {
     // A galaxy result that isn't a transport error means the pipe is alive.
     return { nudge: null, armed: { ...ALL_NUDGES_ARMED } };
   }

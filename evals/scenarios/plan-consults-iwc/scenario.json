@@ -9,7 +9,7 @@
   "timeoutMs": 420000,
   "assertions": {
     "toolCalls": {
-      "mustInclude": [{ "name": "galaxy_recommend_iwc_workflows" }]
+      "mustInclude": [{ "name": "mcp__galaxy__recommend_iwc_workflows" }]
     },
     "plan": { "exists": true }
   }

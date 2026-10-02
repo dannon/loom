@@ -97,7 +97,7 @@ takes. One line per submission:
 
 ```json
 {
-  "tool": "galaxy_run_tool",
+  "tool": "mcp__galaxy__run_tool",
   "args": { "tool_id": "fastp" },
   "stepAnchor": "plan-a-step-1",
   "result": { "content": [{ "type": "text", "text": "<the GalaxyResult envelope as JSON>" }] }

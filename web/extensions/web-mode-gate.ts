@@ -3,7 +3,8 @@
  *
  * Default-DENY allowlist for the remote brain's tool surface. The agent may
  * only reach the curated remote surface:
- *   - Galaxy / BRC-Analytics MCP tools (galaxy_*, brc_analytics_*)
+ *   - Galaxy / BRC-Analytics MCP tools (mcp__galaxy__*, mcp__brc_analytics__*)
+ *     and the brain's own Galaxy tools (galaxy_*)
  *   - the `mcp` proxy gateway, scoped to those same curated servers -- the only
  *     path to them on a cold-cache container, where direct tools don't register
  *   - the brain's HTTP helper tools (gtn_*, notebook_*, skills_fetch)
@@ -35,11 +36,10 @@ import { readEnv } from "../../shared/orbit-env.js";
 // pi built-in file tools, confined to the notebook path allowlist.
 const PATH_GATED_TOOLS = new Set(["edit", "write", "read"]);
 
-// The curated remote surface. MCP tools are "<server>_<tool>" with the server
-// name's hyphens normalized to underscores (pi-mcp-adapter formatToolName,
-// default "server" prefix): galaxy -> galaxy_, brc-analytics -> brc_analytics_.
-// gtn_*/notebook_* are brain-registered HTTP helper tools.
-const ALLOWED_PREFIXES = ["galaxy_", "brc_analytics_", "gtn_", "notebook_"];
+// The curated remote surface. pi names MCP tools "mcp__<server>__<tool>", with
+// anything outside [A-Za-z0-9_] in the server name turned into "_". galaxy_*,
+// gtn_* and notebook_* are brain-registered tools.
+const ALLOWED_PREFIXES = ["mcp__galaxy__", "mcp__brc_analytics__", "galaxy_", "gtn_", "notebook_"];
 
 // Allowed tool names that don't share one of the prefixes above.
 // The MCP output reader only inspects registered artifacts from this session.

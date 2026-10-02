@@ -9,8 +9,8 @@
   "timeoutMs": 420000,
   "assertions": {
     "toolCalls": {
-      "mustInclude": [{ "name": "galaxy_recommend_iwc_workflows" }],
-      "mustNotInclude": ["galaxy_invoke_workflow", "galaxy_import_workflow_from_iwc"]
+      "mustInclude": [{ "name": "mcp__galaxy__recommend_iwc_workflows" }],
+      "mustNotInclude": ["mcp__galaxy__invoke_workflow", "mcp__galaxy__import_workflow_from_iwc"]
     },
     "activity": {
       "mustInclude": [{ "kind": "skill.hint", "payloadContains": { "trigger": "iwc-candidates" } }]

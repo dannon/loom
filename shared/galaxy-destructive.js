@@ -35,14 +35,14 @@ const DESTRUCTIVE_OPS = {
   },
 };
 
-/** Lowercase + drop a leading `galaxy_` so both the prefixed MCP name and the bare op name
+/** Lowercase + drop a leading `mcp__galaxy__` or `galaxy_` so the pi tool name, the bare op name
  *  (and either gate's casing) resolve the same.
  * @param {unknown} toolName @returns {string} */
 function normalize(toolName) {
   return String(toolName == null ? "" : toolName)
     .trim()
     .toLowerCase()
-    .replace(/^galaxy_/, "");
+    .replace(/^(?:mcp__galaxy__|galaxy_)/, "");
 }
 
 /** @param {unknown} v @returns {Record<string, unknown>} */
@@ -86,7 +86,7 @@ function classifyNamed(name, args) {
 /**
  * Classify an MCP tool call. Handles three shapes:
  *  - direct:     update_history({ deleted, history_id })
- *  - mcp proxy:  mcp({ tool: "galaxy_update_history", args: "<json string>" }) -- the
+ *  - mcp proxy:  mcp({ tool: "mcp__galaxy__update_history", args: "<json string>" }) -- the
  *                adapter's generic gateway tool, a bypass if left unhandled (#338 F1)
  *  - code mode:  run_galaxy_tool({ code: "<python calling call_tool(...)>" }) (#338 F2)
  * @param {string} toolName @param {Record<string, unknown>} input @returns {GalaxyDestructiveOp | null}
@@ -242,7 +242,7 @@ export function isGalaxyDestructiveCurl(command) {
 function classifyCode(code) {
   const s = String(code == null ? "" : code);
   // Tolerate the tool name appearing as a positional or kwarg, with or without the
-  // galaxy_ prefix: call_tool('update_history', ...) / call_tool(name="galaxy_update_history", ...).
+  // galaxy_ prefix: call_tool('update_history', ...) / call_tool(name="mcp__galaxy__update_history", ...).
   if (!/call_tool\([^)]*["'](?:galaxy_)?update_history["']/.test(s)) return null;
   const purge = hasPurge(s);
   if (!purge && !/["']?deleted["']?\s*[:=]\s*["']?true\b/i.test(s)) return null;

@@ -166,7 +166,7 @@ describe("AgentManager", () => {
               JSON.stringify({
                 type: "tool_execution_start",
                 toolCallId: "collection-read",
-                toolName: "galaxy_get_collection_details",
+                toolName: "mcp__galaxy__get_collection_details",
               }),
             );
           }
@@ -209,7 +209,7 @@ describe("AgentManager", () => {
             const result = {
               type: "tool_execution_end",
               toolCallId: "collection-read",
-              toolName: "galaxy_get_collection_details",
+              toolName: "mcp__galaxy__get_collection_details",
               result: { content: [{ type: "text", text: "Collection retrieved" }] },
               isError: false,
             };

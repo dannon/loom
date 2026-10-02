@@ -168,9 +168,9 @@ describe("shouldBlockTool", () => {
 
   // Default-DENY allowlist: the curated remote surface passes through.
   it.each([
-    "galaxy_run_tool",
-    "galaxy_connect",
-    "brc_analytics_get_genome",
+    "mcp__galaxy__run_tool",
+    "mcp__galaxy__connect",
+    "mcp__brc_analytics__get_genome",
     "gtn_search",
     "gtn_fetch",
     "notebook_push_to_galaxy",
@@ -225,7 +225,7 @@ describe("shouldBlockTool", () => {
     const result = shouldBlockTool(
       "mcp",
       {
-        tool: "galaxy_update_history",
+        tool: "mcp__galaxy__update_history",
         args: '{"purged":true,"history_id":"abc"}',
         server: "galaxy",
       },
@@ -239,7 +239,7 @@ describe("shouldBlockTool", () => {
     const result = shouldBlockTool(
       "mcp",
       {
-        tool: "galaxy_update_history",
+        tool: "mcp__galaxy__update_history",
         args: '{"deleted":true,"history_id":"abc"}',
         server: "galaxy",
       },
@@ -355,7 +355,7 @@ describe("web-mode-gate registration (default export)", () => {
       await handler({ toolName: "write", input: { path: "/tmp/loom-session/secret.txt" } }),
     ).toMatchObject({ block: true });
     // curated remote surface passes through
-    expect(await handler({ toolName: "galaxy_run_tool", input: {} })).toBeUndefined();
+    expect(await handler({ toolName: "mcp__galaxy__run_tool", input: {} })).toBeUndefined();
   });
 });
 
@@ -365,7 +365,7 @@ describe("shouldBlockTool -- destructive Galaxy ops (#338)", () => {
 
   it("blocks a whole-history delete (remote mode has no confirmation UI)", () => {
     const r = shouldBlockTool(
-      "galaxy_update_history",
+      "mcp__galaxy__update_history",
       { deleted: true, history_id: "h" },
       allowlist,
       cwd,
@@ -375,8 +375,12 @@ describe("shouldBlockTool -- destructive Galaxy ops (#338)", () => {
 
   it("blocks a history purge", () => {
     expect(
-      shouldBlockTool("galaxy_update_history", { purged: true, history_id: "h" }, allowlist, cwd)
-        ?.block,
+      shouldBlockTool(
+        "mcp__galaxy__update_history",
+        { purged: true, history_id: "h" },
+        allowlist,
+        cwd,
+      )?.block,
     ).toBe(true);
   });
 
@@ -392,8 +396,8 @@ describe("shouldBlockTool -- destructive Galaxy ops (#338)", () => {
 
   it("still permits a non-destructive update_history (rename) and reads", () => {
     expect(
-      shouldBlockTool("galaxy_update_history", { name: "renamed" }, allowlist, cwd),
+      shouldBlockTool("mcp__galaxy__update_history", { name: "renamed" }, allowlist, cwd),
     ).toBeUndefined();
-    expect(shouldBlockTool("galaxy_get_histories", {}, allowlist, cwd)).toBeUndefined();
+    expect(shouldBlockTool("mcp__galaxy__get_histories", {}, allowlist, cwd)).toBeUndefined();
   });
 });

@@ -15,6 +15,7 @@
 // executable.
 
 import { uvxMissingNotice } from "../../shared/uvx-runner.js";
+import { isGalaxyMcpTool } from "../../shared/galaxy-mcp-tools.js";
 
 // Deliberately narrow. A missing launcher is always a spawn/ENOENT failure
 // naming the runner; anything vaguer risks swallowing a real Galaxy error and
@@ -39,7 +40,7 @@ export function isGalaxyLauncherError(
   toolName: string | undefined,
   text: string | undefined,
 ): boolean {
-  if (!toolName || !toolName.startsWith("galaxy_")) return false;
+  if (!isGalaxyMcpTool(toolName)) return false;
   if (!text) return false;
   return LAUNCHER_ERROR_PATTERNS.some((pattern) => pattern.test(text));
 }

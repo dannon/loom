@@ -20,10 +20,10 @@ afterEach(() => {
 });
 
 describe("buildGalaxyContextBlock reconnect steer", () => {
-  it("steers the model to call galaxy_connect() before reporting a disconnection", () => {
+  it("steers the model to call mcp__galaxy__connect() before reporting a disconnection", () => {
     const block = buildGalaxyContextBlock();
     // The whole point of Scott's report: never dead-end on "disconnected".
-    expect(block).toContain("galaxy_connect()");
+    expect(block).toContain("mcp__galaxy__connect()");
     expect(block).toMatch(/never report.*disconnected/i);
   });
 

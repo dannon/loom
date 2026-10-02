@@ -17,11 +17,11 @@ function harness() {
     abort,
     notify,
     fire,
-    check: (name = "galaxy_get_dataset_details", args = { dataset_id: "data1" }) =>
+    check: (name = "mcp__galaxy__get_dataset_details", args = { dataset_id: "data1" }) =>
       fire("tool_call", { toolName: name, input: args }),
     result: (state: string, extras = {}) =>
       fire("tool_result", {
-        toolName: "galaxy_get_dataset_details",
+        toolName: "mcp__galaxy__get_dataset_details",
         input: { dataset_id: "data1" },
         isError: false,
         content: [
@@ -78,8 +78,10 @@ describe("Galaxy polling cooldown", () => {
   it("does not throttle other datasets, terminal results, or mutations", async () => {
     const h = harness();
     h.result("running");
-    expect(await h.check("galaxy_get_dataset_details", { dataset_id: "other" })).toBeUndefined();
-    expect(await h.check("galaxy_run_tool")).toBeUndefined();
+    expect(
+      await h.check("mcp__galaxy__get_dataset_details", { dataset_id: "other" }),
+    ).toBeUndefined();
+    expect(await h.check("mcp__galaxy__run_tool")).toBeUndefined();
     h.result("ok");
     expect(await h.check()).toBeUndefined();
     h.result("error");
