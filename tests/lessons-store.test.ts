@@ -486,6 +486,13 @@ describe("getLessonStore", () => {
   const config = (obj: unknown) =>
     fs.writeFileSync(path.join(home, ".loom", "config.json"), JSON.stringify(obj));
 
+  it("has one userLessonsDir, importable without the store, for the /lesson writer", async () => {
+    const dirModule = await import("../extensions/loom/lessons/user-dir");
+    expect(dirModule.userLessonsDir).toBe(userLessonsDir);
+    const src = fs.readFileSync("extensions/loom/lessons/user-dir.ts", "utf-8");
+    expect(src).not.toMatch(/from "\.\/store"/);
+  });
+
   it("reads ~/.loom/lessons by default and LOOM_LESSONS_DIR instead when set", () => {
     expect(userLessonsDir()).toBe(path.join(home, ".loom", "lessons"));
     plant(path.join(home, ".loom", "lessons"), "stats/home.md", userFile("From home"));
