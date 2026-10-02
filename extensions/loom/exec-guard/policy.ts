@@ -19,12 +19,21 @@ import type { GalaxyDestructiveOp } from "../../../shared/galaxy-destructive.js"
 // denied for every tier, not downgraded to an ask. This is the floor that closes
 // #183: a capable model that gets to read ~/.loom/config.json echoes the keys
 // straight into the provider's request logs. Approval can't override it.
-function denyCredentialStore(p: string): PolicyResult {
+function denyCredentialStore(p: string, home: string): PolicyResult {
   return {
     decision: "deny",
     category: "read:credential-store",
-    reason: `access to credential store ${p} blocked for all models`,
+    reason: `access to credential store ${shown(p, home)} blocked for all models`,
   };
+}
+
+// Reasons land in the activity log, and a path the classifier resolved is
+// absolute; spelling the home dir as `~` keeps the username out of it.
+function shown(p: string, home: string): string {
+  if (!home || !path.isAbsolute(p)) return p;
+  const rel = path.relative(home, p);
+  if (rel === "") return "~";
+  return rel.startsWith("..") || path.isAbsolute(rel) ? p : `~/${rel}`;
 }
 
 const FILE_WRITE_TOOLS = new Set(["write", "edit"]);
@@ -132,11 +141,11 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     // but its resolved twin is a credential store.
     const reads = c.sensitiveReadPaths.map((p) => ({ p, ...deps.resolver.contains(p) }));
     for (const { p, resolved } of reads) {
-      if (isCredentialStore(resolved, deps.home)) return denyCredentialStore(p);
+      if (isCredentialStore(resolved, deps.home)) return denyCredentialStore(p, deps.home);
     }
     for (const { p, resolved } of reads) {
       if (isSensitivePath(resolved, deps.home)) {
-        return finalizeAsk(req, "read:sensitive", `read of sensitive path ${p}`);
+        return finalizeAsk(req, "read:sensitive", `read of sensitive path ${shown(p, deps.home)}`);
       }
     }
     // Workspace-jail floor: only confidently-parsed simple read commands, so a
@@ -206,7 +215,7 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     // verdict wins no matter which key carries the offending path.
     const targets = pathTargets(req, deps);
     for (const t of targets) {
-      if (isCredentialStore(t.resolved, deps.home)) return denyCredentialStore(t.raw);
+      if (isCredentialStore(t.resolved, deps.home)) return denyCredentialStore(t.raw, deps.home);
     }
     for (const t of targets) {
       if (isSensitivePath(t.resolved, deps.home)) {

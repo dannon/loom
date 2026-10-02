@@ -635,13 +635,21 @@ describe("classifyBash -- a cd changes what relative operands mean", () => {
       "unknown",
     );
   });
-  it("an operand it cannot resolve near Loom state keeps denying", () => {
-    for (const c of [
-      "cd ~/.loom/analyses/proj && echo x > $OUT",
-      "cd ~/.loom/analyses/proj && echo x > ../x",
-      "cd ~/.loom && echo x > *.md",
-    ])
+  it("an operand it cannot place inside Loom state keeps denying", () => {
+    for (const c of ["cd ~/.loom && echo x > *.md", "cd ~/.loom && echo x > $OUT"])
       expect(classifyBash(c, H, C).kind, c).toBe("catastrophic");
+  });
+  it("inside an analysis it asks rather than denies, and realpaths what it climbs out of", () => {
+    const v = classifyBash("cd ~/.loom/analyses/proj && echo x > $OUT", H, C);
+    expect(v.kind).toBe("unknown");
+    expect(v.guardedCwd).toBe(true);
+    const up = classifyBash("cd ~/.loom/analyses/proj/data && cp ../raw.csv .", H, C);
+    expect(up.kind).toBe("unknown");
+    expect(up.guardedCwd).toBe(false);
+    expect(up.loomWriteTargets).toContain(`${H}/.loom/analyses/proj/data`);
+    const glob = classifyBash("cd ~/.loom/analyses/proj/data && cp *.csv out/", H, C);
+    expect(glob.kind).toBe("unknown");
+    expect(glob.guardedCwd).toBe(false);
   });
   it("a comment does not swallow the newline that ends it", () => {
     expect(classifyBash("cd ~/.loom # go\necho x > a", H, C).kind).toBe("catastrophic");

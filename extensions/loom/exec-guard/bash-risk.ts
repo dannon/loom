@@ -139,16 +139,51 @@ const DQ_ESCAPABLE = '$`"\\\n';
 /** A shell word, or a run of unquoted operator characters (`&&`, `>>`, `2>&`
  *  arrives as a word `2` then `>&`). Parentheses and newlines are always an
  *  operator of their own. */
-type ShellToken = { word: WordFragment[] } | { op: string };
+type ShellToken = { word: WordFragment[] } | { op: string } | { heredoc: string };
+
+// Index of the `)` closing the `$(` whose `(` sits at `open`, skipping quoted
+// spans and escapes; the end of the string when it never closes.
+function substitutionEnd(s: string, open: number): number {
+  let depth = 0;
+  for (let j = open; j < s.length; j++) {
+    const c = s[j];
+    if (c === "\\") j++;
+    else if (c === "'") {
+      const k = s.indexOf("'", j + 1);
+      j = k === -1 ? s.length : k;
+    } else if (c === '"') {
+      j++;
+      while (j < s.length && s[j] !== '"') j += s[j] === "\\" ? 2 : 1;
+    } else if (c === "(") depth++;
+    else if (c === ")" && --depth === 0) return j;
+  }
+  return s.length - 1;
+}
+
+function backtickEnd(s: string, open: number): number {
+  for (let j = open + 1; j < s.length; j++) {
+    if (s[j] === "\\") j++;
+    else if (s[j] === "`") return j;
+  }
+  return s.length - 1;
+}
 
 // Split a command into shell words and operators, tracking the quoting of each
 // fragment. Models bash's word splitting, escaping and comments, not its
 // expansions -- anything that would need expanding is rejected by the resolvers
 // below.
-function shellTokens(command: string): ShellToken[] {
+//
+// `structure` is for the cd tracker, which needs to know what actually runs:
+// an unquoted `$(...)` or backtick span stays inside its word instead of being
+// split on its parentheses, and a heredoc body comes back as one `heredoc`
+// token rather than as lines of commands. The path scan keeps the flat view,
+// where a heredoc body's words are still examined.
+function shellTokens(command: string, structure = false): ShellToken[] {
   const tokens: ShellToken[] = [];
   let word: WordFragment[] = [];
   let opEnd = -2;
+  const heredocs: { delim: string; strip: boolean }[] = [];
+  let delimStrip: boolean | null = null;
   let text = "";
   let quote: "'" | '"' | null = null;
   let started = false;
@@ -158,7 +193,11 @@ function shellTokens(command: string): ShellToken[] {
   };
   const endWord = () => {
     endFragment(false);
-    if (word.length) tokens.push({ word });
+    if (word.length) {
+      if (delimStrip !== null) heredocs.push({ delim: wordText(word), strip: delimStrip });
+      delimStrip = null;
+      tokens.push({ word });
+    }
     word = [];
     started = false;
   };
@@ -205,6 +244,13 @@ function shellTokens(command: string): ShellToken[] {
       if (command[i] !== "\n") pushEscaped(command[i]);
       continue;
     }
+    if (structure && ((ch === "$" && command[i + 1] === "(") || ch === "`")) {
+      const end = ch === "`" ? backtickEnd(command, i) : substitutionEnd(command, i + 1);
+      text += command.slice(i, end + 1);
+      started = true;
+      i = end;
+      continue;
+    }
     if (ch === "'" || ch === '"') {
       endFragment(false);
       quote = ch;
@@ -226,9 +272,17 @@ function shellTokens(command: string): ShellToken[] {
       if (ch !== " " && ch !== "\t") {
         const prev = tokens[tokens.length - 1];
         const joinable = /[;&|<>]/.test(ch) && opEnd === i - 1;
-        if (joinable && prev && "op" in prev && /^[;&|<>]+$/.test(prev.op)) prev.op += ch;
-        else tokens.push({ op: ch });
+        let op: string;
+        if (joinable && prev && "op" in prev && /^[;&|<>]+$/.test(prev.op)) op = prev.op += ch;
+        else tokens.push({ op: (op = ch) });
         opEnd = i;
+        if (structure && op === "<<") {
+          delimStrip = command[i + 1] === "-";
+          if (delimStrip) i++;
+        } else if (structure && op === "<<<") {
+          delimStrip = null;
+        }
+        if (structure && ch === "\n" && heredocs.length) i = readHeredocs(i + 1) - 1;
       }
       continue;
     }
@@ -237,6 +291,29 @@ function shellTokens(command: string): ShellToken[] {
   }
   endWord();
   return tokens;
+
+  // Consume the bodies queued on the line that just ended; returns the index
+  // of the newline that ends the last delimiter line.
+  function readHeredocs(pos: number): number {
+    for (const h of heredocs) {
+      let body = "";
+      while (pos < command.length) {
+        const nl = command.indexOf("\n", pos) === -1 ? command.length : command.indexOf("\n", pos);
+        const line = command.slice(pos, nl);
+        if ((h.strip ? line.replace(/^\t+/, "") : line) === h.delim) {
+          pos = nl;
+          break;
+        }
+        body += line + "\n";
+        pos = nl + 1;
+      }
+      tokens.push({ heredoc: body });
+      if (pos < command.length && command[pos] === "\n" && h !== heredocs[heredocs.length - 1])
+        pos++;
+    }
+    heredocs.length = 0;
+    return pos;
+  }
 }
 
 function shellWords(command: string): WordFragment[][] {
@@ -329,12 +406,17 @@ function scanLoomWrite(
 // The checks above judge each path as written, so `cd ~/.loom && echo x > a`
 // carried no `.loom/` after the write verb and sailed through. What follows
 // tracks the working directory across one command line -- `cd`, `pushd`,
-// `popd`, `cd -`, subshells, `bash -c` and `eval` -- and resolves relative
+// `popd`, `cd -`, subshells, command substitutions, heredocs fed to a shell,
+// `sh -c` wherever it appears in the argv, and `eval` -- and resolves relative
 // operands against it, so a hop into Loom's own state or a credential store gets
-// the verdict the direct path would. It is still a model of the shell, not the
-// shell: loops, functions, variables it cannot expand, `env -C`/`git -C` and
-// friends are out of its reach (an unexpandable target is only treated as
-// suspect when it visibly names a state dir).
+// the verdict the direct path would.
+//
+// It is a model of the shell, not the shell. Loops, functions, aliases,
+// variables it cannot expand and `env -C`/`git -C` are out of reach. Where that
+// matters it errs toward asking: a cd target it cannot resolve keeps the
+// protection of the directory it left, a cd may always have failed, and any
+// `cd`/`pushd` whose target visibly names Loom state (even inside a python -c
+// string) is never auto-allowed.
 
 interface CwdState {
   /** Absolute directory, or null once a `cd` target could not be resolved. */
@@ -348,6 +430,10 @@ interface CwdState {
    *  silently. */
   guarded: boolean;
 }
+
+/** Every directory the shell might be standing in. More than one when a cd
+ *  could have failed and the next command runs anyway. */
+type Where = CwdState[];
 
 interface CdScan {
   catastrophic: boolean;
@@ -369,6 +455,9 @@ const SUSPECT_CD = new RegExp(
   "i",
 );
 
+// A cd anywhere in the raw text, quoted or not, for the backstop below.
+const RAW_CD = /(?:^|[^\w-])(?:cd|pushd)\s+("[^"]*"|'[^']*'|[^\s;&|()`'"]+)/g;
+
 // Words that open or close a compound command and sit in front of the real verb.
 const LEADING_KEYWORDS = new Set([
   "{",
@@ -383,19 +472,18 @@ const LEADING_KEYWORDS = new Set([
   "until",
 ]);
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+const DECLARE_VERBS = new Set(["export", "declare", "typeset", "local", "readonly"]);
+// Variables that change where a later `cd` lands without changing its text.
+const CD_STEERING = /^(?:HOME|CDPATH)=/;
+const UNKNOWN: CwdState = { dir: null, state: false, nearState: false, guarded: false };
+const LOST: CwdState = { dir: null, state: true, nearState: true, guarded: true };
 
 // Resolve a word to the absolute path the shell would use, or null. Same
-// expansion rules as resolveLoomWord, plus a relative path against `base` and,
-// for `cd` only, `..` -- bash's default logical cd collapses `..` lexically
-// before it chdirs, so the lexical answer is the right one there. A write or
-// read operand with `..` stays unresolvable: the kernel resolves that one
-// physically.
-function resolveWordFrom(
-  word: WordFragment[],
-  home: string,
-  base: string | null,
-  allowDotDot: boolean,
-): string | null {
+// expansion rules as resolveLoomWord, plus a relative path against `base` and
+// `..`, collapsed lexically -- which is what bash's default logical cd does. A
+// write through a symlinked `..` is caught by the caller handing the prefix to
+// the policy layer to realpath.
+function resolveWordFrom(word: WordFragment[], home: string, base: string | null): string | null {
   const fragments = word.filter((f) => f.text.length > 0);
   if (fragments.length === 0) return null;
   let text = wordText(fragments);
@@ -414,9 +502,66 @@ function resolveWordFrom(
     }
   }
   if (text.startsWith("~") || /[*?$`\\{}[\]]/.test(text)) return null;
-  if (!allowDotDot && text.split("/").includes("..")) return null;
   if (path.isAbsolute(text)) return path.resolve(text);
   return base ? path.resolve(base, text) : null;
+}
+
+// The `$(...)` and backtick bodies inside a word, wherever bash would run them.
+function substitutions(word: WordFragment[]): string[] {
+  const out: string[] = [];
+  for (const f of word) {
+    if (f.quote === "'") continue;
+    const t = f.text;
+    for (let j = 0; j < t.length; j++) {
+      if (t[j] === "$" && t[j + 1] === "(") {
+        const end = substitutionEnd(t, j + 1);
+        out.push(t.slice(j + 2, end));
+        j = end;
+      } else if (t[j] === "`") {
+        const end = backtickEnd(t, j);
+        out.push(t.slice(j + 1, end));
+        j = end;
+      }
+    }
+  }
+  return out;
+}
+
+function sameState(a: CwdState, b: CwdState): boolean {
+  return (
+    a.dir === b.dir && a.state === b.state && a.nearState === b.nearState && a.guarded === b.guarded
+  );
+}
+function union(...wheres: Where[]): Where {
+  const out: Where = [];
+  for (const w of wheres) for (const s of w) if (!out.some((o) => sameState(o, s))) out.push(s);
+  return out;
+}
+function worst(where: Where): CwdState {
+  return {
+    dir: null,
+    state: where.some((d) => d.state),
+    nearState: where.some((d) => d.nearState),
+    guarded: where.some((d) => d.guarded),
+  };
+}
+
+interface Shell {
+  cur: Where;
+  oldpwd: Where | null;
+  stack: Where[];
+  /** A cd has happened, so relative operands no longer mean the request's cwd. */
+  moved: boolean;
+  /** HOME or CDPATH was reassigned, so a bare or relative cd lands who knows where. */
+  steered: boolean;
+}
+
+interface Segment {
+  words: WordFragment[][];
+  outs: WordFragment[][];
+  ins: WordFragment[][];
+  hereStrings: WordFragment[][];
+  heredocs: number;
 }
 
 function scanCdContext(command: string, home: string, cwd: string): CdScan {
@@ -430,59 +575,74 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
       guarded: state || (!!home && isCredentialStore(dir, home)),
     };
   };
-  const start: CwdState = {
-    dir: cwd && path.isAbsolute(cwd) ? cwd : null,
-    state: false,
-    nearState: false,
-    guarded: false,
-  };
-  walk(command, { cur: start, oldpwd: null, stack: [], moved: false }, 0);
-  return out;
+  const start: CwdState = cwd && path.isAbsolute(cwd) ? { ...UNKNOWN, dir: cwd } : UNKNOWN;
+  walk(command, { cur: [start], oldpwd: null, stack: [], moved: false, steered: false }, 0);
 
-  interface Shell {
-    cur: CwdState;
-    oldpwd: CwdState | null;
-    stack: CwdState[];
-    /** A cd has happened, so relative operands no longer mean the request's cwd. */
-    moved: boolean;
+  // Backstop for every place the walker cannot see into -- `find -exec`,
+  // `python -c "os.system(...)"`, `xargs`, a function body: a cd whose target
+  // is Loom state or a credential store is never auto-allowed, wherever it sits.
+  for (const m of command.replace(/\\/g, "").matchAll(RAW_CD)) {
+    const raw = m[1].replace(/^["']|["']$/g, "");
+    const abs = resolveWordFrom([{ text: raw, quote: null }], home, null);
+    if (abs ? stateFor(abs).guarded : SUSPECT_CD.test(raw)) out.guarded = true;
   }
+  return out;
 
   function walk(script: string, sh: Shell, depth: number): Shell {
     if (depth > 4) {
       // Nested deeper than any honest command: refuse to judge it as harmless.
-      if (sh.cur.nearState) out.catastrophic = true;
-      if (sh.cur.guarded) out.guarded = true;
+      out.guarded = true;
+      if (sh.cur.some((d) => d.nearState)) out.catastrophic = true;
       return sh;
     }
+    const hasOr = script.includes("||");
     const saved: Shell[] = [];
-    let words: WordFragment[][] = [];
-    let outs: WordFragment[][] = [];
-    let ins: WordFragment[][] = [];
-    let pending: "out" | "in" | "dup" | "skip" | null = null;
-    const flush = () => {
-      if (words.length || outs.length || ins.length) sh = runSimple(words, outs, ins, sh, depth);
-      words = [];
-      outs = [];
-      ins = [];
+    // Heredoc bodies arrive after the line that asked for them; each waits here
+    // with the state its command started in.
+    const hosts: { shell: boolean; sh: Shell }[] = [];
+    let seg: Segment = { words: [], outs: [], ins: [], hereStrings: [], heredocs: 0 };
+    let pending: "out" | "in" | "dup" | "skip" | "here" | null = null;
+    const flush = (sep: string) => {
+      if (seg.words.length || seg.outs.length || seg.ins.length) {
+        const before = sh;
+        const r = runSimple(seg, sh, depth);
+        sh = r.sh;
+        for (let k = 0; k < seg.heredocs; k++) hosts.push({ shell: r.shell, sh: before });
+        // The cd may have failed. `&&` would skip what follows; anything else
+        // runs it in the old directory.
+        if (r.cd && (sep !== "&&" || hasOr)) sh = { ...sh, cur: union(sh.cur, before.cur) };
+      }
+      seg = { words: [], outs: [], ins: [], hereStrings: [], heredocs: 0 };
       pending = null;
     };
-    for (const t of shellTokens(script)) {
+    for (const t of shellTokens(script, true)) {
+      if ("heredoc" in t) {
+        const host = hosts.shift();
+        if (host?.shell) walk(t.heredoc, copy(host.sh), depth + 1);
+        continue;
+      }
       if ("word" in t) {
         const txt = wordText(t.word);
-        if (pending === "out" || (pending === "dup" && !/^(\d+|-)$/.test(txt))) outs.push(t.word);
-        else if (pending === "in") ins.push(t.word);
-        else if (pending === null) words.push(t.word);
+        if (pending === "out" || (pending === "dup" && !/^(\d+|-)$/.test(txt)))
+          seg.outs.push(t.word);
+        else if (pending === "in") seg.ins.push(t.word);
+        else if (pending === "here") seg.hereStrings.push(t.word);
+        else if (pending === null) seg.words.push(t.word);
         pending = null;
         continue;
       }
       const op = t.op;
-      if (op === "<<" || op === "<<-" || op === "<<<" || op === "<&") pending = "skip";
+      if (op === "<<") {
+        seg.heredocs++;
+        pending = "skip";
+      } else if (op === "<<<") pending = "here";
+      else if (op === "<&") pending = "skip";
       else if (op === "<") pending = "in";
       else if (op.includes(">")) pending = op.endsWith("&") ? "dup" : "out";
       else {
-        flush();
+        flush(op);
         if (op === "(") {
-          saved.push({ ...sh, stack: [...sh.stack] });
+          saved.push(copy(sh));
         } else if (op === ")") {
           // A subshell's cd does not outlive it.
           const back = saved.pop();
@@ -490,24 +650,33 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
         }
       }
     }
-    flush();
+    flush("");
     return sh;
   }
 
+  function copy(sh: Shell): Shell {
+    return { ...sh, stack: [...sh.stack] };
+  }
+
   function runSimple(
-    allWords: WordFragment[][],
-    outs: WordFragment[][],
-    ins: WordFragment[][],
+    seg: Segment,
     sh: Shell,
     depth: number,
-  ): Shell {
+  ): { sh: Shell; cd: boolean; shell: boolean } {
+    const all = [...seg.words, ...seg.outs, ...seg.ins, ...seg.hereStrings];
+    // Command substitutions run in a subshell that starts where this command stands.
+    for (const w of all) for (const inner of substitutions(w)) walk(inner, copy(sh), depth + 1);
+
     let i = 0;
-    while (i < allWords.length) {
-      const t = wordText(allWords[i]);
-      if (LEADING_KEYWORDS.has(t) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) i++;
-      else break;
+    while (i < seg.words.length) {
+      const t = wordText(seg.words[i]);
+      if (LEADING_KEYWORDS.has(t)) i++;
+      else if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) {
+        if (CD_STEERING.test(t)) sh = { ...sh, steered: true };
+        i++;
+      } else break;
     }
-    const rest = allWords.slice(i);
+    const rest = seg.words.slice(i);
     const texts = rest.map(wordText);
     const offset = texts.length - unwrap(texts).length;
     const argv = rest.slice(offset);
@@ -515,61 +684,114 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
     const argTexts = args.map(wordText);
     const verb = argv.length ? wordText(argv[0]).split("/").pop() : undefined;
 
+    if (verb && DECLARE_VERBS.has(verb) && argTexts.some((a) => CD_STEERING.test(a))) {
+      sh = { ...sh, steered: true };
+    }
     if (verb === "cd" || verb === "pushd" || verb === "popd" || verb === "chdir") {
-      return changeDir(verb, args, sh);
+      return { sh: changeDir(verb, args, sh), cd: true, shell: false };
     }
+    if (sh.cur.some((d) => d.guarded) && (argv.length || seg.outs.length)) out.guarded = true;
 
-    if (sh.cur.guarded && (argv.length || outs.length)) out.guarded = true;
+    if (sh.moved) for (const where of sh.cur) judgeOperands(where, verb, args, argTexts, seg);
 
-    if (sh.moved) {
-      const base = sh.cur.dir;
-      if (verb && READ_LIKE.has(verb)) {
-        args.forEach((w, k) => {
-          if (argTexts[k].startsWith("-")) return;
-          const abs = resolveWordFrom(w, home, base, true);
-          if (abs) out.readPaths.push(abs);
-        });
+    // An inner shell starts where this one stands, wherever it sits in the argv
+    // (`find -exec sh -c`, `xargs bash -c`, `nice sh -c`); `eval` runs in this one.
+    const texts2 = argv.map(wordText);
+    const shellAt = texts2.findIndex((t) => SHELLS.has(t.split("/").pop() ?? ""));
+    let shell = false;
+    if (shellAt !== -1) {
+      shell = true;
+      const c = texts2.findIndex((t, k) => k > shellAt && /^-[a-zA-Z]*c[a-zA-Z]*$/.test(t));
+      if (c !== -1) {
+        // bash takes the first operand after its options as the script; `--` ends them.
+        const script = texts2.slice(c + 1).find((t) => !/^[-+]/.test(t));
+        if (script !== undefined) walk(script, copy(sh), depth + 1);
       }
-      for (const w of ins) {
-        const abs = resolveWordFrom(w, home, base, true);
-        if (abs) out.readPaths.push(abs);
-      }
-      const writes = [...outs];
-      const inPlaceSed =
-        verb === "sed" && argTexts.some((a) => a === "--in-place" || /^-[a-zA-Z]*i/.test(a));
-      if (verb === "tee" || verb === "cp" || verb === "mv" || inPlaceSed) {
-        args.forEach((w, k) => {
-          if (!argTexts[k].startsWith("-")) writes.push(w);
-        });
-      } else if (verb === "dd") {
-        for (const w of args) {
-          if (w[0]?.quote === null && w[0].text.startsWith("of=")) {
-            writes.push([{ ...w[0], text: w[0].text.slice(3) }, ...w.slice(1)]);
-          }
-        }
-      }
-      for (const w of writes) {
-        const abs = resolveWordFrom(w, home, base, false);
-        if (abs === null) {
-          if (sh.cur.nearState) out.catastrophic = true;
-        } else if (isLoomStatePath(abs, home)) {
-          out.catastrophic = true;
-        } else if (hasStateSegment(abs)) {
-          out.writeTargets.push(abs);
-        }
-      }
-    }
-
-    // An inner shell starts where this one stands; `eval` runs in this one.
-    if (verb && SHELLS.has(verb)) {
-      const c = argTexts.findIndex((a) => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(a));
-      if (c !== -1 && c + 1 < argTexts.length) {
-        walk(argTexts[c + 1], { ...sh, stack: [...sh.stack] }, depth + 1);
-      }
+      for (const w of seg.hereStrings) walk(wordText(w), copy(sh), depth + 1);
     } else if (verb === "eval") {
-      return walk(argTexts.join(" "), sh, depth + 1);
+      return { sh: walk(argTexts.join(" "), sh, depth + 1), cd: false, shell };
     }
-    return sh;
+    return { sh, cd: false, shell };
+  }
+
+  function judgeOperands(
+    where: CwdState,
+    verb: string | undefined,
+    args: WordFragment[][],
+    argTexts: string[],
+    seg: Segment,
+  ) {
+    const base = where.dir;
+    const reads: WordFragment[][] = [...seg.ins];
+    if (verb && READ_LIKE.has(verb)) {
+      args.forEach((w, k) => {
+        if (!argTexts[k].startsWith("-")) reads.push(w);
+      });
+    }
+    for (const w of reads) {
+      const abs = resolveWordFrom(w, home, base);
+      if (abs) {
+        out.readPaths.push(abs);
+      } else if (base === null && where.state && home) {
+        // Somewhere in Loom state we could not pin down: judge a relative read
+        // as if it were in either config dir, so `config.json` still denies.
+        const rel = wordText(w);
+        if (!path.isAbsolute(rel) && !rel.split("/").includes("..")) {
+          for (const name of WORKSPACE_STATE_DIR_NAMES)
+            out.readPaths.push(path.join(home, name, rel));
+        }
+      }
+    }
+    const writes = [...seg.outs];
+    const inPlaceSed =
+      verb === "sed" && argTexts.some((a) => a === "--in-place" || /^-[a-zA-Z]*i/.test(a));
+    if (verb === "tee" || verb === "cp" || verb === "mv" || inPlaceSed) {
+      args.forEach((w, k) => {
+        if (!argTexts[k].startsWith("-")) writes.push(w);
+      });
+    } else if (verb === "dd") {
+      for (const w of args) {
+        if (w[0]?.quote === null && w[0].text.startsWith("of=")) {
+          writes.push([{ ...w[0], text: w[0].text.slice(3) }, ...w.slice(1)]);
+        }
+      }
+    }
+    for (const w of writes) {
+      const text = wordText(w);
+      const abs = resolveWordFrom(w, home, base);
+      if (abs !== null) {
+        if (isLoomStatePath(abs, home)) out.catastrophic = true;
+        else if (hasStateSegment(abs)) out.writeTargets.push(abs);
+        // `..` is collapsed lexically, but the kernel walks it physically: hand
+        // the directory it climbs out of to the policy layer to realpath.
+        const segs = text.split("/");
+        const up = segs.indexOf("..");
+        if (up !== -1) {
+          const prefix = resolveWordFrom(
+            [{ text: segs.slice(0, up).join("/") || ".", quote: null }],
+            home,
+            base,
+          );
+          if (prefix && hasStateSegment(prefix)) out.writeTargets.push(prefix);
+          if (base && hasStateSegment(base)) out.writeTargets.push(base);
+        }
+      } else if (where.state) {
+        out.catastrophic = true;
+      } else if (where.nearState || (where.dir === null && where.guarded)) {
+        // A plain relative glob cannot climb out or match a dot-dir, so it stays
+        // in this analysis; anything else we cannot place asks instead of passing.
+        const plainGlob =
+          base &&
+          !/[$`~\\]/.test(text) &&
+          !path.isAbsolute(text) &&
+          !text.split("/").some((p) => p === ".." || /^\.[^/]*[*?[{]/.test(p));
+        if (plainGlob) {
+          if (isLoomStatePath(path.resolve(base, text), home)) out.catastrophic = true;
+        } else {
+          out.guarded = true;
+        }
+      }
+    }
   }
 
   function changeDir(verb: string, args: WordFragment[][], sh: Shell): Shell {
@@ -585,7 +807,7 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
     }
     const target = args[k];
     const stack = [...sh.stack];
-    let next: CwdState;
+    let next: Where;
     if (verb === "popd") {
       next = stack.pop() ?? sh.cur;
     } else if (verb === "pushd" && !target) {
@@ -594,7 +816,7 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
       stack.push(sh.cur);
       next = top;
     } else if (!target) {
-      next = home ? stateFor(home) : { dir: null, state: false, nearState: false, guarded: false };
+      next = [sh.steered ? LOST : home ? stateFor(home) : UNKNOWN];
     } else {
       const text = wordText(target);
       if (text === "-" && verb !== "pushd") {
@@ -603,32 +825,33 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
         next = sh.oldpwd;
       } else if (/^[+-]\d+$/.test(text)) {
         // A pushd/popd stack rotation we do not model: assume the worst entry.
-        const all = [sh.cur, ...stack];
-        next = {
-          dir: null,
-          state: all.some((d) => d.state),
-          nearState: all.some((d) => d.nearState),
-          guarded: all.some((d) => d.guarded),
-        };
+        next = [worst(union(sh.cur, ...stack))];
+      } else if (sh.steered && !path.isAbsolute(text) && !text.startsWith("$")) {
+        next = [LOST];
       } else {
-        const abs = resolveWordFrom(target, home, sh.cur.dir, true);
-        if (abs) {
-          next = stateFor(abs);
-        } else {
-          const suspect = SUSPECT_CD.test(text.replace(/\\/g, ""));
-          // Relative from a directory we already lost track of: still inside it.
-          const inherit = !path.isAbsolute(text) && !/^[~$]/.test(text) && sh.cur.dir === null;
-          next = {
-            dir: null,
-            state: suspect || (inherit && sh.cur.state),
-            nearState: suspect || (inherit && sh.cur.nearState),
-            guarded: suspect || (inherit && sh.cur.guarded),
-          };
-        }
+        next = union(
+          sh.cur.map((where) => {
+            const abs = resolveWordFrom(target, home, where.dir);
+            if (abs) return stateFor(abs);
+            // Unresolvable: it might be right here (`cd "$PWD"`), so keep this
+            // directory's protection, plus whatever the text itself gives away.
+            const suspect =
+              SUSPECT_CD.test(text.replace(/\\/g, "")) ||
+              substitutions(target).some((body) =>
+                shellWords(body).some((w) => SUSPECT_CD.test(wordText(w))),
+              );
+            return {
+              dir: null,
+              state: suspect || where.state,
+              nearState: suspect || where.nearState,
+              guarded: suspect || where.guarded,
+            };
+          }),
+        );
       }
       if (verb === "pushd") stack.push(sh.cur);
     }
-    return { cur: next, oldpwd: sh.cur, stack, moved: true };
+    return { ...sh, cur: next, oldpwd: sh.cur, stack, moved: true };
   }
 }
 

@@ -926,8 +926,12 @@ describe("decide -- a cd into Loom state carries the direct path's verdict", () 
     "cd ~/.loom && touch lessons/x.md",
     "cd ~/.loom && grep -r token .",
     "cd ~/.ssh && echo k >> authorized_keys",
-    "cd $ORBIT_HOME && cat config.json",
     "cd ~/.loom/lessons && echo x > /tmp/elsewhere",
+    // Not writes into state, but any command line that cds into Loom state is
+    // never auto-allowed -- the walker is not the only thing that can run a cd.
+    "(cd ~/.loom) && echo x > a",
+    "pushd ~/.loom && popd && echo x > a",
+    "cd ~/.loom",
   ])("asks instead of auto-allowing what it cannot judge in a guarded dir: %j", (command) => {
     expect(run(command).decision).toBe("ask");
   });
@@ -940,14 +944,91 @@ describe("decide -- a cd into Loom state carries the direct path's verdict", () 
     'cd "$(git rev-parse --show-toplevel)" && echo x > y',
     "cd ~/.loom/analyses/proj && echo x > out.txt",
     "cd ~/.loom/analyses/proj && python3 run.py > out.txt",
-    // a subshell's cd and a popped pushd do not outlive themselves
-    "(cd ~/.loom) && echo x > a",
-    "pushd ~/.loom && popd && echo x > a",
     "cd /tmp && cd - && echo x > a",
-    // a cd with nothing after it runs in a shell that exits straight away
-    "cd ~/.loom",
   ])("leaves every other cd alone: %j", (command) => {
     expect(run(command).decision).toBe("allow");
+  });
+
+  // Each of these got past an earlier version of the walker.
+  it.each([
+    // a cd that fails leaves the shell where it was
+    "cd ~/.loom; cd /etc/passwd; echo x > config.json",
+    "cd ~/.loom && cd /etc/passwd || echo x > config.json",
+    // a heredoc body is data, not a cd
+    "cd ~/.loom <<X\ncd /tmp\nX\necho x > config.json",
+    "cd ~/.loom/lessons <<X\ncd /tmp\nX\ncp /tmp/x.md galaxy-api/evil.md",
+    "cat <<X\n(\nX\ncd ~/.loom <<Y\n)\nY\necho x > config.json",
+    // ...unless a shell reads it
+    "bash <<X\ncd ~/.loom && echo x > config.json\nX",
+    // an unquoted substitution as the target, and hops it cannot resolve
+    "cd $(echo ~/.loom) && echo x > config.json",
+    'cd ~/.loom/lessons && cd "$PWD" && echo x > evil.md',
+    "cd ~/.loom && cd $(pwd) && echo x > config.json",
+    // nested execution
+    "echo `cd ~/.loom && echo x > config.json`",
+    'echo "$(cd ~/.loom && echo x > config.json)"',
+    "find . -maxdepth 0 -exec sh -c 'cd ~/.loom && echo x > config.json' \\;",
+    "xargs -I{} sh -c 'cd ~/.loom && echo x > config.json' <<< a",
+    "bash -c -- 'cd ~/.loom && echo x > config.json'",
+    "bash <<< 'cd ~/.loom && echo x > config.json'",
+    // variables that steer a later cd
+    "CDPATH=~/.loom cd lessons && echo x > evil.md",
+    "HOME=$HOME/.loom; cd; echo x > config.json",
+    "export CDPATH=/x; cd lessons; echo x > evil.md",
+    "cd \"$(echo ~/.lo''om)\" && echo x > config.json",
+  ])("denies a write: %j", (command) => {
+    const r = run(command);
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("bash:catastrophic");
+  });
+
+  it.each([
+    "cd ~/.loom; cd /nonexistent-xyz; cat config.json",
+    "cd ~/.ssh; cd /etc/passwd; cat id_rsa",
+    "cd ~/.loom <<X\ncd /tmp\nX\ncat config.json",
+    "cd $(dirname ~/.loom/config.json) && cat config.json",
+    "cd $ORBIT_HOME && cat config.json",
+  ])("denies a credential-store read: %j", (command) => {
+    const r = run(command);
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("read:credential-store");
+  });
+
+  it.each(["python3 -c \"import os; os.system('cd ~/.loom && echo x > config.json')\""])(
+    "asks for what it cannot see into: %j",
+    (command) => {
+      expect(run(command).decision).toBe("ask");
+    },
+  );
+
+  it("keeps the home directory out of the reason it logs", () => {
+    const r = run("cd ~/.loom && cat config.json");
+    expect(r.reason).toContain("~/.loom/config.json");
+    expect(r.reason).not.toContain(HOME);
+  });
+
+  it.each([
+    // ordinary work inside an Orbit analysis, cwd there
+    "cd data && cp ../raw.csv .",
+    "cd data && python3 run.py > ../results.txt",
+    "cd data && cp *.csv ../out/",
+    "cd scripts && sed -i 's/a/b/' *.py",
+    "cd build && cmake .. && make > ../log.txt",
+    "cd data && cat <<EOF > notes.md\ncd /tmp\nEOF",
+  ])("leaves ordinary analysis work alone: %j", (command) => {
+    const analysis = `${HOME}/.loom/analyses/proj`;
+    const inAnalysis: PathResolver = {
+      contains: (p) => ({ resolved: p, inside: p.startsWith(analysis) }),
+    };
+    const r = decide(
+      req({
+        cwd: analysis,
+        config: { ...baseCfg, trustedWorkspaces: [analysis] },
+        toolInput: { command },
+      }),
+      { resolver: inAnalysis, home: HOME },
+    );
+    expect(r.decision).toBe("allow");
   });
 
   it("realpaths a carved-out write target reached by cd", () => {
