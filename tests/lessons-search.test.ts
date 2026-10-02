@@ -5,6 +5,7 @@ import * as path from "path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { lessonText, searchLessons, tokenize } from "../extensions/loom/lessons/search";
 import { registerLessonsSearchTool } from "../extensions/loom/lessons/search-tool";
+import { lessonFile } from "./lessons-fixture";
 import { renderFullLesson, renderLessonSearchResult } from "../extensions/loom/lesson-hint";
 import { resetLessonStore } from "../extensions/loom/lessons/store";
 import { readCounters } from "../extensions/loom/lessons/counters";
@@ -249,6 +250,29 @@ describe("the lessons_search tool", () => {
       }),
     ]);
     expect(readCounters()["stats/na-coerced-to-zero-in-filters"].surfaced).toBe(1);
+  });
+
+  it("records only the top hit, the one rendered in full", async () => {
+    const plant = (slug: string, title: string) => {
+      const d = path.join(dir, "lessons", "stats");
+      fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(
+        path.join(d, `${slug}.md`),
+        lessonFile({ title, trigger: { step_keywords: '["zebrafish"]' } }),
+      );
+    };
+    plant("zebrafish-one", "Zebrafish counts one");
+    plant("zebrafish-two", "Zebrafish counts two");
+    plant("zebrafish-three", "Zebrafish counts three");
+    resetLessonStore();
+    const out = await tool()("zebrafish counts");
+    const ids = out.details.ids as string[];
+    expect(ids.length).toBeGreaterThan(1);
+    const surfaced = rows().filter((r) => r.kind === "lesson.surfaced");
+    expect(surfaced.map((r) => r.payload.lessonId)).toEqual([ids[0]]);
+    const counters = readCounters();
+    expect(counters[ids[0]].surfaced).toBe(1);
+    for (const id of ids.slice(1)) expect(counters[id]).toBeUndefined();
   });
 
   it("says nothing matched without echoing the query, and records nothing", async () => {
