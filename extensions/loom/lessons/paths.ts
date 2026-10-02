@@ -161,10 +161,14 @@ function errorDetail(err: unknown): string {
  */
 function parentIsReal(filePath: string): boolean {
   const dir = path.dirname(filePath);
-  // The state dir when it holds the file, as before. LOOM_LESSONS_DIR can put
-  // the tier outside it, and then the directory the user named is the root:
-  // nothing below it may be a link.
-  const root = [getConfigDir(), lessonsDir()].find((r) => {
+  // With LOOM_LESSONS_DIR set, the directory the user named is the root for
+  // anything under it -- itself possibly a link, wherever it sits, the same as
+  // the store reads it -- and nothing below it may be a link. Otherwise the
+  // state dir, so a linked lessons/ inside it is refused.
+  const stateDir = getConfigDir();
+  const overridden = lessonsDir() !== path.join(stateDir, "lessons");
+  const roots = overridden ? [lessonsDir(), stateDir] : [stateDir];
+  const root = roots.find((r) => {
     const rel = path.relative(r, dir);
     return !rel.startsWith("..") && !path.isAbsolute(rel);
   });
