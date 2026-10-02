@@ -10,9 +10,9 @@
  * trigger table if upstream ever moves a field.
  *
  * Handlers chain inside one extension in registration order, and pi feeds each
- * one the previous handler's `content`. That is why `registerLessonHint` goes
- * BEFORE `registerSecretRedaction` in `index.ts`: hint text is tool-result
- * content like any other, and it has to pass through the redactor too.
+ * one the previous handler's `content`. So every handler registered after
+ * `registerLessonHint` sees the hint, which is why the hint is a block of its
+ * own that `withoutLessonHints` (shared/lesson-hint-marker.js) can drop.
  */
 
 import type { MessageEndEvent, ToolResultEvent } from "@earendil-works/pi-coding-agent";
@@ -60,23 +60,17 @@ export function resultTextOf(content: LessonToolResultContent): string {
 }
 
 /**
- * Append a note after the result, on the last text block. By the time this
- * runs the oversized-output recovery has already replaced a huge result with
- * its preview (`index.ts` registers that first), so the end of the content is
+ * Add the hint as a text block of its own at the end. Not folded into the
+ * tool's last block: a later handler reading the result as the tool's output
+ * has to be able to tell the two apart, and a failed call with no text of its
+ * own would otherwise be described by the hint. By the time this runs the
+ * oversized-output recovery has already replaced a huge result with its
+ * preview (`index.ts` registers that first), so the end of the content is
  * still the end of what the model reads. Returns a copy.
  */
 export function appendHintToContent(
   content: LessonToolResultContent,
   hint: string,
 ): LessonToolResultContent {
-  const next = content.slice();
-  for (let i = next.length - 1; i >= 0; i--) {
-    const block = next[i];
-    if (block.type === "text") {
-      next[i] = { ...block, text: `${block.text}\n\n${hint}` };
-      return next;
-    }
-  }
-  next.push({ type: "text", text: hint });
-  return next;
+  return [...content, { type: "text", text: hint }];
 }

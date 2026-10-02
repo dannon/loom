@@ -18,8 +18,8 @@ import { fileURLToPath } from "node:url";
 import { loadConfig } from "../config";
 import { LESSON_NAMESPACES } from "../../../shared/lesson-rules.js";
 import { readEnv } from "../../../shared/orbit-env.js";
-import { resolveStateDir } from "../../../shared/state-dir.js";
 import { syncSuppressedFlags } from "./counters";
+import { userLessonsDir } from "./user-dir";
 import type { Lesson } from "./types";
 import { parseUserLesson } from "./user-lesson";
 
@@ -171,21 +171,12 @@ export function loadPackageLessons(file: string = packageSnapshotPath()): {
 }
 
 /**
- * Where the user's own lessons live: `<state dir>/lessons/<namespace>/<slug>.md`.
- *
- * `LOOM_LESSONS_DIR` REPLACES this rather than adding to it -- it exists so a
- * test, an eval, or a shared project directory can supply the whole tier.
- * Content read from it is validated and wrapped exactly like `~/.loom/lessons`.
- *
  * `<state dir>/lesson-drafts/`, where the /lesson command keeps a draft the
- * user has not accepted, is a sibling, so the namespace walk below never sees
- * it and an unaccepted draft can never reach the model.
+ * user has not accepted, is a sibling of the default `userLessonsDir()`, so the
+ * namespace walk below never sees it and an unaccepted draft can never reach
+ * the model.
  */
-export function userLessonsDir(): string {
-  const override = readEnv("LESSONS_DIR")?.trim();
-  if (override) return path.resolve(process.cwd(), override);
-  return path.join(resolveStateDir(), "lessons");
-}
+export { userLessonsDir };
 
 /** Master switch. Off means no lesson reaches the model on any surface. */
 export function isLessonsEnabled(): boolean {

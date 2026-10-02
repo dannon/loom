@@ -20,6 +20,8 @@ import { resetState, setNotebookPath } from "../extensions/loom/state";
 import { lessonFile } from "./lessons-fixture";
 import { clip, collapse, firstSentence } from "../extensions/loom/lessons/text";
 import { LESSONS_WRAPPER_TAG, wrapLessons } from "../extensions/loom/lessons/wrapper";
+import { resultTextOf } from "../extensions/loom/lessons/pi-event-contract";
+import { withoutLessonHints } from "../shared/lesson-hint-marker.js";
 
 describe("text helpers", () => {
   it("collapses every run of whitespace, including newlines", () => {
@@ -121,7 +123,11 @@ describe("decideToolResultHint", () => {
     );
     expect(out?.match.lesson.id).toBe(REF.id);
     expect(out?.match.trigger).toBe("signature");
-    expect(out?.content[0].type === "text" && out.content[0].text).toContain(LESSON_HINT_MARKER);
+    // The tool's own block is untouched; the hint is the block after it.
+    expect(out?.content).toHaveLength(2);
+    expect(out?.content[0]).toEqual(failing[0]);
+    const last = out?.content[1];
+    expect(last?.type === "text" && last.text.startsWith(LESSON_HINT_MARKER)).toBe(true);
   });
 
   it("returns null when the lesson already fired this session", () => {
@@ -144,8 +150,21 @@ describe("decideToolResultHint", () => {
     expect(out?.match.lesson.id).toBe(REF.id);
   });
 
+  it("still hints when the tool output merely quotes the marker", () => {
+    const quoted = [
+      text(`ValueError: ${LESSON_HINT_MARKER} No reference index registered for build mm39`),
+    ];
+    expect(
+      decideToolResultHint(
+        { toolName: "galaxy_run_tool", input: {}, content: quoted },
+        [REF],
+        new Set(),
+      ),
+    ).not.toBeNull();
+  });
+
   it("returns null when the result already carries ANY lesson hint", () => {
-    const already = [text(`already\n\n${LESSON_HINT_MARKER} something else`), ...failing];
+    const already = [...failing, text(`${LESSON_HINT_MARKER} something else`)];
     expect(
       decideToolResultHint(
         { toolName: "galaxy_run_tool", input: {}, content: already },
@@ -304,7 +323,7 @@ describe("recordSurfacing + registerLessonHint", () => {
   it("stays silent with no matching lesson on disk", async () => {
     const run = chain(registerLessonHint);
     const out = await run(event());
-    expect(out.content[0].text).not.toContain(LESSON_HINT_MARKER);
+    expect(out.content.map((c) => c.text).join("\n")).not.toContain(LESSON_HINT_MARKER);
     expect(activityRows()).toEqual([]);
   });
 
@@ -312,11 +331,12 @@ describe("recordSurfacing + registerLessonHint", () => {
     plantRef();
     const run = chain(registerLessonHint);
     const first = await run(event());
-    expect(first.content[0].text).toContain(LESSON_HINT_MARKER);
-    expect(first.content[0].text.match(/\[loom lesson\]/g)).toHaveLength(1);
+    const firstText = first.content.map((c) => c.text).join("\n");
+    expect(firstText).toContain(LESSON_HINT_MARKER);
+    expect(firstText.match(/\[loom lesson\]/g)).toHaveLength(1);
     // Second identical result: armed, so no second hint and no second row.
     const second = await run(event());
-    expect(second.content[0].text).not.toContain(LESSON_HINT_MARKER);
+    expect(second.content.map((c) => c.text).join("\n")).not.toContain(LESSON_HINT_MARKER);
     expect(activityRows().filter((r) => r.kind === "lesson.surfaced")).toHaveLength(1);
     expect(readCounters()[REF.id].surfaced).toBe(1);
   });
@@ -348,13 +368,13 @@ describe("recordSurfacing + registerLessonHint", () => {
     ).toBeNull();
   });
 
-  it("hint text goes through secret redaction when registered first", async () => {
+  it("hint text is redacted when registered after the redactor, as index.ts does", async () => {
     // A user-local lesson that happens to quote a live key.
     process.env.ANTHROPIC_API_KEY = "LessonQuotedKey7Value";
     plantRef("Compare against LessonQuotedKey7Value before doing anything.");
     const run = chain((pi) => {
-      registerLessonHint(pi);
       registerSecretRedaction(pi);
+      registerLessonHint(pi);
     });
     const out = await run(event());
     const all = out.content.map((c) => c.text).join("\n");
@@ -362,15 +382,49 @@ describe("recordSurfacing + registerLessonHint", () => {
     expect(all).not.toContain("LessonQuotedKey7Value");
     expect(all).toContain("[redacted]");
   });
+
+  it("a handler after the hint can recover the tool's own text, even when it was empty", async () => {
+    // The shape that matters: a failed Galaxy call with no text of its own,
+    // matched by tool id alone. Anything reading the result after the hint
+    // must not mistake the hint for the error.
+    mkdirSync(join(lessonsDir, "galaxy-tools"), { recursive: true });
+    writeFileSync(
+      join(lessonsDir, "galaxy-tools", "tool-id-only.md"),
+      lessonFile({ title: "A tool fails without saying why", trigger: { tools: '["hisat2"]' } }),
+    );
+    resetLessonStore();
+    const seen: string[] = [];
+    const run = chain((pi) => {
+      registerLessonHint(pi);
+      pi.on("tool_result", async (e: { content: { type: string; text?: string }[] }) => {
+        seen.push(resultTextOf(withoutLessonHints(e.content) as never));
+      });
+    });
+    const out = await run({ ...event(), content: [text("")] });
+    expect(out.content.map((c) => c.text).join("\n")).toContain(LESSON_HINT_MARKER);
+    expect(seen).toEqual([""]);
+  });
 });
 
 describe("registration order", () => {
-  it("registers the lesson hint before secret redaction", () => {
-    const source = readFileSync("extensions/loom/index.ts", "utf-8");
+  // Comments stripped, so prose that names a register call can't satisfy the check.
+  const source = readFileSync("extensions/loom/index.ts", "utf-8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//"))
+    .join("\n");
+
+  it("registers the lesson hint after secret redaction", () => {
     const hintAt = source.indexOf("registerLessonHint(pi)");
     const redactAt = source.indexOf("registerSecretRedaction(pi)");
     expect(hintAt).toBeGreaterThan(-1);
     expect(redactAt).toBeGreaterThan(-1);
-    expect(hintAt).toBeLessThan(redactAt);
+    expect(hintAt).toBeGreaterThan(redactAt);
+  });
+
+  it("registers the lesson hint after the observation triggers, whenever they exist", () => {
+    const hintAt = source.indexOf("registerLessonHint(pi)");
+    const triggersAt = source.indexOf("registerObservationTriggers(pi)");
+    if (triggersAt > -1) expect(hintAt).toBeGreaterThan(triggersAt);
   });
 });

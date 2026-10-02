@@ -22,8 +22,8 @@ this same fixture.
 ## What it does not pin
 
 Whether the model does anything with the hint -- that needs a model and lives in
-`lesson-changes-plan`. And whether hint text reaches the provider after
-redaction, which `tests/lesson-hint.test.ts` checks by chaining both handlers.
+`lesson-changes-plan`. And whether lesson text is redacted, which
+`tests/lessons-redaction.test.ts` checks on every surface that renders one.
 
 ## Rerunning it
 

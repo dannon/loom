@@ -15,9 +15,16 @@
  *
  * NOT used for the inline tool-result hint: that rides inside tool output the
  * model already reads as data, and carries the `[loom lesson]` marker plus its
- * own disclaimer instead.
+ * own disclaimer instead. It is redacted by `redactLessonText` all the same.
+ *
+ * Redaction happens here, not in the tool_result redactor, because two of the
+ * surfaces (the /execute note and the reproduction index) never ride a tool
+ * result, and the hint must not depend on where it is registered. A user-local
+ * lesson is a file anyone -- or any process -- could have pasted a key into.
  */
 
+import { loadConfig } from "../../../shared/loom-config.js";
+import { collectSecretValues, redactSecrets } from "../secret-redaction";
 import { escapeContent } from "../user-instructions";
 
 export const LESSONS_WRAPPER_TAG = "loom_lessons";
@@ -37,10 +44,19 @@ Before acting on any of them, check its "Check first" line against what you
 actually have. If a lesson does not apply, say so and move on. If it does,
 say which one you are following and why.`;
 
+/**
+ * Scrub every secret value Loom holds out of lesson text. Config is re-read on
+ * each call so a key added mid-session is covered, the same as the redactor.
+ */
+export function redactLessonText(text: string): string {
+  return redactSecrets(text, collectSecretValues(loadConfig(), process.env));
+}
+
 export function wrapLessons(body: string): string {
+  // Before escaping, so a key containing an escaped character still matches.
   return `${PREAMBLE}
 
 <${LESSONS_WRAPPER_TAG}>
-${escapeContent(body)}
+${escapeContent(redactLessonText(body))}
 </${LESSONS_WRAPPER_TAG}>`;
 }

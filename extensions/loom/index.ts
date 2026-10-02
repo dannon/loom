@@ -45,6 +45,7 @@ import { registerSecretRedaction } from "./secret-redaction";
 import { registerObservationTriggers } from "./observation-triggers";
 import { registerObservationsCommand } from "./observations-command";
 import { registerLessonHint } from "./lesson-hint";
+import { withoutLessonHints } from "../../shared/lesson-hint-marker.js";
 import { registerLessonsSearchTool } from "./lessons/search-tool";
 import { isLessonReplayEnabled, registerLessonReplay } from "./lessons/replay";
 import { registerMcpOutputRecovery } from "./mcp-output";
@@ -108,17 +109,20 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerMcpRecovery(pi);
   registerGalaxyPollGuard(pi);
   registerProgressUpdates(pi);
-  // Before redaction on purpose: pi feeds each tool_result handler the previous
-  // one's content, so a lesson hint passes through the redactor like any other
-  // result text. After the oversized-output recovery, so it lands on the preview
-  // the model actually reads.
-  registerLessonHint(pi);
   registerSecretRedaction(pi);
   // AFTER redaction, deliberately. pi runs tool_result handlers in
   // registration order and each sees the previous one's rewrite, so the
   // collector reads the content the model actually gets -- reading the raw
   // result would put an API key one normalization away from the wire.
   registerObservationTriggers(pi);
+  // AFTER redaction, and it must also stay after the observation triggers once
+  // they are registered here. pi feeds each tool_result handler the previous
+  // one's content, so anything registered after the hint reads it as part of
+  // the result -- a Galaxy error with no text of its own would get Loom's hint
+  // as its error signature. Lesson text is redacted where it is rendered, so
+  // it needs nothing from the redactor. After the oversized-output recovery,
+  // so it lands after the preview the model actually reads.
+  registerLessonHint(pi);
 
   setupUIBridge(pi);
   registerSessionLifecycle(pi);
@@ -522,8 +526,9 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
     try {
       const name = galaxyCall(event.toolName, event.input)?.name;
       const failed = event.isError || Boolean((event.details as { error?: unknown })?.error);
+      // Without any lesson hint: lesson prose is not the tool's error text.
       const resultText = failed
-        ? event.content
+        ? withoutLessonHints(event.content)
             .filter((c) => c.type === "text")
             .map((c) => c.text)
             .join("\n")

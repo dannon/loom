@@ -4,7 +4,8 @@
  *
  * Retrieval is local, and nothing here echoes the query back or puts it in
  * the lesson.surfaced row. The generic tool.start activity row still records
- * the call's arguments like any other tool's.
+ * the call's arguments like any other tool's, unless activity-hooks.ts puts
+ * this tool on its quiet list.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -62,11 +63,10 @@ first" line against what you actually have before acting on it.`,
           details: { hits: 0, corpus: store.lessons.length },
         };
       }
-      for (const hit of hits) {
-        // trigger "search" says the model asked; surface "tool_result" says
-        // where the text landed. Both are C5 values.
-        recordSurfacing({ lesson: hit.lesson, trigger: "search", matched: "" }, "tool_result");
-      }
+      // Only the top hit is rendered in full; the rest are an id and a title,
+      // which is a pointer, not the lesson. trigger "search" says the model
+      // asked; surface "tool_result" says where the text landed.
+      recordSurfacing({ lesson: hits[0].lesson, trigger: "search", matched: "" }, "tool_result");
       return {
         content: [{ type: "text", text: renderLessonSearchResult(hits) }],
         details: {
