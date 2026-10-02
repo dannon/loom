@@ -316,6 +316,19 @@ describe("deliverObservation", () => {
     expect(JSON.stringify(d.rows)).not.toContain("reference genome");
   });
 
+  it("says unsaved, not queued, when the outbox can't be written", async () => {
+    // The second review's setup: both state dirs are regular files.
+    fs.rmSync(path.join(tmpHome, ".loom"), { recursive: true, force: true });
+    fs.writeFileSync(path.join(tmpHome, ".loom"), "not a directory");
+    fs.writeFileSync(path.join(tmpHome, ".orbit"), "not a directory");
+    const d = deps({
+      submit: async () => ({ ok: false, status: 503, error: "unconfigured", queueable: true }),
+    });
+    expect(await deliverObservation(facts, ctx, d)).toBe("unsaved");
+    expect(d.rows.map(([k]) => k)).toEqual(["observation.built", "observation.unsaved"]);
+    expect(d.state.delivered).toBe(0);
+  });
+
   it("collects nothing when the mode is off", async () => {
     const d = deps({
       mode: "off",

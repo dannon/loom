@@ -16,7 +16,7 @@ const obs: Observation = {
   kind: "tool-error",
   stage: "tool-parameterization",
   trigger: "tool_error",
-  tools: [{ id: "Filter1", version: "1.1.1" }],
+  tools: [{ id: "toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2", version: "2.2.1+galaxy1" }],
   mcpTool: "galaxy_run_tool",
   datatypes: ["tabular"],
   signature: "ToolExecutionError: dataset <id> failed",
@@ -259,7 +259,7 @@ describe("local logs", () => {
       stage: "tool-parameterization",
       trigger: "tool_error",
       signature: obs.signature,
-      tools: ["Filter1"],
+      tools: ["toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2"],
       mcpTool: "galaxy_run_tool",
       datatypes: ["tabular"],
       server: "usegalaxy.org",
@@ -297,7 +297,59 @@ describe("local logs", () => {
   });
 });
 
+describe("cancelling a queued observation", () => {
+  it("removes the row by id and leaves the others", async () => {
+    const m = await load();
+    const other = { ...obs, id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" };
+    m.appendToObservationOutbox(obs);
+    m.appendToObservationOutbox(other);
+    expect(m.removeFromObservationOutbox(obs.id)).toBe("removed");
+    expect(lines("observations-outbox.jsonl").map((l) => JSON.parse(l).id)).toEqual([other.id]);
+    expect(m.removeFromObservationOutbox(obs.id)).toBe("absent");
+  });
+
+  it("refuses while a drain may be sending that very row", async () => {
+    const m = await load();
+    m.appendToObservationOutbox(obs);
+    let release!: () => void;
+    const blocked = new Promise<void>((r) => (release = r));
+    const drain = m.drainObservationOutbox(
+      async () => {
+        await blocked;
+        return { ok: true, status: 202, queueable: false };
+      },
+      () => true,
+    );
+    expect(m.removeFromObservationOutbox(obs.id)).toBe("busy");
+    release();
+    await drain;
+  });
+});
+
+describe("a local write that fails", () => {
+  it("reports the outbox write as failed instead of pretending it was saved", async () => {
+    // The second review's setup: the state dirs are regular files.
+    fs.rmSync(path.join(tmpHome, ".loom"), { recursive: true, force: true });
+    fs.writeFileSync(path.join(tmpHome, ".loom"), "not a directory");
+    fs.writeFileSync(path.join(tmpHome, ".orbit"), "not a directory");
+    const m = await load();
+    expect(m.appendToObservationOutbox(obs)).toBeNull();
+    expect(m.saveRetractToken(obs.id, "b".repeat(32))).toBe(false);
+  });
+});
+
 describe("retract-token store", () => {
+  it("is written via a temp file and rename, so a failed write leaves the old store intact", async () => {
+    const m = await load();
+    m.saveRetractToken(obs.id, "b".repeat(32));
+    const store = path.join(tmpHome, ".loom", "observations-tokens.json");
+    // Block the temp path: the write fails before anything touches the store.
+    fs.mkdirSync(`${store}.${process.pid}.tmp`);
+    expect(m.saveRetractToken("6ba7b810-9dad-41d1-80b4-00c04fd430c8", "c".repeat(32))).toBe(false);
+    expect(m.readRetractToken(obs.id)).toBe("b".repeat(32));
+    expect(JSON.parse(fs.readFileSync(store, "utf-8"))).toEqual({ [obs.id]: "b".repeat(32) });
+  });
+
   it("round-trips a token and forgets it, at 0600", async () => {
     const m = await load();
     m.saveRetractToken(obs.id, "b".repeat(32));
@@ -412,6 +464,95 @@ describe("drainObservationOutbox", () => {
       dropped: 0,
     });
     expect(submit).toHaveBeenCalledOnce();
+  });
+
+  it("re-applies the builder's admission rules to a hand-edited row", async () => {
+    const m = await load();
+    // The second review's row: legal under the wire validator and clean under
+    // the old scan, but nothing the builder would ever have produced.
+    fs.writeFileSync(
+      path.join(tmpHome, ".loom", "observations-outbox.jsonl"),
+      JSON.stringify({
+        ...obs,
+        tools: [{ id: "/srv/Alice_Smith", version: "alice@localhost" }],
+        mcpTool: "galaxy.internal",
+        datatypes: ["192.0.2.12"],
+        galaxy: { server: "usegalaxy.org", version: "Alice Smith" },
+      }) + "\n",
+    );
+    const submit = vi.fn(ok);
+    expect(await m.drainObservationOutbox(submit, () => true)).toEqual({
+      sent: 0,
+      kept: 0,
+      dropped: 1,
+    });
+    expect(submit).not.toHaveBeenCalled();
+    // Each structured field is refused on its own, not just by the leak scan.
+    for (const forged of [
+      { ...obs, tools: [{ id: "Alice_Smith" }] },
+      { ...obs, mcpTool: "galaxy_alice_smith" },
+      { ...obs, datatypes: ["patient_17"] },
+      { ...obs, galaxy: { server: "usegalaxy.org", version: "Smith" } },
+    ]) {
+      expect(
+        m.observationProblems(forged as Observation).errors.length,
+        JSON.stringify(forged),
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("never loses a row when two drains overlap", async () => {
+    // The second review's sequence. Outbox holds A; drain 1 starts sending A
+    // and blocks; B is appended; a second drain runs meanwhile. Before, drain
+    // 2 rewrote the file to [B] and drain 1 then truncated it by line count,
+    // losing B.
+    const m = await load();
+    const a = obs;
+    const b = { ...obs, id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" };
+    m.appendToObservationOutbox(a);
+    let release!: () => void;
+    const blocked = new Promise<void>((r) => (release = r));
+    const first = m.drainObservationOutbox(
+      async () => {
+        m.appendToObservationOutbox(b);
+        await blocked;
+        return { ok: true, status: 202, queueable: false };
+      },
+      () => true,
+    );
+    const secondSubmit = vi.fn().mockResolvedValue({ ok: false, status: 503, queueable: true });
+    const second = await m.drainObservationOutbox(secondSubmit, () => true);
+    // The second drain stood aside rather than sending A a second time.
+    expect(second).toEqual({ sent: 0, kept: 0, dropped: 0 });
+    expect(secondSubmit).not.toHaveBeenCalled();
+    release();
+    expect((await first).sent).toBe(1);
+    expect(lines("observations-outbox.jsonl").map((l) => JSON.parse(l).id)).toEqual([b.id]);
+  });
+
+  it("stands aside while another live process holds the drain lock", async () => {
+    const m = await load();
+    m.appendToObservationOutbox(obs);
+    // The parent process is alive and is not this one.
+    fs.writeFileSync(
+      path.join(tmpHome, ".loom", "observations-outbox.jsonl.drain"),
+      String(process.ppid),
+    );
+    const submit = vi.fn(ok);
+    expect(await m.drainObservationOutbox(submit, () => true)).toEqual({
+      sent: 0,
+      kept: 0,
+      dropped: 0,
+    });
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("takes over a drain lock its holder died with", async () => {
+    const m = await load();
+    m.appendToObservationOutbox(obs);
+    // Far past any real pid; kill(pid, 0) says it does not exist.
+    fs.writeFileSync(path.join(tmpHome, ".loom", "observations-outbox.jsonl.drain"), "99999999");
+    expect((await m.drainObservationOutbox(vi.fn(ok), () => true)).sent).toBe(1);
   });
 
   it("is a no-op with no outbox", async () => {

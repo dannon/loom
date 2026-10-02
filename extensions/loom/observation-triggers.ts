@@ -168,7 +168,15 @@ export function factsForToolResult(
 // Delivery
 // -----------------------------------------------------------------------------
 
-export type DeliveryOutcome = "sent" | "queued" | "declined" | "invalid" | "skipped";
+/**
+ * `unsaved`: the send failed in a way worth retrying, but the outbox could not
+ * be written, so nothing is kept. `sent-unretractable`: it went, but its
+ * retract token could not be saved. Both are local-write failures the user has
+ * to hear about, since the usual message ("saved locally", "retract it any
+ * time") would be untrue.
+ */
+export type DeliveryOutcome =
+  "sent" | "sent-unretractable" | "queued" | "unsaved" | "declined" | "invalid" | "skipped";
 
 /**
  * Everything impure, injected. The privacy-relevant decisions -- does this
@@ -325,7 +333,7 @@ export async function deliverObservation(
 
   const res = await deps.submit(obs);
   if (res.ok) {
-    if (res.retractToken) saveRetractToken(obs.id, res.retractToken);
+    const tokenLost = Boolean(res.retractToken) && !saveRetractToken(obs.id, res.retractToken!);
     appendSentLog(sentLogEntryFor(obs, "sent"));
     deps.state.delivered += 1;
     deps.record("observation.sent", {
@@ -334,11 +342,20 @@ export async function deliverObservation(
       // After consent, so the normalized signature may be logged -- except the
       // user's own /observe sentence, which stays in the sent log only.
       ...(obs.trigger === "explicit" ? {} : { signature: obs.signature }),
+      ...(tokenLost ? { tokenWrite: "failed" } : {}),
     });
-    return "sent";
+    return tokenLost ? "sent-unretractable" : "sent";
   }
   if (res.queueable) {
-    appendToObservationOutbox(obs);
+    if (!appendToObservationOutbox(obs)) {
+      deps.record("observation.unsaved", {
+        id: obs.id,
+        kind: obs.kind,
+        status: res.status ?? 0,
+        reason: "outbox-write-failed",
+      });
+      return "unsaved";
+    }
     appendSentLog(sentLogEntryFor(obs, "queued"));
     deps.state.delivered += 1;
     deps.record("observation.queued", {
@@ -362,6 +379,17 @@ export async function deliverObservation(
 // -----------------------------------------------------------------------------
 // Registration
 // -----------------------------------------------------------------------------
+
+/** What to tell the user when a delivery's local write failed, if anything. */
+export function localWriteWarning(outcome: DeliveryOutcome): string | undefined {
+  if (outcome === "unsaved") {
+    return "An observation couldn't be sent right now, and it couldn't be saved locally to retry either (check that the Loom state directory is writable). Nothing was kept.";
+  }
+  if (outcome === "sent-unretractable") {
+    return "An observation was sent, but its retract token couldn't be saved locally, so /observations retract won't be able to delete it.";
+  }
+  return undefined;
+}
 
 /** Activity rows land beside the session's notebook, like every other row. */
 export function recordObservationActivity(
@@ -476,7 +504,9 @@ export function registerObservationTriggers(pi: ExtensionAPI): void {
       const facts = pending.shift();
       if (!facts) break;
       try {
-        await deliverObservation(facts, ctx, liveDeliverDeps());
+        const outcome = await deliverObservation(facts, ctx, liveDeliverDeps());
+        const warning = localWriteWarning(outcome);
+        if (warning && ctx.hasUI) ctx.ui.notify(warning, "warning");
       } catch (err) {
         // A failed delivery must never take the settle handler down with it.
         console.error("observation delivery failed:", err);

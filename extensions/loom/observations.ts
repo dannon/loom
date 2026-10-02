@@ -46,11 +46,16 @@ import type {
 import {
   appendFileSync,
   chmodSync,
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
+  rmSync,
+  statSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { join } from "node:path";
 import { release } from "node:os";
@@ -602,21 +607,224 @@ function appendLine(name: string, value: unknown, mode?: number): string | null 
   }
 }
 
-/** Durability backstop: a POST that could succeed later is never lost. */
+// Two processes can share one ~/.loom -- Orbit and a CLI session, or two CLI
+// sessions -- so the outbox is guarded by lock files, not just by the fact that
+// one process's sync code can't interleave with itself.
+//
+// The FILE lock is short and synchronous: it covers one append, one read, or
+// one rewrite. The DRAIN lock is long: it is held for a whole drain, across the
+// POSTs, so two drains can never both read a row and both send it, and a
+// cancel can never remove a row that a drain is sending right now.
+const FILE_LOCK_WAIT_MS = 2000;
+const FILE_LOCK_STALE_MS = 30_000;
+// Longer than the slowest possible drain: OUTBOX_DRAIN_MAX rows, two attempts
+// each, each bounded by TIMEOUT_MS.
+const DRAIN_LOCK_STALE_MS = 15 * 60_000;
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function tryCreateLock(lockPath: string): boolean {
+  try {
+    const fd = openSync(lockPath, "wx", 0o600);
+    try {
+      writeSync(fd, String(process.pid));
+    } finally {
+      closeSync(fd);
+    }
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw err;
+  }
+}
+
+function lockAgeMs(lockPath: string): number {
+  try {
+    return Date.now() - statSync(lockPath).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/** Run `fn` holding `lockPath`, or return undefined if it can't be had in time. */
+function withFileLock<T>(lockPath: string, fn: () => T): { value: T } | undefined {
+  const deadline = Date.now() + FILE_LOCK_WAIT_MS;
+  try {
+    mkdirSync(getConfigDir(), { recursive: true });
+    while (!tryCreateLock(lockPath)) {
+      // A holder that died mid-section leaves its lock behind. The sections
+      // are milliseconds long, so one this old is not anyone's.
+      if (lockAgeMs(lockPath) > FILE_LOCK_STALE_MS) {
+        rmSync(lockPath, { force: true });
+        continue;
+      }
+      if (Date.now() > deadline) return undefined;
+      sleepSync(20);
+    }
+  } catch {
+    return undefined;
+  }
+  try {
+    return { value: fn() };
+  } finally {
+    rmSync(lockPath, { force: true });
+  }
+}
+
+/** Write via a per-process temp file and rename, so no reader sees half a file. */
+function writeFileAtomic(file: string, contents: string): void {
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, contents, { mode: 0o600 });
+    renameSync(tmp, file);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
+}
+
+function outboxPath(): string {
+  return observationsFilePath(OUTBOX_FILE);
+}
+
+function outboxLockPath(): string {
+  return `${outboxPath()}.lock`;
+}
+
+function readOutboxLines(): string[] {
+  const file = outboxPath();
+  if (!existsSync(file)) return [];
+  return readFileSync(file, "utf-8")
+    .split("\n")
+    .filter((l) => l.trim());
+}
+
+function outboxRowId(line: string): string | undefined {
+  try {
+    const id = (JSON.parse(line) as { id?: unknown }).id;
+    return typeof id === "string" ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Rewrite the outbox without the rows `drop` picks out. Caller holds the file lock. */
+function rewriteOutboxWithout(drop: (line: string) => boolean): number {
+  const remaining = readOutboxLines().filter((l) => !drop(l));
+  writeFileAtomic(outboxPath(), remaining.map((l) => l + "\n").join(""));
+  return remaining.length;
+}
+
+let drainingHere = false;
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM: it exists, it just isn't ours to signal.
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function acquireDrainLock(): boolean {
+  if (drainingHere) return false;
+  const lockPath = `${outboxPath()}.drain`;
+  try {
+    mkdirSync(getConfigDir(), { recursive: true });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (tryCreateLock(lockPath)) {
+        drainingHere = true;
+        return true;
+      }
+      let holder = Number.NaN;
+      try {
+        holder = Number.parseInt(readFileSync(lockPath, "utf-8"), 10);
+      } catch {
+        /* vanished between the two calls; try again */
+      }
+      const stale =
+        !Number.isInteger(holder) ||
+        holder <= 0 ||
+        !pidAlive(holder) ||
+        lockAgeMs(lockPath) > DRAIN_LOCK_STALE_MS;
+      if (!stale) return false;
+      rmSync(lockPath, { force: true });
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function releaseDrainLock(): void {
+  drainingHere = false;
+  rmSync(`${outboxPath()}.drain`, { force: true });
+}
+
+/**
+ * Durability backstop: a POST that could succeed later is kept for the next
+ * drain. Returns the file path, or null when it could not be written -- the
+ * caller has to say so, because the user was about to be told it was saved.
+ */
 export function appendToObservationOutbox(obs: Observation): string | null {
-  // 0600: this file carries the install token, which is the thing that ties
-  // rows together. Nothing else in it is sensitive, but that is enough.
-  return appendLine(OUTBOX_FILE, obs, 0o600);
+  try {
+    const done = withFileLock(outboxLockPath(), () => {
+      const file = outboxPath();
+      // 0600: this file carries the install token, which is the thing that
+      // ties rows together. Nothing else in it is sensitive, but that is enough.
+      appendFileSync(file, JSON.stringify(obs) + "\n", { encoding: "utf-8", mode: 0o600 });
+      try {
+        chmodSync(file, 0o600);
+      } catch {
+        /* perm-tightening is best-effort */
+      }
+      return file;
+    });
+    return done?.value ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export type OutboxRemoval = "removed" | "absent" | "busy" | "failed";
+
+/**
+ * Take a queued observation out before it is ever sent. Refused while a drain
+ * is running, since that drain may already be sending this very row.
+ */
+export function removeFromObservationOutbox(id: string): OutboxRemoval {
+  if (!acquireDrainLock()) return "busy";
+  try {
+    const done = withFileLock(outboxLockPath(), () => {
+      if (!readOutboxLines().some((l) => outboxRowId(l) === id)) return "absent" as const;
+      rewriteOutboxWithout((l) => outboxRowId(l) === id);
+      return "removed" as const;
+    });
+    return done?.value ?? "failed";
+  } catch {
+    return "failed";
+  } finally {
+    releaseDrainLock();
+  }
 }
 
 export const OUTBOX_DRAIN_MAX = 10;
 
 /**
  * Retry what the outbox holds, oldest first, at most OUTBOX_DRAIN_MAX per call.
- * Each row is re-validated before it goes -- the file is local and could have
- * been edited -- and anything that fails, or that the route now refuses for
- * good, is dropped rather than kept to fail forever. Only queueable failures
- * stay.
+ * Each row is re-checked before it goes, with the same rules the builder
+ * applies -- the file is local, could have been edited, and its rows go
+ * without a fresh confirm -- and anything that fails, or that the route now
+ * refuses for good, is dropped rather than kept to fail forever. Only
+ * queueable failures stay.
+ *
+ * The rewrite removes rows by id, never by position, so a row appended or
+ * removed by someone else while the POSTs were in flight is left as it is. If
+ * another drain is already running (here or in another process sharing this
+ * state dir), this one does nothing.
  */
 export async function drainObservationOutbox(
   submit: (obs: Observation) => Promise<SubmitObservationResult>,
@@ -626,68 +834,76 @@ export async function drainObservationOutbox(
    */
   stillCollecting: () => boolean,
 ): Promise<{ sent: number; kept: number; dropped: number }> {
-  const file = observationsFilePath(OUTBOX_FILE);
   const counts = { sent: 0, kept: 0, dropped: 0 };
-  if (!existsSync(file)) return counts;
-  const lines = readFileSync(file, "utf-8")
-    .split("\n")
-    .filter((l) => l.trim());
-  if (lines.length === 0) return counts;
+  if (!existsSync(outboxPath())) return counts;
+  if (!acquireDrainLock()) return counts;
+  try {
+    const lines = withFileLock(outboxLockPath(), readOutboxLines)?.value ?? [];
+    if (lines.length === 0) return counts;
 
-  const keep: string[] = [];
-  let unreachable = false;
-  for (const [i, line] of lines.entries()) {
-    // Past the per-drain cap, once the route has proved unreachable this
-    // round, or once collection has been turned off, the rest just wait: on a
-    // black-holed network each try costs the full timeout, and this runs
-    // before the turn's own prompts appear.
-    if (i >= OUTBOX_DRAIN_MAX || unreachable || !stillCollecting()) {
-      keep.push(line);
-      continue;
+    // Settled rows: sent, or dropped for good. Matched by id; a line too
+    // broken to carry an id is matched by its exact text.
+    const doneIds = new Set<string>();
+    const doneLines = new Set<string>();
+    const settle = (line: string, id: string | undefined): void => {
+      if (id) doneIds.add(id);
+      else doneLines.add(line);
+    };
+
+    let unreachable = false;
+    for (const [i, line] of lines.entries()) {
+      // Past the per-drain cap, once the route has proved unreachable this
+      // round, or once collection has been turned off, the rest just wait: on
+      // a black-holed network each try costs the full timeout, and this runs
+      // before the turn's own prompts appear.
+      if (i >= OUTBOX_DRAIN_MAX || unreachable || !stillCollecting()) break;
+      const id = outboxRowId(line);
+      if (id && doneIds.has(id)) continue;
+      let obs: Observation;
+      try {
+        obs = JSON.parse(line) as Observation;
+      } catch {
+        settle(line, undefined);
+        counts.dropped += 1;
+        continue;
+      }
+      const problems = observationProblems(obs);
+      if (problems.errors.length > 0 || problems.leaks.length > 0) {
+        settle(line, id);
+        counts.dropped += 1;
+        continue;
+      }
+      const res = await submit(obs);
+      if (res.ok) {
+        if (res.retractToken) saveRetractToken(obs.id, res.retractToken);
+        appendSentLog(sentLogEntryFor(obs, "sent"));
+        settle(line, id);
+        counts.sent += 1;
+      } else if (res.queueable) {
+        if (res.status === undefined) unreachable = true;
+      } else {
+        settle(line, id);
+        counts.dropped += 1;
+      }
     }
-    let obs: Observation;
-    try {
-      obs = JSON.parse(line) as Observation;
-    } catch {
-      counts.dropped += 1;
-      continue;
-    }
-    if (!validateObservation(obs).ok || scanObservationForLeaks(obs).length > 0) {
-      counts.dropped += 1;
-      continue;
-    }
-    const res = await submit(obs);
-    if (res.ok) {
-      if (res.retractToken) saveRetractToken(obs.id, res.retractToken);
-      appendSentLog(sentLogEntryFor(obs, "sent"));
-      counts.sent += 1;
-    } else if (res.queueable) {
-      keep.push(line);
-      if (res.status === undefined) unreachable = true;
-    } else {
-      counts.dropped += 1;
-    }
+
+    const rewritten = withFileLock(outboxLockPath(), () =>
+      rewriteOutboxWithout((l) => doneLines.has(l) || doneIds.has(outboxRowId(l) ?? "")),
+    );
+    // Couldn't take the lock to rewrite: the settled rows stay in the file and
+    // a sent one may go again next time. Leaving them is the safe failure; a
+    // rewrite without the lock could drop a row someone just appended.
+    counts.kept = rewritten?.value ?? readOutboxLines().length;
+    return counts;
+  } finally {
+    releaseDrainLock();
   }
-
-  // Rows appended while the sends were in flight (a queued /observe, an
-  // overlapping settle) are past the ones read above; carry them over rather
-  // than overwrite them. Then rewrite via a temp file, so a crash mid-write
-  // can't truncate rows that are still owed.
-  const now = readFileSync(file, "utf-8")
-    .split("\n")
-    .filter((l) => l.trim());
-  keep.push(...now.slice(lines.length));
-  const tmp = `${file}.tmp`;
-  writeFileSync(tmp, keep.map((l) => l + "\n").join(""), { mode: 0o600 });
-  renameSync(tmp, file);
-  counts.kept = keep.length;
-  return counts;
 }
 
 export interface ObservationSentEntry {
   at: string;
   id: string;
-  status: "sent" | "queued" | "retracted";
+  status: "sent" | "queued" | "retracted" | "cancelled";
   kind: string;
   stage: string;
   trigger: string;
@@ -766,29 +982,40 @@ function readTokenStore(): Record<string, string> {
   }
 }
 
-function writeTokenStore(store: Record<string, string>): void {
+function tokenStorePath(): string {
+  return observationsFilePath(TOKEN_STORE_FILE);
+}
+
+/**
+ * Read-modify-write under a lock, written via temp + rename: a crash mid-write
+ * would otherwise leave a truncated store, which reads back as empty and loses
+ * every retract token at once. False when the change could not be saved.
+ */
+function updateTokenStore(change: (store: Record<string, string>) => void): boolean {
   try {
-    const dir = getConfigDir();
-    mkdirSync(dir, { recursive: true });
-    const file = join(dir, TOKEN_STORE_FILE);
-    writeFileSync(file, JSON.stringify(store, null, 2) + "\n", { mode: 0o600 });
-    try {
-      chmodSync(file, 0o600);
-    } catch {
-      /* best-effort */
-    }
+    const done = withFileLock(`${tokenStorePath()}.lock`, () => {
+      const store = readTokenStore();
+      change(store);
+      writeFileAtomic(tokenStorePath(), JSON.stringify(store, null, 2) + "\n");
+      return true;
+    });
+    return done?.value === true;
   } catch {
-    /* losing a token costs retraction, not correctness */
+    return false;
   }
 }
 
 /**
  * The Worker returns a retract token once, so it has to be kept to make
  * `/observations retract` possible. Kept out of the sent log and listed in the
- * exec-guard's credential stores so the agent can never read it.
+ * exec-guard's credential stores so the agent can never read it. False when it
+ * could not be written, which the caller tells the user about: without it the
+ * row can't be retracted.
  */
-export function saveRetractToken(id: string, token: string): void {
-  writeTokenStore({ ...readTokenStore(), [id]: token });
+export function saveRetractToken(id: string, token: string): boolean {
+  return updateTokenStore((store) => {
+    store[id] = token;
+  });
 }
 
 export function readRetractToken(id: string): string | undefined {
@@ -796,9 +1023,9 @@ export function readRetractToken(id: string): string | undefined {
   return typeof token === "string" && token.length > 0 ? token : undefined;
 }
 
-export function forgetRetractToken(id: string): void {
-  const store = readTokenStore();
-  if (!(id in store)) return;
-  delete store[id];
-  writeTokenStore(store);
+export function forgetRetractToken(id: string): boolean {
+  if (!(id in readTokenStore())) return true;
+  return updateTokenStore((store) => {
+    delete store[id];
+  });
 }
