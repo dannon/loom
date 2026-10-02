@@ -48,6 +48,7 @@ import {
   chmodSync,
   closeSync,
   existsSync,
+  linkSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -625,19 +626,54 @@ function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+// The lock is written in full under a private name and then hard-linked into
+// place, so it never exists empty: a creator that wrote the pid after an
+// exclusive open left a moment where a reader saw "" and judged it stale.
 function tryCreateLock(lockPath: string): boolean {
+  const tmp = `${lockPath}.${process.pid}.new`;
   try {
-    const fd = openSync(lockPath, "wx", 0o600);
+    const fd = openSync(tmp, "w", 0o600);
     try {
       writeSync(fd, String(process.pid));
     } finally {
       closeSync(fd);
     }
+    linkSync(tmp, lockPath);
     return true;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
     throw err;
+  } finally {
+    rmSync(tmp, { force: true });
   }
+}
+
+/**
+ * Remove a lock judged stale, but only if it is still the one that was judged.
+ * It is renamed aside first (only one process can win that), and if what was
+ * renamed turns out to be someone's fresh lock it is linked back.
+ */
+function removeStaleLock(lockPath: string, judged: string): void {
+  const claim = `${lockPath}.${process.pid}.claim`;
+  try {
+    renameSync(lockPath, claim);
+  } catch {
+    return;
+  }
+  let now = "";
+  try {
+    now = readFileSync(claim, "utf-8");
+  } catch {
+    /* treat as changed */
+  }
+  if (now !== judged) {
+    try {
+      linkSync(claim, lockPath);
+    } catch {
+      /* a new lock already exists; leave it */
+    }
+  }
+  rmSync(claim, { force: true });
 }
 
 function lockAgeMs(lockPath: string): number {
@@ -657,7 +693,13 @@ function withFileLock<T>(lockPath: string, fn: () => T): { value: T } | undefine
       // A holder that died mid-section leaves its lock behind. The sections
       // are milliseconds long, so one this old is not anyone's.
       if (lockAgeMs(lockPath) > FILE_LOCK_STALE_MS) {
-        rmSync(lockPath, { force: true });
+        let judged = "";
+        try {
+          judged = readFileSync(lockPath, "utf-8");
+        } catch {
+          continue;
+        }
+        removeStaleLock(lockPath, judged);
         continue;
       }
       if (Date.now() > deadline) return undefined;
@@ -739,19 +781,21 @@ function acquireDrainLock(): boolean {
         drainingHere = true;
         return true;
       }
-      let holder = Number.NaN;
+      let content: string | undefined;
       try {
-        holder = Number.parseInt(readFileSync(lockPath, "utf-8"), 10);
+        content = readFileSync(lockPath, "utf-8");
       } catch {
-        /* vanished between the two calls; try again */
+        continue; // vanished between the two calls; try again
       }
+      const holder = Number.parseInt(content, 10);
+      const age = lockAgeMs(lockPath);
+      // An unreadable pid is only abandoned once it is clearly not mid-write.
       const stale =
-        !Number.isInteger(holder) ||
-        holder <= 0 ||
-        !pidAlive(holder) ||
-        lockAgeMs(lockPath) > DRAIN_LOCK_STALE_MS;
+        Number.isInteger(holder) && holder > 0
+          ? !pidAlive(holder) || age > DRAIN_LOCK_STALE_MS
+          : age > FILE_LOCK_STALE_MS;
       if (!stale) return false;
-      rmSync(lockPath, { force: true });
+      removeStaleLock(lockPath, content);
     }
   } catch {
     return false;
@@ -813,6 +857,14 @@ export function removeFromObservationOutbox(id: string): OutboxRemoval {
 
 export const OUTBOX_DRAIN_MAX = 10;
 
+export interface OutboxDrainCounts {
+  sent: number;
+  kept: number;
+  dropped: number;
+  /** Present when a row went but its retract token could not be saved. */
+  unretractable?: number;
+}
+
 /**
  * Retry what the outbox holds, oldest first, at most OUTBOX_DRAIN_MAX per call.
  * Each row is re-checked before it goes, with the same rules the builder
@@ -833,8 +885,8 @@ export async function drainObservationOutbox(
    * minutes on a slow network, and collection may be turned off meanwhile.
    */
   stillCollecting: () => boolean,
-): Promise<{ sent: number; kept: number; dropped: number }> {
-  const counts = { sent: 0, kept: 0, dropped: 0 };
+): Promise<OutboxDrainCounts> {
+  const counts: OutboxDrainCounts = { sent: 0, kept: 0, dropped: 0 };
   if (!existsSync(outboxPath())) return counts;
   if (!acquireDrainLock()) return counts;
   try {
@@ -875,7 +927,9 @@ export async function drainObservationOutbox(
       }
       const res = await submit(obs);
       if (res.ok) {
-        if (res.retractToken) saveRetractToken(obs.id, res.retractToken);
+        if (res.retractToken && !saveRetractToken(obs.id, res.retractToken)) {
+          counts.unretractable = (counts.unretractable ?? 0) + 1;
+        }
         appendSentLog(sentLogEntryFor(obs, "sent"));
         settle(line, id);
         counts.sent += 1;

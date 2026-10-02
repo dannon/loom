@@ -290,6 +290,8 @@ describe("/observations", () => {
       expect.objectContaining({ id: "id-1", status: "retracted" }),
     );
     expect(ui.notify).toHaveBeenCalledWith(expect.stringContaining("Retracted"), "info");
+    // A sent row left behind in the outbox must not go again after a retract.
+    expect(removeFromObservationOutbox).toHaveBeenCalledWith("id-1");
   });
 
   it("retract of a queued row with no token cancels it from the outbox", async () => {

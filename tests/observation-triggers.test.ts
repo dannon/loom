@@ -343,6 +343,20 @@ describe("deliverObservation", () => {
     expect(JSON.stringify(describe.mock.calls[0][0])).not.toContain("alice");
   });
 
+  it("logs only field:reason names from a Worker refusal, never its free text", async () => {
+    const d = deps({
+      submit: async () => ({
+        ok: false,
+        status: 400,
+        errors: ["signature:bad-length", "rejected for alice@institute.edu at /Users/alice"],
+        queueable: false,
+      }),
+    });
+    expect(await deliverObservation(facts, ctx, d)).toBe("invalid");
+    const row = d.rows.find(([k]) => k === "observation.invalid")?.[1];
+    expect(row?.errors).toBe("signature:bad-length");
+  });
+
   it("collects nothing when the mode is off", async () => {
     const d = deps({
       mode: "off",

@@ -269,9 +269,16 @@ async function doRetract(ctx: ExtensionContext, id: string): Promise<void> {
     return;
   }
   forgetRetractToken(id);
+  // A row that was sent but whose outbox rewrite never happened (lock
+  // contention, a crash mid-drain) would otherwise go again on the next drain
+  // -- and after a retract the service would accept it as new.
+  const leftover = removeFromObservationOutbox(id);
   appendSentLog(sentLogRowFor(id, "retracted"));
   ctx.ui.notify(
-    res.alreadyGone ? `${id} was already gone -- nothing is stored.` : `Retracted ${id}.`,
+    (res.alreadyGone ? `${id} was already gone -- nothing is stored.` : `Retracted ${id}.`) +
+      (leftover === "busy" || leftover === "failed"
+        ? " A copy may still be queued locally; run the same retract again to cancel it."
+        : ""),
     "info",
   );
 }

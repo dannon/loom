@@ -547,6 +547,30 @@ describe("drainObservationOutbox", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it("does not take a fresh lock that has no pid in it yet", async () => {
+    const m = await load();
+    m.appendToObservationOutbox(obs);
+    fs.writeFileSync(path.join(tmpHome, ".loom", "observations-outbox.jsonl.drain"), "");
+    const submit = vi.fn(ok);
+    expect((await m.drainObservationOutbox(submit, () => true)).sent).toBe(0);
+    expect(submit).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(tmpHome, ".loom", "observations-outbox.jsonl.drain"))).toBe(
+      true,
+    );
+  });
+
+  it("counts a row that went but whose retract token could not be saved", async () => {
+    const m = await load();
+    m.appendToObservationOutbox(obs);
+    fs.mkdirSync(path.join(tmpHome, ".loom", "observations-tokens.json"));
+    expect(await m.drainObservationOutbox(vi.fn(ok), () => true)).toEqual({
+      sent: 1,
+      kept: 0,
+      dropped: 0,
+      unretractable: 1,
+    });
+  });
+
   it("takes over a drain lock its holder died with", async () => {
     const m = await load();
     m.appendToObservationOutbox(obs);

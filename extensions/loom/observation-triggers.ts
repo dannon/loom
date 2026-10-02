@@ -370,7 +370,9 @@ export async function deliverObservation(
   deps.record("observation.invalid", {
     kind: obs.kind,
     status: res.status ?? 0,
-    errors: (res.errors ?? []).join(","),
+    // The Worker's error list is endpoint-controlled text, and the endpoint
+    // can be repointed; only `field:reason` names are kept.
+    errors: (res.errors ?? []).filter(isFieldReason).join(","),
     leaks: "",
   });
   return "invalid";
@@ -379,6 +381,20 @@ export async function deliverObservation(
 // -----------------------------------------------------------------------------
 // Registration
 // -----------------------------------------------------------------------------
+
+const FIELD_REASON_RE = /^[A-Za-z0-9_.<>[\]]{1,60}:[a-z0-9-]{1,40}$/;
+
+function isFieldReason(v: unknown): boolean {
+  return typeof v === "string" && FIELD_REASON_RE.test(v);
+}
+
+// A filesystem error message carries the path, and the path carries the
+// username; only the error's code or name is printed.
+function errorTag(err: unknown): string {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  if (typeof code === "string") return code;
+  return err instanceof Error ? err.name : "error";
+}
 
 /** What to tell the user when a delivery's local write failed, if anything. */
 export function localWriteWarning(outcome: DeliveryOutcome): string | undefined {
@@ -496,8 +512,11 @@ export function registerObservationTriggers(pi: ExtensionAPI): void {
         if (drained.sent + drained.dropped > 0) {
           recordObservationActivity("observation.outbox", { ...drained });
         }
+        if (drained.unretractable && ctx.hasUI) {
+          ctx.ui.notify(localWriteWarning("sent-unretractable") ?? "", "warning");
+        }
       } catch (err) {
-        console.error("observation outbox drain failed:", err);
+        console.error("observation outbox drain failed:", errorTag(err));
       }
     }
     while (pending.length > 0) {
@@ -509,7 +528,7 @@ export function registerObservationTriggers(pi: ExtensionAPI): void {
         if (warning && ctx.hasUI) ctx.ui.notify(warning, "warning");
       } catch (err) {
         // A failed delivery must never take the settle handler down with it.
-        console.error("observation delivery failed:", err);
+        console.error("observation delivery failed:", errorTag(err));
       }
     }
   });
