@@ -469,11 +469,14 @@ Run `/tester-id` with no argument to see the current value. It writes only the `
 
 #### Sharing Galaxy failure patterns
 
-Loom can report the _shape_ of a Galaxy failure -- which tool, which stage,
-which datatypes, and a normalized one-line signature -- to the Galaxy team's
-private intake queue, so recurring problems get documented or fixed upstream.
-Nothing goes without your say-so: the default `ask` mode shows you the exact
-payload after a turn that hit a Galaxy error and sends only if you confirm.
+When a Galaxy tool fails, or the same step fails three times in a row, Loom
+can report the _shape_ of it -- which tool, which stage, which datatypes, and a
+normalized one-line signature, never your data -- to the Galaxy team's private
+intake queue. Those reports are how a problem one person hits becomes a lesson
+Loom surfaces for the next person who hits it (you included), and how the team
+finds what to fix upstream. Nothing goes without your say-so: the default `ask`
+mode shows you the exact payload after a turn that hit a Galaxy error and sends
+only if you confirm.
 
 ```
 /observations               # mode, counts, and where the local log lives
