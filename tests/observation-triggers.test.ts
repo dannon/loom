@@ -128,7 +128,7 @@ const facts: ObservationFacts = {
   mcpTool: "galaxy_run_tool",
   toolIds: ["Filter1"],
   datatypes: ["tabular"],
-  rawSignature: "ToolExecutionError: dataset 2a56fb8e4c1d9f70b3ac55e1d2f80911 failed",
+  rawSignature: "ToolExecutionError: Job 12345 refused a header-only table",
 };
 
 function deps(over: Partial<DeliverDeps> = {}): DeliverDeps & {
@@ -205,6 +205,33 @@ describe("deliverObservation", () => {
     expect(JSON.stringify(d.rows)).not.toMatch(/Alice|Smith/);
   });
 
+  it("refuses an ask payload whose raw line carried an id the normalizer rewrote", async () => {
+    const confirm = vi.fn();
+    const describe = vi.fn();
+    const d = deps({
+      mode: "ask",
+      confirm,
+      describe,
+      submit: async () => {
+        throw new Error("must not send");
+      },
+    });
+    const outcome = await deliverObservation(
+      {
+        ...facts,
+        rawSignature: "ToolExecutionError: dataset 2a56fb8e4c1d9f70b3ac55e1d2f80911 failed",
+      },
+      ctx,
+      d,
+    );
+    expect(outcome).toBe("invalid");
+    expect(describe).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(String(d.rows.find(([k]) => k === "observation.invalid")?.[1].leaks)).toContain(
+      "signature.raw:long-hex",
+    );
+  });
+
   it("collects nothing when the mode is off", async () => {
     const d = deps({
       mode: "off",
@@ -240,7 +267,7 @@ describe("deliverObservation", () => {
     expect(await deliverObservation(facts, ctx, d)).toBe("declined");
     expect(confirm).toHaveBeenCalledOnce();
     expect((confirm.mock.calls[0][0] as Observation).signature).toBe(
-      "ToolExecutionError: dataset <id> failed",
+      "ToolExecutionError: Job <n> refused a header-only table",
     );
     expect(d.rows.map(([k]) => k)).toEqual(["observation.built", "observation.declined"]);
     expect(d.state.delivered).toBe(0);
@@ -410,7 +437,7 @@ describe("registerObservationTriggers", () => {
   const failure = {
     toolName: "galaxy_run_tool",
     input: { tool_id: "Filter1" },
-    content: [{ type: "text", text: "ToolExecutionError: dataset 2a56fb8e4c1d9f70 failed" }],
+    content: [{ type: "text", text: "ToolExecutionError: Job 12345 refused a header-only table" }],
     isError: true,
     details: undefined,
   };
@@ -443,7 +470,7 @@ describe("registerObservationTriggers", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(pendingObservationCount()).toBe(0);
     const sent = JSON.parse(String(fetchMock.mock.calls[0][1].body));
-    expect(sent.signature).toBe("ToolExecutionError: dataset <id> failed");
+    expect(sent.signature).toBe("ToolExecutionError: Job <n> refused a header-only table");
   });
 
   it("raises one assertion-failed report per session however often the gate blocks", async () => {

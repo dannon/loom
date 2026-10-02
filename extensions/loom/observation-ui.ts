@@ -98,11 +98,12 @@ export async function confirmObservation(
  * in, so the single source of truth for "is this text safe" stays the
  * validator rather than a second copy of its rules.
  */
-function acceptDescription(candidate: string): string {
-  const text = String(candidate ?? "")
-    .split(/\r?\n/)[0]
-    .trim()
-    .slice(0, DESCRIPTION_MAX);
+export function acceptDescription(candidate: string): string {
+  const whole = String(candidate ?? "");
+  // Everything the user typed is scanned before any of it is cut: the cap and
+  // the first-line rule can both drop the part of a leak a rule keys on.
+  if (textLeaks(whole.replace(/\s+/g, " ")).length > 0) return "";
+  const text = whole.split(/\r?\n/)[0].trim().slice(0, DESCRIPTION_MAX);
   if (!text || text === "NONE") return "";
   const probe = {
     schemaVersion: 1 as const,

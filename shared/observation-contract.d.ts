@@ -77,6 +77,7 @@ export interface Observation {
   description: string;
 }
 
+export declare function rawSignatureLine(text: unknown): string;
 export declare function normalizeSignature(text: unknown): string;
 export declare const LEAK_PATTERNS: ReadonlyArray<readonly [string, RegExp]>;
 export declare function validateObservation(

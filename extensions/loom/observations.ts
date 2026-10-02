@@ -29,6 +29,7 @@ import {
   VERSION_MAX,
   capObservation,
   normalizeSignature,
+  rawSignatureLine,
   looksLikeHost,
   observationByteLength,
   scanObservationForLeaks,
@@ -325,14 +326,46 @@ export function buildObservation(
   const capped = capObservation(candidate);
   // A description that can't pass is dropped whole. Trimming it would be
   // guessing at which half was the leak, and an empty description still leaves
-  // a usable structured observation.
+  // a usable structured observation. Scanned uncapped as well as capped: the
+  // cap can cut a hostname down to something no rule recognises.
   if (capped.description) {
     const probe = validateObservation({ ...capped, description: "" });
     const full = validateObservation(capped);
-    const leaky = textLeaks(capped.description).length > 0;
+    const leaky =
+      textLeaks(capped.description).length > 0 || textLeaks(candidate.description).length > 0;
     if ((!full.ok || leaky) && probe.ok) return { ...capped, description: "" };
   }
   return capped;
+}
+
+export interface ObservationProblems {
+  /** Wire-validator errors, `field:reason`. */
+  errors: string[];
+  /** Leak-table hits, `field:pattern`. Names only, never a value. */
+  leaks: string[];
+}
+
+/**
+ * Everything that stops a built observation from going, in one place so the
+ * delivery path, its precheck and the replay can't drift apart. `rawSignature`
+ * is the text the signature was built from, passed only for the `full` shape:
+ * the full leak table runs over the raw line too, and any hit there refuses the
+ * whole observation -- the normalizer and the cap both erase shapes the table
+ * would have caught. The `structured` shape never carries that text, so there
+ * is nothing of it to scan.
+ */
+export function observationProblems(
+  obs: Observation,
+  raw: { rawSignature?: string } = {},
+): ObservationProblems {
+  const validity = validateObservation(obs);
+  const leaks = scanObservationForLeaks(obs);
+  if (raw.rawSignature !== undefined) {
+    for (const name of textLeaks(rawSignatureLine(raw.rawSignature))) {
+      leaks.push(`signature.raw:${name}`);
+    }
+  }
+  return { errors: validity.ok ? [] : validity.errors, leaks };
 }
 
 /** The impure half: who and where this install is. No secrets, no hostname. */

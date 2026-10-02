@@ -177,6 +177,7 @@ import {
   buildObservation,
   extractDatatypes,
   extractToolIds,
+  observationProblems,
 } from "../extensions/loom/observations";
 import { factsForToolResult } from "../extensions/loom/observation-triggers";
 import { scanObservationForLeaks, validateObservation } from "../shared/observation-contract.js";
@@ -215,30 +216,42 @@ describe("observation-redaction-hostile-result: the fixture against the real pip
     "~/bin",
   ];
 
-  it("has four entries and the asserted signature is what the pipeline produces", () => {
-    expect(entries).toHaveLength(4);
+  it("refuses every hostile line on the raw scan and passes only the clean one", () => {
+    expect(entries).toHaveLength(5);
     const scenario = loadScenario("observation-redaction-hostile-result");
     const asserted = (scenario.assertions.activity?.mustInclude ?? [])
       .map((e) => e.payloadContains?.signature)
-      .filter((s): s is string => typeof s === "string");
+      .filter((s): s is string => typeof s === "string" && s !== "(withheld)");
 
-    for (const entry of entries) {
+    entries.forEach((entry, i) => {
       const facts = factsForToolResult(entry.tool, entry.args, entry.text);
       expect(facts, entry.text).not.toBeNull();
       const obs = buildObservation(facts!, envelope, "full");
-      expect(asserted, obs.signature).toContain(obs.signature);
-    }
+      const { errors, leaks } = observationProblems(obs, { rawSignature: facts!.rawSignature });
+      if (i < 4) {
+        expect(
+          leaks.some((l) => l.startsWith("signature.raw:")),
+          entry.text,
+        ).toBe(true);
+      } else {
+        expect(errors, entry.text).toEqual([]);
+        expect(leaks, entry.text).toEqual([]);
+        expect(asserted).toContain(obs.signature);
+      }
+    });
   });
 
-  it("produces a valid, leak-free observation with nothing identifying left in it", () => {
+  it("leaves nothing identifying in what the builder produces, sendable or not", () => {
     for (const entry of entries) {
       const facts = factsForToolResult(entry.tool, entry.args, entry.text)!;
-      const obs = buildObservation(facts, envelope, "full");
-      expect(validateObservation(obs), obs.signature).toEqual({ ok: true });
-      expect(scanObservationForLeaks(obs), obs.signature).toEqual([]);
-      const serialized = JSON.stringify(obs);
-      for (const secret of FORBIDDEN) {
-        expect(serialized, `${secret} in ${obs.signature}`).not.toContain(secret);
+      for (const shape of ["full", "structured"] as const) {
+        const obs = buildObservation(facts, envelope, shape);
+        expect(validateObservation(obs), obs.signature).toEqual({ ok: true });
+        expect(scanObservationForLeaks(obs), obs.signature).toEqual([]);
+        const serialized = JSON.stringify(obs);
+        for (const secret of FORBIDDEN) {
+          expect(serialized, `${secret} in ${obs.signature}`).not.toContain(secret);
+        }
       }
     }
   });

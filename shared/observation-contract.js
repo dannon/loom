@@ -97,11 +97,21 @@ const NORMALIZERS = Object.freeze([
   [/\d{5,}/g, "<n>"],
 ]);
 
-export function normalizeSignature(text) {
-  let s = String(text ?? "")
+/**
+ * The line normalizeSignature reads, before any rewrite or cap. The client-side
+ * leak scan runs over this as well as over the result, because the rewrites
+ * and the cap can each erase the very shape a rule would have refused: a port
+ * becomes `<n>`, a hostname is cut mid-label at the length limit.
+ */
+export function rawSignatureLine(text) {
+  return String(text ?? "")
     .split(/\r?\n/)[0]
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export function normalizeSignature(text) {
+  let s = rawSignatureLine(text);
   for (const [re, repl] of NORMALIZERS) s = s.replace(re, repl);
   // Plain slice: appending an ellipsis would make the result non-ASCII and the
   // validator would then reject every truncated signature.

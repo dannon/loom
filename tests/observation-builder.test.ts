@@ -327,7 +327,9 @@ describe("buildObservation", () => {
   });
 });
 
-import { UNKNOWN_SIGNATURE } from "../shared/observation-contract.js";
+import { UNKNOWN_SIGNATURE, normalizeSignature } from "../shared/observation-contract.js";
+import { observationProblems } from "../extensions/loom/observations.js";
+import { acceptDescription } from "../extensions/loom/observation-ui.js";
 
 describe("buildObservation in the structured (auto) shape", () => {
   const hostile = {
@@ -459,5 +461,60 @@ describe("shape checks on model-authored fields", () => {
       "full",
     );
     expect(obs.description).toBe("");
+  });
+});
+
+describe("the leak scan runs before normalization and truncation", () => {
+  const base = {
+    kind: "tool-error" as const,
+    trigger: "tool_error" as const,
+    mcpTool: "galaxy_run_tool",
+    toolIds: [],
+    datatypes: [],
+  };
+
+  function problemsFor(rawSignature: string): string[] {
+    const obs = buildObservation({ ...base, rawSignature }, envelope, "full");
+    return observationProblems(obs, { rawSignature }).leaks;
+  }
+
+  it("refuses a host whose port the normalizer would have turned into <n>", () => {
+    const raw = "Connection to galaxyprod:12345 refused";
+    expect(normalizeSignature(raw)).toBe("Connection to galaxyprod:<n> refused");
+    expect(problemsFor(raw)).toContain("signature.raw:host-port");
+  });
+
+  it("refuses a hostname the signature cap would have cut mid-label", () => {
+    const a = "x".repeat(179) + " galaxy.hospital.internal";
+    expect(normalizeSignature(a).endsWith("galaxy.hospital.inte")).toBe(true);
+    expect(problemsFor(a)).toContain("signature.raw:hostname");
+
+    const b = "x".repeat(176) + " galaxy.cancer-center.org failed";
+    expect(normalizeSignature(b).endsWith("galaxy.cancer-center.or")).toBe(true);
+    expect(problemsFor(b)).toContain("signature.raw:hostname");
+  });
+
+  it("refuses a UUID the long-number rule would have half-rewritten", () => {
+    const raw = "lost 12345678-abcd-4abc-8abc-abcdefabcdef";
+    expect(normalizeSignature(raw)).toBe("lost <n>-abcd-4abc-8abc-abcdefabcdef");
+    expect(problemsFor(raw)).toContain("signature.raw:uuid");
+  });
+
+  it("drops a description whose hostname the description cap would have cut", () => {
+    const description = "x".repeat(479) + " galaxy.hospital.internal";
+    const obs = buildObservation(
+      { ...base, rawSignature: "ToolExecutionError: header-only table", description },
+      envelope,
+      "full",
+    );
+    expect(obs.description).toBe("");
+    expect(acceptDescription(description)).toBe("");
+  });
+
+  it("does not scan raw text the structured shape never carries", () => {
+    const rawSignature = "Connection to galaxyprod:12345 refused";
+    const obs = buildObservation({ ...base, rawSignature }, envelope, "structured");
+    expect(observationProblems(obs).leaks).toEqual([]);
+    expect(JSON.stringify(obs)).not.toContain("galaxyprod");
   });
 });

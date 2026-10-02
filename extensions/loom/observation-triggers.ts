@@ -18,11 +18,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
-import {
-  normalizeSignature,
-  scanObservationForLeaks,
-  validateObservation,
-} from "../../shared/observation-contract.js";
+import { normalizeSignature } from "../../shared/observation-contract.js";
 import type {
   Observation,
   ObservationKind,
@@ -36,6 +32,7 @@ import {
   drainObservationOutbox,
   extractDatatypes,
   extractToolIds,
+  observationProblems,
   recordGalaxyVersionFromConnect,
   resetGalaxyVersion,
   saveRetractToken,
@@ -45,6 +42,7 @@ import {
 } from "./observations.js";
 import type {
   ObservationFacts,
+  ObservationProblems,
   ObservationShape,
   SubmitObservationResult,
 } from "./observations.js";
@@ -215,12 +213,15 @@ export function buildAndRecordObservation(
     collectObservationEnvelope(deps.installToken()),
     shape,
   );
-  const validity = validateObservation(obs);
-  const leaks = scanObservationForLeaks(obs);
+  const { errors, leaks } = observationProblems(
+    obs,
+    shape === "full" ? { rawSignature: facts.rawSignature } : {},
+  );
+  const valid = errors.length === 0;
   // A payload that failed is exactly the one whose free-form fields may carry
   // the leak, so they are withheld from the activity log too -- the
   // observation.invalid row that follows names the field and the pattern.
-  const clean = validity.ok && leaks.length === 0;
+  const clean = valid && leaks.length === 0;
   const shown = (value: string): string => (clean ? value : WITHHELD);
   deps.record("observation.built", {
     kind: obs.kind,
@@ -233,10 +234,14 @@ export function buildAndRecordObservation(
     datatypes: shown(obs.datatypes.join(",")),
     server: obs.galaxy.server,
     descriptionLength: obs.description.length,
-    valid: validity.ok,
+    valid,
     leakScan: leaks.length === 0 ? "clean" : "dirty",
   });
-  return { obs, valid: validity.ok, errors: validity.ok ? [] : validity.errors, leaks };
+  return { obs, valid, errors, leaks };
+}
+
+function isClean(p: ObservationProblems): boolean {
+  return p.errors.length === 0 && p.leaks.length === 0;
 }
 
 export async function deliverObservation(
@@ -273,11 +278,7 @@ export async function deliverObservation(
           shape,
         )
       : undefined;
-  if (
-    precheck &&
-    validateObservation(precheck).ok &&
-    scanObservationForLeaks(precheck).length === 0
-  ) {
+  if (precheck && isClean(observationProblems(precheck, { rawSignature: facts.rawSignature }))) {
     try {
       description = await deps.describe(precheck, ctx);
     } catch {

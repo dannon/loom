@@ -1,6 +1,6 @@
 {
   "name": "nothing identifying survives the observation validator",
-  "description": "A hostile galaxy_run_tool failure -- absolute path, project directory name, 32-hex dataset id, five-digit history number, dataset URL and email address, all on the one line the normalizer reads -- plus hostile tool arguments, replayed through the real build-and-validate path with no model attached. Asserts the exact scrubbed signature, that the shape allowlist drops a path posing as a tool id, that the collector's own whole-payload leak scan comes back clean, and that the same signature three times is reported once as a retry-loop. The replay reaches the build step only, so nothing may be sent.",
+  "description": "A hostile galaxy_run_tool failure -- absolute path, project directory name, 32-hex dataset id, five-digit history number, dataset URL and email address, all on the one line the normalizer reads -- plus hostile tool arguments, replayed through the real build-and-check path with no model attached, in the default ask shape. The leak scan runs over the raw line before the normalizer rewrites it, so every hostile line is refused outright rather than scrubbed and sent; the same line three times is still reported once as a retry-loop, and refused again. A fifth, clean failure shows what does pass: the normalized signature with the public toolshed id and the datatype. The replay reaches the build step only, so nothing may be sent.",
   "tier": 1,
   "inputs": ["/observations status"],
   "env": {
@@ -26,7 +26,10 @@
         {
           "kind": "observation.replay",
           "source": "observation-replay",
-          "payloadContains": { "file": "observations.jsonl", "entries": "4" }
+          "payloadContains": {
+            "file": "observations.jsonl",
+            "entries": "5"
+          }
         },
         {
           "kind": "observation.built",
@@ -35,14 +38,11 @@
             "kind": "tool-error",
             "trigger": "tool_error",
             "stage": "tool-parameterization",
-            "signature": "ToolExecutionError: dataset <id> in history <n> failed; wrote <path> see <url> mail <email>",
-            "mcpTool": "galaxy_run_tool",
-            "toolIds": "toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2",
-            "datatypes": "fastqsanger.gz",
+            "shape": "full",
+            "signature": "(withheld)",
             "server": "usegalaxy.org",
             "descriptionLength": "0",
-            "valid": "true",
-            "leakScan": "clean"
+            "leakScan": "dirty"
           }
         },
         {
@@ -50,11 +50,8 @@
           "source": "observation-replay",
           "payloadContains": {
             "kind": "tool-error",
-            "signature": "HTTPError: 400 Bad Request from <path>",
-            "toolIds": "",
-            "datatypes": "",
-            "valid": "true",
-            "leakScan": "clean"
+            "signature": "(withheld)",
+            "leakScan": "dirty"
           }
         },
         {
@@ -63,7 +60,23 @@
           "payloadContains": {
             "kind": "retry-loop",
             "trigger": "retry_loop",
-            "signature": "ToolExecutionError: dataset <id> in history <n> failed; wrote <path> see <url> mail <email>",
+            "signature": "(withheld)",
+            "leakScan": "dirty"
+          }
+        },
+        {
+          "kind": "observation.built",
+          "source": "observation-replay",
+          "payloadContains": {
+            "kind": "tool-error",
+            "trigger": "tool_error",
+            "stage": "tool-parameterization",
+            "shape": "full",
+            "signature": "ToolExecutionError: Job <n> failed because an input is in state 'error'",
+            "mcpTool": "galaxy_run_tool",
+            "toolIds": "toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2",
+            "datatypes": "fastqsanger.gz",
+            "server": "usegalaxy.org",
             "valid": "true",
             "leakScan": "clean"
           }
