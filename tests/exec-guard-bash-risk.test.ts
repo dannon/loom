@@ -593,3 +593,57 @@ describe("classifyBash -- a backslash inside the state-dir name", () => {
     );
   });
 });
+
+// classifyBash only sees the string, so it tracks the cwd across one line
+// itself. The policy suite covers the verdicts; these pin what the classifier
+// hands the policy layer.
+describe("classifyBash -- a cd changes what relative operands mean", () => {
+  const H = "/home/alice";
+  const C = "/home/alice/project";
+
+  it("resolves read operands against the dir the cd landed in", () => {
+    const r = classifyBash("cd ~/.loom && cat config.json", H, C);
+    expect(r.sensitiveReadPaths).toContain(`${H}/.loom/config.json`);
+    expect(r.guardedCwd).toBe(true);
+  });
+  it("resolves relative hops from the request's cwd", () => {
+    expect(classifyBash("cd ../.loom && echo x > a", H, C).kind).toBe("catastrophic");
+    expect(classifyBash("cd .. && cat .netrc", H, C).sensitiveReadPaths).toContain(`${H}/.netrc`);
+  });
+  it("hands a carved-out target reached by cd to the policy layer to realpath", () => {
+    const r = classifyBash("cd ~/.loom/analyses/proj && echo x > out.txt", H, C);
+    expect(r.kind).toBe("unknown");
+    expect(r.loomWriteTargets).toContain(`${H}/.loom/analyses/proj/out.txt`);
+    expect(r.guardedCwd).toBe(false);
+  });
+  it("adds nothing for a cd anywhere else", () => {
+    const r = classifyBash("cd ~/work/x && echo > y && cat notes.txt", H, C);
+    expect(r.loomWriteTargets).toEqual([]);
+    expect(r.guardedCwd).toBe(false);
+    expect(r.sensitiveReadPaths).toEqual(["notes.txt", `${H}/work/x/notes.txt`]);
+  });
+  it("is unchanged when no cd happened", () => {
+    const r = classifyBash("cat notes.txt | wc -l", H, C);
+    expect(r.sensitiveReadPaths).toEqual(["notes.txt"]);
+    expect(r.guardedCwd).toBe(false);
+  });
+  it("a heredoc delimiter or fd duplication is not a write target", () => {
+    expect(classifyBash("cd ~/.loom/analyses/proj && cat <<EOF > out.txt\nx\nEOF", H, C).kind).toBe(
+      "unknown",
+    );
+    expect(classifyBash("cd ~/.loom/analyses/proj && make 2>&1 > log.txt", H, C).kind).toBe(
+      "unknown",
+    );
+  });
+  it("an operand it cannot resolve near Loom state keeps denying", () => {
+    for (const c of [
+      "cd ~/.loom/analyses/proj && echo x > $OUT",
+      "cd ~/.loom/analyses/proj && echo x > ../x",
+      "cd ~/.loom && echo x > *.md",
+    ])
+      expect(classifyBash(c, H, C).kind, c).toBe("catastrophic");
+  });
+  it("a comment does not swallow the newline that ends it", () => {
+    expect(classifyBash("cd ~/.loom # go\necho x > a", H, C).kind).toBe("catastrophic");
+  });
+});

@@ -107,7 +107,7 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
 
   if (toolName === "bash") {
     const command = pick(req.toolInput, "command") ?? "";
-    const c = classifyBash(command, deps.home);
+    const c = classifyBash(command, deps.home, req.cwd);
     if (c.kind === "catastrophic") {
       return { decision: "deny", category: "bash:catastrophic", reason: c.reason };
     }
@@ -127,11 +127,14 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     // compound command (closes the `cat secret | tool` evasion). A dedicated
     // credential store is denied for ALL tiers; any other sensitive path
     // downgrades to an ask (deny for weak / non-interactive).
-    for (const p of c.sensitiveReadPaths) {
-      const { resolved } = deps.resolver.contains(p);
-      if (isCredentialStore(resolved, deps.home)) {
-        return denyCredentialStore(p);
-      }
+    // Each floor sweeps every target first, so the strictest verdict wins: after
+    // `cd ~/.ssh && cat id_rsa` the bare `id_rsa` is only basename-sensitive,
+    // but its resolved twin is a credential store.
+    const reads = c.sensitiveReadPaths.map((p) => ({ p, ...deps.resolver.contains(p) }));
+    for (const { p, resolved } of reads) {
+      if (isCredentialStore(resolved, deps.home)) return denyCredentialStore(p);
+    }
+    for (const { p, resolved } of reads) {
       if (isSensitivePath(resolved, deps.home)) {
         return finalizeAsk(req, "read:sensitive", `read of sensitive path ${p}`);
       }
@@ -158,8 +161,10 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     // Unknown command. A trusted workspace relaxes by one notch only, and only
     // for this category: trusted model ask->allow, weak model deny->ask (the
     // human stays in the loop). It never lifts the catastrophic/jail/sensitive
-    // floor above.
-    if (req.config.trustedWorkspaces.includes(req.cwd)) {
+    // floor above, and it never covers a command run after a cd into Loom's own
+    // state or a credential store -- trusting the workspace says nothing about
+    // those directories.
+    if (req.config.trustedWorkspaces.includes(req.cwd) && !c.guardedCwd) {
       if (req.modelTier === "trusted") {
         return {
           decision: "allow",

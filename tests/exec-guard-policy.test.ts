@@ -850,3 +850,122 @@ describe.each(WORKSPACE_STATE_DIR_NAMES)("decide -- %s state dir", (D) => {
     ).toBe("ask");
   });
 });
+
+// The classifier used to judge each path as written, so a `cd` into Loom's own
+// state followed by a relative write or read carried no `.loom/` after the verb
+// and fell through to the trusted-workspace auto-allow.
+describe("decide -- a cd into Loom state carries the direct path's verdict", () => {
+  const trusted = { ...baseCfg, trustedWorkspaces: [CWD] };
+  const run = (command: string) => decide(req({ config: trusted, toolInput: { command } }), deps);
+
+  it("denies a relative write after cd into the lessons dir", () => {
+    const r = run("cd ~/.loom/lessons/galaxy-api && echo x > evil.md");
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("bash:catastrophic");
+  });
+  it("denies a relative cp after cd into the lessons dir", () => {
+    const r = run("cd ~/.loom/lessons && cp /tmp/x.md galaxy-api/evil.md");
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("bash:catastrophic");
+  });
+  it("denies reading config.json after cd into the config dir", () => {
+    const r = run("cd ~/.loom && cat config.json");
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("read:credential-store");
+  });
+
+  it.each([
+    // separators
+    "cd ~/.loom/lessons; echo x > evil.md",
+    "cd ~/.loom/lessons || echo x > evil.md",
+    "cd ~/.loom/lessons\necho x > evil.md",
+    // spellings of the directory
+    "cd $HOME/.loom && echo x >> config.json",
+    'cd "${HOME}/.orbit" && tee config.json < /tmp/x',
+    "cd ~/.ORBIT/lessons && cp /tmp/x .",
+    "cd /test-home/alice/.loom/lessons && echo x > evil.md",
+    "cd $LOOM_CONFIG_DIR && echo x > a",
+    "cd ~/.lo* && echo x > a",
+    // hops
+    "cd ~ && cd .loom && echo x > a",
+    "cd ~/.loom && cd /tmp && cd - && echo x > a",
+    "cd ~/.loom/analyses/proj && cd ../.. && echo x > config.json",
+    "cd ../.loom && echo x > a",
+    "pushd ~/.loom && echo x > a",
+    // grouping and nested shells
+    "(cd ~/.loom && echo x > a)",
+    "{ cd ~/.loom; echo x > a; }",
+    "bash -c 'cd ~/.loom && echo x > a'",
+    "eval 'cd ~/.loom'; echo x > a",
+    // every write verb the direct form knows
+    "cd ~/.loom && sed -i s/a/b/ config.json",
+    "cd ~/.loom && dd if=/tmp/x of=config.json",
+    "cd ~/.loom && mv /tmp/x lessons/a.md",
+    // walking back out of the analyses carve-out
+    "cd ~/.loom/analyses/proj && echo x > ../../config.json",
+  ])("denies a write: %j", (command) => {
+    const r = run(command);
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("bash:catastrophic");
+  });
+
+  it.each([
+    "cd ~ && cat .netrc",
+    "cd ~/.ssh && cat id_rsa",
+    "cd ~/.aws && grep key credentials",
+    "cd ~/.orbit && head -c 200 config.json",
+    "cd ~/.loom && cat < config.json",
+  ])("denies a credential-store read: %j", (command) => {
+    const r = run(command);
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("read:credential-store");
+  });
+
+  it.each([
+    "cd ~/.loom && python3 x.py",
+    "cd ~/.loom && touch lessons/x.md",
+    "cd ~/.loom && grep -r token .",
+    "cd ~/.ssh && echo k >> authorized_keys",
+    "cd $ORBIT_HOME && cat config.json",
+    "cd ~/.loom/lessons && echo x > /tmp/elsewhere",
+  ])("asks instead of auto-allowing what it cannot judge in a guarded dir: %j", (command) => {
+    expect(run(command).decision).toBe("ask");
+  });
+
+  it.each([
+    "cd ~/work/x && echo > y",
+    "cd /tmp && echo x > y",
+    "cd sub && make",
+    "cd $BUILD_DIR && make",
+    'cd "$(git rev-parse --show-toplevel)" && echo x > y',
+    "cd ~/.loom/analyses/proj && echo x > out.txt",
+    "cd ~/.loom/analyses/proj && python3 run.py > out.txt",
+    // a subshell's cd and a popped pushd do not outlive themselves
+    "(cd ~/.loom) && echo x > a",
+    "pushd ~/.loom && popd && echo x > a",
+    "cd /tmp && cd - && echo x > a",
+    // a cd with nothing after it runs in a shell that exits straight away
+    "cd ~/.loom",
+  ])("leaves every other cd alone: %j", (command) => {
+    expect(run(command).decision).toBe("allow");
+  });
+
+  it("realpaths a carved-out write target reached by cd", () => {
+    const link = `${HOME}/.loom/analyses/link`;
+    const symlinked: PathResolver = {
+      contains: (p) => ({
+        resolved: p.startsWith(link) ? `${HOME}/.loom` + p.slice(link.length) : p,
+        inside: p.startsWith(CWD),
+      }),
+    };
+    const r = decide(
+      req({
+        config: trusted,
+        toolInput: { command: "cd ~/.loom/analyses/link && echo x > config.json" },
+      }),
+      { resolver: symlinked, home: HOME },
+    );
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("bash:catastrophic");
+  });
+});
