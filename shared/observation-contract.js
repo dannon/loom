@@ -308,10 +308,11 @@ export function validateObservation(obj) {
 
 // Client-side only, on top of LEAK_PATTERNS, and deliberately NOT part of the
 // wire validator the intake Worker mirrors: these are the shapes the contract
-// table lets through that still name a machine, a person or a record. They
-// apply to the two free-text fields; structured fields get shape checks in the
-// builder instead. Known false positive, in the fail-closed direction: a
-// filename with an extension after a slash.
+// table lets through that still name a machine, a person or a record. They run
+// over every string in the payload (scanObservationForLeaks) and over the raw
+// error line the signature came from. Structured fields are also admitted from
+// allowlists in the builder, so for them this is the second line, not the
+// first.
 //
 // Real top-level domains plus the usual private suffixes. A dotted run counts
 // as a host only when its LAST label is one of these: that is what keeps
@@ -361,16 +362,6 @@ export const CLIENT_LEAK_PATTERNS = Object.freeze([
   ]),
 ]);
 
-/** True when `text` contains something host-shaped. Used on structured fields too. */
-export function looksLikeHost(text) {
-  if (typeof text !== "string") return false;
-  return ["hostname", "host-port", "ipv4", "ipv6", "uuid"].some((name) =>
-    CLIENT_LEAK_PATTERNS.find(([n]) => n === name)[1].test(text),
-  );
-}
-
-const FREE_TEXT_FIELDS = new Set(["signature", "description"]);
-
 /** Names of every leak pattern (contract and client-side) that `text` trips. */
 export function textLeaks(text) {
   const hits = [];
@@ -380,26 +371,35 @@ export function textLeaks(text) {
   return hits;
 }
 
+// A public toolshed id is a host and a path by construction, so scanning it
+// whole would always trip. Its host is fixed, and the segments after it are
+// what the model wrote, so those are scanned one at a time instead.
+const PUBLIC_TOOLSHED_PREFIX_RE =
+  /^(?:toolshed\.g2\.bx\.psu\.edu|testtoolshed\.g2\.bx\.psu\.edu)\/repos\//;
+
 /**
- * Belt-and-braces: run the leak table over EVERY string in the payload, at any
- * depth, not just the two free-text fields. Structured fields are shape-checked
- * upstream, so this should always come back empty -- when it does not, the
- * caller drops the observation. installToken is skipped because it is 32 hex by
- * construction and would trip the long-hex rule.
+ * The strings in a payload that the leak table runs over, as [path, text]. A
+ * few fields are exact-shape by contract and would trip a rule by design (a
+ * UUID id, an ISO timestamp, an allowlisted server name, the 32-hex install
+ * token); each is skipped only while it actually has that exact shape, so a
+ * hostile value in one of them is still scanned.
  */
-export function scanObservationForLeaks(obs) {
-  const hits = [];
+function scannableStrings(obs) {
+  const out = [];
   const walk = (value, path) => {
     if (typeof value === "string") {
-      if (path === "installToken") return;
-      for (const [name, re] of LEAK_PATTERNS) {
-        if (re.test(value)) hits.push(`${path}:${name}`);
+      if (path === "installToken" && INSTALL_TOKEN_RE.test(value)) return;
+      if (path === "id" && UUID_V4_RE.test(value)) return;
+      if (path === "clientTs" && ISO_TS_RE.test(value)) return;
+      if (path === "galaxy.server" && PUBLIC_GALAXY_SERVERS.includes(value)) return;
+      if (/^tools\[\d+\]\.id$/.test(path) && PUBLIC_TOOLSHED_PREFIX_RE.test(value)) {
+        value
+          .replace(PUBLIC_TOOLSHED_PREFIX_RE, "")
+          .split("/")
+          .forEach((seg, i) => out.push([`${path}/${i}`, seg]));
+        return;
       }
-      if (FREE_TEXT_FIELDS.has(path)) {
-        for (const [name, re] of CLIENT_LEAK_PATTERNS) {
-          if (re.test(value)) hits.push(`${path}:${name}`);
-        }
-      }
+      out.push([path, value]);
       return;
     }
     if (Array.isArray(value)) {
@@ -411,7 +411,22 @@ export function scanObservationForLeaks(obs) {
     }
   };
   walk(obs, "");
-  return hits;
+  return out;
+}
+
+/**
+ * Run the whole leak table -- the contract's and the client-side one -- over
+ * EVERY string in the payload, at any depth. Structured fields are admitted
+ * from allowlists upstream, so on a builder-made payload this comes back
+ * empty; when it does not, the caller drops the observation. Hits are
+ * `path:pattern`; a hit in a toolshed id segment is reported against the id.
+ */
+export function scanObservationForLeaks(obs) {
+  const hits = [];
+  for (const [path, text] of scannableStrings(obs)) {
+    for (const name of textLeaks(text)) hits.push(`${path.replace(/\/\d+$/, "")}:${name}`);
+  }
+  return [...new Set(hits)];
 }
 
 function sliceOr(v, max, fallback) {

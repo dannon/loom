@@ -30,7 +30,6 @@ import {
   capObservation,
   normalizeSignature,
   rawSignatureLine,
-  looksLikeHost,
   observationByteLength,
   scanObservationForLeaks,
   textLeaks,
@@ -59,6 +58,11 @@ import { getConfigDir } from "./config.js";
 import { readLoomVersion } from "./feedback.js";
 import { loadProfiles } from "./profiles.js";
 import { isWsl } from "../../shared/wsl.js";
+import {
+  GALAXY_BUILTIN_TOOL_IDS,
+  GALAXY_DATATYPES,
+  GALAXY_MCP_TOOLS,
+} from "./observation-allowlists.js";
 import { isDesktopShell, readEnv } from "../../shared/orbit-env.js";
 
 // -----------------------------------------------------------------------------
@@ -93,48 +97,70 @@ export function stageForTool(mcpTool: string | undefined): ObservationStage {
 // Tool ids and datatypes
 // -----------------------------------------------------------------------------
 
-// A Galaxy tool id is a public identifier, but it arrives from model-authored
-// arguments, so it is admitted by shape rather than trusted. Either a bare id
-// of word characters only (Filter1, __FILTER_FROM_FILE__) -- no dots or dashes,
-// so a hostname, an IP or a UUID can't pose as one -- or a path on one of the
-// PUBLIC toolsheds (host/repos/owner/repo/tool[/version]). Anything else with
-// a slash in it -- `home/alice/run.sh`, a private toolshed's hostname, an IP --
-// is dropped: a path and a toolshed id are made of the same characters, so
-// only the host can tell them apart. `+` is in the body set because toolshed
-// versions carry it (2.2.1+galaxy1).
-const BARE_TOOL_ID_SHAPE = /^\w+$/;
-const TOOLSHED_TOOL_ID_SHAPE =
-  /^(?:toolshed\.g2\.bx\.psu\.edu|testtoolshed\.g2\.bx\.psu\.edu)\/repos\/\w[\w.+-]*\/\w[\w.+-]*\/\w[\w.+-]*(?:\/\w[\w.+-]*)?$/;
-// Galaxy datatypes are lowercase words with at most one dotted suffix
-// (fastqsanger.gz, vcf_bgzip). No hyphen, no upper case and nothing that reads
-// as a host, which keeps out the commonest shapes of a file stem or a server
-// posing as a datatype; a stem that happens to be datatype-shaped still gets
-// through, since there is no registry here to check against.
-const DATATYPE_SHAPE = /^[a-z0-9_]+(?:\.[a-z0-9_]+)?$/;
-// galaxy-mcp's own tool names. The proxy shape builds this from model-authored
-// text, so it is checked rather than passed through.
-const MCP_TOOL_SHAPE = /^galaxy_[a-z0-9_]{1,73}$/;
+// Every structured field is admitted against a list, not a shape: a shape lets
+// any identifier-shaped word through, and a patient code or a person's name is
+// as datatype- or tool-id-shaped as `fastqsanger` or `Filter1`. The lists are
+// generated from pinned Galaxy and galaxy-mcp releases (see
+// observation-allowlists.ts); a name missing from one is dropped, which costs
+// signal, never privacy.
+//
+// A tool id is either a bare id that ships inside Galaxy, or a path on one of
+// the PUBLIC toolsheds (host/repos/owner/repo/tool[/version]). The toolshed's
+// owner, repo and tool names are public but can't be listed here, so those
+// three keep a shape check; the version slot gets a version shape, and an id
+// whose version fails it keeps its id and loses the version.
+const TOOLSHED_TOOL_ID_RE =
+  /^((?:toolshed\.g2\.bx\.psu\.edu|testtoolshed\.g2\.bx\.psu\.edu)\/repos\/\w[\w.+-]*\/\w[\w.+-]*\/\w[\w.+-]*)(?:\/([^/]+))?$/;
+// 2.2.1+galaxy1, 0.7.17, 1.1.4.post2, 3.0rc1: a release number, optionally
+// with galaxy/rc/dev/post-style suffixes. No free-form words.
+const TOOLSHED_VERSION_SHAPE =
+  /^\d+(?:\.\d+){0,5}(?:[+~_.-]?(?:galaxy|alpha|beta|rc|dev|post|a|b)\d*(?:\.\d+)*){0,2}$/;
+
+function isAdmissibleToolVersion(v: string): boolean {
+  // The leak table runs over every string that is sent, so a version it would
+  // trip on (0.7.17.4 reads as an IPv4 address) is dropped here rather than
+  // taking the whole observation down with it.
+  return TOOLSHED_VERSION_SHAPE.test(v) && textLeaks(v).length === 0;
+}
+
+/**
+ * The admitted form of a model-authored tool id, or null. Bare ids must be
+ * Galaxy's own; toolshed ids keep their version only when it is
+ * version-shaped.
+ */
+export function admitToolId(raw: string): string | null {
+  const v = String(raw ?? "").trim();
+  if (!v || v.length > TOOL_ID_MAX) return null;
+  if (GALAXY_BUILTIN_TOOL_IDS.has(v)) return v;
+  const m = v.match(TOOLSHED_TOOL_ID_RE);
+  if (!m) return null;
+  return m[2] !== undefined && isAdmissibleToolVersion(m[2]) ? `${m[1]}/${m[2]}` : m[1];
+}
 
 export function isAdmissibleToolId(v: string): boolean {
-  return (
-    v.length > 0 &&
-    v.length <= TOOL_ID_MAX &&
-    (BARE_TOOL_ID_SHAPE.test(v) || TOOLSHED_TOOL_ID_SHAPE.test(v))
-  );
+  return admitToolId(v) === v;
+}
+
+// Lower-case spelling -> Galaxy's own spelling, so `BAM` from a model still
+// lands on `bam` and an odd-cased real one (if any) keeps its case.
+const DATATYPE_BY_LOWER = new Map([...GALAXY_DATATYPES].map((d) => [d.toLowerCase(), d]));
+
+export function admitDatatype(raw: string): string | null {
+  const v = String(raw ?? "").trim();
+  if (DATATYPE_SENTINELS.has(v) || v.length > DATATYPE_MAX) return null;
+  if (GALAXY_DATATYPES.has(v)) return v;
+  return DATATYPE_BY_LOWER.get(v.toLowerCase()) ?? null;
 }
 
 export function isAdmissibleDatatype(v: string): boolean {
-  return (
-    !DATATYPE_SENTINELS.has(v) &&
-    v.length <= DATATYPE_MAX &&
-    DATATYPE_SHAPE.test(v) &&
-    !looksLikeHost(v)
-  );
+  return !DATATYPE_SENTINELS.has(v) && GALAXY_DATATYPES.has(v);
 }
 
+/** galaxy-mcp's real tool names. The proxy shape builds this from model text. */
 export function isAdmissibleMcpTool(v: string | undefined): v is string {
-  return typeof v === "string" && MCP_TOOL_SHAPE.test(v);
+  return typeof v === "string" && GALAXY_MCP_TOOLS.has(v);
 }
+
 const TOOL_ID_KEYS = ["tool_id", "tool_ids"] as const;
 const DATATYPE_KEYS = ["file_type", "ext", "extension", "datatype"] as const;
 // Galaxy's "work it out for me" sentinel is not a datatype signal.
@@ -170,18 +196,16 @@ function dedupeCap(values: string[], max: number): string[] {
   return [...new Set(values)].slice(0, max);
 }
 
+function admitted(values: string[], admit: (v: string) => string | null): string[] {
+  return values.map(admit).filter((v): v is string => v !== null);
+}
+
 export function extractToolIds(input: Record<string, unknown> | undefined): string[] {
-  const admitted = collectStrings(input, TOOL_ID_KEYS)
-    .map((v) => v.trim())
-    .filter(isAdmissibleToolId);
-  return dedupeCap(admitted, TOOLS_MAX);
+  return dedupeCap(admitted(collectStrings(input, TOOL_ID_KEYS), admitToolId), TOOLS_MAX);
 }
 
 export function extractDatatypes(input: Record<string, unknown> | undefined): string[] {
-  const admitted = collectStrings(input, DATATYPE_KEYS)
-    .map((v) => v.trim().toLowerCase())
-    .filter(isAdmissibleDatatype);
-  return dedupeCap(admitted, DATATYPES_MAX);
+  return dedupeCap(admitted(collectStrings(input, DATATYPE_KEYS), admitDatatype), DATATYPES_MAX);
 }
 
 // -----------------------------------------------------------------------------
@@ -312,9 +336,9 @@ export function buildObservation(
     trigger: facts.trigger,
     // Re-admitted here as well as in the extractors: facts can arrive from a
     // caller that never went through them.
-    tools: facts.toolIds.filter(isAdmissibleToolId).map(splitToolId),
+    tools: admitted(facts.toolIds, admitToolId).map(splitToolId),
     ...(mcpTool ? { mcpTool } : {}),
-    datatypes: facts.datatypes.filter(isAdmissibleDatatype),
+    datatypes: admitted(facts.datatypes, admitDatatype),
     signature: freeText ? normalizeSignature(facts.rawSignature) : UNKNOWN_SIGNATURE,
     galaxy: {
       server: env.server,
@@ -354,18 +378,58 @@ export interface ObservationProblems {
  * would have caught. The `structured` shape never carries that text, so there
  * is nothing of it to scan.
  */
+/**
+ * The builder's admission rules, re-applied to a finished observation. The
+ * builder only ever produces admissible fields, so on its output this is
+ * empty; it is here for the payloads that did not come straight from the
+ * builder -- an outbox row read back from disk is local, editable, and
+ * re-sent without a fresh confirm.
+ */
+function admissionProblems(obs: Observation): string[] {
+  const out: string[] = [];
+  const tools: unknown[] = Array.isArray(obs.tools) ? obs.tools : [];
+  tools.forEach((t, i) => {
+    const ref = (t ?? {}) as { id?: unknown; version?: unknown };
+    const joined =
+      typeof ref.id !== "string"
+        ? undefined
+        : ref.version === undefined
+          ? ref.id
+          : typeof ref.version === "string"
+            ? `${ref.id}/${ref.version}`
+            : undefined;
+    if (joined === undefined || !isAdmissibleToolId(joined)) out.push(`tools[${i}]:not-allowed`);
+  });
+  if (obs.mcpTool !== undefined && !isAdmissibleMcpTool(obs.mcpTool)) {
+    out.push("mcpTool:not-allowed");
+  }
+  const datatypes: unknown[] = Array.isArray(obs.datatypes) ? obs.datatypes : [];
+  datatypes.forEach((d, i) => {
+    if (typeof d !== "string" || !isAdmissibleDatatype(d)) out.push(`datatypes[${i}]:not-allowed`);
+  });
+  const version = obs.galaxy?.version;
+  if (
+    version !== undefined &&
+    !(typeof version === "string" && GALAXY_VERSION_SHAPE.test(version))
+  ) {
+    out.push("galaxy.version:not-allowed");
+  }
+  return out;
+}
+
 export function observationProblems(
   obs: Observation,
   raw: { rawSignature?: string } = {},
 ): ObservationProblems {
   const validity = validateObservation(obs);
+  const errors = [...(validity.ok ? [] : validity.errors), ...admissionProblems(obs)];
   const leaks = scanObservationForLeaks(obs);
   if (raw.rawSignature !== undefined) {
     for (const name of textLeaks(rawSignatureLine(raw.rawSignature))) {
       leaks.push(`signature.raw:${name}`);
     }
   }
-  return { errors: validity.ok ? [] : validity.errors, leaks };
+  return { errors, leaks };
 }
 
 /** The impure half: who and where this install is. No secrets, no hostname. */

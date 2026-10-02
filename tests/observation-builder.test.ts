@@ -13,7 +13,9 @@ import {
   getGalaxyVersion,
   resetGalaxyVersion,
   buildObservation,
+  isAdmissibleMcpTool,
 } from "../extensions/loom/observations.js";
+import { factsForToolResult } from "../extensions/loom/observation-triggers.js";
 import { validateObservation, scanObservationForLeaks } from "../shared/observation-contract.js";
 import type { ObservationEnvelope } from "../extensions/loom/observations.js";
 
@@ -97,9 +99,7 @@ describe("extractToolIds", () => {
     }
   });
 
-  it("drops anything outside the id shape allowlist", () => {
-    // A path and a toolshed id are made of the same characters, so the rule is
-    // that every segment starts with a word character -- not a character set.
+  it("drops anything that is neither a Galaxy built-in nor a public toolshed id", () => {
     expect(extractToolIds({ tool_id: "../../etc/passwd" })).toEqual([]);
     expect(extractToolIds({ tool_id: "/etc/passwd" })).toEqual([]);
     expect(extractToolIds({ tool_id: "C:/Users/bob/tool.xml" })).toEqual([]);
@@ -108,12 +108,13 @@ describe("extractToolIds", () => {
   });
 
   it("caps the count and dedupes", () => {
-    expect(extractToolIds({ tool_ids: ["a", "a", "b", "c", "d", "e", "f", "g"] })).toEqual([
-      "a",
-      "b",
-      "c",
-      "d",
-      "e",
+    const ids = ["Filter1", "Filter1", "Grep1", "cat1", "Cut1", "sort1", "upload1", "comp1"];
+    expect(extractToolIds({ tool_ids: ids })).toEqual([
+      "Filter1",
+      "Grep1",
+      "cat1",
+      "Cut1",
+      "sort1",
     ]);
   });
 
@@ -121,6 +122,78 @@ describe("extractToolIds", () => {
     expect(extractToolIds(undefined)).toEqual([]);
     expect(extractToolIds({})).toEqual([]);
     expect(extractToolIds({ tool_id: 7 } as unknown as Record<string, unknown>)).toEqual([]);
+  });
+});
+
+describe("structured fields are admitted from allowlists, not shapes", () => {
+  const base = {
+    kind: "tool-error" as const,
+    trigger: "tool_error" as const,
+    toolIds: [],
+    datatypes: [],
+    rawSignature: "x",
+  };
+
+  it("sends none of the reviewer's identifying words as structure", () => {
+    const facts = factsForToolResult(
+      "mcp",
+      {
+        server: "galaxy",
+        tool: "alice_smith",
+        args: { tool_id: "Alice_Smith", file_type: "patient_17.fastq" },
+      },
+      "Unknown tool",
+    )!;
+    const obs = buildObservation(facts, envelope, "structured");
+    expect("mcpTool" in obs).toBe(false);
+    expect(obs.tools).toEqual([]);
+    expect(obs.datatypes).toEqual([]);
+    expect(JSON.stringify(obs)).not.toMatch(/alice|smith|patient/i);
+  });
+
+  it("keeps a private hostname out of the toolshed version slot", () => {
+    const id = "toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2/biobank.internal";
+    expect(extractToolIds({ tool_id: id })).toEqual([
+      "toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2",
+    ]);
+    const obs = buildObservation({ ...base, toolIds: [id] }, envelope, "structured");
+    expect(obs.tools).toEqual([{ id: "toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2" }]);
+  });
+
+  it("refuses a datatype- or version-shaped name", () => {
+    expect(extractDatatypes({ file_type: "patient07_smith" })).toEqual([]);
+    expect(
+      extractToolIds({ tool_id: "toolshed.g2.bx.psu.edu/repos/iuc/x/y/patient07_smith" }),
+    ).toEqual(["toolshed.g2.bx.psu.edu/repos/iuc/x/y"]);
+  });
+
+  it("drops a four-part version that reads as an IPv4 address, keeping the id", () => {
+    expect(
+      extractToolIds({ tool_id: "toolshed.g2.bx.psu.edu/repos/devteam/bwa/bwa/0.7.17.4" }),
+    ).toEqual(["toolshed.g2.bx.psu.edu/repos/devteam/bwa/bwa"]);
+  });
+
+  it("admits real galaxy-mcp names, Galaxy datatypes and Galaxy's own bare tool ids", () => {
+    expect(isAdmissibleMcpTool("galaxy_run_tool")).toBe(true);
+    expect(isAdmissibleMcpTool("galaxy_get_job_details")).toBe(true);
+    expect(isAdmissibleMcpTool("galaxy_alice_smith")).toBe(false);
+    expect(extractDatatypes({ file_type: "BAM" })).toEqual(["bam"]);
+    expect(extractDatatypes({ file_type: "fastqsanger.bz2" })).toEqual(["fastqsanger.bz2"]);
+    expect(extractToolIds({ tool_id: "__MERGE_COLLECTION__" })).toEqual(["__MERGE_COLLECTION__"]);
+  });
+
+  it("scans every string, so a toolshed segment that names a host is still refused", () => {
+    const obs = buildObservation(
+      { ...base, toolIds: ["toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2/2.2.1+galaxy1"] },
+      envelope,
+      "structured",
+    );
+    expect(scanObservationForLeaks(obs)).toEqual([]);
+    const forged = {
+      ...obs,
+      tools: [{ id: "toolshed.g2.bx.psu.edu/repos/biobank.internal/x/y" }],
+    };
+    expect(scanObservationForLeaks(forged)).toContain("tools[0].id:hostname");
   });
 });
 
@@ -132,7 +205,7 @@ describe("extractDatatypes", () => {
     expect(extractDatatypes({ datatype: "tabular" })).toEqual(["tabular"]);
   });
 
-  it("drops auto and anything outside the shape allowlist", () => {
+  it("drops auto and anything not on Galaxy's datatype list", () => {
     expect(extractDatatypes({ file_type: "auto" })).toEqual([]);
     expect(extractDatatypes({ file_type: "C:/Users/bob" })).toEqual([]);
     expect(extractDatatypes({ ext: "x".repeat(41) })).toEqual([]);
@@ -516,5 +589,17 @@ describe("the leak scan runs before normalization and truncation", () => {
     const obs = buildObservation({ ...base, rawSignature }, envelope, "structured");
     expect(observationProblems(obs).leaks).toEqual([]);
     expect(JSON.stringify(obs)).not.toContain("galaxyprod");
+  });
+});
+
+describe("the generated allowlists", () => {
+  it("hold nothing the leak scan would refuse, so an admitted field can always be sent", async () => {
+    const { GALAXY_MCP_TOOLS, GALAXY_DATATYPES, GALAXY_BUILTIN_TOOL_IDS } =
+      await import("../extensions/loom/observation-allowlists.js");
+    const { textLeaks } = await import("../shared/observation-contract.js");
+    for (const set of [GALAXY_MCP_TOOLS, GALAXY_DATATYPES, GALAXY_BUILTIN_TOOL_IDS]) {
+      expect(set.size).toBeGreaterThan(40);
+      for (const v of set) expect(textLeaks(v), v).toEqual([]);
+    }
   });
 });
