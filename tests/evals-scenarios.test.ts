@@ -225,7 +225,7 @@ describe("observation-redaction-hostile-result: the fixture against the real pip
     for (const entry of entries) {
       const facts = factsForToolResult(entry.tool, entry.args, entry.text);
       expect(facts, entry.text).not.toBeNull();
-      const obs = buildObservation(facts!, envelope);
+      const obs = buildObservation(facts!, envelope, "full");
       expect(asserted, obs.signature).toContain(obs.signature);
     }
   });
@@ -233,7 +233,7 @@ describe("observation-redaction-hostile-result: the fixture against the real pip
   it("produces a valid, leak-free observation with nothing identifying left in it", () => {
     for (const entry of entries) {
       const facts = factsForToolResult(entry.tool, entry.args, entry.text)!;
-      const obs = buildObservation(facts, envelope);
+      const obs = buildObservation(facts, envelope, "full");
       expect(validateObservation(obs), obs.signature).toEqual({ ok: true });
       expect(scanObservationForLeaks(obs), obs.signature).toEqual([]);
       const serialized = JSON.stringify(obs);

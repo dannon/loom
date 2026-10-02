@@ -256,6 +256,7 @@ describe("buildObservation", () => {
           "mail alice.researcher@institute.edu",
       },
       envelope,
+      "full",
     );
     expect(obs.signature).toBe(
       "ToolExecutionError: dataset <id> in history <n> failed; wrote <path> see <url> mail <email>",
@@ -292,6 +293,7 @@ describe("buildObservation", () => {
         rawSignature: "evidence gate blocked a plan-step completion",
       },
       envelope,
+      "full",
     );
     expect(obs.stage).toBe("result-interpretation");
   });
@@ -300,6 +302,7 @@ describe("buildObservation", () => {
     const obs = buildObservation(
       { kind: "other", trigger: "explicit", toolIds: [], datatypes: [], rawSignature: "x" },
       { ...envelope, galaxyVersion: "24.2.1", wsl: true, app: "orbit", platform: "linux" },
+      "full",
     );
     expect(obs.galaxy).toEqual({ server: "usegalaxy.org", version: "24.2.1" });
     expect(obs.client).toEqual({ app: "orbit", version: "0.8.0", platform: "linux", wsl: true });
@@ -317,6 +320,7 @@ describe("buildObservation", () => {
         description: "the run for alice@institute.edu failed",
       },
       envelope,
+      "full",
     );
     expect(obs.description).toBe("");
     expect(validateObservation(obs)).toEqual({ ok: true });
@@ -324,6 +328,45 @@ describe("buildObservation", () => {
 });
 
 import { UNKNOWN_SIGNATURE } from "../shared/observation-contract.js";
+
+describe("buildObservation in the structured (auto) shape", () => {
+  const hostile = {
+    kind: "tool-error" as const,
+    trigger: "tool_error" as const,
+    mcpTool: "galaxy_run_tool",
+    toolIds: ["toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2/2.2.1+galaxy1"],
+    datatypes: ["fastqsanger.gz"],
+    rawSignature: "ValueError: could not convert string to float: 'Alice Smith'",
+    description: "Alice Smith had BRCA1 expression 3.14",
+  };
+
+  it("carries no free text at all, and keeps every structured field", () => {
+    const obs = buildObservation(hostile, envelope, "structured");
+    expect(obs.signature).toBe(UNKNOWN_SIGNATURE);
+    expect(obs.description).toBe("");
+    expect(obs.mcpTool).toBe("galaxy_run_tool");
+    expect(obs.stage).toBe("tool-parameterization");
+    expect(obs.tools).toEqual([
+      { id: "toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2", version: "2.2.1+galaxy1" },
+    ]);
+    expect(obs.datatypes).toEqual(["fastqsanger.gz"]);
+    expect(validateObservation(obs)).toEqual({ ok: true });
+    expect(JSON.stringify(obs)).not.toMatch(/Alice|Smith|BRCA1|3\.14/);
+  });
+
+  it("sends the reviewer's name-and-value messages as nothing but structure", () => {
+    for (const raw of [
+      "ValueError: could not convert string to float: 'Alice Smith'",
+      "KeyError: 'patient_07_jane'",
+      "History 'Smith cohort RNA-seq' is not accessible",
+      "Error in sample Alice_Smith: column padj not found",
+    ]) {
+      const obs = buildObservation({ ...hostile, rawSignature: raw }, envelope, "structured");
+      expect(obs.signature, raw).toBe(UNKNOWN_SIGNATURE);
+      expect(JSON.stringify(obs), raw).not.toMatch(/Alice|Smith|jane/);
+    }
+  });
+});
 
 describe("buildObservation signature fallback", () => {
   const facts = {
@@ -335,14 +378,18 @@ describe("buildObservation signature fallback", () => {
 
   it("carries the normalizer's unknown literal through", () => {
     for (const raw of ["", "   ", "\n\n"]) {
-      const obs = buildObservation({ ...facts, rawSignature: raw }, envelope);
+      const obs = buildObservation({ ...facts, rawSignature: raw }, envelope, "full");
       expect(obs.signature, JSON.stringify(raw)).toBe(UNKNOWN_SIGNATURE);
       expect(validateObservation(obs)).toEqual({ ok: true });
     }
   });
 
   it("keeps a placeholder-only signature as the placeholder", () => {
-    const obs = buildObservation({ ...facts, rawSignature: "/Users/alice/run.log" }, envelope);
+    const obs = buildObservation(
+      { ...facts, rawSignature: "/Users/alice/run.log" },
+      envelope,
+      "full",
+    );
     expect(obs.signature).toBe("<path>");
     expect(validateObservation(obs)).toEqual({ ok: true });
   });
@@ -367,7 +414,7 @@ describe("shape checks on model-authored fields", () => {
       "3f2b8c1a-1234-4abc-8def-a123b56c89ab",
     ]) {
       expect(extractToolIds({ tool_id: id }), id).toEqual([]);
-      expect(buildObservation({ ...base, toolIds: [id] }, envelope).tools, id).toEqual([]);
+      expect(buildObservation({ ...base, toolIds: [id] }, envelope, "full").tools, id).toEqual([]);
     }
     expect(
       extractToolIds({ tool_id: "testtoolshed.g2.bx.psu.edu/repos/iuc/x/y/1.0" }),
@@ -380,7 +427,7 @@ describe("shape checks on model-authored fields", () => {
       "galaxy.corp-internal.example",
       "galaxy_alice smith thesis",
     ]) {
-      const obs = buildObservation({ ...base, mcpTool: name }, envelope);
+      const obs = buildObservation({ ...base, mcpTool: name }, envelope, "full");
       expect("mcpTool" in obs, name).toBe(false);
       expect(obs.stage).toBe("unknown");
     }
@@ -391,9 +438,9 @@ describe("shape checks on model-authored fields", () => {
     expect(extractDatatypes({ file_type: "corp.example.org" })).toEqual([]);
     expect(extractDatatypes({ file_type: "example.com" })).toEqual([]);
     expect(extractDatatypes({ file_type: "fastqsanger.gz" })).toEqual(["fastqsanger.gz"]);
-    expect(buildObservation({ ...base, datatypes: ["Patient07.csv"] }, envelope).datatypes).toEqual(
-      [],
-    );
+    expect(
+      buildObservation({ ...base, datatypes: ["Patient07.csv"] }, envelope, "full").datatypes,
+    ).toEqual([]);
   });
 
   it("keeps a free-form site suffix out of the galaxy version", () => {
@@ -409,6 +456,7 @@ describe("shape checks on model-authored fields", () => {
     const obs = buildObservation(
       { ...base, description: "failed against postgres-prod.lab.example.edu" },
       envelope,
+      "full",
     );
     expect(obs.description).toBe("");
   });

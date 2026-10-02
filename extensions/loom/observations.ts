@@ -25,6 +25,7 @@ import {
   DATATYPE_MAX,
   TOOLS_MAX,
   TOOL_ID_MAX,
+  UNKNOWN_SIGNATURE,
   VERSION_MAX,
   capObservation,
   normalizeSignature,
@@ -274,7 +275,25 @@ export interface ObservationEnvelope {
 
 const PLATFORMS = new Set<ObservationPlatform>(["darwin", "linux", "win32"]);
 
-export function buildObservation(facts: ObservationFacts, env: ObservationEnvelope): Observation {
+/**
+ * What a payload may carry. `full` is the `ask` shape: the normalized signature
+ * and the description, which a human reads in the confirm before anything
+ * goes. `structured` is the `auto` shape and carries no free text at all --
+ * with nobody reading it first, no pattern table is trusted to have caught
+ * every name or data value an error message can quote.
+ */
+export type ObservationShape = "full" | "structured";
+
+export function shapeForMode(mode: "ask" | "auto"): ObservationShape {
+  return mode === "auto" ? "structured" : "full";
+}
+
+export function buildObservation(
+  facts: ObservationFacts,
+  env: ObservationEnvelope,
+  shape: ObservationShape,
+): Observation {
+  const freeText = shape === "full";
   const mcpTool = isAdmissibleMcpTool(facts.mcpTool) ? facts.mcpTool : undefined;
   const candidate = {
     schemaVersion: OBSERVATION_SCHEMA_VERSION,
@@ -295,12 +314,12 @@ export function buildObservation(facts: ObservationFacts, env: ObservationEnvelo
     tools: facts.toolIds.filter(isAdmissibleToolId).map(splitToolId),
     ...(mcpTool ? { mcpTool } : {}),
     datatypes: facts.datatypes.filter(isAdmissibleDatatype),
-    signature: normalizeSignature(facts.rawSignature),
+    signature: freeText ? normalizeSignature(facts.rawSignature) : UNKNOWN_SIGNATURE,
     galaxy: {
       server: env.server,
       ...(env.galaxyVersion ? { version: env.galaxyVersion } : {}),
     },
-    description: facts.description ?? "",
+    description: freeText ? (facts.description ?? "") : "",
   };
 
   const capped = capObservation(candidate);

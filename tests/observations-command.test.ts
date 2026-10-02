@@ -207,7 +207,9 @@ describe("/observations", () => {
     await commands.get("observations")!.handler("mode auto", { hasUI: true, ui });
     expect(ui.confirm).toHaveBeenCalledOnce();
     const message = String(ui.confirm.mock.calls[0][1]);
-    expect(message).toContain("signature:");
+    expect(message).toContain("signature: unknown");
+    expect(message).toContain("description: (none)");
+    expect(message).toContain("In `auto` mode no free text is sent at all");
     expect(message).toContain("Rows expire after 180 days");
     expect(setObservationsMode).toHaveBeenCalledWith("auto");
     expect(markAutoAcknowledged).toHaveBeenCalledOnce();
@@ -375,9 +377,16 @@ describe("sampleObservationFacts", () => {
     expect(sampleObservationFacts()).toBe(seen);
   });
 
-  it("never shows a refused observation as the sample", () => {
-    lastFacts = { ...seen, rawSignature: "refused dataset 42 for this run" };
-    expect(sampleObservationFacts().rawSignature).not.toContain("dataset 42");
+  it("shows the structured shape, so error text a trigger saw never reaches the sample", async () => {
+    lastFacts = { ...seen, rawSignature: "refused dataset 42 for Alice Smith" };
+    const { pi, commands } = makeApi();
+    registerObservationsCommand(pi as any);
+    const ui = uiMock();
+    await commands.get("observations")!.handler("mode auto", { hasUI: true, ui });
+    const message = String(ui.confirm.mock.calls[0][1]);
+    expect(message).not.toMatch(/dataset 42|Alice|Smith/);
+    expect(message).toContain("signature: unknown");
+    expect(message).toContain("galaxy tools: Filter1");
   });
 
   it("falls back to a representative sample with nothing seen yet", () => {

@@ -171,17 +171,38 @@ describe("deliverObservation", () => {
   });
 
   it("sends in auto mode and records built + sent", async () => {
-    const d = deps();
+    const describe = vi.fn().mockResolvedValue("a description");
+    const submit = vi.fn().mockResolvedValue({ ok: true, status: 202, queueable: false });
+    const d = deps({ describe, submit });
     expect(await deliverObservation(facts, ctx, d)).toBe("sent");
     const kinds = d.rows.map(([k]) => k);
     expect(kinds).toEqual(["observation.built", "observation.sent"]);
     const built = d.rows[0][1];
-    expect(built.signature).toBe("ToolExecutionError: dataset <id> failed");
+    // auto is structured-only: no error text, no description, no model call.
+    expect(built.signature).toBe("unknown");
+    expect(built.shape).toBe("structured");
+    expect(describe).not.toHaveBeenCalled();
+    const sent = submit.mock.calls[0][0] as Observation;
+    expect(sent.signature).toBe("unknown");
+    expect(sent.description).toBe("");
     expect(built.leakScan).toBe("clean");
     expect(built.valid).toBe(true);
     expect(built.stage).toBe("tool-parameterization");
     expect(built.toolIds).toBe("Filter1");
     expect(d.state.delivered).toBe(1);
+  });
+
+  it("sends a name-bearing error in auto mode as structure only", async () => {
+    const submit = vi.fn().mockResolvedValue({ ok: true, status: 202, queueable: false });
+    const d = deps({ submit });
+    const outcome = await deliverObservation(
+      { ...facts, rawSignature: "ValueError: could not convert string to float: 'Alice Smith'" },
+      ctx,
+      d,
+    );
+    expect(outcome).toBe("sent");
+    expect(JSON.stringify(submit.mock.calls[0][0])).not.toMatch(/Alice|Smith/);
+    expect(JSON.stringify(d.rows)).not.toMatch(/Alice|Smith/);
   });
 
   it("collects nothing when the mode is off", async () => {
@@ -266,6 +287,7 @@ describe("deliverObservation", () => {
 
   it("refuses to send when the whole-payload leak scan is dirty", async () => {
     const d = deps({
+      mode: "ask",
       submit: async () => {
         throw new Error("must not send");
       },
@@ -284,6 +306,7 @@ describe("deliverObservation", () => {
 
   it("keeps a rejected payload's fields out of the activity log", async () => {
     const d = deps({
+      mode: "ask",
       submit: async () => {
         throw new Error("must not send");
       },
@@ -340,6 +363,7 @@ describe("deliverObservation", () => {
 
   it("survives a describe that throws, with an empty description", async () => {
     const d = deps({
+      mode: "ask",
       describe: async () => {
         throw new Error("model exploded");
       },

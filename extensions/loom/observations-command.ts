@@ -71,8 +71,8 @@ export function formatObservationsStatus(info: {
     `  log: ${info.sentLogPath}`,
     "",
     "  off  -- collect nothing",
-    "  ask  -- show the exact payload and send only on a confirm (default)",
-    "  auto -- send without asking, and log what was sent",
+    "  ask  -- show the exact payload, error text and description included, and send only on a confirm (default)",
+    "  auto -- send without asking, structured fields only: no error text, no description",
     "",
     OBSERVATIONS_USAGE,
   );
@@ -121,22 +121,31 @@ const REPRESENTATIVE_FACTS: ObservationFacts = {
 export function sampleObservationFacts(): ObservationFacts {
   const last = lastObservationFacts();
   if (last) {
-    const probe = buildObservation(last, collectObservationEnvelope(SAMPLE_INSTALL_TOKEN));
+    const probe = buildObservation(
+      last,
+      collectObservationEnvelope(SAMPLE_INSTALL_TOKEN),
+      "structured",
+    );
     if (validateObservation(probe).ok && scanObservationForLeaks(probe).length === 0) return last;
   }
   return REPRESENTATIVE_FACTS;
 }
 
 export async function confirmAutoMode(ctx: ExtensionContext): Promise<boolean> {
+  // The auto shape: the sample has to show what auto actually sends, which is
+  // the structured fields with no signature text and no description.
   const sample = buildObservation(
     sampleObservationFacts(),
     collectObservationEnvelope(peekInstallToken() ?? SAMPLE_INSTALL_TOKEN),
+    "structured",
   );
   try {
     return await ctx.ui.confirm(
       "Send observations automatically from now on?",
       `${PURPOSE_STATEMENT}\n\n` +
-        "This is exactly what one looks like -- the same fields, from this install:\n\n" +
+        "This is exactly what one looks like in auto mode -- the same fields, from this " +
+        "install. The error text is never sent in auto, so the signature is always " +
+        "`unknown` and there is no description:\n\n" +
         `${renderObservationForConfirm(sample)}\n\n${PRIVACY_STATEMENT}`,
     );
   } catch {

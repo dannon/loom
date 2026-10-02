@@ -40,9 +40,14 @@ import {
   resetGalaxyVersion,
   saveRetractToken,
   sentLogEntryFor,
+  shapeForMode,
   submitObservation,
 } from "./observations.js";
-import type { ObservationFacts, SubmitObservationResult } from "./observations.js";
+import type {
+  ObservationFacts,
+  ObservationShape,
+  SubmitObservationResult,
+} from "./observations.js";
 import { getOrCreateInstallToken, resolveObservationsMode } from "./observations-config.js";
 import type { ObservationsMode } from "./observations-config.js";
 import { onEvidenceDecision } from "./evidence-gate.js";
@@ -176,7 +181,8 @@ export interface DeliverDeps {
   mode: ObservationsMode;
   state: TriggerState;
   installToken(): string;
-  describe(facts: ObservationFacts, ctx: ExtensionContext): Promise<string>;
+  /** Gets the built observation, never the raw facts. */
+  describe(obs: Observation, ctx: ExtensionContext): Promise<string>;
   confirm(obs: Observation, ctx: ExtensionContext): Promise<boolean>;
   submit(obs: Observation): Promise<SubmitObservationResult>;
   record(kind: string, payload: Record<string, unknown>): void;
@@ -202,10 +208,12 @@ export function buildAndRecordObservation(
   facts: ObservationFacts,
   description: string,
   deps: Pick<DeliverDeps, "installToken" | "record">,
+  shape: ObservationShape,
 ): BuiltObservation {
   const obs = buildObservation(
     { ...facts, description },
     collectObservationEnvelope(deps.installToken()),
+    shape,
   );
   const validity = validateObservation(obs);
   const leaks = scanObservationForLeaks(obs);
@@ -218,6 +226,7 @@ export function buildAndRecordObservation(
     kind: obs.kind,
     trigger: obs.trigger,
     stage: obs.stage,
+    shape,
     signature: shown(obs.signature),
     mcpTool: shown(obs.mcpTool ?? ""),
     toolIds: shown(obs.tools.map((t) => t.id).join(",")),
@@ -249,20 +258,28 @@ export async function deliverObservation(
     return "skipped";
   }
 
-  // Check the structured half before asking anyone for a description: if it
-  // can't be sent, prompting the user (or spending a model call) for one is
-  // wasted, and the build below records the refusal either way.
-  const precheck = buildObservation(
-    { ...facts, description: "" },
-    collectObservationEnvelope(deps.installToken()),
-  );
-  const sendable =
-    validateObservation(precheck).ok && scanObservationForLeaks(precheck).length === 0;
+  const shape = shapeForMode(deps.mode);
 
+  // Check the rest of the payload before asking anyone for a description: if
+  // it can't be sent, prompting the user for one is wasted, and the build
+  // below records the refusal either way. `auto` never asks -- it carries no
+  // free text.
   let description = "";
-  if (sendable) {
+  const precheck =
+    shape === "full"
+      ? buildObservation(
+          { ...facts, description: "" },
+          collectObservationEnvelope(deps.installToken()),
+          shape,
+        )
+      : undefined;
+  if (
+    precheck &&
+    validateObservation(precheck).ok &&
+    scanObservationForLeaks(precheck).length === 0
+  ) {
     try {
-      description = await deps.describe(facts, ctx);
+      description = await deps.describe(precheck, ctx);
     } catch {
       // A description is a nice-to-have; the structured observation is the point.
       description = "";
@@ -272,7 +289,7 @@ export async function deliverObservation(
   // The install token is written to config here, before any confirm, because a
   // valid payload needs one and the confirm has to show the real payload. It
   // is local state until the user says send.
-  const { obs, valid, errors, leaks } = buildAndRecordObservation(facts, description, deps);
+  const { obs, valid, errors, leaks } = buildAndRecordObservation(facts, description, deps, shape);
 
   if (!valid || leaks.length > 0) {
     // Fail closed. Nothing is sent, and only field and pattern names are
@@ -349,7 +366,7 @@ export function liveDeliverDeps(
     mode: ctxMode,
     state,
     installToken: getOrCreateInstallToken,
-    describe: (facts, ctx) => describeObservation(ctxMode, facts, ctx),
+    describe: (obs, ctx) => describeObservation(ctxMode, obs, ctx),
     confirm: confirmObservation,
     submit: submitObservation,
     record: (kind, payload) => recordObservationActivity(kind, payload),
