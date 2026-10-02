@@ -26,3 +26,4 @@ extensions/loom/vendor/skills/
 # files are deliberately still formatted.
 lessons/snapshot.json
 lessons/*/*.md
+tests/fixtures/lessons/
