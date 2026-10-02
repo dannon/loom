@@ -8,10 +8,9 @@
  * that stops the lesson being applied to the wrong situation -- is a
  * `lessons_search` away.
  *
- * Registration order in `index.ts` is load-bearing: this goes immediately
- * BEFORE `registerSecretRedaction`, because pi feeds each `tool_result`
- * handler the previous one's content, and hint text is tool-result content
- * like any other. A user-local lesson quoting a key gets redacted too.
+ * Every surface here redacts its own text (`wrapLessons`, and
+ * `redactLessonText` for the unwrapped inline hint), so a user-local lesson
+ * quoting a key is scrubbed whatever the registration order in `index.ts`.
  *
  * One hint per result, once per lesson per session. Two notes on one result
  * crowd out the output the model is there to read, and re-firing the same
@@ -32,7 +31,7 @@ import { getLessonStore, resetLessonStore } from "./lessons/store";
 import type { SearchHit } from "./lessons/search";
 import { clip, collapse, firstSentence } from "./lessons/text";
 import type { Lesson, Match, SurfaceKind } from "./lessons/types";
-import { wrapLessons } from "./lessons/wrapper";
+import { redactLessonText, wrapLessons } from "./lessons/wrapper";
 import { galaxyCall } from "./mcp-recovery";
 import { getNotebookPath } from "./state";
 
@@ -45,7 +44,7 @@ const MAX_CHECK_FIRST = 300;
 const MAX_STEP_LESSONS = 3;
 
 export function formatLessonHint(lesson: Lesson): string {
-  return [
+  const hint = [
     `${LESSON_HINT_MARKER} ${collapse(lesson.title)}`,
     `Check first: ${clip(collapse(lesson.sections.check_first), MAX_CHECK_FIRST)}`,
     `Then: ${firstSentence(lesson.sections.intervention)}`,
@@ -54,6 +53,7 @@ export function formatLessonHint(lesson: Lesson): string {
       `have before acting on it, and say which lesson you followed. Full lesson, ` +
       `including when it does NOT apply: \`lessons_search({ query: "${lesson.id}" })\`.`,
   ].join("\n");
+  return redactLessonText(hint);
 }
 
 /**
