@@ -5,7 +5,9 @@
  *
  * - Lessons go under getConfigDir(), which is ~/.loom today and ~/.orbit after
  *   the rename (shared/state-dir.js). Nothing here joins homedir() with
- *   ".loom" itself, so the move stays one switch.
+ *   ".loom" itself, so the move stays one switch. LOOM_LESSONS_DIR replaces
+ *   that directory for the writer and the store alike (./user-dir), so a
+ *   lesson saved here is a lesson the store loads.
  * - Staged drafts go in a SIBLING directory, not inside lessons/. A draft the
  *   user has not approved must not be loadable as a lesson, and a separate
  *   directory guarantees that without the lesson store having to know the
@@ -17,6 +19,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { getConfigDir } from "../../../shared/loom-config.js";
+import { userLessonsDir } from "./user-dir";
 import {
   LESSON_NAMESPACES,
   MAX_FILE_BYTES,
@@ -33,7 +36,7 @@ export interface LocalLesson {
 }
 
 export function lessonsDir(): string {
-  return path.join(getConfigDir(), "lessons");
+  return userLessonsDir();
 }
 
 export function draftsDir(): string {
@@ -157,10 +160,16 @@ function errorDetail(err: unknown): string {
  * The state dir itself may be a link (dotfile setups do that).
  */
 function parentIsReal(filePath: string): boolean {
-  const root = getConfigDir();
   const dir = path.dirname(filePath);
+  // The state dir when it holds the file, as before. LOOM_LESSONS_DIR can put
+  // the tier outside it, and then the directory the user named is the root:
+  // nothing below it may be a link.
+  const root = [getConfigDir(), lessonsDir()].find((r) => {
+    const rel = path.relative(r, dir);
+    return !rel.startsWith("..") && !path.isAbsolute(rel);
+  });
+  if (!root) return false;
   const rel = path.relative(root, dir);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) return false;
   try {
     return fs.realpathSync(dir) === path.join(fs.realpathSync(root), rel);
   } catch (err) {

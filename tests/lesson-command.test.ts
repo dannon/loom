@@ -19,6 +19,7 @@ import {
 } from "../extensions/loom/lessons/propose";
 import { composeLessonMarkdown } from "../extensions/loom/lessons/compose";
 import { draftFilePath, lessonFilePath } from "../extensions/loom/lessons/paths";
+import { getLessonStore, resetLessonStore } from "../extensions/loom/lessons/store";
 import { resetActivity } from "../extensions/loom/activity";
 import { setNotebookPath } from "../extensions/loom/state";
 
@@ -329,6 +330,51 @@ describe("/lesson drafts and /lesson save", () => {
     await h.run("save galaxy-api/x");
     expect(h.notifications.at(-1)!.level).toBe("warning");
     expect(fs.existsSync(lessonFilePath("galaxy-api", "x"))).toBe(false);
+  });
+});
+
+describe("LOOM_LESSONS_DIR", () => {
+  let shared: string;
+  beforeEach(() => {
+    shared = path.join(tmp, "shared-lessons");
+    process.env.LOOM_LESSONS_DIR = shared;
+    resetLessonStore();
+  });
+  afterEach(() => {
+    delete process.env.LOOM_LESSONS_DIR;
+    resetLessonStore();
+  });
+
+  it("saves into the override, where the store loads it and /lesson list shows it", async () => {
+    const draft = draftFilePath("stats", "na-is-zero");
+    // Drafts stay in the state dir, never inside the override.
+    expect(draft.startsWith(path.join(tmp, ".loom", "lesson-drafts"))).toBe(true);
+    fs.mkdirSync(path.dirname(draft), { recursive: true });
+    fs.writeFileSync(draft, VALID);
+    const h = harness();
+    await h.run("save stats/na-is-zero");
+    expect(h.notifications.at(-1)!.msg).toMatch(/^Saved stats\/na-is-zero/);
+    const saved = path.join(shared, "stats", "na-is-zero.md");
+    expect(fs.readFileSync(saved, "utf-8")).toBe(VALID);
+    expect(fs.existsSync(path.join(tmp, ".loom", "lessons"))).toBe(false);
+
+    expect(getLessonStore().lessons.map((l) => l.id)).toContain("stats/na-is-zero");
+    await h.run("list");
+    expect(h.notifications.at(-1)!.msg).toContain("stats/na-is-zero  [draft]");
+  });
+
+  it("still refuses a symlinked namespace directory inside the override", async () => {
+    const elsewhere = path.join(tmp, "elsewhere");
+    fs.mkdirSync(elsewhere, { recursive: true });
+    fs.mkdirSync(shared, { recursive: true });
+    fs.symlinkSync(elsewhere, path.join(shared, "stats"));
+    const draft = draftFilePath("stats", "na-is-zero");
+    fs.mkdirSync(path.dirname(draft), { recursive: true });
+    fs.writeFileSync(draft, VALID);
+    const h = harness();
+    await h.run("save stats/na-is-zero");
+    expect(fs.readdirSync(elsewhere)).toEqual([]);
+    expect(h.notifications.at(-1)!.msg).not.toMatch(/^Saved/);
   });
 });
 
