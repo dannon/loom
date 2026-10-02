@@ -495,10 +495,15 @@ datatypes, server, client). `/observe` is the one exception -- it always asks
 first and shows your note, whatever the mode. Every field is checked before it
 leaves the machine: the mcp tool name, Galaxy's own tool ids and the datatypes
 against lists generated from galaxy-mcp and Galaxy releases (a toolshed tool's
-owner and repository can only be shape-checked), and the error line against a
-validator that refuses the whole report if, before any rewriting, it looks
-like it carries a path, URL, address, host or id. No pattern catches every
-name, which is why only `ask`, where you read it first, sends text. The server is recorded as its
+owner and repository can only be shape-checked), and the error line in
+stages: URLs and email addresses are replaced first, then the line is checked
+for hosts, ports, network addresses, UUIDs and the like before paths, ids and
+long numbers are rewritten (so a rewrite can't hide one), then the rewritten
+line is checked again in full. Common errors come out scrubbed (`Dataset <id>
+not found`, `No such file: <path>`). If the line still looks like it carries a
+host, address, path or id, the error text is withheld and you are offered the
+rest of the report, with a one-line reason. No pattern catches every name,
+which is why only `ask`, where you read it first, sends text. The server is recorded as its
 public name (`usegalaxy.org`, `usegalaxy.eu`, ...) or as the literal `private`
 for anything else -- an institutional mirror is never named. Rows are tied to a
 random per-install token, not to your account, and expire after 180 days.
