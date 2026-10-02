@@ -3,8 +3,9 @@
  * hint, the /execute note and the reproduction index all point at.
  *
  * Retrieval is local, and nothing here echoes the query back or puts it in
- * the lesson.surfaced row. The generic activity hooks skip this tool entirely,
- * so the query never reaches activity.jsonl either.
+ * the lesson.surfaced row. The generic tool.start activity row still records
+ * the call's arguments like any other tool's, unless activity-hooks.ts puts
+ * this tool on its quiet list.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
