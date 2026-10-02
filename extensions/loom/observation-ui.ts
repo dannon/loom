@@ -32,6 +32,16 @@ import type { ObservationsMode } from "./observations-config.js";
 
 export const DESCRIPTION_TIMEOUT_MS = 8000;
 
+/**
+ * Why anyone would say yes. The confirm leads with this because the privacy
+ * statement alone reads like a cookie banner: it says what is withheld and
+ * nothing about what the report is for.
+ */
+export const PURPOSE_STATEMENT =
+  "Reports like this are how recurring problems get turned into lessons Loom surfaces " +
+  "to everyone -- including you -- the next time it happens, and into fixes in Galaxy " +
+  "and Loom.";
+
 export const PRIVACY_STATEMENT =
   "Only the fields above are sent, to the Galaxy team's private intake queue, over " +
   "an install-specific random token rather than any account or machine identity. No " +
@@ -74,7 +84,8 @@ export async function confirmObservation(
   try {
     return await ctx.ui.confirm(
       "Send this observation to the Galaxy team?",
-      `${renderObservationForConfirm(obs)}\n\n${PRIVACY_STATEMENT}`,
+      `Loom hit something that looks like a failure pattern. ${PURPOSE_STATEMENT}\n\n` +
+        `${renderObservationForConfirm(obs)}\n\n${PRIVACY_STATEMENT}`,
     );
   } catch {
     // A stale context after a session swap, or a shell with no dialog. Either

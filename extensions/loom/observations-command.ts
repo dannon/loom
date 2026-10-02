@@ -39,7 +39,11 @@ import {
   lastObservationFacts,
   liveDeliverDeps,
 } from "./observation-triggers.js";
-import { PRIVACY_STATEMENT, renderObservationForConfirm } from "./observation-ui.js";
+import {
+  PRIVACY_STATEMENT,
+  PURPOSE_STATEMENT,
+  renderObservationForConfirm,
+} from "./observation-ui.js";
 import { scanObservationForLeaks, validateObservation } from "../../shared/observation-contract.js";
 
 export const OBSERVATIONS_USAGE =
@@ -53,7 +57,7 @@ export function formatObservationsStatus(info: {
   counts: { sent: number; queued: number; retracted: number };
 }): string {
   const lines = [
-    "Observations -- automatic reports about Galaxy failure patterns",
+    "Observations -- failure patterns reported back so they become lessons Loom surfaces to everyone",
     "",
     `  mode: ${info.mode}`,
   ];
@@ -131,7 +135,8 @@ export async function confirmAutoMode(ctx: ExtensionContext): Promise<boolean> {
   try {
     return await ctx.ui.confirm(
       "Send observations automatically from now on?",
-      "This is exactly what one looks like -- the same fields, from this install:\n\n" +
+      `${PURPOSE_STATEMENT}\n\n` +
+        "This is exactly what one looks like -- the same fields, from this install:\n\n" +
         `${renderObservationForConfirm(sample)}\n\n${PRIVACY_STATEMENT}`,
     );
   } catch {
