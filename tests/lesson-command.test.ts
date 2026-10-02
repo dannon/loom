@@ -363,6 +363,27 @@ describe("LOOM_LESSONS_DIR", () => {
     expect(h.notifications.at(-1)!.msg).toContain("stats/na-is-zero  [draft]");
   });
 
+  it("saves into an override that sits in the state dir as a link, as the store reads it", async () => {
+    // The user named the link, so it is the root, not a link inside the tier.
+    const target = path.join(tmp, "synced-lessons");
+    fs.mkdirSync(target, { recursive: true });
+    fs.mkdirSync(path.join(tmp, ".loom"), { recursive: true });
+    const linked = path.join(tmp, ".loom", "shared");
+    fs.symlinkSync(target, linked);
+    process.env.LOOM_LESSONS_DIR = linked;
+    const draft = draftFilePath("stats", "na-is-zero");
+    fs.mkdirSync(path.dirname(draft), { recursive: true });
+    fs.writeFileSync(draft, VALID);
+    const h = harness();
+    await h.run("save stats/na-is-zero");
+    expect(h.notifications.at(-1)!.msg).toMatch(/^Saved stats\/na-is-zero/);
+    expect(fs.existsSync(path.join(target, "stats", "na-is-zero.md"))).toBe(true);
+    resetLessonStore();
+    expect(getLessonStore().lessons.map((l) => l.id)).toContain("stats/na-is-zero");
+    await h.run("list");
+    expect(h.notifications.at(-1)!.msg).toContain("stats/na-is-zero  [draft]");
+  });
+
   it("still refuses a symlinked namespace directory inside the override", async () => {
     const elsewhere = path.join(tmp, "elsewhere");
     fs.mkdirSync(elsewhere, { recursive: true });
