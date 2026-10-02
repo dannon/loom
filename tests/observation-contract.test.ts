@@ -379,12 +379,33 @@ describe("client-side leak table", () => {
     ["ipv4", "connection refused by 10.12.4.7"],
     ["ipv6", "ECONNREFUSED [fd00::1:2]:443"],
     ["uuid", "Job for uuid 3f2b8c1a-1234-4abc-8def-a123b56c89ab not found"],
-    ["relative-path", "read <path> Documents/patient_jsmith_cohort.csv"],
-    ["relative-path", "alice\\Desktop\\cohort.xlsx"],
-    ["relative-path", "\\\\fileserver\\alice\\cohort.csv"],
+    ["path-separator", "read <path> Documents/patient_jsmith_cohort.csv"],
+    ["path-separator", "alice\\Desktop\\cohort.xlsx"],
+    ["path-separator", "\\\\fileserver\\alice\\cohort.csv"],
     ["tilde-user", "~alice<path>"],
     ["id-phrase", "history_id=1234 or dataset_id:42"],
     ["id-phrase", "datasets 12 were empty"],
+    // The second review's shapes, each sendable before.
+    ["hostname", "rsync to galaxy.cancer-center.org_backup failed"],
+    ["ipv4", "connect refused node_10.12.4.7 port closed"],
+    ["ipv4", "ConnectionError: host=srv_192.168.17.42"],
+    ["ipv4", "addr 10.0.0.5x"],
+    ["ipv4", "tcp4 a10.12.4.7"],
+    ["user-at-host", "User alice@7node rejected"],
+    ["user-at-host", "mail to alice@3lab rejected"],
+    ["path-separator", "Permission denied: /Alice_Smith"],
+    ["path-separator", "Cannot open results/Alice_Smith"],
+    ["path-separator", "Cannot open Desktop/patient07"],
+    [
+      "path-separator",
+      "FileNotFoundError: [Errno 2] No such file or directory: '<path> Smith/counts'",
+    ],
+    ["path-separator", "<path> Doe\\run1"],
+    ["scheme-url", "Unable to load s3://alice-study/private_cohort"],
+    ["id-phrase", "Could not load dataset id: 42"],
+    ["id-phrase", "history id 7 not found"],
+    ["id-phrase", "could not merge histories 12 and 13"],
+    ["id-phrase", "Job 42 failed; invocation_id=73"],
   ];
 
   for (const [name, text] of LEAKS) {
@@ -403,9 +424,8 @@ describe("client-side leak table", () => {
   it("leaves ordinary Galaxy messages alone", () => {
     for (const text of [
       "ToolExecutionError: dataset <id> in history <n> failed; wrote <path> see <url> mail <email>",
-      "Galaxy 24.2.1 rejected input/output mapping",
       "expected fastqsanger.gz input",
-      "pass and/or fail at 12:30:45",
+      "pass or fail at 12:30:45",
       "tool hisat2 2.2.1+galaxy1 failed",
       // Real Galaxy and Python error shapes that an earlier, looser hostname
       // rule dropped.
@@ -414,6 +434,26 @@ describe("client-side leak table", () => {
       "No module named numpy.core.multiarray",
       "Job 3 is in error state",
       "HTTPError:400 Bad Request at line:42",
+    ]) {
+      expect(textLeaks(text), text).toEqual([]);
+    }
+  });
+
+  it("refuses any path separator, ordinary prose included", () => {
+    // The fail-closed cost of the path rule: from here a slash in prose can't
+    // be told apart from the tail of a path.
+    for (const text of ["Galaxy 24.2.1 rejected input/output mapping", "pass and/or fail"]) {
+      expect(textLeaks(text), text).toEqual(["path-separator"]);
+    }
+  });
+
+  it("cannot see a single-label host or an unlisted suffix (a known limit)", () => {
+    // No pattern tells `galaxyprod` from a word. This is why auto mode sends
+    // no free text: only a human reading the ask confirm can catch these.
+    for (const text of [
+      "Cannot resolve galaxyprod",
+      "connect galaxyprod:443 refused",
+      "Cannot resolve galaxy.hospital",
     ]) {
       expect(textLeaks(text), text).toEqual([]);
     }

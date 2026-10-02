@@ -330,35 +330,46 @@ const HOST_SUFFIXES = [
   "internal|local|lan|corp|intranet|private|home|test|example|invalid|localhost|localdomain",
 ].join("|");
 export const CLIENT_LEAK_PATTERNS = Object.freeze([
+  // Bounded by "not a host character" rather than \b, so a host glued to a
+  // word character (galaxy.cancer-center.org_backup) still counts.
   Object.freeze([
     "hostname",
-    new RegExp(`\\b[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.(?:${HOST_SUFFIXES})\\b`, "i"),
+    new RegExp(
+      `(?<![A-Za-z0-9-])[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.(?:${HOST_SUFFIXES})(?![A-Za-z0-9-])`,
+      "i",
+    ),
   ]),
   // A single-label host with a port: galaxyprod:8080, localhost:8443. Four or
   // five digits, so `line:42` and `HTTPError:400` stay out.
   Object.freeze(["host-port", /\b[A-Za-z][A-Za-z0-9-]*:\d{4,5}\b/]),
-  // The contract's email rule needs a dotted domain; alice@localhost doesn't.
-  Object.freeze(["user-at-host", /[A-Za-z0-9._%+-]+@[A-Za-z][A-Za-z0-9-]*/]),
-  Object.freeze(["ipv4", /\b\d{1,3}(?:\.\d{1,3}){3}\b/]),
+  // Anything at anything: the contract's email rule needs a dotted domain, and
+  // alice@localhost, alice@7node and alice@3lab don't have one.
+  Object.freeze(["user-at-host", /[^\s@]@[A-Za-z0-9]/]),
+  // No word boundaries: node_10.12.4.7, srv_192.168.17.42 and 10.0.0.5x are
+  // still addresses.
+  Object.freeze(["ipv4", /\d{1,3}(?:\.\d{1,3}){3}/]),
   Object.freeze([
     "ipv6",
     /\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*\]|[0-9A-Fa-f]{0,4}::[0-9A-Fa-f]{0,4}|(?:[0-9A-Fa-f]{1,4}:){3,}[0-9A-Fa-f]{1,4}/,
   ]),
   Object.freeze(["uuid", /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i]),
-  // Relative and UNC paths: two separators, or one separator before a
-  // filename with an extension. The normalizer's path rule needs a leading
-  // root, so `Users/alice/x` and `alice\Desktop\x.xlsx` reach here intact.
-  Object.freeze([
-    "relative-path",
-    /[\w.~-]+[\\/][\w.-]+[\\/]|[\w-]+[\\/][\w-]+\.[A-Za-z][A-Za-z0-9]{0,4}\b|\\\\/,
-  ]),
+  // Any scheme, not just http: s3://, gs://, ftp://, file://.
+  Object.freeze(["scheme-url", /[A-Za-z][A-Za-z0-9+.-]*:\/\//]),
+  // Any path separator at all. The normalizer turns a rooted path into
+  // <path>, which has none, so what is left is a relative path, a one-segment
+  // path (/Alice_Smith), the tail of a path with a space in it, or a UNC
+  // share -- and from here none of them can be told apart from a name. The
+  // cost, in the fail-closed direction: "and/or" and "400/500" refuse too.
+  Object.freeze(["path-separator", /[\w-]*[\\/]/]),
   Object.freeze(["tilde-user", /~[A-Za-z_]/]),
-  // The contract's id phrase misses `history_id=12` and plurals. Job and
-  // invocation numbers are left alone: Galaxy's own messages say "Job 3 is in
-  // error state", and a small decoded job number names nothing.
+  // The contract's id phrase misses `history_id=12`, `dataset id: 42`,
+  // `histories 12 and 13` and other plurals. A bare job or invocation number
+  // is left alone -- Galaxy's own messages say "Job 3 is in error state", and
+  // a small decoded job number names nothing -- but one labelled as an id
+  // (`invocation_id=73`, `job id 9`) is an id.
   Object.freeze([
     "id-phrase",
-    /\b(?:history|dataset|hid|collection|hda|hdca)s?(?:_?ids?)?\b[^A-Za-z0-9]{0,4}\d/i,
+    /\b(?:histor(?:y|ies)|datasets?|hids?|collections?|hdas?|hdcas?)(?:[\s_-]?ids?)?\b[^A-Za-z0-9]{0,4}\d|\b(?:jobs?|invocations?|workflows?|users?)[\s_-]?ids?\b[^A-Za-z0-9]{0,4}\d/i,
   ]),
 ]);
 
