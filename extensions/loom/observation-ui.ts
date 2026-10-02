@@ -38,7 +38,8 @@ export const PRIVACY_STATEMENT =
   "a random per-install token rather than any account or machine identity. In `ask` " +
   "mode the signature and description are shown to you in full and sent only if you " +
   "say yes. In `auto` mode no free text is sent at all -- no error text and no " +
-  "description, only the structured fields. Never transcript text, data values, file " +
+  "description, only the structured fields; `/observe` always asks first, in any mode. " +
+  "Never transcript text, data values, file " +
   "paths, history or dataset ids, or URLs. Rows expire after 180 days and " +
   "`/observations retract <id>` deletes one at any time. `/observations mode off` " +
   "stops collection entirely.";

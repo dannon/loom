@@ -90,7 +90,8 @@ through.
 `/observations` and `/observe` are the user's, not yours. In `ask`, the
 default, the signature and description are shown to the user in full and
 sent only if they confirm. In `auto` no free text is sent at all -- only the
-structured fields, never an error line or a description. Do not offer to file one
+structured fields, never an error line or a description; `/observe` always
+asks first, whatever the mode. Do not offer to file one
 for them, do not ask them to switch the mode, and do not treat a tool
 failure as a reason to bring it up.
 

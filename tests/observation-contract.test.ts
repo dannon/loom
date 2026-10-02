@@ -406,6 +406,14 @@ describe("client-side leak table", () => {
     ["id-phrase", "history id 7 not found"],
     ["id-phrase", "could not merge histories 12 and 13"],
     ["id-phrase", "Job 42 failed; invocation_id=73"],
+    // The fix review's shapes.
+    ["host-port", "Connection to galaxyprod:443 refused"],
+    ["host-port", "localhost:80 down"],
+    ["host-port", "Connection to galaxy_prod:8080 refused"],
+    ["host-port", "Connection to galaxyprod:123456 refused"],
+    ["path-separator", "File %2FUsers%2Falice%2Fx.txt missing"],
+    ["id-phrase", "history number 12 not found"],
+    ["id-phrase", "dataset no. 42 is empty"],
   ];
 
   for (const [name, text] of LEAKS) {
@@ -450,11 +458,7 @@ describe("client-side leak table", () => {
   it("cannot see a single-label host or an unlisted suffix (a known limit)", () => {
     // No pattern tells `galaxyprod` from a word. This is why auto mode sends
     // no free text: only a human reading the ask confirm can catch these.
-    for (const text of [
-      "Cannot resolve galaxyprod",
-      "connect galaxyprod:443 refused",
-      "Cannot resolve galaxy.hospital",
-    ]) {
+    for (const text of ["Cannot resolve galaxyprod", "Cannot resolve galaxy.hospital"]) {
       expect(textLeaks(text), text).toEqual([]);
     }
   });

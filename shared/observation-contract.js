@@ -339,9 +339,12 @@ export const CLIENT_LEAK_PATTERNS = Object.freeze([
       "i",
     ),
   ]),
-  // A single-label host with a port: galaxyprod:8080, localhost:8443. Four or
-  // five digits, so `line:42` and `HTTPError:400` stay out.
-  Object.freeze(["host-port", /\b[A-Za-z][A-Za-z0-9-]*:\d{4,5}\b/]),
+  // A single-label host with a port: galaxyprod:8080, galaxy_prod:8080 (a
+  // Docker service name), localhost:80. Ports 80 and 443 by name, otherwise
+  // four to six digits (six, because the normalizer only rewrites from five up
+  // and the raw line is what this sees), so `line:42` and `HTTPError:400` stay
+  // out.
+  Object.freeze(["host-port", /(?<![\w-])[A-Za-z][\w-]*:(?:80|443|\d{4,6})\b/]),
   // Anything at anything: the contract's email rule needs a dotted domain, and
   // alice@localhost, alice@7node and alice@3lab don't have one.
   Object.freeze(["user-at-host", /[^\s@]@[A-Za-z0-9]/]),
@@ -360,16 +363,17 @@ export const CLIENT_LEAK_PATTERNS = Object.freeze([
   // path (/Alice_Smith), the tail of a path with a space in it, or a UNC
   // share -- and from here none of them can be told apart from a name. The
   // cost, in the fail-closed direction: "and/or" and "400/500" refuse too.
-  Object.freeze(["path-separator", /[\w-]*[\\/]/]),
+  Object.freeze(["path-separator", /[\w-]*[\\/]|%2[Ff]|%5[Cc]/]),
   Object.freeze(["tilde-user", /~[A-Za-z_]/]),
   // The contract's id phrase misses `history_id=12`, `dataset id: 42`,
   // `histories 12 and 13` and other plurals. A bare job or invocation number
   // is left alone -- Galaxy's own messages say "Job 3 is in error state", and
   // a small decoded job number names nothing -- but one labelled as an id
-  // (`invocation_id=73`, `job id 9`) is an id.
+  // (`invocation_id=73`, `job id 9`) is an id. "history number 12" and
+  // "dataset no. 42" are the same phrase with a word in the way.
   Object.freeze([
     "id-phrase",
-    /\b(?:histor(?:y|ies)|datasets?|hids?|collections?|hdas?|hdcas?)(?:[\s_-]?ids?)?\b[^A-Za-z0-9]{0,4}\d|\b(?:jobs?|invocations?|workflows?|users?)[\s_-]?ids?\b[^A-Za-z0-9]{0,4}\d/i,
+    /\b(?:histor(?:y|ies)|datasets?|hids?|collections?|hdas?|hdcas?)(?:[\s_-]?ids?)?\b[^A-Za-z0-9]{0,4}(?:(?:number|num|no)\b[^A-Za-z0-9]{0,4})?\d|\b(?:jobs?|invocations?|workflows?|users?)[\s_-]?ids?\b[^A-Za-z0-9]{0,4}\d/i,
   ]),
 ]);
 
