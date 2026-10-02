@@ -598,8 +598,8 @@ describe("classifyBash -- a backslash inside the state-dir name", () => {
 // itself. The policy suite covers the verdicts; these pin what the classifier
 // hands the policy layer.
 describe("classifyBash -- a cd changes what relative operands mean", () => {
-  const H = "/home/alice";
-  const C = "/home/alice/project";
+  const H = "/test-home/alice";
+  const C = "/test-home/alice/project";
 
   it("resolves read operands against the dir the cd landed in", () => {
     const r = classifyBash("cd ~/.loom && cat config.json", H, C);
@@ -639,10 +639,12 @@ describe("classifyBash -- a cd changes what relative operands mean", () => {
     for (const c of ["cd ~/.loom && echo x > *.md", "cd ~/.loom && echo x > $OUT"])
       expect(classifyBash(c, H, C).kind, c).toBe("catastrophic");
   });
-  it("inside an analysis it asks rather than denies, and realpaths what it climbs out of", () => {
+  it("inside an analysis it treats an unplaceable target as it would without the cd", () => {
     const v = classifyBash("cd ~/.loom/analyses/proj && echo x > $OUT", H, C);
     expect(v.kind).toBe("unknown");
-    expect(v.guardedCwd).toBe(true);
+    expect(v.guardedCwd).toBe(false);
+    // ...but one that climbs out could land anywhere, so it asks
+    expect(classifyBash("cd ~/.loom/analyses/proj && echo x > ../$X", H, C).guardedCwd).toBe(true);
     const up = classifyBash("cd ~/.loom/analyses/proj/data && cp ../raw.csv .", H, C);
     expect(up.kind).toBe("unknown");
     expect(up.guardedCwd).toBe(false);
@@ -650,6 +652,10 @@ describe("classifyBash -- a cd changes what relative operands mean", () => {
     const glob = classifyBash("cd ~/.loom/analyses/proj/data && cp *.csv out/", H, C);
     expect(glob.kind).toBe("unknown");
     expect(glob.guardedCwd).toBe(false);
+  });
+  it("a cd that is only a grep pattern or a comment guards nothing", () => {
+    for (const c of ['grep -rn "cd .loom" docs/', "cat notes.md # cd ~/.ssh later"])
+      expect(classifyBash(c, H, C).guardedCwd, c).toBe(false);
   });
   it("a comment does not swallow the newline that ends it", () => {
     expect(classifyBash("cd ~/.loom # go\necho x > a", H, C).kind).toBe("catastrophic");

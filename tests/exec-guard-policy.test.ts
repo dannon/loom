@@ -927,11 +927,6 @@ describe("decide -- a cd into Loom state carries the direct path's verdict", () 
     "cd ~/.loom && grep -r token .",
     "cd ~/.ssh && echo k >> authorized_keys",
     "cd ~/.loom/lessons && echo x > /tmp/elsewhere",
-    // Not writes into state, but any command line that cds into Loom state is
-    // never auto-allowed -- the walker is not the only thing that can run a cd.
-    "(cd ~/.loom) && echo x > a",
-    "pushd ~/.loom && popd && echo x > a",
-    "cd ~/.loom",
   ])("asks instead of auto-allowing what it cannot judge in a guarded dir: %j", (command) => {
     expect(run(command).decision).toBe("ask");
   });
@@ -942,6 +937,19 @@ describe("decide -- a cd into Loom state carries the direct path's verdict", () 
     "cd sub && make",
     "cd $BUILD_DIR && make",
     'cd "$(git rev-parse --show-toplevel)" && echo x > y',
+    // a subshell's cd and a popped pushd do not outlive themselves
+    "(cd ~/.loom) && echo x > a",
+    "pushd ~/.loom && popd && echo x > a",
+    // a cd with nothing after it runs in a shell that exits straight away
+    "cd ~/.loom",
+    // a cd that is only data: a commit message, a grep pattern, a comment, a
+    // heredoc written to a file
+    "git log --grep='cd .loom'",
+    'git commit -m "fix: cd ~/.loom before writing"',
+    'echo "run: cd ~/.loom && ls"',
+    "cat > script.sh <<'EOF'\ncd ~/.loom\nEOF",
+    // arithmetic shifts are not heredocs
+    "echo $[1<<2]\ncd /tmp\necho x > y",
     "cd ~/.loom/analyses/proj && echo x > out.txt",
     "cd ~/.loom/analyses/proj && python3 run.py > out.txt",
     "cd /tmp && cd - && echo x > a",
@@ -975,6 +983,19 @@ describe("decide -- a cd into Loom state carries the direct path's verdict", () 
     "CDPATH=~/.loom cd lessons && echo x > evil.md",
     "HOME=$HOME/.loom; cd; echo x > config.json",
     "export CDPATH=/x; cd lessons; echo x > evil.md",
+    // a target held in a variable, when the line names the dir it holds
+    "D=~/.loom; cd $D && echo '{}' > config.json",
+    "D=~/.loom; cd \"$D\" && sed -i 's/a/b/' config.json",
+    'for d in ~/.loom; do cd "$d"; echo x > config.json; done',
+    'set -- ~/.loom; cd "$1" && echo x > config.json',
+    "echo ~/.loom | xargs -I{} sh -c 'cd {} && echo x > config.json'",
+    "find ~/.loom -maxdepth 0 -exec sh -c 'cd \"$1\" && echo x > config.json' _ {} \\;",
+    // quotes inside a double-quoted substitution
+    'echo "$(cd "$HOME/.loom" && echo x > config.json)"',
+    'echo "$(cd "$HOME/.lo""om" && echo x > config.json)"',
+    // arithmetic does not hide the lines after it
+    "echo $[1<<2]\ncd ~/.loom\necho x > config.json",
+    "((x = 1 << 2))\ncd ~/.loom\necho x > config.json",
     "cd \"$(echo ~/.lo''om)\" && echo x > config.json",
   ])("denies a write: %j", (command) => {
     const r = run(command);
@@ -994,12 +1015,14 @@ describe("decide -- a cd into Loom state carries the direct path's verdict", () 
     expect(r.category).toBe("read:credential-store");
   });
 
-  it.each(["python3 -c \"import os; os.system('cd ~/.loom && echo x > config.json')\""])(
-    "asks for what it cannot see into: %j",
-    (command) => {
-      expect(run(command).decision).toBe("ask");
-    },
-  );
+  it.each([
+    "python3 -c \"import os; os.system('cd ~/.loom && echo x > config.json')\"",
+    "perl <<X\nsystem('cd ~/.loom && echo x > config.json')\nX",
+    "D=~/.ssh; cd $D && cat config",
+    "D=~/.aws; cd $D; grep -r aws_secret .",
+  ])("asks for what it cannot see into: %j", (command) => {
+    expect(run(command).decision).toBe("ask");
+  });
 
   it("keeps the home directory out of the reason it logs", () => {
     const r = run("cd ~/.loom && cat config.json");
@@ -1015,6 +1038,9 @@ describe("decide -- a cd into Loom state carries the direct path's verdict", () 
     "cd scripts && sed -i 's/a/b/' *.py",
     "cd build && cmake .. && make > ../log.txt",
     "cd data && cat <<EOF > notes.md\ncd /tmp\nEOF",
+    'cd data && sort in.txt > "$OUT"',
+    'cd results && Rscript plot.R > "${name}.log"',
+    'cd data; for f in *.txt; do wc -l "$f" > "$f.count"; done',
   ])("leaves ordinary analysis work alone: %j", (command) => {
     const analysis = `${HOME}/.loom/analyses/proj`;
     const inAnalysis: PathResolver = {
@@ -1029,6 +1055,14 @@ describe("decide -- a cd into Loom state carries the direct path's verdict", () 
       { resolver: inAnalysis, home: HOME },
     );
     expect(r.decision).toBe("allow");
+  });
+
+  it("stays fast on a long script that cds back and forth", () => {
+    const lines = Array.from({ length: 60 }, (_, i) => `cd d${i}; make > log; cd ..`);
+    const t0 = Date.now();
+    expect(run(lines.join("\n")).decision).toBe("allow");
+    expect(run("cd a; ".repeat(2000) + "echo x > y").decision).toBe("allow");
+    expect(Date.now() - t0).toBeLessThan(2000);
   });
 
   it("realpaths a carved-out write target reached by cd", () => {
