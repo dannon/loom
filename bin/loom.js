@@ -382,7 +382,7 @@ if (!isInformationalCommand) {
   // register it unconditionally. It exposes BRC genome/assembly/lineage
   // lookups that the agent can call alongside Galaxy MCP.
   mcpConfig.mcpServers["brc-analytics"] = {
-    url: "https://dev.brc-analytics.org/api/v1/mcp/",
+    url: "https://brc-analytics.org/api/v1/mcp/",
     directTools: true,
   };
 
