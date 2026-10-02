@@ -78,8 +78,10 @@ earns its place:
   out on its own.
 
 The body carries nothing to follow and nothing to run: no URLs, no markdown
-links, no fenced code blocks, printable ASCII only, each section at most 600
-characters. Those are enforced, not advisory. Provenance goes in `sources`.
+links, images or HTML, no code blocks, printable ASCII only, each section at
+most 600 characters. Those are enforced, not advisory. Provenance goes in
+`sources`, and a link there must point at one of the hosts listed in
+`LINK_HOSTS` in `validate.mjs`.
 
 ## Contributing
 
@@ -106,9 +108,10 @@ Certificate of Origin 1.1 assertion: you wrote the contribution, or have the
 right to submit it under the licence above.
 
 The validator is the second line of defence on the first checkbox, not the
-first. It rejects URLs and non-ASCII in a body and caps every field, but it
-cannot tell that a plausible-looking tool id was a private server's, or that a
-sentence describes one specific person's data. That judgement is yours, and a
+first. It refuses the shapes of URLs, links, HTML, paths, ids, addresses and
+keys and caps every field, but it cannot tell that a plausible-looking tool id
+was a private server's, that a sentence describes one specific person's data,
+or that a sentence is an instruction aimed at the model rather than advice. That judgement is yours, and a
 published lesson cannot be unpublished from git history -- the privacy decision
 happens before the pull request, which is why the checkbox is phrased the way
 it is.

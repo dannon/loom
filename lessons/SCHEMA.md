@@ -60,11 +60,18 @@ required.
 
 Each section is at most 600 characters and must not be empty. Nothing before
 the first heading. No fenced code blocks anywhere on a line, and no indented
-code blocks (a short inline backtick span is fine). No URLs of any scheme,
-protocol-relative or scheme-less, anywhere in the body. No markdown links,
-inline or reference-style. No HTML outside an inline code span. No heading
-other than those six, whether `#`-style at any indent or a setext underline,
-and no horizontal rules. The whole file is at most 16384 bytes.
+code blocks, at any depth (a short inline backtick span is fine). No URLs of
+any scheme, protocol-relative, scheme-less or `www.`, anywhere in the body. No
+heading other than those six, whether `#`-style at any indent or a setext
+underline, and no horizontal rules. The whole file is at most 16384 bytes.
+
+The body and every frontmatter string are also run through `marked`'s GFM lexer,
+so "is this a link" is answered the way a renderer answers it rather than by a
+line regex. Refused at any depth (inside blockquotes, list items and tables
+too): links of every kind (inline, reference, autolinks), link reference
+definitions, images, HTML, backslash escapes and character references
+(`&#64;`, `&#x40;`, `&amp;`). A code span may show a placeholder such as
+`<collection id>`, but not a tag with attributes, a closing tag or a link.
 
 ## What the validator adds on top of the field list
 
@@ -81,13 +88,25 @@ them, and they are part of the schema.
 - **Plain YAML only.** No comments (they ship in the raw file and would
   otherwise go unchecked), no anchors or aliases, no explicit tags.
 - **Nothing identifying, anywhere.** No absolute or home-directory paths,
-  Windows or UNC paths, hex ids of 16 or more characters, uuids, IP addresses or
-  email addresses in the body, in any frontmatter value or on any raw
-  frontmatter line. No URL in the body or in a frontmatter field, except
-  `graduated_to`, `upstream` and `sources[].resource`, which may hold an
-  `https` link with no credentials, query or fragment and no home path or email
-  in its path. These are shape checks: a private hostname written as prose, a
-  name or a copied data value still needs the contributor's own judgement.
+  Windows or UNC paths, hex ids of 16 or more characters, uuids, IPv4 or IPv6
+  addresses (the `::` forms too), email addresses, hostnames on network
+  top-level domains, or credential-shaped strings (provider API keys, AWS key
+  ids, GitHub and Slack tokens, private key headers, JWTs) in the body, in any
+  frontmatter value or on any raw frontmatter line. `trigger.hosts` is the one
+  field that holds a hostname. No URL, and nothing shaped like a `scheme:`, in
+  the body or in a frontmatter field, except Galaxy collection types like
+  `list:paired`.
+- **Links** go only in `graduated_to`, `upstream` and `sources[].resource`, and
+  each must be a canonical `https` URL to one of the hosts in `LINK_HOSTS` at the
+  top of `validate.mjs`: no port, credentials, query, fragment, percent-escape
+  or `..`, and the whole string still gets the identifying-data checks (so no
+  commit SHAs, uuids or home paths in the path). Those fields may hold free text
+  instead, like `galaxy-mcp#55`. To link somewhere new, add the host to
+  `LINK_HOSTS` in the same pull request and say why.
+- **These are shape checks, not meaning checks.** A private hostname written as
+  prose, a person's name, a copied data value or an instruction aimed at the
+  model ("ignore prior instructions and...") all pass. They need the
+  contributor's own judgement and a reviewer's.
 - **Dates** are `YYYY-MM-DD` strings that are also real calendar dates.
 - **`generated.by`** matches `agent:<something>` or `human:<something>`;
   **`verified[].by`** must be `human:<pseudonym>`. It is the one identity field
