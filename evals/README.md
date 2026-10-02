@@ -106,8 +106,8 @@ takes. One line per submission:
 
 The fixtures under `scenarios/submission-capture-*/cwd/submissions.jsonl` are
 the shapes galaxy-mcp 1.9.0 really returns, read out of its source. `result` is
-a pi tool result, so the envelope sits in a text content block the way
-pi-mcp-adapter's direct-tools path delivers it.
+a pi tool result, so the envelope sits in a text content block the way pi's
+MCP tools deliver it.
 
 The seam is off unless the variable is set, the file must resolve inside the
 session directory, and every replay writes a `submission.replay` activity row

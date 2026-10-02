@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import {
   Type,
   createAssistantMessageEventStream,
@@ -14,11 +14,11 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { guardMcpOutput } from "../node_modules/pi-mcp-adapter/mcp-output-guard";
+import { convertMcpResult } from "../node_modules/@earendil-works/pi-coding-agent/dist/extensions/mcp/tools.js";
 import { registerMcpOutputRecovery } from "../extensions/loom/mcp-output";
 import { registerMcpRecovery } from "../extensions/loom/mcp-recovery";
 
-// Real adapter truncation + real Pi event dispatch and tool continuation.
+// pi's real MCP truncation + real Pi event dispatch and tool continuation.
 // Only the model and Galaxy responses are fixtures; no network or paid calls.
 describe("MCP recovery through the Pi runtime", () => {
   it("continues from a blocked expensive search, a huge result and a timeout in one user turn", async () => {
@@ -150,9 +150,11 @@ describe("MCP recovery through the Pi runtime", () => {
                   { id: "fixture-tissue-id", name: "TISSUE" },
                 ],
               });
-              const result = await guardMcpOutput([{ type: "text", text: raw }]);
-              artifacts.push(dirname(result.outputGuard!.fullOutputPath!));
-              return { content: result.content, details: { outputGuard: result.outputGuard } };
+              const result = await convertMcpResult("galaxy", "get_tool_panel", {
+                content: [{ type: "text", text: raw }],
+              });
+              artifacts.push((result.details as { fullOutputPath: string }).fullOutputPath);
+              return { content: result.content, details: result.details };
             },
           },
           {
@@ -202,7 +204,8 @@ describe("MCP recovery through the Pi runtime", () => {
       });
     } finally {
       dispose?.();
-      for (const path of artifacts) rmSync(path, { recursive: true, force: true });
+      // Files directly in $TMPDIR: remove each, never their directory.
+      for (const path of artifacts) rmSync(path, { force: true });
       rmSync(dir, { recursive: true, force: true });
     }
   }, 20_000);

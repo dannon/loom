@@ -88,18 +88,6 @@ describe("Galaxy polling cooldown", () => {
     expect(await h.check()).toBeUndefined();
   });
 
-  it("shares the cooldown across direct and proxy calls", async () => {
-    const h = harness();
-    h.result("running");
-    const waiting = h.fire("tool_call", {
-      toolName: "mcp",
-      input: { server: "galaxy", tool: "get_dataset_details", args: '{"dataset_id":"data1"}' },
-    });
-    expect(h.notify).toHaveBeenCalledTimes(1);
-    h.abort.abort();
-    expect(await waiting).toMatchObject({ block: true });
-  });
-
   it("cancels stale waits on a session change and allows an explicit new user status request", async () => {
     const h = harness();
     h.result("running");

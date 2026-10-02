@@ -16,7 +16,6 @@ import { appendActivityEvent } from "./activity";
 import { deliverAutoFollowUp } from "./auto-resume";
 import { activeGalaxyStatus } from "./profiles";
 import { getNotebookPath } from "./state";
-import { galaxyMcpTool } from "../../shared/galaxy-mcp-tools.js";
 
 const RECOMMEND_TOOL = "mcp__galaxy__recommend_iwc_workflows";
 
@@ -52,15 +51,8 @@ export function draftsPlan(messages: readonly Message[]): boolean {
   );
 }
 
-/** An IWC lookup, called directly or through the mcp gateway. */
-export function isIwcLookup(toolName: string, args: unknown): boolean {
-  if (IWC_TOOLS.has(toolName)) return true;
-  if (toolName !== "mcp" || !args || typeof args !== "object") return false;
-  const tool = (args as { tool?: unknown }).tool;
-  return (
-    typeof tool === "string" &&
-    (IWC_TOOLS.has(tool) || IWC_TOOLS.has(galaxyMcpTool(tool.replace(/^galaxy_/, ""))))
-  );
+export function isIwcLookup(toolName: string): boolean {
+  return IWC_TOOLS.has(toolName);
 }
 
 export function registerIwcPlanCheck(pi: ExtensionAPI): void {
@@ -73,7 +65,7 @@ export function registerIwcPlanCheck(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_execution_start", async (event) => {
-    if (isIwcLookup(event.toolName, event.args)) consulted = true;
+    if (isIwcLookup(event.toolName)) consulted = true;
   });
 
   pi.on("agent_end", async (event) => {

@@ -22,38 +22,23 @@ function harness() {
 }
 
 describe("Galaxy MCP recovery", () => {
-  it("blocks catalog-wide schema fan-out before dispatch, including proxy calls", () => {
+  it("blocks catalog-wide schema fan-out before dispatch", () => {
     const h = harness();
-    for (const [name, input] of [
-      ["mcp__galaxy__search_tools_by_keywords", { keywords: ["tissue"] }],
-      ["mcp__galaxy__search_tools_by_keywords", { keywords: ["tissue"] }],
-      [
-        "mcp",
-        { server: "galaxy", tool: "search_tools_by_keywords", args: '{"keywords":["tissue"]}' },
-      ],
-    ] as const) {
-      const decision = h.check(name, input);
-      expect(decision.block).toBe(true);
-      expect(decision.reason).toContain("mcp__galaxy__search_tools_by_name");
-      expect(decision.reason).toContain("input datatype");
-    }
+    const decision = h.check("mcp__galaxy__search_tools_by_keywords", { keywords: ["tissue"] });
+    expect(decision.block).toBe(true);
+    expect(decision.reason).toContain("mcp__galaxy__search_tools_by_name");
+    expect(decision.reason).toContain("input datatype");
     expect(h.check("mcp__galaxy__search_tools_by_name", { query: "tissue" })).toBeUndefined();
-    expect(h.check("mcp", { server: "other", tool: "search_tools_by_keywords" })).toBeUndefined();
+    expect(h.check("mcp__other__search_tools_by_keywords", {})).toBeUndefined();
   });
 
-  it("adds actionable recovery for direct and proxy timeout failures, not a UI-only notice", () => {
-    const h = harness();
-    for (const [name, input] of [
-      ["mcp__galaxy__get_histories", { limit: 100 }],
-      ["mcp", { server: "galaxy", tool: "get_histories", args: { limit: 100 } }],
-    ] as const) {
-      const result = h.result(name, input);
-      const text = JSON.stringify(result.content);
-      expect(text).toContain("Narrow or paginate");
-      expect(text).toContain("Continue the authorized task");
-      expect(text).toContain("connect");
-      expect(result.isError).toBeUndefined(); // never clear the original failure
-    }
+  it("adds actionable recovery for timeout failures, not a UI-only notice", () => {
+    const result = harness().result("mcp__galaxy__get_histories", { limit: 100 });
+    const text = JSON.stringify(result.content);
+    expect(text).toContain("Narrow or paginate");
+    expect(text).toContain("Continue the authorized task");
+    expect(text).toContain("mcp__galaxy__connect()");
+    expect(result.isError).toBeUndefined(); // never clear the original failure
   });
 
   it("tells the model to record an accepted submission that capture never saw", () => {
@@ -71,53 +56,52 @@ describe("Galaxy MCP recovery", () => {
     const h = harness();
     h.result("mcp__galaxy__get_histories", { limit: 100, offset: 0 });
     expect(h.check("mcp__galaxy__get_histories", { offset: 0, limit: 100 }).block).toBe(true);
-    expect(
-      h.check("mcp", { tool: "mcp__galaxy__get_histories", args: '{"limit":100,"offset":0}' })
-        .block,
-    ).toBe(true);
     expect(h.check("mcp__galaxy__get_histories", { limit: 5 })).toBeUndefined();
     h.reset();
     expect(h.check("mcp__galaxy__get_histories", { limit: 100, offset: 0 })).toBeUndefined();
   });
 
-  it("allows one identical read after a verified reconnect and bounds reconnect loops", () => {
+  it("allows one identical read after a verified re-bind and bounds re-bind loops", () => {
     const h = harness();
     const args = { dataset_id: "fixture" };
     h.result("mcp__galaxy__get_dataset_details", args);
-    expect(h.check("mcp", { connect: "galaxy" })).toBeUndefined();
-    h.result("mcp", { connect: "galaxy" }, "connected", false, { mode: "list", server: "galaxy" });
+    expect(h.check("mcp__galaxy__connect")).toBeUndefined();
+    h.result("mcp__galaxy__connect", {}, '{"success": true}', false);
     expect(h.check("mcp__galaxy__get_dataset_details", args)).toBeUndefined();
     h.result("mcp__galaxy__get_dataset_details", args);
     expect(h.check("mcp__galaxy__get_dataset_details", args).block).toBe(true);
-    const capped = h.check("mcp", { connect: "galaxy" });
+    const capped = h.check("mcp__galaxy__connect");
     expect(capped.block).toBe(true);
     // Once the agent's attempt is spent, the user still needs a way out.
     expect(capped.reason).toContain("/mcp reconnect galaxy");
-    expect(h.check("mcp", { connect: "other" })).toBeUndefined();
     h.reset();
-    expect(h.check("mcp", { connect: "galaxy" })).toBeUndefined();
+    expect(h.check("mcp__galaxy__connect")).toBeUndefined();
   });
 
-  it("does not unlock retries when reconnect failed but the proxy isError flag is false", () => {
+  it("does not cap or unlock anything outside an incident", () => {
+    const h = harness();
+    expect(h.check("mcp__galaxy__connect")).toBeUndefined();
+    expect(h.check("mcp__galaxy__connect")).toBeUndefined();
+  });
+
+  it("does not unlock retries when the re-bind failed", () => {
     const h = harness();
     h.result("mcp__galaxy__get_histories");
-    h.result("mcp", { connect: "galaxy" }, "Failed", false, {
-      mode: "connect",
-      error: "connect_failed",
-    });
+    h.check("mcp__galaxy__connect");
+    h.result("mcp__galaxy__connect", {}, "Failed to connect", true);
     expect(h.check("mcp__galaxy__get_histories").block).toBe(true);
   });
 
   it("allows later polling and a new recovery incident after a successful retry", () => {
     const h = harness();
     h.result("mcp__galaxy__get_histories");
-    h.check("mcp", { connect: "galaxy" });
-    h.result("mcp", { connect: "galaxy" }, "connected", false, { mode: "list" });
+    h.check("mcp__galaxy__connect");
+    h.result("mcp__galaxy__connect", {}, '{"success": true}', false);
     expect(h.check("mcp__galaxy__get_histories")).toBeUndefined();
     h.result("mcp__galaxy__get_histories", {}, '{"success":true}', false);
     expect(h.check("mcp__galaxy__get_histories")).toBeUndefined();
     h.result("mcp__galaxy__get_histories");
-    expect(h.check("mcp", { connect: "galaxy" })).toBeUndefined();
+    expect(h.check("mcp__galaxy__connect")).toBeUndefined();
   });
 
   it("requires outcome inspection for timed-out mutations and never replays them itself", () => {
@@ -145,26 +129,32 @@ describe("Galaxy MCP recovery", () => {
     expect(download).toContain("This was a read-only lookup");
     expect(download).not.toContain("result is UNKNOWN");
     const connect = JSON.stringify(h.result("mcp__galaxy__connect").content);
-    expect(connect).toContain("safe to call again after reconnecting");
+    expect(connect).toContain("safe to call again once");
     expect(connect).not.toContain("result is UNKNOWN");
   });
 
-  it("gives dropped connections an agent-callable reconnect", () => {
-    const text = JSON.stringify(
-      harness().result("mcp__galaxy__get_histories", {}, "Connection closed (-32000)").content,
-    );
-    expect(text).toContain("mcp(");
-    expect(text).toContain("yourself once");
-    expect(text).not.toContain("Run /mcp");
+  it("tells the agent a dropped connection comes back on its own", () => {
+    for (const error of [
+      "Connection closed (-32000)",
+      "MCP connection closed",
+      "MCP client is closed",
+    ]) {
+      const text = JSON.stringify(
+        harness().result("mcp__galaxy__get_histories", {}, error).content,
+      );
+      expect(text).toContain("reconnects on the next call");
+      expect(text).toContain("mcp__galaxy__connect()");
+      expect(text).not.toContain("mcp(");
+      expect(text).not.toContain("Run /mcp");
+    }
   });
 
-  it("recognizes adapter proxy errors that carry details.error instead of isError", () => {
-    const h = harness();
-    expect(
-      h.result("mcp", { server: "galaxy", tool: "get_histories" }, "Request timed out", false, {
-        error: "call_failed",
-      }),
-    ).toBeDefined();
+  it("recognizes pi's timeout wording", () => {
+    const text = JSON.stringify(
+      harness().result("mcp__galaxy__get_histories", {}, "MCP request timed out after 300000ms")
+        .content,
+    );
+    expect(text).toContain("Narrow or paginate");
   });
 
   it("does not treat response data, auth errors, or non-Galaxy failures as transport failures", () => {
@@ -175,9 +165,9 @@ describe("Galaxy MCP recovery", () => {
     ).toBeUndefined();
     expect(h.result("mcp__galaxy__get_histories", {}, "spawn uvx ENOENT")).toBeUndefined();
     expect(h.result("bash")).toBeUndefined();
-    expect(h.result("mcp", { server: "other", tool: "get_histories" })).toBeUndefined();
-    expect(
-      galaxyCall("mcp", { server: "galaxy", tool: "get_histories", args: "invalid" }),
-    ).toBeUndefined();
+    expect(h.result("mcp__other__get_histories")).toBeUndefined();
+    // Loom's own galaxy_* tools are not galaxy-mcp calls.
+    expect(h.result("galaxy_job_record")).toBeUndefined();
+    expect(galaxyCall("galaxy_job_record", {})).toBeUndefined();
   });
 });

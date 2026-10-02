@@ -27,12 +27,13 @@ describe("buildGalaxyContextBlock reconnect steer", () => {
     expect(block).toMatch(/never report.*disconnected/i);
   });
 
-  it("gives the agent the callable reconnect operation", () => {
+  it("has the agent re-bind before pointing the user at /mcp reconnect", () => {
     const block = buildGalaxyContextBlock();
-    expect(block).toContain('mcp({connect: "galaxy"})');
+    expect(block).toContain("the connection comes back on the next call");
+    expect(block).not.toContain("mcp({connect");
     // The manual command is a fallback, never the first step.
     expect(block.indexOf("/mcp reconnect galaxy")).toBeGreaterThan(
-      block.indexOf('mcp({connect: "galaxy"})'),
+      block.indexOf("mcp__galaxy__connect()"),
     );
   });
 

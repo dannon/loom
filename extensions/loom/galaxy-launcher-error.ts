@@ -3,8 +3,8 @@
 //
 // galaxy-transport-error.ts covers a *live* server whose stdio transport died:
 // `/mcp reconnect galaxy` fixes that. This file covers the server never having
-// started, because the `uvx` that launches it is not on PATH -- the adapter
-// reports `spawn uvx ENOENT`. Reconnecting cannot fix that: there is nothing to
+// started, because the `uvx` that launches it is not on PATH -- pi reports
+// `spawn uvx ENOENT`. Reconnecting cannot fix that: there is nothing to
 // reconnect to until uv is installed. Left unclassified, the model improvises
 // and hands the user the reconnect incantation, which burns their time on an
 // action that cannot possibly work.

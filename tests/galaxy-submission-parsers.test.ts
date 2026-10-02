@@ -454,45 +454,47 @@ describe("resolveResultPayload", () => {
     expect(resolveResultPayload(mcpResult(RUN_TOOL)).text).toContain('"jobs"');
   });
 
-  it("prefers the proxy path's structuredContent when it is there", () => {
+  it("prefers the untruncated CallToolResult pi keeps in structuredContent", () => {
     const resolved = resolveResultPayload({
-      content: [{ type: "text", text: "truncated preview…" }],
-      details: { mcpResult: { structuredContent: RUN_TOOL, content: [] } },
+      content: [{ type: "text", text: "Warning: truncated output…" }],
+      details: { server: "galaxy", tool: "run_tool" },
+      structuredContent: {
+        content: [{ type: "text", text: JSON.stringify(RUN_TOOL) }],
+        structuredContent: RUN_TOOL,
+      },
     });
     expect(resolved.value).toEqual(RUN_TOOL);
   });
 
-  it("ignores an omitted-summary mcpResult and falls back to the content block", () => {
+  it("reads the full text block from structuredContent when the server sent no structure", () => {
     const resolved = resolveResultPayload({
-      content: [{ type: "text", text: JSON.stringify(RUN_TOOL) }],
-      details: { mcpResult: { omitted: true, reason: "too big", contentBlocks: 1 } },
+      content: [{ type: "text", text: "Warning: truncated output…" }],
+      structuredContent: { content: [{ type: "text", text: JSON.stringify(RUN_TOOL) }] },
     });
     expect(resolved.value).toBeUndefined();
     expect(resolved.text).toContain('"jobs"');
   });
 
-  it("surfaces the adapter's spill path when the output guard truncated", () => {
+  it("surfaces pi's full-output file when the text was truncated", () => {
     const resolved = resolveResultPayload({
-      content: [{ type: "text", text: "preview…\n\n[truncated]" }],
-      details: {
-        outputGuard: { truncated: true, fullOutputPath: "/tmp/mcp-output-abc/output.txt" },
-      },
+      content: [{ type: "text", text: "Warning: truncated output…" }],
+      details: { server: "galaxy", tool: "run_tool", fullOutputPath: "/tmp/pi-mcp-0123.txt" },
     });
-    expect(resolved.truncatedPath).toBe("/tmp/mcp-output-abc/output.txt");
+    expect(resolved.truncatedPath).toBe("/tmp/pi-mcp-0123.txt");
   });
 
-  it("says so in the reason when even the spill file did not parse", () => {
+  it("says so in the reason when even the full-output file did not parse", () => {
     const out = parse(
       "mcp__galaxy__run_tool",
       {},
       {
-        content: [{ type: "text", text: "preview…" }],
-        details: { outputGuard: { truncated: true, fullOutputPath: "/tmp/nope/output.txt" } },
+        content: [{ type: "text", text: "Warning: truncated output…" }],
+        details: { server: "galaxy", fullOutputPath: "/tmp/nope/pi-mcp-0123.txt" },
       },
     );
     expect(out.ok).toBe(false);
     if (out.ok) return;
-    expect(out.reason).toContain("spill file");
+    expect(out.reason).toContain("full-output file");
   });
 });
 

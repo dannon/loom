@@ -39,16 +39,14 @@ describe("draftsPlan", () => {
 });
 
 describe("isIwcLookup", () => {
-  it("counts direct IWC tools and IWC calls through the mcp gateway", () => {
-    expect(isIwcLookup("mcp__galaxy__recommend_iwc_workflows", {})).toBe(true);
-    expect(isIwcLookup("mcp", { tool: "mcp__galaxy__search_iwc_workflows" })).toBe(true);
-    expect(isIwcLookup("mcp", { tool: "recommend_iwc_workflows" })).toBe(true);
+  it("counts the IWC tools", () => {
+    expect(isIwcLookup("mcp__galaxy__recommend_iwc_workflows")).toBe(true);
+    expect(isIwcLookup("mcp__galaxy__search_iwc_workflows")).toBe(true);
   });
 
   it("doesn't count other Galaxy tools", () => {
-    expect(isIwcLookup("mcp__galaxy__search_tools_by_name", {})).toBe(false);
-    expect(isIwcLookup("mcp", { tool: "mcp__galaxy__run_tool" })).toBe(false);
-    expect(isIwcLookup("mcp", { server: "galaxy" })).toBe(false);
+    expect(isIwcLookup("mcp__galaxy__search_tools_by_name")).toBe(false);
+    expect(isIwcLookup("mcp__galaxy__run_tool")).toBe(false);
   });
 });
 
@@ -119,7 +117,7 @@ describe("registerIwcPlanCheck", () => {
 
   it("stays quiet once IWC has been consulted this session", async () => {
     const h = hooks();
-    await h.toolStart("mcp", { tool: "mcp__galaxy__recommend_iwc_workflows" });
+    await h.toolStart("mcp__galaxy__recommend_iwc_workflows", {});
     await h.agentEnd([assistant("some answer")]);
     await h.agentEnd([assistant(PLAN)]);
     expect(delivered).toEqual([]);

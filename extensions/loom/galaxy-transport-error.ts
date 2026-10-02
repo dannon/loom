@@ -1,9 +1,8 @@
-// Mid-session, the MCP client SDK can lose its stdio transport to the
-// galaxy-mcp subprocess. After that every galaxy_* call comes back as
-// "Failed to call tool: <transport error>", and the adapter never self-heals
-// because it still thinks the connection is up. The fix on the user's side is
-// to reconnect the MCP server, not to re-authenticate Galaxy. mcp-recovery.ts
-// supplies the agent-callable repair; this module classifies and notifies.
+// Mid-session, the MCP client can lose its stdio transport to the galaxy-mcp
+// subprocess, and the failing call comes back with a transport error. pi
+// reconnects on the next call, so the fix is to retry and re-bind the Galaxy
+// session, not to re-authenticate Galaxy. mcp-recovery.ts supplies the
+// agent-facing steps; this module classifies and notifies.
 //
 // Crucially this must NOT match galaxy-mcp's own "Not connected to Galaxy.
 // Authenticate via OAuth or run connect()..." error, which is an auth problem
@@ -14,7 +13,8 @@ import { isGalaxyMcpTool } from "../../shared/galaxy-mcp-tools.js";
 // A dropped transport: the server is gone and a new connection fixes it.
 const DROPPED_ERROR_PATTERNS: RegExp[] = [
   /not connected(?!\s+to\s+galaxy)/i, // bare SDK "Not connected"; exclude the verbose auth error
-  /connection closed/i, // -32000
+  /connection closed/i, // -32000, and pi's "MCP connection closed"
+  /MCP client is (?:closed|connecting)/i, // pi: a call on a client that already went away
   /-32000/,
 ];
 
@@ -32,12 +32,11 @@ export const GALAXY_RECONNECT_NUDGE =
 
 // Deliberately does not claim the server is healthy: a timeout only proves that
 // no response arrived before the timer, so a wedged server looks identical to a
-// slow one. It also doesn't send the user to mcp.json -- loom rewrites that
-// file's galaxy entry on every launch, the path moves with PI_CODING_AGENT_DIR,
-// and /mcp reconnect reuses the already-loaded config rather than re-reading it.
+// slow one. It also doesn't send the user to mcp.json -- the brain registers the
+// galaxy server itself on every load, so there's nothing there to edit.
 // Agent-facing recovery instructions live in mcp-recovery.ts. The UI notice
 // states the uncertainty, with /mcp reconnect as the user's fallback once the
-// agent's single reconnect attempt is spent.
+// agent's single re-bind is spent.
 export const GALAXY_TIMEOUT_NUDGE =
   "Galaxy MCP request timed out. Its result is unknown; this does not mean a Galaxy job failed.";
 

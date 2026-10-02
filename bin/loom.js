@@ -675,8 +675,8 @@ if (userArgs[0] === "update") {
   checkLLMProvider();
 
   // Galaxy is configured but the uvx runner that launches galaxy-mcp is missing.
-  // Warn (don't block): Loom is still useful without Galaxy, and pi-mcp-adapter
-  // would otherwise fail to spawn that server with a buried error. Orbit bundles
+  // Warn (don't block): Loom is still useful without Galaxy, and pi would
+  // otherwise fail to spawn that server with a buried error. Orbit bundles
   // uv onto PATH before spawn, so this only fires for standalone CLI installs.
   if (galaxyUrl && galaxyApiKey && !isUvxAvailable()) {
     console.error(`\n${uvxMissingNotice()}\n`);

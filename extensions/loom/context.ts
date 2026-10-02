@@ -295,8 +295,8 @@ A timeout alone does not prove that the connection is dead.
 When it happens -- and before you ever tell the user Galaxy is disconnected:
 1. For "Not connected to Galaxy", call \`mcp__galaxy__connect()\` to re-bind
    this session. Do not report a disconnection you haven't tried to fix.
-2. For a dropped transport, call \`mcp({connect: "galaxy"})\` yourself,
-   then \`mcp__galaxy__connect()\`. Verify both results before continuing.
+2. For a dropped transport, the connection comes back on the next call; call
+   \`mcp__galaxy__connect()\` yourself once and verify the result before continuing.
 3. For timeouts, narrow read-only queries first. Before retrying a mutation,
    check whether Galaxy accepted it. Never blindly replay a submission.
 4. Only if your own reconnect fails, tell the user they can run

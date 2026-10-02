@@ -3,20 +3,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { classifyGalaxyFailure, type GalaxyFailureKind } from "./galaxy-transport-error";
 import { galaxyMcpTool, isGalaxyMcpTool } from "../../shared/galaxy-mcp-tools.js";
 
+const CONNECT = galaxyMcpTool("connect");
+
 type Args = Record<string, unknown>;
 export function galaxyCall(name: string, input: Args): { name: string; args: Args } | undefined {
-  if (name === "mcp") {
-    if (input.server !== undefined && input.server !== "galaxy") return;
-    name = typeof input.tool === "string" ? input.tool : "";
-    if (input.server !== "galaxy" && !/^(galaxy_|mcp__galaxy__)/.test(name)) return;
-    try {
-      const args = typeof input.args === "string" ? JSON.parse(input.args) : (input.args ?? {});
-      if (!args || typeof args !== "object" || Array.isArray(args)) return;
-      return { name: galaxyMcpTool(name.replace(/^(?:galaxy_|mcp__galaxy__)/, "")), args };
-    } catch {
-      return;
-    }
-  }
   if (!isGalaxyMcpTool(name)) return;
   return { name, args: input };
 }
@@ -48,31 +38,31 @@ keyword. Fetch schemas only for candidate tools. Search a saved tool catalog
 locally with mcp_read_output rather than repeatedly fetching the entire panel.
 
 A timeout is an unknown result, not proof that a job failed. Narrow/paginate
-read-only requests before retrying. For a dropped transport or persistent
-timeouts on small requests, call mcp({connect: "galaxy"}) yourself once to
-reconnect the adapter, then mcp__galaxy__connect() to bind the Galaxy session.
-Check that recovery succeeded before continuing. Do not tell the user to type
+read-only requests before retrying. A dropped Galaxy MCP connection reconnects
+on its own at the next call; for a dropped transport or persistent timeouts on
+small requests, call mcp__galaxy__connect() yourself once to re-bind the Galaxy
+session. Check that it succeeded before continuing. Do not tell the user to type
 /mcp reconnect galaxy or restart Orbit as the first recovery step.
 For a timed-out mutation (run, invoke, create, upload, update, delete, etc.),
 inspect the destination history, jobs/invocations or affected resource first.
 Reuse an accepted operation; retry only when non-acceptance or safe retry is
 established. Never blindly replay a mutation, invent its ID, or infer success.
-Limit recovery to one narrowed retry and one reconnect per incident. If those
+Limit recovery to one narrowed retry and one re-bind per incident. If those
 fail, report the concrete blocker and preserve work instead of looping.
 `;
 
 export function galaxyRecoveryHint(name: string, kind: Exclude<GalaxyFailureKind, null>): string {
   const outcome =
-    name === "mcp__galaxy__connect"
-      ? "mcp__galaxy__connect only binds this session and changes nothing in Galaxy; it is safe to call again after reconnecting."
+    name === CONNECT
+      ? "mcp__galaxy__connect only binds this session and changes nothing in Galaxy; it is safe to call again once."
       : READ_ONLY.test(name)
         ? "This was a read-only lookup. Continue the authorized task using a smaller query or saved response."
         : "This operation may already have been accepted by Galaxy. Its result is UNKNOWN. Inspect the destination history, jobs/invocations or affected resource before considering any retry. Reuse accepted work, and if you find the accepted job or invocation, record it with galaxy_job_record or galaxy_invocation_record -- Loom cannot capture a submission whose call failed. Do not blindly repeat a submission, upload, create, update or delete; do not invent IDs or claim success.";
   const action =
     kind === "dropped"
-      ? 'Call mcp({"connect":"galaxy"}) yourself once, then mcp__galaxy__connect(). Check their results before continuing; do not ask the user to reconnect or restart Orbit.'
-      : 'Narrow or paginate the request before one read-only retry; do not repeat the same expensive call. If even a small request times out, call mcp({"connect":"galaxy"}) once, then mcp__galaxy__connect(), and check the results.';
-  return `${MARKER}\n${action}\n${outcome}\n${name.includes("search_tools") || name === "mcp__galaxy__get_tool_panel" ? DISCOVERY_HINT : ""}\nDo the recovery now without another permission question. After one narrowed retry and one reconnect fail, report a concrete blocker rather than looping. Respect Stop/pause.`;
+      ? "The connection reconnects on the next call. Call mcp__galaxy__connect() yourself once and check its result before continuing; do not ask the user to reconnect or restart Orbit."
+      : "Narrow or paginate the request before one read-only retry; do not repeat the same expensive call. If even a small request times out, call mcp__galaxy__connect() once and check the result.";
+  return `${MARKER}\n${action}\n${outcome}\n${name.includes("search_tools") || name === "mcp__galaxy__get_tool_panel" ? DISCOVERY_HINT : ""}\nDo the recovery now without another permission question. After one narrowed retry and one re-bind fail, report a concrete blocker rather than looping. Respect Stop/pause.`;
 }
 
 function stable(value: unknown): string {
@@ -87,33 +77,27 @@ function stable(value: unknown): string {
 
 export function registerMcpRecovery(pi: ExtensionAPI): void {
   const timedOutReads = new Set<string>();
-  const retriedAfterReconnect = new Set<string>();
+  const retriedAfterRebind = new Set<string>();
   const retryPermits = new Set<string>();
   let transportFailed = false;
-  let reconnectAttempts = 0;
+  let rebindAttempts = 0;
   const reset = () => {
     timedOutReads.clear();
-    retriedAfterReconnect.clear();
+    retriedAfterRebind.clear();
     retryPermits.clear();
     transportFailed = false;
-    reconnectAttempts = 0;
+    rebindAttempts = 0;
   };
   pi.on("input", reset);
   pi.on("session_start", reset);
   pi.on("session_tree", reset);
   pi.on("tool_call", (event) => {
-    if (
-      event.toolName === "mcp" &&
-      !event.input.tool &&
-      event.input.connect === "galaxy" &&
-      transportFailed
-    ) {
-      if (reconnectAttempts++ >= 1)
-        return {
-          block: true,
-          reason:
-            "Automatic Galaxy reconnect was already attempted for this incident. Inspect its result and report the concrete blocker; do not loop. The user can run /mcp reconnect galaxy (no restart needed).",
-        };
+    if (event.toolName === CONNECT && transportFailed && rebindAttempts++ >= 1) {
+      return {
+        block: true,
+        reason:
+          "Galaxy was already re-bound once for this incident. Inspect that result and report the concrete blocker; do not loop. The user can run /mcp reconnect galaxy (no restart needed).",
+      };
     }
     const call = galaxyCall(event.toolName, event.input);
     if (!call) return;
@@ -125,7 +109,7 @@ export function registerMcpRecovery(pi: ExtensionAPI): void {
     }
     const key = call.name + stable(call.args);
     if (retryPermits.delete(key)) {
-      retriedAfterReconnect.add(key);
+      retriedAfterRebind.add(key);
       return;
     }
     if (timedOutReads.has(key)) {
@@ -136,16 +120,10 @@ export function registerMcpRecovery(pi: ExtensionAPI): void {
     }
   });
   pi.on("tool_result", (event) => {
-    const details = event.details as { error?: unknown; mode?: unknown } | undefined;
-    if (
-      event.toolName === "mcp" &&
-      !event.input.tool &&
-      event.input.connect === "galaxy" &&
-      !event.isError &&
-      !details?.error &&
-      details?.mode === "list"
-    ) {
-      for (const key of timedOutReads) if (!retriedAfterReconnect.has(key)) retryPermits.add(key);
+    const details = event.details as { error?: unknown } | undefined;
+    // A good re-bind earns each timed-out read one more try.
+    if (event.toolName === CONNECT && transportFailed && !event.isError && !details?.error) {
+      for (const key of timedOutReads) if (!retriedAfterRebind.has(key)) retryPermits.add(key);
       return;
     }
     const call = galaxyCall(event.toolName, event.input);
@@ -157,9 +135,9 @@ export function registerMcpRecovery(pi: ExtensionAPI): void {
         const key = call.name + stable(call.args);
         timedOutReads.delete(key);
         retryPermits.delete(key);
-        retriedAfterReconnect.delete(key);
+        retriedAfterRebind.delete(key);
         transportFailed = false;
-        reconnectAttempts = 0;
+        rebindAttempts = 0;
       }
       return;
     }

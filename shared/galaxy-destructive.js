@@ -6,7 +6,8 @@
 //
 // Two confidence levels here:
 //   - RELIABLE: structured JSON we can read exactly -- a direct tool call, or one wrapped
-//     in the adapter's generic `mcp({tool, args})` proxy (args is a JSON string).
+//     in a generic `mcp({tool, args})` proxy (args is a JSON string) -- Loom no
+//     longer ships one, but pi-mcp-adapter installed as a pi package brings it back.
 //   - BEST-EFFORT GUARDRAIL: free-form strings we can only pattern-match -- a raw curl/wget
 //     DELETE, or code-mode's run_galaxy_tool(code=<python>) script. Trivially evadable
 //     (obfuscation, a different client, method override); the goal is to catch the obvious
@@ -86,8 +87,8 @@ function classifyNamed(name, args) {
 /**
  * Classify an MCP tool call. Handles three shapes:
  *  - direct:     update_history({ deleted, history_id })
- *  - mcp proxy:  mcp({ tool: "mcp__galaxy__update_history", args: "<json string>" }) -- the
- *                adapter's generic gateway tool, a bypass if left unhandled (#338 F1)
+ *  - mcp proxy:  mcp({ tool: "galaxy_update_history", args: "<json string>" }) --
+ *                pi-mcp-adapter's gateway tool, a bypass if left unhandled (#338 F1)
  *  - code mode:  run_galaxy_tool({ code: "<python calling call_tool(...)>" }) (#338 F2)
  * @param {string} toolName @param {Record<string, unknown>} input @returns {GalaxyDestructiveOp | null}
  */

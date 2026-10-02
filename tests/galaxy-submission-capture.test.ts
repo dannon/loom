@@ -251,53 +251,35 @@ describe("submission capture: work that finished before the call returned", () =
   });
 });
 
-describe("submission capture: the mcp proxy tool", () => {
-  // Reconnect guidance steers the model to pi's `mcp` proxy, where the Galaxy
-  // tool's name and args are nested inside the call. Matching only the bare
-  // tool names let those submissions through with no record at all.
-  it("registers a tool run made through the proxy, with its args", async () => {
-    setCurrentStepAnchor("plan-a-step-2");
+describe("submission capture: truncated results", () => {
+  // Past 20 KB pi cuts the middle out of an MCP result and saves the full text.
+  // A tool_result handler that rewrites the content also drops structuredContent,
+  // so the file is the only complete copy left for a big mapped-over run.
+  it("re-reads pi's full-output file when the inline text is cut", async () => {
+    const full = path.join(tmpDir, "pi-mcp-0123456789abcdef.txt");
+    fs.writeFileSync(full, JSON.stringify(THREE_JOBS));
     await submit(
-      "mcp",
+      "mcp__galaxy__run_tool",
+      { tool_id: "fastp" },
       {
-        server: "galaxy",
-        tool: "mcp__galaxy__run_tool",
-        args: JSON.stringify({ tool_id: "fastp" }),
-      },
-      {
-        content: [{ type: "text", text: "preview" }],
-        details: { mcpResult: { structuredContent: THREE_JOBS, content: [] } },
+        content: [{ type: "text", text: "Warning: truncated output (original token count: 9000)" }],
+        details: { server: "galaxy", tool: "run_tool", fullOutputPath: full },
       },
     );
-    const blocks = findJobBlocks(notebook());
-    expect(blocks).toHaveLength(3);
-    expect(blocks[0].notebookAnchor).toBe("plan-a-step-2");
-    const [row] = activity().filter((r) => r.kind === "submission.registered");
-    expect(row.payload.tool).toBe("mcp__galaxy__run_tool");
+    expect(findJobBlocks(notebook())).toHaveLength(3);
   });
 
-  it("registers the mcp__galaxy__ spelling too", async () => {
+  it("uses structuredContent when it survived", async () => {
     await submit(
-      "mcp__galaxy__invoke_workflow",
-      { workflow_id: "c0ffee1234567890" },
-      mcpResult(INVOCATION),
+      "mcp__galaxy__run_tool",
+      { tool_id: "fastp" },
+      {
+        content: [{ type: "text", text: "Warning: truncated output" }],
+        details: { server: "galaxy", tool: "run_tool" },
+        structuredContent: { content: [], structuredContent: THREE_JOBS },
+      },
     );
-    expect(findInvocationBlocks(notebook())).toHaveLength(1);
-  });
-
-  it("ignores a proxied read and a non-Galaxy server", async () => {
-    const before = notebook();
-    await submit(
-      "mcp",
-      { server: "galaxy", tool: "mcp__galaxy__get_history_contents", args: {} },
-      mcpResult(THREE_JOBS),
-    );
-    await submit(
-      "mcp",
-      { server: "other", tool: "mcp__galaxy__run_tool", args: {} },
-      mcpResult(THREE_JOBS),
-    );
-    expect(notebook()).toBe(before);
+    expect(findJobBlocks(notebook())).toHaveLength(3);
   });
 });
 

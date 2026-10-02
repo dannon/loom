@@ -8,7 +8,7 @@ Loom registers a small set of tools at the extension layer:
 | ---------------------------- | ----------------------------------------------------------------------------------------------- |
 | GTN tutorials                | `gtn_search`, `gtn_fetch`                                                                       |
 | Skills                       | `skills_fetch` (SKILL.md / reference docs; `repo: "foundry"` reads bundled Foundry casts)       |
-| Saved MCP output             | `mcp_read_output` (search/page a response already saved by the MCP adapter)                     |
+| Saved MCP output             | `mcp_read_output` (search/page an oversized MCP response pi already saved)                      |
 | Galaxy invocations           | `galaxy_invocation_record`, `galaxy_invocation_check_all`, `galaxy_invocation_check_one`        |
 | Dashboard                    | `dashboard_read`, `dashboard_update`                                                            |
 | Multi-agent (experimental)   | `team_dispatch` (gated by `LOOM_TEAM_DISPATCH=1`)                                               |
