@@ -106,7 +106,10 @@ export declare function lessonIdFromPath(relPath: string): string | null;
 
 export type LessonValidation = { ok: true } | { ok: false; errors: string[] };
 /** Errors are `"<line>: <message>"`. */
-export declare function validateLessonMarkdown(text: string): LessonValidation;
+export declare function validateLessonMarkdown(
+  text: string,
+  opts?: { namespace?: string },
+): LessonValidation;
 /** Corpus form: `relPath` is `<namespace>/<slug>.md`; lines are `path:line: message`. */
 export declare function validateLessonFile(relPath: string, raw: string): string[];
 

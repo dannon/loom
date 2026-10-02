@@ -185,6 +185,23 @@ describe("the proposal path and the corpus gate refuse the same lessons", () => 
     });
   }
 
+  it("applies a namespace's own rules when the namespace is given", () => {
+    const rel = "galaxy-api/hid-is-not-an-id.md";
+    const text = swap(
+      readFileSync(join(CORPUS, rel), "utf8"),
+      /^graduated_to:[\s\S]*?(?=^upstream:)/m,
+      "graduated_to: []\n",
+    );
+    const corpus = validateLessonFile(rel, text);
+    expect(corpus.join("\n")).toMatch(/graduated_to/);
+    const local = validateLessonMarkdown(text, { namespace: "galaxy-api" });
+    expect(local.ok).toBe(false);
+    if (local.ok) return;
+    expect(local.errors).toEqual(corpus.map((e) => e.slice(rel.length + 1)));
+    // An unknown namespace is refused, not waved through as a proposable one.
+    expect(validateLessonMarkdown(text, { namespace: "../etc" }).ok).toBe(false);
+  });
+
   it("passes every seed lesson through both", () => {
     const files = collectLessonFiles(CORPUS);
     expect(files.length).toBeGreaterThan(0);
@@ -192,6 +209,8 @@ describe("the proposal path and the corpus gate refuse the same lessons", () => 
       const text = readFileSync(join(CORPUS, rel), "utf8");
       expect(validateLessonFile(rel, text), rel).toEqual([]);
       expect(validateLessonMarkdown(text), rel).toEqual({ ok: true });
+      const namespace = rel.split("/")[0];
+      expect(validateLessonMarkdown(text, { namespace }), rel).toEqual({ ok: true });
     }
   });
 });

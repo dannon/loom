@@ -109,23 +109,28 @@ export function parseLesson(raw) {
 }
 
 // A proposal has no path until it is saved, and the corpus validator only
-// judges a path-bearing file. The stand-in is a proposable namespace and a
-// valid slug, so the path checks pass and every content rule runs unchanged;
-// the caller checks the real namespace and slug itself. The galaxy-api
-// graduation rule is the one path-dependent content rule, and a proposal can
-// never land in galaxy-api.
-const STAND_IN_PATH = "stats/proposal.md";
+// judges a path-bearing file. The stand-in is a valid slug under the lesson's
+// namespace when the caller knows it, so the path checks pass and every
+// content rule runs unchanged, the galaxy-api graduation rule included. With
+// no namespace the stand-in is a proposable one; a proposal can never land in
+// galaxy-api, and its caller checks the real namespace and slug itself.
+const STAND_IN_SLUG = "proposal";
+const DEFAULT_NAMESPACE = "stats";
 
 /**
  * Validate a lesson's bytes with no path attached -- a proposal before it has
- * been written anywhere. Errors are `"<line>: <message>"`. Run it on exactly
+ * been written anywhere, or a local lesson whose file name is not part of the
+ * verdict. Pass the namespace whenever it is known, so the namespace's own
+ * rules apply. Errors are `"<line>: <message>"`. Run it on exactly
  * the bytes that will be shown and saved: a check on anything upstream of
  * those (the structured input, a sanitised copy) checks the wrong thing.
  */
-export function validateLessonMarkdown(text) {
+export function validateLessonMarkdown(text, { namespace = DEFAULT_NAMESPACE } = {}) {
   if (typeof text !== "string") return { ok: false, errors: ["1: lesson is not text"] };
-  const prefix = `${STAND_IN_PATH}:`;
-  const errors = validateLessonFile(STAND_IN_PATH, text).map((v) =>
+  // An unknown namespace goes through as is: the corpus form refuses it.
+  const standIn = `${String(namespace)}/${STAND_IN_SLUG}.md`;
+  const prefix = `${standIn}:`;
+  const errors = validateLessonFile(standIn, text).map((v) =>
     v.startsWith(prefix) ? v.slice(prefix.length) : v,
   );
   return errors.length === 0 ? { ok: true } : { ok: false, errors };

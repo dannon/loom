@@ -332,7 +332,7 @@ export async function proposeLesson(
     generatedBy: generatedBy(),
     generatedAt: today(),
   });
-  const validation = validateLessonMarkdown(markdown);
+  const validation = validateLessonMarkdown(markdown, { namespace: namespace as string });
   if (!validation.ok) return failValidation(validation.errors);
 
   armed = null;
@@ -413,7 +413,7 @@ export async function commitDraft(rawId: string, ctx: ProposeUiContext): Promise
     return reject(id, "validator", `No draft for ${id} (${read.detail}).`, ["0: draft missing"]);
   }
 
-  const validation = validateLessonMarkdown(read.text);
+  const validation = validateLessonMarkdown(read.text, { namespace });
   if (!validation.ok) {
     return reject(
       id,
