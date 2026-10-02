@@ -7,24 +7,28 @@
  *
  * Exit 0 when clean; exit 1 with one `path:line: message` line per violation.
  *
- * Plain Node plus `yaml` (already a root dependency). Nothing from
- * `extensions/`, so this runs before anything is built and can be imported by
- * a plain `.mjs` script.
+ * Plain Node plus `yaml` and `marked` (both runtime dependencies: this ships
+ * and checks user-local lessons too). Nothing from `extensions/`, so this runs
+ * before anything is built and can be imported by a plain `.mjs` script.
  *
  * Every bound below is a content control rather than a tidiness preference. A
  * lesson ships inside the package to every install, and the published snapshot
  * goes into a public index, so a lesson must not carry anything to follow (no
- * URLs, no markdown links), anything to run (no fenced code), or anything
- * identifying (no paths, hex ids, uuids, IPs or email addresses anywhere, and no
- * URLs outside the fields the schema says may hold a link, which take https only).
- * The regexes catch shapes, not meaning: a private hostname written as prose, a
- * person's name or a copied data value still needs a human reviewer.
+ * URLs, links, images, HTML or character references, judged by a real markdown
+ * parser rather than line regexes), anything to run (no code blocks), or
+ * anything identifying (no paths, hostnames, hex ids, uuids, IPs, email
+ * addresses or credential shapes anywhere, and no URLs outside the fields the
+ * schema says may hold a link, which take https to an allowed host only).
+ * These are shape checks, not meaning checks: a private hostname written as
+ * prose, a person's name, a copied data value or an instruction aimed at the
+ * model still needs a human reviewer.
  */
 
 import fs from "node:fs";
 import path from "node:path";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { Lexer, marked } from "marked";
 import { isAlias, parseDocument, visit } from "yaml";
 
 export const LESSONS_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -145,76 +149,307 @@ export function normalizeSignature(text) {
 }
 
 /**
- * Shapes that point at a person, a machine or a dataset. The observation
- * validator's list, minus its hid/dataset/history-followed-by-a-number rule:
- * lessons talk about hids in the abstract and that rule would reject them.
+ * Hosts a link field may point at. A link is provenance for a reviewer to
+ * follow, so it goes to the project's own sites or to the public repositories
+ * the lessons already name as trigger hosts, and nowhere else: an arbitrary
+ * host is itself identifying (an internal Galaxy, a lab's file server) and can
+ * carry anything in its path. Exact hostnames, no wildcard subdomains. To add
+ * one, add it here and say why in the pull request.
  */
-const IDENTIFYING = [
-  [
-    "a URL",
-    // A scheme, a script-ish scheme with no slashes, a protocol-relative
-    // //host, or a scheme-less host/path.
-    /[A-Za-z][A-Za-z0-9+.-]*:\/\/|\b(?:javascript|data|vbscript|file):|(?:^|[\s(<"'=])\/\/[A-Za-z0-9]|\b(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\/\S/i,
-  ],
-  ["a home-directory path", /\/(?:Users|home|root)\/|~[A-Za-z0-9._-]*[\\/]/i],
-  ["an absolute path", /(?:^|[\s(<"'=:,])\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]/],
-  ["a Windows path", /\b[A-Za-z]:[\\/]|\\\\[A-Za-z0-9.-]+\\/],
-  ["a hex id of 16+ characters", /[0-9a-fA-F]{16,}/],
-  ["a uuid", /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
-  [
-    "an IP address",
-    /\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}\b|\bfe80::/i,
-  ],
-  ["an email address", /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/],
-];
+export const LINK_HOSTS = Object.freeze([
+  "github.com",
+  "galaxyproject.org",
+  "docs.galaxyproject.org",
+  "help.galaxyproject.org",
+  "training.galaxyproject.org",
+  "doi.org",
+  "zenodo.org",
+  "figshare.com",
+  "journals.plos.org",
+  "static-content.springer.com",
+  "www.ncbi.nlm.nih.gov",
+]);
 
 /** Fields C3 allows to carry a link. Everything else in a lesson may not. */
 const LINK_FIELDS = ["graduated_to", "upstream", "sources.resource"];
 
 /**
- * Problems with one link in a field that may hold links. https only, nothing
- * that identifies who fetched it (credentials, query, fragment), and the path
- * still gets the home-directory and email checks.
+ * Credential shapes from the provider-key list. Not anchored at a word
+ * boundary on the left because `_` is a word character and `node_sk-...` would
+ * slip past; the lookbehind only stops `disk-quota-...` reading as `sk-`.
  */
-function linkProblems(link) {
-  let url;
-  try {
-    url = new URL(link);
-  } catch {
-    return ["a malformed URL"];
+const CREDENTIALS = [
+  /(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{16,}/,
+  /(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}/,
+  /(?<![A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{20,}/,
+  /(?<![A-Za-z0-9])xox[baprs]-[A-Za-z0-9-]{10,}/,
+  /(?<![A-Za-z0-9])AIza[0-9A-Za-z_-]{35}/,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  /(?<![A-Za-z0-9])eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}/,
+];
+
+// Galaxy collection types are written `list:paired`, which is otherwise
+// exactly the shape of a scheme.
+const COLLECTION_TYPE =
+  /^(?:list|paired|paired_or_unpaired|record|sample_sheet)(?::(?:list|paired|paired_or_unpaired|record|sample_sheet))+$/;
+// Pseudonyms in generated.by and verified.by have their own strict pattern.
+const AUTHOR = /^(?:agent|human):[A-Za-z0-9._/@-]{1,80}$/;
+
+/**
+ * `word:` followed directly by something, the shape of any URI scheme. Not
+ * `word::`, which is a namespace in R, C++ and Rust and never a scheme.
+ */
+function hasScheme(text) {
+  const re = /(?<![A-Za-z0-9+.:-])([A-Za-z][A-Za-z0-9+.-]*):(?=[^\s\d:])/g;
+  for (const m of text.matchAll(re)) {
+    const word = /^\S*/.exec(text.slice(m.index))[0].replace(/[`'"),.;\]}>]+$/, "");
+    if (COLLECTION_TYPE.test(word) || AUTHOR.test(word)) continue;
+    return true;
   }
+  return false;
+}
+
+// Top-level domains that mean a network name rather than a file extension:
+// `.gz`, `.md`, `.ts` and friends are country codes too, and lessons talk about
+// files all the time.
+const TLDS =
+  "com|org|net|edu|gov|mil|int|io|dev|cloud|info|biz|internal|local|localdomain|lan|corp|intranet|private|home|arpa|example|test|invalid|localhost|uk|de|fr|nl|ch|eu|ca|au|jp|cn|se|dk|fi|es|nz|br";
+
+const URL_SHAPES = ["a URL", "a hostname"];
+
+/**
+ * Shapes that point at a person, a machine, a dataset or a credential. The
+ * observation validator's list, minus its hid/dataset/history-followed-by-a-
+ * number rule: lessons talk about hids in the abstract.
+ */
+const IDENTIFYING = [
+  [
+    "a URL",
+    (s) =>
+      // A scheme with slashes, a protocol-relative //host, www., a scheme-less
+      // host/path, or any `scheme:` at all (`https:example.org` and
+      // `mailto:` both resolve).
+      /[A-Za-z][A-Za-z0-9+.-]*:\/\/|(?:^|[^A-Za-z0-9:])\/\/[A-Za-z0-9]|(?<![A-Za-z0-9])www\.|(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\/\S|\b(?:javascript|data|vbscript|file):/i.test(
+        s,
+      ) || hasScheme(s),
+  ],
+  ["a hostname", new RegExp(`(?:[A-Za-z0-9-]+\\.)+(?:${TLDS})(?![A-Za-z0-9-])`, "i")],
+  ["a home-directory path", /\/(?:Users|home|root)\/|~[A-Za-z0-9._-]*[\\/]/i],
+  // Any lead-in that is not itself part of a word or a relative path.
+  ["an absolute path", /(?:^|[^A-Za-z0-9._~/-])\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]/],
+  ["a Windows path", /\b[A-Za-z]:[\\/]|\\\\[A-Za-z0-9.-]+\\/],
+  ["a hex id of 16+ characters", /[0-9a-fA-F]{16,}/],
+  ["a uuid", /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i],
+  [
+    "an IP address",
+    // No word boundaries: `node_10.12.4.7` is still an address. The `::` form
+    // needs a hex group on one side and nothing word-like hugging it, so
+    // `dplyr::filter` and `std::vector` stay prose.
+    /(?:\d{1,3}\.){3}\d{1,3}|(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}|(?<![0-9A-Fa-f:])(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*)?|::[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*)(?![A-Za-z0-9:])/i,
+  ],
+  // Anything@domain, quoted local parts included.
+  ["an email address", /[A-Za-z0-9._%+"-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/],
+  ["a credential-shaped string", (s) => CREDENTIALS.some((re) => re.test(s))],
+];
+
+/** Names of the identifying shapes in `text`, minus any in `skip`. */
+function shapesIn(text, skip = []) {
+  const s = String(text ?? "");
   const out = [];
-  if (url.protocol !== "https:") out.push("a non-https URL");
-  if (url.username || url.password) out.push("credentials in a URL");
-  if (url.search || url.hash) out.push("a query or fragment in a URL");
-  let pathname = url.pathname;
-  try {
-    pathname = decodeURIComponent(pathname);
-  } catch {
-    out.push("a malformed URL");
-  }
-  for (const name of ["a home-directory path", "a Windows path", "an email address"]) {
-    const re = IDENTIFYING.find(([n]) => n === name)[1];
-    if (re.test(pathname)) out.push(`${name} inside a URL`);
+  for (const [name, test] of IDENTIFYING) {
+    if (skip.includes(name)) continue;
+    if (typeof test === "function" ? test(s) : test.test(s)) out.push(name);
   }
   return out;
 }
 
 /**
- * Names of the identifying shapes in `text`. With `allowUrls`, each URL is
- * checked as a link and the rest of the text is checked as usual.
+ * Identifying-data problems in one string. Exported so the local-lesson rules
+ * use this table rather than a copy of it. Each problem reads `<where>
+ * contains <shape>; lessons carry none`.
  */
-export function identifyingShapes(text, { allowUrls = false } = {}) {
+export function identifyingProblems(text, where) {
+  return shapesIn(text).map((shape) => `${where} contains ${shape}; lessons carry none`);
+}
+
+/** A string that is, or carries, a URL or a hostname. */
+function looksLikeLink(text) {
+  return shapesIn(text).some((name) => URL_SHAPES.includes(name));
+}
+
+/**
+ * Problems with a link in a field that may hold one. The raw string is what
+ * ships, so it is judged as written: canonical https to an allowed host, no
+ * port, credentials, query, fragment, percent-escapes or dot segments, and the
+ * whole string still gets the identifying table. The absolute-path rule is
+ * left out because every URL path is one; the host allowlist bounds where a
+ * path can point instead.
+ */
+export function linkProblems(link, where) {
+  const raw = String(link ?? "");
   const out = [];
-  let s = text;
-  if (allowUrls) {
-    s = text.replace(/[A-Za-z][A-Za-z0-9+.-]*:\/\/\S*/g, (link) => {
-      out.push(...linkProblems(link));
-      return " ";
-    });
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    url = undefined;
   }
-  for (const [name, re] of IDENTIFYING) if (re.test(s)) out.push(name);
-  return [...new Set(out)];
+  if (!url || /\s/.test(raw)) {
+    out.push(`${where} is not a single URL`);
+  } else {
+    if (url.protocol !== "https:") out.push(`${where} is a non-https URL`);
+    if (url.username || url.password) out.push(`${where} has credentials in a URL`);
+    if (url.port) out.push(`${where} has a port in a URL`);
+    if (/[?#]/.test(raw)) out.push(`${where} has a query or fragment in a URL`);
+    if (url.protocol === "https:" && !LINK_HOSTS.includes(url.hostname)) {
+      out.push(
+        `${where} links to ${JSON.stringify(url.hostname)}, which is not an allowed link host`,
+      );
+    }
+    // The origin-only form is the one difference new URL() is allowed to make.
+    if (url.href !== raw && url.href !== `${raw}/`) {
+      out.push(`${where} is not a canonical URL; write it as ${JSON.stringify(url.href)}`);
+    }
+  }
+  if (/%/.test(raw)) out.push(`${where} has a percent-escape in a URL`);
+  if (/\\/.test(raw)) out.push(`${where} has a backslash in a URL`);
+  if (/\.\./.test(raw)) out.push(`${where} has a dot segment in a URL`);
+  for (const shape of shapesIn(raw, [...URL_SHAPES, "an absolute path"])) {
+    out.push(`${where} contains ${shape} inside a URL`);
+  }
+  return out;
+}
+
+/**
+ * What markdown a lesson may not contain, keyed by what a finding is called in
+ * a message. `rule` reads as a refusal in a body message; `noun` reads after
+ * "contains" in a field message.
+ */
+const MARKUP = {
+  link: { rule: "no markdown links", noun: "a markdown link" },
+  image: { rule: "no images", noun: "an image" },
+  html: { rule: "no HTML", noun: "HTML" },
+  def: { rule: "no markdown links", noun: "a link reference definition" },
+  escape: { rule: "no backslash escapes", noun: "a backslash escape" },
+  charref: { rule: "no character references", noun: "a character reference" },
+  codespan: { rule: "no links or HTML inside a code span", noun: "a link or HTML in a code span" },
+};
+
+// `&#64;`, `&#x40;` and `&amp;`. Numeric ones without the semicolon too:
+// browsers decode those in text.
+const CHAR_REF = /&#[0-9]+;?|&#[xX][0-9A-Fa-f]+;?|&[A-Za-z][A-Za-z0-9]*;/;
+
+// A code span may show a placeholder like `<collection id>`, but nothing a
+// renderer that disagreed about where the span ends could turn into a live
+// tag: no closing tags, comments, attribute values, quotes or schemes.
+const INERT_PLACEHOLDER = /^<[A-Za-z][A-Za-z0-9 _-]*>$/;
+
+function childTokens(token) {
+  const out = [];
+  if (Array.isArray(token.tokens)) out.push(...token.tokens);
+  if (Array.isArray(token.items)) out.push(...token.items);
+  if (token.type === "table") {
+    for (const cell of token.header ?? []) out.push(...(cell.tokens ?? []));
+    for (const row of token.rows ?? []) for (const cell of row) out.push(...(cell.tokens ?? []));
+  }
+  return out;
+}
+
+/**
+ * Lex `text` and call `visit(token, offset)` for every token at every depth,
+ * where `offset` is the token's position in `text` when its raw text can be
+ * found there, and the enclosing block's when the lexer rewrote it (it strips
+ * the `>` from blockquote contents, for one). Returns the lexer's output, or
+ * undefined when the lexer threw.
+ */
+function walkTokens(text, visit) {
+  let tokens;
+  try {
+    tokens = marked.lexer(text, { gfm: true });
+  } catch {
+    return undefined;
+  }
+  const walk = (list, base, depth) => {
+    let cursor = base;
+    for (const token of list) {
+      const at = typeof token.raw === "string" ? text.indexOf(token.raw, cursor) : -1;
+      const offset = at === -1 ? base : at;
+      if (at !== -1) cursor = at + token.raw.length;
+      visit(token, offset, depth);
+      walk(childTokens(token), offset, depth + 1);
+    }
+  };
+  walk(tokens, 0, 0);
+  return tokens;
+}
+
+/** Every refused piece of markup in `text`, as `{ kind, offset }`. */
+function markupFindings(text) {
+  const out = [];
+  for (const m of text.matchAll(new RegExp(CHAR_REF.source, "g"))) {
+    out.push({ kind: "charref", offset: m.index });
+  }
+  const tokens = walkTokens(text, (token, offset) => {
+    if (["link", "image", "html", "def", "escape"].includes(token.type)) {
+      out.push({ kind: token.type, offset });
+    } else if (token.type === "codespan" && !inertCodeSpan(token.text)) {
+      out.push({ kind: "codespan", offset });
+    }
+  });
+  // Fail closed: text the parser cannot read is text nobody checked.
+  if (!tokens) out.push({ kind: "html", offset: 0 });
+  // A definition anywhere makes some `[label]` live. The walk sees it as a
+  // def token wherever it sits; this is the backstop if a lexer version
+  // records the definition without emitting one.
+  else if (Object.keys(tokens.links ?? {}).length > 0 && !out.some((f) => f.kind === "def")) {
+    out.push({ kind: "def", offset: 0 });
+  }
+  return out;
+}
+
+// Containers whose children are separate blocks rather than one run of text.
+const BLOCK_CONTAINERS = new Set(["blockquote", "list", "list_item", "table"]);
+
+/**
+ * What a reader sees once `tokens` render: inline runs concatenated with no
+ * separator, so `alice@exa**mple**.org` comes out as the address it is.
+ */
+function plainText(tokens, sep = "\n") {
+  return tokens
+    .map((t) => {
+      const kids = childTokens(t);
+      if (kids.length > 0) return plainText(kids, BLOCK_CONTAINERS.has(t.type) ? "\n" : "");
+      return typeof t.text === "string" ? t.text : "";
+    })
+    .join(sep);
+}
+
+function inertCodeSpan(content) {
+  let inner;
+  try {
+    inner = Lexer.lexInline(content, { gfm: true });
+  } catch {
+    return false;
+  }
+  const bad = (list) =>
+    list.some(
+      (t) =>
+        t.type === "link" ||
+        t.type === "image" ||
+        (t.type === "html" && !INERT_PLACEHOLDER.test(t.raw)) ||
+        bad(childTokens(t)),
+    );
+  return !bad(inner);
+}
+
+/**
+ * Markup problems in one string, for any field or body. Exported so the
+ * local-lesson rules apply the same parser instead of keeping regexes of their
+ * own. Each problem reads `<where> contains <what>`.
+ */
+export function markupProblems(text, where) {
+  const kinds = [...new Set(markupFindings(String(text ?? "")).map((f) => f.kind))];
+  return kinds.map((k) => `${where} contains ${MARKUP[k].noun}`);
 }
 
 /**
@@ -378,6 +613,10 @@ function checkExactKeys(add, line, label, value, keys) {
   return true;
 }
 
+function codepoint(ch) {
+  return `U+${ch.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
 /** Validate one lesson. `relPath` is `<namespace>/<slug>.md`. */
 export function validateLessonFile(relPath, raw) {
   const rel = relPath.split(path.sep).join("/");
@@ -410,13 +649,13 @@ export function validateLessonFile(relPath, raw) {
     return out;
   }
 
-  const odd = /[^\t\n\x20-\x7e]/.exec(text);
-  if (odd) {
+  // Every one, not the first: a pasted paragraph usually brings several, and
+  // fixing them one run at a time is how the last one gets missed.
+  for (const odd of text.matchAll(/[^\t\n\x20-\x7e]/gu)) {
     const line = text.slice(0, odd.index).split("\n").length;
     // Reported as a codepoint: an em-dash, an en-dash and a non-breaking hyphen
     // are indistinguishable in a terminal and the fix differs for each.
-    const point = odd[0].codePointAt(0).toString(16).toUpperCase().padStart(4, "0");
-    add(line, `non-ASCII character U+${point}; write em-dashes as --`);
+    add(line, `non-ASCII character ${codepoint(odd[0])}; write em-dashes as --`);
   }
 
   const split = splitFrontmatter(text);
@@ -425,11 +664,11 @@ export function validateLessonFile(relPath, raw) {
     return out;
   }
 
-  // The raw lines too, so a comment or anything else the parser drops is still
-  // held to the identifying-data rules. Links are judged as links here because
-  // the line-to-field mapping is not known; the parsed check below is strict.
+  // The raw lines too, so anything the parser drops is still held to the
+  // identifying-data rules. URLs and hostnames are left to the parsed check
+  // below, which knows which field may hold a link and which holds a host.
   split.fmLines.forEach((line, i) => {
-    for (const shape of identifyingShapes(line, { allowUrls: true })) {
+    for (const shape of shapesIn(line, URL_SHAPES)) {
       add(split.fmFirstLine + i, `frontmatter line contains ${shape}; lessons carry none`);
     }
   });
@@ -678,20 +917,31 @@ export function validateLessonFile(relPath, raw) {
   // Every string, not just the prose fields: a title, a cue or a source id
   // reaches the snapshot and the public index exactly like the body does.
   eachString(fm, "", (label, value) => {
+    const line = at(label.split(/[.[]/)[0]);
     // The file-level ASCII check reads raw bytes, and a YAML escape like "\u202e"
     // is ASCII on disk. This is the check that sees the decoded value.
-    const bad = /[^\x20-\x7e]/.exec(value);
-    if (bad) {
-      const point = bad[0].codePointAt(0).toString(16).toUpperCase().padStart(4, "0");
-      add(
-        at(label.split(/[.[]/)[0]),
-        `${label} contains control or non-ASCII character U+${point}`,
-      );
+    for (const bad of value.matchAll(/[^\x20-\x7e]/gu)) {
+      add(line, `${label} contains control or non-ASCII character ${codepoint(bad[0])}`);
     }
-    const allowUrls = LINK_FIELDS.includes(label.replace(/\[\d+\]/g, ""));
-    for (const shape of identifyingShapes(value, { allowUrls })) {
-      add(at(label.split(/[.[]/)[0]), `${label} contains ${shape}; lessons carry none`);
+    const field = label.replace(/\[\d+\]/g, "");
+    if (LINK_FIELDS.includes(field)) {
+      // Free text is allowed here too ("galaxy-mcp#55"); only a string that
+      // tries to be a link is held to the link rules.
+      const problems = looksLikeLink(value)
+        ? linkProblems(value, label)
+        : [...identifyingProblems(value, label), ...markupProblems(value, label)];
+      for (const p of problems) add(line, p);
+      return;
     }
+    if (field === "trigger.hosts") {
+      // A host is the whole point of this field; its own pattern pins the shape.
+      for (const shape of shapesIn(value, URL_SHAPES)) {
+        add(line, `${label} contains ${shape}; lessons carry none`);
+      }
+      return;
+    }
+    for (const p of identifyingProblems(value, label)) add(line, p);
+    for (const p of markupProblems(value, label)) add(line, p);
   });
 
   out.push(...validateBody(rel, split));
@@ -764,7 +1014,7 @@ function validateBody(rel, split) {
     if (/<[A-Za-z!/?]/.test(line.replace(/`[^`]*`/g, ""))) {
       add(at, "no HTML in a lesson body");
     }
-    for (const shape of identifyingShapes(line)) {
+    for (const shape of shapesIn(line)) {
       if (shape === "a URL") add(at, "no URLs in a lesson body; put provenance in sources");
       else add(at, `${shape} in a lesson body; lessons carry none`);
     }
@@ -773,7 +1023,46 @@ function validateBody(rel, split) {
     if (/\]\(|\]\[|^\s*\[[^\]]+\]:/.test(line)) add(at, "no markdown links in a lesson body");
   });
 
-  return out;
+  // The line rules above are cheap and catch the obvious; the parser is the
+  // one that agrees with a renderer about what is a link, HTML or code.
+  const lineOf = (offset) =>
+    split.bodyFirstLine + split.body.slice(0, offset).split("\n").length - 1;
+  for (const f of markupFindings(split.body)) {
+    add(lineOf(f.offset), `${MARKUP[f.kind].rule} in a lesson body`);
+  }
+  const lineShapes = (from, to) =>
+    new Set(bodyLines.slice(from, to + 1).flatMap((l) => shapesIn(l)));
+  const tokens = walkTokens(split.body, (token, offset, depth) => {
+    const at = lineOf(offset);
+    if (token.type === "code") {
+      add(
+        at,
+        token.codeBlockStyle === "indented"
+          ? "no indented code blocks in a lesson body"
+          : "no fenced code blocks in a lesson body; a short inline span is fine",
+      );
+    } else if (token.type === "hr") {
+      add(at, "no setext headings or horizontal rules in a lesson body");
+    } else if (
+      token.type === "heading" &&
+      (depth > 0 || !SECTIONS.some((spec) => spec.heading === token.raw.trimEnd()))
+    ) {
+      add(at, "unexpected heading; only the six lesson sections are allowed");
+    }
+    if (depth !== 0 || typeof token.raw !== "string") return;
+    // Formatting can split a shape so no single raw line holds it whole;
+    // judge the rendered text of each block as well.
+    const first = at - split.bodyFirstLine;
+    const seen = lineShapes(first, first + token.raw.split("\n").length - 1);
+    for (const shape of shapesIn(plainText([token]))) {
+      if (seen.has(shape)) continue;
+      if (shape === "a URL") add(at, "no URLs in a lesson body; put provenance in sources");
+      else add(at, `${shape} in a lesson body; lessons carry none`);
+    }
+  });
+  if (!tokens) add(split.bodyFirstLine, "the lesson body could not be parsed as markdown");
+
+  return [...new Set(out)];
 }
 
 /** Lesson paths under `dir`, as sorted `<namespace>/<slug>.md`. */
