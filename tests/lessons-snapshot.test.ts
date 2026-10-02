@@ -240,6 +240,27 @@ describe("the drift gate on a corpus of its own", () => {
     expect(checkSnapshot({ dir, snapshotPath, nowMs: NOW }).ok).toBe(false);
   });
 
+  // A NaN date would silently turn the staleness comparison off.
+  it.each([["not-a-date"], ["2026-09-30"], ["2026-02-30T00:00:00.000Z"], [null]])(
+    "fails on a hand-edited built_at of %j",
+    (value) => {
+      const { dir, snapshotPath } = builtCorpus();
+      const snapshot = JSON.parse(readFileSync(snapshotPath, "utf8"));
+      snapshot.built_at = value;
+      writeFileSync(snapshotPath, serializeSnapshot(snapshot));
+      const result = checkSnapshot({ dir, snapshotPath, nowMs: NOW });
+      expect(result.ok).toBe(false);
+      expect(result.failure.join("\n")).toMatch(/built_at is not an ISO timestamp/);
+    },
+  );
+
+  it("refuses to build with a built_at that is not an ISO timestamp", () => {
+    const { dir } = builtCorpus();
+    expect(() => buildSnapshot({ dir, builtAt: "not-a-date", commit: COMMIT })).toThrow(
+      /built_at must be an ISO timestamp/,
+    );
+  });
+
   it("only warns about a lesson that went stale after the build", () => {
     const { dir, snapshotPath } = builtCorpus();
     const later = Date.parse("2028-01-01T00:00:00Z");
