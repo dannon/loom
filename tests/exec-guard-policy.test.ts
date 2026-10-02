@@ -1077,6 +1077,9 @@ describe("decide -- a cd into Loom state carries the direct path's verdict", () 
     "OLDPWD=~/.loom/lessons; cd - && echo x > a.md",
     // a pipeline stage is a subshell; its cd does not move the parent
     "cd ~/.loom/lessons && cd /tmp | cd /tmp && echo x > a.md",
+    "cd ~/.loom/lessons && cd /tmp |& cat && echo x > a.md",
+    "export OLDPWD=~/.loom/lessons; cd - && echo x > a.md",
+    "declare OLDPWD=~/.loom; cd - && cat config.json",
   ])("denies: %j", (command) => {
     expect(run(command).decision).toBe("deny");
   });
@@ -1092,6 +1095,9 @@ describe("decide -- a cd into Loom state carries the direct path's verdict", () 
     "echo bash -c 'cd ~/.loom && echo x > config.json'",
     // a comment that names ~/.loom is not a reason to suspect the cd
     "cd $OUT && python3 script.py > log # ~/.loom",
+    // a cd in a pipeline stage, and an OLDPWD that points somewhere ordinary
+    "cd ~/.loom/lessons |& cat; echo x > a.md",
+    "OLDPWD=/tmp; cd - && echo x > a.md",
   ])("leaves alone: %j", (command) => {
     expect(run(command).decision).toBe("allow");
   });

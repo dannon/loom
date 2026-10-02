@@ -1211,7 +1211,7 @@ export function classifyBash(commandRaw: string, home = "", cwd = ""): BashClass
   if (cd.guarded) {
     return {
       kind: "unknown",
-      reason: "command runs inside Loom's state or a credential store",
+      reason: "command may run inside Loom's state or a credential store",
       readPaths: [],
       ...base,
     };
