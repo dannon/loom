@@ -32,8 +32,8 @@ import { getNotebookPath } from "../state.js";
 import {
   PROPOSABLE_NAMESPACES,
   TRIGGER_KEYS,
+  identifyingProblems,
   isValidLessonSlug,
-  identifyingShapes,
   parseLesson,
   validateLessonMarkdown,
 } from "../../../shared/lesson-rules.js";
@@ -213,7 +213,7 @@ function slugProblems(slug: unknown): string[] {
   if (!isValidLessonSlug(slug)) {
     return ["0: slug must be lowercase words joined by hyphens, at most 80 characters"];
   }
-  const out = identifyingShapes(slug as string).map((shape) => `0: slug contains ${shape}`);
+  const out = identifyingProblems(slug as string, "slug").map((problem) => `0: ${problem}`);
   if (/\d{5,}/.test(slug as string)) out.push("0: slug contains a long number");
   return out;
 }
