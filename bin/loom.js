@@ -715,6 +715,7 @@ if (userArgs[0] === "update") {
   //    churn the global file for a setting they never read. Override
   //    persistently with `ui.showThinking: true` in ~/.loom/config.json, or
   //    just toggle it live in-session with Ctrl+T.
+  //  - TUI mode (interactive terminal only): see below.
   {
     const piSettingsPath = join(agentDir, "settings.json");
     try {
@@ -742,6 +743,13 @@ if (userArgs[0] === "update") {
         });
         if (piSettings.hideThinkingBlock !== hideThinking) {
           piSettings.hideThinkingBlock = hideThinking;
+          changed = true;
+        }
+        // pi 1.0 went fullscreen by default, which takes away the terminal's own
+        // scrollback. Keep Loom's terminal where it was; only fill the gap, so a
+        // user who picks fullscreen in /settings keeps it.
+        if (piSettings.tuiMode === undefined) {
+          piSettings.tuiMode = "regular";
           changed = true;
         }
       }
