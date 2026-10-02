@@ -1041,6 +1041,11 @@ describe("decide -- a cd into Loom state carries the direct path's verdict", () 
     'cd data && sort in.txt > "$OUT"',
     'cd results && Rscript plot.R > "${name}.log"',
     'cd data; for f in *.txt; do wc -l "$f" > "$f.count"; done',
+    "cd data && samtools sort in.bam -o out.bam",
+    "cd ../proj && make > build.log",
+    "pushd data && Rscript ../plot.R && popd",
+    "(cd data && gzip -d *.gz) && ls data",
+    "cd data && python3 ../scripts/run.py | tee run.log",
   ])("leaves ordinary analysis work alone: %j", (command) => {
     const analysis = `${HOME}/.loom/analyses/proj`;
     const inAnalysis: PathResolver = {
@@ -1055,6 +1060,68 @@ describe("decide -- a cd into Loom state carries the direct path's verdict", () 
       { resolver: inAnalysis, home: HOME },
     );
     expect(r.decision).toBe("allow");
+  });
+
+  // A cross-family review ran these against the previous version; each was allowed.
+  it.each([
+    // a `)` in a comment, or inside nested quotes, does not close the substitution
+    'echo "$(printf x # )\ncd ~/.loom && \\cat config.json\n)"',
+    'echo "$(echo "$(printf ")")"; cd ~/.loom/lessons && echo x > a.md)"',
+    // an unquoted heredoc body is expanded whoever reads it
+    "printf '' <<EOF\n$(cd ~/.loom/lessons && echo x > a.md)\nEOF",
+    // an arithmetic command still runs its substitutions
+    "(( $(cd ~/.loom/lessons && echo x > a.md; echo 1) ))",
+    // a cd's own redirection opens in the directory the shell is in now
+    "cd ~/.loom/lessons && cd . > a.md",
+    // OLDPWD decides where cd - goes
+    "OLDPWD=~/.loom/lessons; cd - && echo x > a.md",
+    // a pipeline stage is a subshell; its cd does not move the parent
+    "cd ~/.loom/lessons && cd /tmp | cd /tmp && echo x > a.md",
+  ])("denies: %j", (command) => {
+    expect(run(command).decision).toBe("deny");
+  });
+
+  it("a quoted heredoc body stays literal", () => {
+    expect(run("printf '' <<'EOF'\n$(cd ~/.loom/lessons && echo x > a.md)\nEOF").decision).toBe(
+      "allow",
+    );
+  });
+
+  it.each([
+    // text an inert command only prints
+    "echo bash -c 'cd ~/.loom && echo x > config.json'",
+    // a comment that names ~/.loom is not a reason to suspect the cd
+    "cd $OUT && python3 script.py > log # ~/.loom",
+  ])("leaves alone: %j", (command) => {
+    expect(run(command).decision).toBe("allow");
+  });
+
+  it("does not make a command with no cd stricter than it was", () => {
+    // The quoted pattern is (still) split into read operands; before the cd
+    // tracker this asked on the basename `.env`, and it must not now deny.
+    const r = run(`grep '.env ${HOME}/.ssh/config' README.md`);
+    expect(r.decision).toBe("ask");
+    expect(r.category).toBe("read:sensitive");
+  });
+
+  // Forms the same review confirmed caught; kept so they stay caught.
+  it.each([
+    "cd ~/.{loom,x}/lessons && echo x > a.md",
+    "cd ~/.loom/{lessons,y} && echo x > a.md",
+    "cd -P ~/.loom/lessons && echo x > a.md",
+    "cd -L -- ~/.loom/lessons && echo x > a.md",
+    "command cd ~/.loom/lessons && echo x > a.md",
+    "builtin cd ~/.loom/lessons && echo x > a.md",
+    "cd ~/.loom/lessons && tee a.md < <(echo x)",
+    "cd ~/.loom && cat <(cat config.json)",
+  ])("still denies: %j", (command) => {
+    expect(run(command).decision).toBe("deny");
+  });
+
+  it("stays linear on a long run of successful cds", () => {
+    const t0 = performance.now();
+    expect(run("cd a&&".repeat(3333) + "echo ok").decision).toBe("allow");
+    expect(performance.now() - t0).toBeLessThan(500);
   });
 
   it("stays fast on a long script that cds back and forth", () => {

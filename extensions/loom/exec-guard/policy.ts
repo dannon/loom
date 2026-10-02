@@ -136,14 +136,22 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     // compound command (closes the `cat secret | tool` evasion). A dedicated
     // credential store is denied for ALL tiers; any other sensitive path
     // downgrades to an ask (deny for weak / non-interactive).
-    // Each floor sweeps every target first, so the strictest verdict wins: after
-    // `cd ~/.ssh && cat id_rsa` the bare `id_rsa` is only basename-sensitive,
-    // but its resolved twin is a credential store.
-    const reads = c.sensitiveReadPaths.map((p) => ({ p, ...deps.resolver.contains(p) }));
-    for (const { p, resolved } of reads) {
+    // Targets resolved after a cd go first, so the credential store a cd reached
+    // is denied even when the operand as typed is only basename-sensitive
+    // (`cd ~/.ssh && cat id_rsa`). A command with no cd has none, and keeps the
+    // single first-match pass it always had.
+    const cdReads = c.cdReadPaths.map((p) => ({ p, ...deps.resolver.contains(p) }));
+    for (const { p, resolved } of cdReads) {
       if (isCredentialStore(resolved, deps.home)) return denyCredentialStore(p, deps.home);
     }
-    for (const { p, resolved } of reads) {
+    for (const p of c.sensitiveReadPaths) {
+      const { resolved } = deps.resolver.contains(p);
+      if (isCredentialStore(resolved, deps.home)) return denyCredentialStore(p, deps.home);
+      if (isSensitivePath(resolved, deps.home)) {
+        return finalizeAsk(req, "read:sensitive", `read of sensitive path ${shown(p, deps.home)}`);
+      }
+    }
+    for (const { p, resolved } of cdReads) {
       if (isSensitivePath(resolved, deps.home)) {
         return finalizeAsk(req, "read:sensitive", `read of sensitive path ${shown(p, deps.home)}`);
       }

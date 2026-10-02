@@ -24,6 +24,9 @@ export interface BashClass {
    *  store. The classifier cannot tell what an unrecognized command does there,
    *  so the policy layer must not auto-allow it. */
   guardedCwd: boolean;
+  /** Read targets resolved against a directory a `cd` reached. Kept apart from
+   *  sensitiveReadPaths so a command with no cd is judged exactly as before. */
+  cdReadPaths: string[];
 }
 
 // Never-legitimate, irreversible-system-damage patterns. Order matters; first match wins.
@@ -139,23 +142,57 @@ const DQ_ESCAPABLE = '$`"\\\n';
 /** A shell word, or a run of unquoted operator characters (`&&`, `>>`, `2>&`
  *  arrives as a word `2` then `>&`). Parentheses and newlines are always an
  *  operator of their own. */
-type ShellToken = { word: WordFragment[] } | { op: string } | { heredoc: string };
+type ShellToken = { word: WordFragment[] } | { op: string } | { heredoc: string; quoted: boolean };
 
-// Index of the `)` closing the `$(` whose `(` sits at `open`, skipping quoted
-// spans and escapes; the end of the string when it never closes.
+// Index of the `)` closing the `$(` whose `(` sits at `open`; the end of the
+// string when it never closes. The body is shell code in its own right, so a
+// `)` inside a comment, a quoted string, or a nested substitution inside a
+// quoted string does not close it.
 function substitutionEnd(s: string, open: number): number {
   let depth = 0;
+  let wordStart = true;
   for (let j = open; j < s.length; j++) {
     const c = s[j];
-    if (c === "\\") j++;
-    else if (c === "'") {
+    if (c === "\\") {
+      j++;
+      wordStart = false;
+    } else if (c === "'") {
       const k = s.indexOf("'", j + 1);
       j = k === -1 ? s.length : k;
+      wordStart = false;
     } else if (c === '"') {
-      j++;
-      while (j < s.length && s[j] !== '"') j += s[j] === "\\" ? 2 : 1;
-    } else if (c === "(") depth++;
-    else if (c === ")" && --depth === 0) return j;
+      j = doubleQuoteEnd(s, j);
+      wordStart = false;
+    } else if (c === "`") {
+      j = backtickEnd(s, j);
+      wordStart = false;
+    } else if (c === "$" && s[j + 1] === "(") {
+      j = substitutionEnd(s, j + 1);
+      wordStart = false;
+    } else if (c === "#" && wordStart) {
+      const nl = s.indexOf("\n", j);
+      if (nl === -1) return s.length - 1;
+      j = nl - 1;
+    } else if (c === "(") {
+      depth++;
+      wordStart = true;
+    } else if (c === ")") {
+      if (--depth === 0) return j;
+      wordStart = true;
+    } else {
+      wordStart = /[ \t\n;&|<>]/.test(c);
+    }
+  }
+  return s.length - 1;
+}
+
+function doubleQuoteEnd(s: string, open: number): number {
+  for (let j = open + 1; j < s.length; j++) {
+    const c = s[j];
+    if (c === "\\") j++;
+    else if (c === "$" && s[j + 1] === "(") j = substitutionEnd(s, j + 1);
+    else if (c === "`") j = backtickEnd(s, j);
+    else if (c === '"') return j;
   }
   return s.length - 1;
 }
@@ -182,7 +219,7 @@ function shellTokens(command: string, structure = false): ShellToken[] {
   const tokens: ShellToken[] = [];
   let word: WordFragment[] = [];
   let opEnd = -2;
-  const heredocs: { delim: string; strip: boolean }[] = [];
+  const heredocs: { delim: string; strip: boolean; quoted: boolean }[] = [];
   let delimStrip: boolean | null = null;
   let text = "";
   let quote: "'" | '"' | null = null;
@@ -194,7 +231,12 @@ function shellTokens(command: string, structure = false): ShellToken[] {
   const endWord = () => {
     endFragment(false);
     if (word.length) {
-      if (delimStrip !== null) heredocs.push({ delim: wordText(word), strip: delimStrip });
+      if (delimStrip !== null) {
+        // A quoted delimiter makes the body literal; otherwise bash expands
+        // `$(...)` and backticks in it.
+        const quoted = word.some((f) => f.quote !== null);
+        heredocs.push({ delim: wordText(word), strip: delimStrip, quoted });
+      }
       delimStrip = null;
       tokens.push({ word });
     }
@@ -270,7 +312,9 @@ function shellTokens(command: string, structure = false): ShellToken[] {
     if (structure && ch === "(" && command[i + 1] === "(" && !started) {
       endWord();
       const end = substitutionEnd(command, i);
-      tokens.push({ word: [{ text: command.slice(i, end + 1), quote: "'" }] });
+      // Double-quoted, not single: the expression is not split, but a `$(...)`
+      // inside it still runs.
+      tokens.push({ word: [{ text: command.slice(i, end + 1), quote: '"' }] });
       i = end;
       continue;
     }
@@ -330,7 +374,7 @@ function shellTokens(command: string, structure = false): ShellToken[] {
         body += line + "\n";
         pos = nl + 1;
       }
-      tokens.push({ heredoc: body });
+      tokens.push({ heredoc: body, quoted: h.quoted });
       if (pos < command.length && command[pos] === "\n" && h !== heredocs[heredocs.length - 1])
         pos++;
     }
@@ -517,6 +561,10 @@ const ANALYSES_TREE = new RegExp(
 // More candidate directories than this and the tracker stops telling them
 // apart; the cost of judging each one grows with every cd that might fail.
 const MAX_CANDIDATES = 8;
+// Past this many directory changes in one line the tracker stops following
+// paths and keeps only the worst protection seen; otherwise a long run of
+// `cd a&&` costs time proportional to the square of its length.
+const MAX_CDS = 64;
 
 // Words that open or close a compound command and sit in front of the real verb.
 const LEADING_KEYWORDS = new Set([
@@ -614,6 +662,10 @@ interface Shell {
   moved: boolean;
   /** HOME or CDPATH was reassigned, so a bare or relative cd lands who knows where. */
   steered: boolean;
+  /** The code being walked names Loom state (or a credential store) outright,
+   *  so a cd target it cannot expand is presumed to be it. */
+  presumeState: boolean;
+  presumeGuarded: boolean;
 }
 
 interface Segment {
@@ -642,9 +694,7 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
     seen.set(dir, v);
     return v;
   };
-  const named = command.replace(/\\/g, "").replace(ANALYSES_TREE, "");
-  const presumeState = NAMES_STATE.test(named);
-  const presumeGuarded = presumeState || NAMES_CREDENTIALS.test(named);
+  let cdCount = 0;
   const backstop = (text: string) => {
     for (const m of text.replace(/\\/g, "").matchAll(RAW_CD)) {
       const raw = m[1].replace(/^["']|["']$/g, "");
@@ -653,7 +703,19 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
     }
   };
   const start: CwdState = cwd && path.isAbsolute(cwd) ? { ...UNKNOWN, dir: cwd } : UNKNOWN;
-  walk(command, { cur: [start], oldpwd: null, stack: [], moved: false, steered: false }, 0);
+  walk(
+    command,
+    {
+      cur: [start],
+      oldpwd: null,
+      stack: [],
+      moved: false,
+      steered: false,
+      presumeState: false,
+      presumeGuarded: false,
+    },
+    0,
+  );
 
   return out;
 
@@ -664,14 +726,30 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
       if (sh.cur.some((d) => d.nearState)) out.catastrophic = true;
       return sh;
     }
+    const tokens = shellTokens(script, true);
+    // Only words that run count -- a comment that mentions ~/.loom is not a
+    // reason to suspect the line. Orbit's analyses tree is work product.
+    const named = tokens
+      .map((t) => ("word" in t ? wordText(t.word) : ""))
+      .join(" ")
+      .replace(/\\/g, "")
+      .replace(ANALYSES_TREE, "");
+    const namesState = NAMES_STATE.test(named);
+    sh = {
+      ...sh,
+      presumeState: sh.presumeState || namesState,
+      presumeGuarded: sh.presumeGuarded || namesState || NAMES_CREDENTIALS.test(named),
+    };
     const hasOr = script.includes("||");
     const saved: Shell[] = [];
+    let inPipe = false;
     // Heredoc bodies arrive after the line that asked for them; each waits here
     // with the state its command started in.
     const hosts: { shell: boolean; inert: boolean; sh: Shell }[] = [];
     let seg: Segment = { words: [], outs: [], ins: [], hereStrings: [], heredocs: 0 };
     let pending: "out" | "in" | "dup" | "skip" | "here" | null = null;
     const flush = (sep: string) => {
+      const pipe = sep === "|" || sep === "|&";
       if (seg.words.length || seg.outs.length || seg.ins.length) {
         const before = sh;
         const r = runSimple(seg, sh, depth);
@@ -679,16 +757,28 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
         for (let k = 0; k < seg.heredocs; k++) {
           hosts.push({ shell: r.shell, inert: r.inert, sh: before });
         }
-        // The cd may have failed. `&&` would skip what follows; anything else
-        // runs it in the old directory.
-        if (r.cd && (sep !== "&&" || hasOr)) sh = { ...sh, cur: union(sh.cur, before.cur) };
+        if (pipe || inPipe) {
+          // Every stage of a pipeline is a subshell: its cd moves nobody else.
+          sh = before;
+        } else if (r.cd && (sep !== "&&" || hasOr)) {
+          // The cd may have failed. `&&` would skip what follows; anything
+          // else runs it in the old directory.
+          sh = { ...sh, cur: union(sh.cur, before.cur) };
+        }
       }
+      inPipe = pipe;
       seg = { words: [], outs: [], ins: [], hereStrings: [], heredocs: 0 };
       pending = null;
     };
-    for (const t of shellTokens(script, true)) {
+    for (const t of tokens) {
       if ("heredoc" in t) {
         const host = hosts.shift();
+        // An unquoted body is expanded before anyone reads it, whoever the host.
+        if (!t.quoted && host) {
+          for (const inner of substitutions([{ text: t.heredoc, quote: '"' }])) {
+            walk(inner, copy(host.sh), depth + 1);
+          }
+        }
         if (host?.shell) walk(t.heredoc, copy(host.sh), depth + 1);
         else if (host && !host.inert) backstop(t.heredoc);
         continue;
@@ -745,6 +835,7 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
       if (LEADING_KEYWORDS.has(t)) i++;
       else if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) {
         if (CD_STEERING.test(t)) sh = { ...sh, steered: true };
+        sh = setOldpwd(seg.words[i], sh);
         i++;
       } else break;
     }
@@ -756,10 +847,15 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
     const argTexts = args.map(wordText);
     const verb = argv.length ? wordText(argv[0]).split("/").pop() : undefined;
 
-    if (verb && DECLARE_VERBS.has(verb) && argTexts.some((a) => CD_STEERING.test(a))) {
-      sh = { ...sh, steered: true };
+    if (verb && DECLARE_VERBS.has(verb)) {
+      if (argTexts.some((a) => CD_STEERING.test(a))) sh = { ...sh, steered: true };
+      for (const w of args) sh = setOldpwd(w, sh);
     }
     if (verb === "cd" || verb === "pushd" || verb === "popd" || verb === "chdir") {
+      // The redirections are opened before the builtin runs, in the old
+      // directory: `cd . > a.md` truncates a.md where the shell stands now.
+      if (sh.cur.some((d) => d.guarded) && (seg.outs.length || seg.ins.length)) out.guarded = true;
+      if (sh.moved) for (const where of sh.cur) judgeOperands(where, undefined, [], [], seg);
       return { sh: changeDir(verb, args, sh), cd: true, shell: false, inert: false };
     }
     if (sh.cur.some((d) => d.guarded) && (argv.length || seg.outs.length)) out.guarded = true;
@@ -771,7 +867,8 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
     const texts2 = argv.map(wordText);
     const inert = verb !== undefined && INERT_VERBS.has(verb);
     if (!inert) backstop(texts2.slice(1).join(" "));
-    const shellAt = texts2.findIndex((t) => SHELLS.has(t.split("/").pop() ?? ""));
+    // `echo bash -c '...'` only prints, so an inert verb's arguments are not searched.
+    const shellAt = inert ? -1 : texts2.findIndex((t) => SHELLS.has(t.split("/").pop() ?? ""));
     let shell = false;
     if (shellAt !== -1) {
       shell = true;
@@ -872,6 +969,39 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
     }
   }
 
+  // `OLDPWD=...` decides where a later `cd -` goes.
+  function setOldpwd(word: WordFragment[], sh: Shell): Shell {
+    const head = word[0];
+    if (!head || head.quote !== null || !head.text.startsWith("OLDPWD=")) return sh;
+    const value = [{ ...head, text: head.text.slice("OLDPWD=".length) }, ...word.slice(1)];
+    return { ...sh, oldpwd: targetStates(value, sh) };
+  }
+
+  // Where a cd to `target` could land, from every directory the shell might be in.
+  function targetStates(target: WordFragment[], sh: Shell): Where {
+    const text = wordText(target);
+    return union(
+      sh.cur.map((where) => {
+        const abs = resolveWordFrom(target, home, where.dir);
+        if (abs) return stateFor(abs);
+        // Unresolvable: it might be right here (`cd "$PWD"`), so keep this
+        // directory's protection, plus whatever the text itself gives away.
+        const suspect =
+          sh.presumeState ||
+          SUSPECT_CD.test(text.replace(/\\/g, "")) ||
+          substitutions(target).some((body) =>
+            shellWords(body).some((w) => SUSPECT_CD.test(wordText(w))),
+          );
+        return {
+          dir: null,
+          state: suspect || where.state,
+          nearState: suspect || where.nearState,
+          guarded: suspect || sh.presumeGuarded || where.guarded,
+        };
+      }),
+    );
+  }
+
   function changeDir(verb: string, args: WordFragment[][], sh: Shell): Shell {
     let k = 0;
     while (k < args.length) {
@@ -907,29 +1037,11 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
       } else if (sh.steered && !path.isAbsolute(text) && !text.startsWith("$")) {
         next = [LOST];
       } else {
-        next = union(
-          sh.cur.map((where) => {
-            const abs = resolveWordFrom(target, home, where.dir);
-            if (abs) return stateFor(abs);
-            // Unresolvable: it might be right here (`cd "$PWD"`), so keep this
-            // directory's protection, plus whatever the text itself gives away.
-            const suspect =
-              presumeState ||
-              SUSPECT_CD.test(text.replace(/\\/g, "")) ||
-              substitutions(target).some((body) =>
-                shellWords(body).some((w) => SUSPECT_CD.test(wordText(w))),
-              );
-            return {
-              dir: null,
-              state: suspect || where.state,
-              nearState: suspect || where.nearState,
-              guarded: suspect || presumeGuarded || where.guarded,
-            };
-          }),
-        );
+        next = targetStates(target, sh);
       }
       if (verb === "pushd") stack.push(sh.cur);
     }
+    if (++cdCount > MAX_CDS) next = [worst(next)];
     return { ...sh, cur: next, oldpwd: sh.cur, stack, moved: true };
   }
 }
@@ -1069,12 +1181,13 @@ export function classifyBash(commandRaw: string, home = "", cwd = ""): BashClass
   const cd = scanCdContext(command, home, cwd);
   // Computed for every kind (incl. compound/unknown) so the policy layer's
   // sensitive-read floor fires through a pipe; see BashClass.sensitiveReadPaths.
-  const sensitiveReadPaths = [...extractReadTargets(command), ...cd.readPaths];
+  const sensitiveReadPaths = extractReadTargets(command);
   const loom = scanLoomWrite(command, home);
   const base = {
     sensitiveReadPaths,
     loomWriteTargets: [...loom.targets, ...cd.writeTargets],
     guardedCwd: cd.guarded,
+    cdReadPaths: cd.readPaths,
   };
   for (const [re, why] of CATASTROPHIC) {
     if (re.test(command)) return { kind: "catastrophic", reason: why, readPaths: [], ...base };

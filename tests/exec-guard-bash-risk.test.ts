@@ -603,12 +603,12 @@ describe("classifyBash -- a cd changes what relative operands mean", () => {
 
   it("resolves read operands against the dir the cd landed in", () => {
     const r = classifyBash("cd ~/.loom && cat config.json", H, C);
-    expect(r.sensitiveReadPaths).toContain(`${H}/.loom/config.json`);
+    expect(r.cdReadPaths).toContain(`${H}/.loom/config.json`);
     expect(r.guardedCwd).toBe(true);
   });
   it("resolves relative hops from the request's cwd", () => {
     expect(classifyBash("cd ../.loom && echo x > a", H, C).kind).toBe("catastrophic");
-    expect(classifyBash("cd .. && cat .netrc", H, C).sensitiveReadPaths).toContain(`${H}/.netrc`);
+    expect(classifyBash("cd .. && cat .netrc", H, C).cdReadPaths).toContain(`${H}/.netrc`);
   });
   it("hands a carved-out target reached by cd to the policy layer to realpath", () => {
     const r = classifyBash("cd ~/.loom/analyses/proj && echo x > out.txt", H, C);
@@ -620,11 +620,13 @@ describe("classifyBash -- a cd changes what relative operands mean", () => {
     const r = classifyBash("cd ~/work/x && echo > y && cat notes.txt", H, C);
     expect(r.loomWriteTargets).toEqual([]);
     expect(r.guardedCwd).toBe(false);
-    expect(r.sensitiveReadPaths).toEqual(["notes.txt", `${H}/work/x/notes.txt`]);
+    expect(r.sensitiveReadPaths).toEqual(["notes.txt"]);
+    expect(r.cdReadPaths).toEqual([`${H}/work/x/notes.txt`]);
   });
   it("is unchanged when no cd happened", () => {
     const r = classifyBash("cat notes.txt | wc -l", H, C);
     expect(r.sensitiveReadPaths).toEqual(["notes.txt"]);
+    expect(r.cdReadPaths).toEqual([]);
     expect(r.guardedCwd).toBe(false);
   });
   it("a heredoc delimiter or fd duplication is not a write target", () => {
