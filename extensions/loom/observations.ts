@@ -29,7 +29,7 @@ import {
   VERSION_MAX,
   capObservation,
   normalizeSignature,
-  rawSignatureLine,
+  signatureStageLeaks,
   observationByteLength,
   scanObservationForLeaks,
   textLeaks,
@@ -376,15 +376,6 @@ export interface ObservationProblems {
 }
 
 /**
- * Everything that stops a built observation from going, in one place so the
- * delivery path, its precheck and the replay can't drift apart. `rawSignature`
- * is the text the signature was built from, passed only for the `full` shape:
- * the full leak table runs over the raw line too, and any hit there refuses the
- * whole observation -- the normalizer and the cap both erase shapes the table
- * would have caught. The `structured` shape never carries that text, so there
- * is nothing of it to scan.
- */
-/**
  * The builder's admission rules, re-applied to a finished observation. The
  * builder only ever produces admissible fields, so on its output this is
  * empty; it is here for the payloads that did not come straight from the
@@ -423,6 +414,14 @@ function admissionProblems(obs: Observation): string[] {
   return out;
 }
 
+/**
+ * Everything that stops a built observation from going as built. `rawSignature`
+ * is the text the signature was built from, passed only for the `full` shape:
+ * the staged scan (signatureStageLeaks) runs over it, reported as
+ * `signature.staged:<pattern>`, because the normalizer and the cap can each
+ * erase a shape the final scan would have caught. buildCheckedObservation
+ * turns any signature problem into a withheld signature rather than a refusal.
+ */
 export function observationProblems(
   obs: Observation,
   raw: { rawSignature?: string } = {},
@@ -431,11 +430,80 @@ export function observationProblems(
   const errors = [...(validity.ok ? [] : validity.errors), ...admissionProblems(obs)];
   const leaks = scanObservationForLeaks(obs);
   if (raw.rawSignature !== undefined) {
-    for (const name of textLeaks(rawSignatureLine(raw.rawSignature))) {
-      leaks.push(`signature.raw:${name}`);
+    for (const name of signatureStageLeaks(raw.rawSignature)) {
+      leaks.push(`signature.staged:${name}`);
     }
   }
   return { errors, leaks };
+}
+
+export interface CheckedObservation extends ObservationProblems {
+  obs: Observation;
+  /**
+   * Pattern names that made the signature unsendable, when it was withheld
+   * and the rest kept. Empty when nothing was withheld.
+   */
+  withheld: string[];
+}
+
+const isSignatureProblem = (p: string): boolean => /^signature[.:]/.test(p);
+const patternOf = (p: string): string => p.slice(p.lastIndexOf(":") + 1);
+
+/**
+ * Build and check in one step. In the `full` (ask) shape a signature that
+ * trips the staged scan, or the validator, is WITHHELD rather than refusing
+ * the observation: it becomes `unknown` and everything else -- the structured
+ * fields and a description that passed on its own -- is checked again and
+ * kept, so the user still decides on what is left. Anything else that fails
+ * still fails.
+ */
+export function buildCheckedObservation(
+  facts: ObservationFacts,
+  env: ObservationEnvelope,
+  shape: ObservationShape,
+): CheckedObservation {
+  const obs = buildObservation(facts, env, shape);
+  if (shape !== "full") return { obs, ...observationProblems(obs), withheld: [] };
+  const first = observationProblems(obs, { rawSignature: facts.rawSignature });
+  const signatureProblems = [...first.errors, ...first.leaks].filter(isSignatureProblem);
+  if (signatureProblems.length === 0) return { obs, ...first, withheld: [] };
+  const kept = { ...obs, signature: UNKNOWN_SIGNATURE };
+  return {
+    obs: kept,
+    ...observationProblems(kept),
+    withheld: [...new Set(signatureProblems.map(patternOf))],
+  };
+}
+
+const WITHHELD_PHRASES: Record<string, string> = {
+  url: "a URL",
+  "scheme-url": "a URL",
+  email: "an address",
+  "user-at-host": "an address",
+  hostname: "a host name",
+  "host-port": "a host name",
+  ipv4: "a network address",
+  ipv6: "a network address",
+  "home-path": "a path",
+  "windows-path": "a path",
+  "tilde-path": "a path",
+  "tilde-user": "a path",
+  "path-separator": "a path",
+  "long-hex": "an id",
+  uuid: "an id",
+  "galaxy-id-phrase": "an id",
+  "id-phrase": "an id",
+  "non-ascii": "non-ASCII text",
+};
+
+/** The one-line reason the confirm shows when the error text was withheld. */
+export function withheldReason(names: string[]): string {
+  const phrases = [...new Set(names.map((n) => WITHHELD_PHRASES[n] ?? "something identifying"))];
+  const list =
+    phrases.length <= 1
+      ? (phrases[0] ?? "something identifying")
+      : `${phrases.slice(0, -1).join(", ")} and ${phrases[phrases.length - 1]}`;
+  return `error text withheld: it contained ${list}`;
 }
 
 /** The impure half: who and where this install is. No secrets, no hostname. */

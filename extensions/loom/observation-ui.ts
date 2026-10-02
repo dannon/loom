@@ -37,7 +37,8 @@ export const PRIVACY_STATEMENT =
   "Only the fields above are sent, to the Galaxy team's private intake queue, tied to " +
   "a random per-install token rather than any account or machine identity. In `ask` " +
   "mode the signature and description are shown to you in full and sent only if you " +
-  "say yes. In `auto` mode no free text is sent at all -- no error text and no " +
+  "say yes; error text that still looks like it names a host, address, path or id " +
+  "after scrubbing is withheld, and you are offered the rest. In `auto` mode no free text is sent at all -- no error text and no " +
   "description, only the structured fields; `/observe` always asks first, in any mode. " +
   "Never transcript text, data values, file " +
   "paths, history or dataset ids, or URLs. Rows expire after 180 days and " +
@@ -75,11 +76,13 @@ export function renderObservationForConfirm(obs: Observation): string {
 export async function confirmObservation(
   obs: Observation,
   ctx: ExtensionContext,
+  note?: string,
 ): Promise<boolean> {
   try {
     return await ctx.ui.confirm(
       "Send this observation to the Galaxy team?",
       `Loom hit something that looks like a failure pattern. ${PURPOSE_STATEMENT}\n\n` +
+        (note ? `${note}\n\n` : "") +
         `${renderObservationForConfirm(obs)}\n\n${PRIVACY_STATEMENT}`,
     );
   } catch {

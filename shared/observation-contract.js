@@ -97,12 +97,7 @@ const NORMALIZERS = Object.freeze([
   [/\d{5,}/g, "<n>"],
 ]);
 
-/**
- * The line normalizeSignature reads, before any rewrite or cap. The client-side
- * leak scan runs over this as well as over the result, because the rewrites
- * and the cap can each erase the very shape a rule would have refused: a port
- * becomes `<n>`, a hostname is cut mid-label at the length limit.
- */
+/** The line normalizeSignature reads, before any rewrite or cap. */
 export function rawSignatureLine(text) {
   return String(text ?? "")
     .split(/\r?\n/)[0]
@@ -119,6 +114,40 @@ export function normalizeSignature(text) {
   // The intake route clusters on (kind, signature), so empty is not a legal
   // value. One owner of the fallback, here rather than in each caller.
   return s || UNKNOWN_SIGNATURE;
+}
+
+// Client rules NOT run at the early stage, because the later rewrites remove
+// what they match whole rather than mutilating it: a rooted path becomes
+// <path>, and an id phrase's long number becomes <id> or <n>. A relative path
+// or a short id number survives those rewrites and is caught at the full-table
+// stage. Running them early would withhold nearly every real Galaxy error.
+const EARLY_STAGE_SKIP = new Set(["path-separator", "id-phrase"]);
+
+/**
+ * The staged leak scan for a signature, as pattern names (empty when clean).
+ * Each shape is scanned while it is still intact, so no rewrite can hide one:
+ *
+ *   1. apply the <url> and <email> rewrites, which consume a whole token and
+ *      can't create or hide another shape;
+ *   2. run the client table over that text -- the shapes the <path>, <id> and
+ *      <n> rewrites could erase or mutilate (galaxyprod:12345 -> galaxyprod:<n>,
+ *      a UUID losing its first block to <n>);
+ *   3. apply the rest, then run the full table over the normalized text before
+ *      the length cap, so a host cut mid-label at the cap is still seen.
+ *
+ * The final capped value is scanned again with the rest of the payload by
+ * scanObservationForLeaks.
+ */
+export function signatureStageLeaks(text) {
+  let s = rawSignatureLine(text);
+  for (const [re, repl] of NORMALIZERS.slice(0, 2)) s = s.replace(re, repl);
+  const hits = [];
+  for (const [name, re] of CLIENT_LEAK_PATTERNS) {
+    if (!EARLY_STAGE_SKIP.has(name) && re.test(s)) hits.push(name);
+  }
+  for (const [re, repl] of NORMALIZERS.slice(2)) s = s.replace(re, repl);
+  hits.push(...textLeaks(s));
+  return [...new Set(hits)];
 }
 
 // The leak table. No `g` flags: `test()` on a global regex is stateful and
@@ -309,8 +338,8 @@ export function validateObservation(obj) {
 // Client-side only, on top of LEAK_PATTERNS, and deliberately NOT part of the
 // wire validator the intake Worker mirrors: these are the shapes the contract
 // table lets through that still name a machine, a person or a record. They run
-// over every string in the payload (scanObservationForLeaks) and over the raw
-// error line the signature came from. Structured fields are also admitted from
+// over every string in the payload (scanObservationForLeaks) and, staged, over
+// the error line the signature came from (signatureStageLeaks). Structured fields are also admitted from
 // allowlists in the builder, so for them this is the second line, not the
 // first.
 //
@@ -341,8 +370,8 @@ export const CLIENT_LEAK_PATTERNS = Object.freeze([
   ]),
   // A single-label host with a port: galaxyprod:8080, galaxy_prod:8080 (a
   // Docker service name), localhost:80. Ports 80 and 443 by name, otherwise
-  // four to six digits (six, because the normalizer only rewrites from five up
-  // and the raw line is what this sees), so `line:42` and `HTTPError:400` stay
+  // four to six digits (six, because the early stage of the signature scan
+  // sees the port before <n> does), so `line:42` and `HTTPError:400` stay
   // out.
   Object.freeze(["host-port", /(?<![\w-])[A-Za-z][\w-]*:(?:80|443|\d{4,6})\b/]),
   // Anything at anything: the contract's email rule needs a dotted domain, and

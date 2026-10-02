@@ -27,18 +27,18 @@ import type {
 import {
   appendSentLog,
   appendToObservationOutbox,
-  buildObservation,
+  buildCheckedObservation,
   collectObservationEnvelope,
   drainObservationOutbox,
   extractDatatypes,
   extractToolIds,
-  observationProblems,
   recordGalaxyVersionFromConnect,
   resetGalaxyVersion,
   saveRetractToken,
   sentLogEntryFor,
   shapeForMode,
   submitObservation,
+  withheldReason,
 } from "./observations.js";
 import type {
   ObservationFacts,
@@ -196,7 +196,8 @@ export interface DeliverDeps {
   installToken(): string;
   /** Gets the built observation, never the raw facts. */
   describe(obs: Observation, ctx: ExtensionContext): Promise<string>;
-  confirm(obs: Observation, ctx: ExtensionContext): Promise<boolean>;
+  /** `note` is a one-line reason shown above the payload, e.g. why text was withheld. */
+  confirm(obs: Observation, ctx: ExtensionContext, note?: string): Promise<boolean>;
   submit(obs: Observation): Promise<SubmitObservationResult>;
   record(kind: string, payload: Record<string, unknown>): void;
 }
@@ -206,6 +207,8 @@ export interface BuiltObservation {
   valid: boolean;
   errors: string[];
   leaks: string[];
+  /** Patterns that got the signature withheld (ask only); empty otherwise. */
+  withheld: string[];
 }
 
 /**
@@ -221,21 +224,18 @@ export function buildAndRecordObservation(
   deps: Pick<DeliverDeps, "installToken" | "record">,
   shape: ObservationShape,
 ): BuiltObservation {
-  const obs = buildObservation(
+  const { obs, errors, leaks, withheld } = buildCheckedObservation(
     { ...facts, description },
     collectObservationEnvelope(deps.installToken()),
     shape,
-  );
-  const { errors, leaks } = observationProblems(
-    obs,
-    shape === "full" ? { rawSignature: facts.rawSignature } : {},
   );
   const valid = errors.length === 0;
   // No free text in this row, ever. It is written before anyone has agreed to
   // anything -- before the ask confirm, and for /observe the signature is the
   // user's own sentence -- and a refused payload's text is exactly the text
   // that may carry the leak. The structured fields are safe to show: they are
-  // admitted from allowlists by the builder.
+  // admitted from allowlists by the builder. A withheld signature is named by
+  // the patterns it tripped, never by its text.
   deps.record("observation.built", {
     kind: obs.kind,
     trigger: obs.trigger,
@@ -246,10 +246,11 @@ export function buildAndRecordObservation(
     datatypes: obs.datatypes.join(","),
     server: obs.galaxy.server,
     descriptionLength: obs.description.length,
+    signatureWithheld: withheld.join(","),
     valid,
     leakScan: leaks.length === 0 ? "clean" : "dirty",
   });
-  return { obs, valid, errors, leaks };
+  return { obs, valid, errors, leaks, withheld };
 }
 
 function isClean(p: ObservationProblems): boolean {
@@ -284,15 +285,15 @@ export async function deliverObservation(
   let description = "";
   const precheck =
     shape === "full"
-      ? buildObservation(
+      ? buildCheckedObservation(
           { ...facts, description: "" },
           collectObservationEnvelope(deps.installToken()),
           shape,
         )
       : undefined;
-  if (precheck && isClean(observationProblems(precheck, { rawSignature: facts.rawSignature }))) {
+  if (precheck && isClean(precheck)) {
     try {
-      description = await deps.describe(precheck, ctx);
+      description = await deps.describe(precheck.obs, ctx);
     } catch {
       // A description is a nice-to-have; the structured observation is the point.
       description = "";
@@ -302,7 +303,12 @@ export async function deliverObservation(
   // The install token is written to config here, before any confirm, because a
   // valid payload needs one and the confirm has to show the real payload. It
   // is local state until the user says send.
-  const { obs, valid, errors, leaks } = buildAndRecordObservation(facts, description, deps, shape);
+  const { obs, valid, errors, leaks, withheld } = buildAndRecordObservation(
+    facts,
+    description,
+    deps,
+    shape,
+  );
 
   if (!valid || leaks.length > 0) {
     // Fail closed. Nothing is sent, and only field and pattern names are
@@ -315,7 +321,8 @@ export async function deliverObservation(
     return "invalid";
   }
 
-  if (deps.mode === "ask" && !(await deps.confirm(obs, ctx))) {
+  const note = withheld.length > 0 ? withheldReason(withheld) : undefined;
+  if (deps.mode === "ask" && !(await deps.confirm(obs, ctx, note))) {
     // No signature: the user said no, and for /observe it is their own words.
     deps.record("observation.declined", { kind: obs.kind });
     return "declined";

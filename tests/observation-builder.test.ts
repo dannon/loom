@@ -401,7 +401,11 @@ describe("buildObservation", () => {
 });
 
 import { UNKNOWN_SIGNATURE, normalizeSignature } from "../shared/observation-contract.js";
-import { observationProblems } from "../extensions/loom/observations.js";
+import {
+  buildCheckedObservation,
+  observationProblems,
+  withheldReason,
+} from "../extensions/loom/observations.js";
 import { acceptDescription } from "../extensions/loom/observation-ui.js";
 
 describe("buildObservation in the structured (auto) shape", () => {
@@ -554,23 +558,23 @@ describe("the leak scan runs before normalization and truncation", () => {
   it("refuses a host whose port the normalizer would have turned into <n>", () => {
     const raw = "Connection to galaxyprod:12345 refused";
     expect(normalizeSignature(raw)).toBe("Connection to galaxyprod:<n> refused");
-    expect(problemsFor(raw)).toContain("signature.raw:host-port");
+    expect(problemsFor(raw)).toContain("signature.staged:host-port");
   });
 
   it("refuses a hostname the signature cap would have cut mid-label", () => {
     const a = "x".repeat(179) + " galaxy.hospital.internal";
     expect(normalizeSignature(a).endsWith("galaxy.hospital.inte")).toBe(true);
-    expect(problemsFor(a)).toContain("signature.raw:hostname");
+    expect(problemsFor(a)).toContain("signature.staged:hostname");
 
     const b = "x".repeat(176) + " galaxy.cancer-center.org failed";
     expect(normalizeSignature(b).endsWith("galaxy.cancer-center.or")).toBe(true);
-    expect(problemsFor(b)).toContain("signature.raw:hostname");
+    expect(problemsFor(b)).toContain("signature.staged:hostname");
   });
 
   it("refuses a UUID the long-number rule would have half-rewritten", () => {
     const raw = "lost 12345678-abcd-4abc-8abc-abcdefabcdef";
     expect(normalizeSignature(raw)).toBe("lost <n>-abcd-4abc-8abc-abcdefabcdef");
-    expect(problemsFor(raw)).toContain("signature.raw:uuid");
+    expect(problemsFor(raw)).toContain("signature.staged:uuid");
   });
 
   it("drops a description whose hostname the description cap would have cut", () => {
@@ -582,6 +586,56 @@ describe("the leak scan runs before normalization and truncation", () => {
     );
     expect(obs.description).toBe("");
     expect(acceptDescription(description)).toBe("");
+  });
+
+  it("withholds each of those signatures in ask and keeps the rest of the report", () => {
+    for (const rawSignature of [
+      "Connection to galaxyprod:12345 refused",
+      "x".repeat(179) + " galaxy.hospital.internal",
+      "x".repeat(176) + " galaxy.cancer-center.org failed",
+      "lost 12345678-abcd-4abc-8abc-abcdefabcdef",
+    ]) {
+      const checked = buildCheckedObservation(
+        { ...base, rawSignature, description: "A connection was refused." },
+        envelope,
+        "full",
+      );
+      expect(checked.obs.signature, rawSignature).toBe(UNKNOWN_SIGNATURE);
+      expect(checked.obs.description).toBe("A connection was refused.");
+      expect(checked.obs.mcpTool).toBe("galaxy_run_tool");
+      expect(checked.withheld.length, rawSignature).toBeGreaterThan(0);
+      expect(checked.errors).toEqual([]);
+      expect(checked.leaks).toEqual([]);
+    }
+  });
+
+  it("normalizes common real Galaxy errors and keeps them", () => {
+    for (const [rawSignature, expected] of [
+      ["Dataset 1a2b3c4d5e6f7a8b9c0d not found", "Dataset <id> not found"],
+      ["History 0123456789abcdef0123 is deleted", "History <id> is deleted"],
+      [
+        "Failed to fetch https://usegalaxy.org/api/datasets/1a2b3c4d5e6f7a8b",
+        "Failed to fetch <url>",
+      ],
+      [
+        "No such file: /galaxy/server/database/objects/0/0/1/dataset_001.dat",
+        "No such file: <path>",
+      ],
+      ["Job 12345 failed", "Job <n> failed"],
+    ]) {
+      const checked = buildCheckedObservation({ ...base, rawSignature }, envelope, "full");
+      expect(checked.obs.signature, rawSignature).toBe(expected);
+      expect(checked.withheld, rawSignature).toEqual([]);
+      expect(checked.errors).toEqual([]);
+      expect(checked.leaks).toEqual([]);
+    }
+  });
+
+  it("says why in one line, by kind of shape and never by value", () => {
+    expect(withheldReason(["host-port"])).toBe("error text withheld: it contained a host name");
+    expect(withheldReason(["uuid", "path-separator", "long-hex"])).toBe(
+      "error text withheld: it contained an id and a path",
+    );
   });
 
   it("does not scan raw text the structured shape never carries", () => {

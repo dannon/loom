@@ -78,9 +78,23 @@ describe("confirmObservation", () => {
 
   it("says plainly what each mode sends", () => {
     expect(PRIVACY_STATEMENT).toContain(
-      "In `ask` mode the signature and description are shown to you in full and sent only if you say yes.",
+      "In `ask` mode the signature and description are shown to you in full and sent only if you say yes; error text that still looks like it names a host, address, path or id after scrubbing is withheld, and you are offered the rest.",
     );
     expect(PRIVACY_STATEMENT).toContain("In `auto` mode no free text is sent at all");
+  });
+
+  it("puts the withheld-text reason above the payload", async () => {
+    const confirm = vi.fn().mockResolvedValue(true);
+    const ctx = { hasUI: true, ui: { confirm } } as unknown as ExtensionContext;
+    await confirmObservation(
+      { ...obs, signature: "unknown" },
+      ctx,
+      "error text withheld: it contained a host name",
+    );
+    const message = String(confirm.mock.calls[0][1]);
+    expect(message.indexOf("error text withheld: it contained a host name")).toBeLessThan(
+      message.indexOf("signature: unknown"),
+    );
   });
 
   it("returns false rather than throwing when the UI is gone", async () => {

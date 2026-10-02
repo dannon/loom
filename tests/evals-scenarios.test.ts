@@ -177,7 +177,7 @@ import {
   buildObservation,
   extractDatatypes,
   extractToolIds,
-  observationProblems,
+  buildCheckedObservation,
 } from "../extensions/loom/observations";
 import { factsForToolResult } from "../extensions/loom/observation-triggers";
 import { scanObservationForLeaks, validateObservation } from "../shared/observation-contract.js";
@@ -216,26 +216,25 @@ describe("observation-redaction-hostile-result: the fixture against the real pip
     "~/bin",
   ];
 
-  it("refuses every hostile line on the raw scan and passes only the clean one", () => {
-    expect(entries).toHaveLength(5);
-
+  it("scrubs the hostile lines, and withholds only the signature the staging exists for", () => {
+    expect(entries).toHaveLength(6);
+    const scrubbed =
+      "ToolExecutionError: dataset <id> in history <n> failed; wrote <path> see <url> mail <email>";
+    const expected = [
+      scrubbed,
+      "HTTPError: 400 Bad Request from <path>",
+      scrubbed,
+      scrubbed,
+      "ToolExecutionError: Job <n> failed because an input is in state 'error'",
+      "unknown",
+    ];
     entries.forEach((entry, i) => {
-      const facts = factsForToolResult(entry.tool, entry.args, entry.text);
-      expect(facts, entry.text).not.toBeNull();
-      const obs = buildObservation(facts!, envelope, "full");
-      const { errors, leaks } = observationProblems(obs, { rawSignature: facts!.rawSignature });
-      if (i < 4) {
-        expect(
-          leaks.some((l) => l.startsWith("signature.raw:")),
-          entry.text,
-        ).toBe(true);
-      } else {
-        expect(errors, entry.text).toEqual([]);
-        expect(leaks, entry.text).toEqual([]);
-        expect(obs.signature).toBe(
-          "ToolExecutionError: Job <n> failed because an input is in state 'error'",
-        );
-      }
+      const facts = factsForToolResult(entry.tool, entry.args, entry.text)!;
+      const checked = buildCheckedObservation(facts, envelope, "full");
+      expect(checked.errors, entry.text).toEqual([]);
+      expect(checked.leaks, entry.text).toEqual([]);
+      expect(checked.obs.signature, entry.text).toBe(expected[i]);
+      expect(checked.withheld, entry.text).toEqual(i === 5 ? ["host-port"] : []);
     });
   });
 

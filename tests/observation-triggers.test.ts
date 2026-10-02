@@ -206,31 +206,52 @@ describe("deliverObservation", () => {
     expect(JSON.stringify(d.rows)).not.toMatch(/Alice|Smith/);
   });
 
-  it("refuses an ask payload whose raw line carried an id the normalizer rewrote", async () => {
-    const confirm = vi.fn();
-    const describe = vi.fn();
-    const d = deps({
-      mode: "ask",
-      confirm,
-      describe,
-      submit: async () => {
-        throw new Error("must not send");
-      },
-    });
+  it("withholds the signature, not the report, when the staged scan trips in ask", async () => {
+    const confirm = vi.fn().mockResolvedValue(true);
+    const describe = vi.fn().mockResolvedValue("A connection to the server was refused.");
+    const submit = vi.fn().mockResolvedValue({ ok: true, status: 202, queueable: false });
+    const d = deps({ mode: "ask", confirm, describe, submit });
     const outcome = await deliverObservation(
-      {
-        ...facts,
-        rawSignature: "ToolExecutionError: dataset 2a56fb8e4c1d9f70b3ac55e1d2f80911 failed",
-      },
+      { ...facts, rawSignature: "Connection to galaxyprod:12345 refused" },
       ctx,
       d,
     );
-    expect(outcome).toBe("invalid");
-    expect(describe).not.toHaveBeenCalled();
-    expect(confirm).not.toHaveBeenCalled();
-    expect(String(d.rows.find(([k]) => k === "observation.invalid")?.[1].leaks)).toContain(
-      "signature.raw:long-hex",
-    );
+    expect(outcome).toBe("sent");
+    expect(describe).toHaveBeenCalledOnce();
+    const [shown, , note] = confirm.mock.calls[0];
+    expect((shown as Observation).signature).toBe("unknown");
+    expect(note).toBe("error text withheld: it contained a host name");
+    const sent = submit.mock.calls[0][0] as Observation;
+    expect(sent.signature).toBe("unknown");
+    expect(sent.description).toBe("A connection to the server was refused.");
+    expect(sent.mcpTool).toBe("galaxy_run_tool");
+    expect(JSON.stringify(sent)).not.toContain("galaxyprod");
+    expect(d.rows[0][1].signatureWithheld).toBe("host-port");
+    expect(JSON.stringify(d.rows)).not.toContain("galaxyprod");
+  });
+
+  it("normalizes and sends common real Galaxy errors in ask, with nothing withheld", async () => {
+    for (const [raw, expected] of [
+      ["Dataset 1a2b3c4d5e6f7a8b9c0d not found", "Dataset <id> not found"],
+      ["History 0123456789abcdef0123 is deleted", "History <id> is deleted"],
+      [
+        "Failed to fetch https://usegalaxy.org/api/datasets/1a2b3c4d5e6f7a8b",
+        "Failed to fetch <url>",
+      ],
+      [
+        "No such file: /galaxy/server/database/objects/0/0/1/dataset_001.dat",
+        "No such file: <path>",
+      ],
+      ["Job 12345 failed", "Job <n> failed"],
+    ]) {
+      const confirm = vi.fn().mockResolvedValue(true);
+      const submit = vi.fn().mockResolvedValue({ ok: true, status: 202, queueable: false });
+      const d = deps({ mode: "ask", confirm, submit });
+      expect(await deliverObservation({ ...facts, rawSignature: raw }, ctx, d), raw).toBe("sent");
+      expect(confirm.mock.calls[0][2], raw).toBeUndefined();
+      expect((submit.mock.calls[0][0] as Observation).signature, raw).toBe(expected);
+      expect(d.rows[0][1].signatureWithheld, raw).toBe("");
+    }
   });
 
   it("does not send when collection is turned off while the description is being written", async () => {
@@ -437,32 +458,23 @@ describe("deliverObservation", () => {
     expect(String(invalid?.[1].errors)).not.toContain("alice");
   });
 
-  it("refuses to send when the whole-payload leak scan is dirty", async () => {
-    const d = deps({
-      mode: "ask",
-      submit: async () => {
-        throw new Error("must not send");
-      },
-    });
+  it("withholds a signature only the client-side table catches, and sends the rest", async () => {
+    const submit = vi.fn().mockResolvedValue({ ok: true, status: 202, queueable: false });
+    const d = deps({ mode: "ask", submit });
     // Legal under the wire validator, caught only by the client-side table.
     const outcome = await deliverObservation(
       { ...facts, rawSignature: "connection refused by 10.12.4.7 port 8080" },
       ctx,
       d,
     );
-    expect(outcome).toBe("invalid");
-    expect(String(d.rows.find(([k]) => k === "observation.invalid")?.[1].leaks)).toContain(
-      "signature:ipv4",
-    );
+    expect(outcome).toBe("sent");
+    expect((submit.mock.calls[0][0] as Observation).signature).toBe("unknown");
+    expect(String(d.rows[0][1].signatureWithheld)).toContain("ipv4");
   });
 
-  it("keeps a rejected payload's fields out of the activity log", async () => {
-    const d = deps({
-      mode: "ask",
-      submit: async () => {
-        throw new Error("must not send");
-      },
-    });
+  it("keeps withheld text and dropped tool ids out of the activity log", async () => {
+    const submit = vi.fn().mockResolvedValue({ ok: true, status: 202, queueable: false });
+    const d = deps({ mode: "ask", submit });
     await deliverObservation(
       { ...facts, toolIds: ["/home/alice/tool.xml"], rawSignature: "refused dataset 42 for alice" },
       ctx,
@@ -472,14 +484,13 @@ describe("deliverObservation", () => {
     expect(logged).not.toContain("alice");
     expect(logged).not.toContain("dataset 42");
     expect("signature" in d.rows[0][1]).toBe(false);
+    expect(JSON.stringify(submit.mock.calls[0][0])).not.toMatch(/alice|dataset 42/);
   });
 
   it("does not ask for a description when the structured half can't be sent", async () => {
     const describe = vi.fn().mockResolvedValue("x");
-    const d = deps({ mode: "ask", describe, confirm: vi.fn() });
-    expect(await deliverObservation({ ...facts, rawSignature: "refused dataset 42" }, ctx, d)).toBe(
-      "invalid",
-    );
+    const d = deps({ mode: "ask", describe, confirm: vi.fn(), installToken: () => "NOT-HEX" });
+    expect(await deliverObservation(facts, ctx, d)).toBe("invalid");
     expect(describe).not.toHaveBeenCalled();
     expect(d.confirm).not.toHaveBeenCalled();
   });
