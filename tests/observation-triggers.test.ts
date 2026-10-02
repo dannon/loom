@@ -329,6 +329,20 @@ describe("deliverObservation", () => {
     expect(d.state.delivered).toBe(0);
   });
 
+  it("hands the description prompt the built observation, never the raw facts", async () => {
+    const raw = factsForToolResult(
+      "mcp",
+      { server: "galaxy", tool: "alice@clinic.org", args: {} },
+      "Unknown tool",
+    )!;
+    expect(raw.mcpTool).toBe("galaxy_alice@clinic.org");
+    const describe = vi.fn().mockResolvedValue("");
+    const d = deps({ mode: "ask", describe });
+    await deliverObservation(raw, ctx, d);
+    expect(describe).toHaveBeenCalledOnce();
+    expect(JSON.stringify(describe.mock.calls[0][0])).not.toContain("alice");
+  });
+
   it("collects nothing when the mode is off", async () => {
     const d = deps({
       mode: "off",
