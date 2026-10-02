@@ -16,6 +16,7 @@ import { refreshGalaxyHistory } from "./galaxy-history.js";
 import { formatGalaxyTooltip } from "./galaxy-tooltip.js";
 import { PromptQueue, queuedPreview } from "./prompt-queue.js";
 import { isHandledPrompt } from "./handled-prompt.js";
+import { attachFilePathDrop } from "./file-drop.js";
 import { FeedbackDraftStore } from "./feedback-draft.js";
 import {
   ProviderFieldStore,
@@ -2701,6 +2702,15 @@ inputEl.addEventListener("input", () => {
   inputEl.style.height = Math.min(inputEl.scrollHeight, 150) + "px";
   maybeOpenSlashPopup();
 });
+
+attachFilePathDrop(
+  inputEl,
+  (file) => window.orbit.getPathForFile(file),
+  () =>
+    chat.addInfoMessage(
+      "Could not read a local path for this file. Drag it from your file manager or Orbit's Files pane.",
+    ),
+);
 
 inputEl.addEventListener("blur", () => {
   // Defer so a click inside the popup can still fire.

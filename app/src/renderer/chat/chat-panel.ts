@@ -575,6 +575,14 @@ export class ChatPanel {
       });
     });
 
+    // Cmd/Ctrl+C: the constructor's copy listener fills the clipboard. Keep the
+    // selection (users often copy and keep going) but dismiss the button for
+    // it, the same way a click elsewhere does, until the selection changes.
+    this.container.addEventListener("copy", () => {
+      btn.hidden = true;
+      dismissal.suppress(currentSignature());
+    });
+
     // Keyboard selection (Shift+arrow, Ctrl+A, etc.) — selectionchange is safe
     // here because there's no mousedown race.
     document.addEventListener("selectionchange", () => {
