@@ -77,6 +77,8 @@ export interface Observation {
   description: string;
 }
 
+export declare function rawSignatureLine(text: unknown): string;
+export declare function signatureStageLeaks(text: unknown): string[];
 export declare function normalizeSignature(text: unknown): string;
 export declare const LEAK_PATTERNS: ReadonlyArray<readonly [string, RegExp]>;
 export declare function validateObservation(
@@ -84,7 +86,6 @@ export declare function validateObservation(
 ): { ok: true } | { ok: false; errors: string[] };
 export declare const CLIENT_LEAK_PATTERNS: ReadonlyArray<readonly [string, RegExp]>;
 export declare function textLeaks(text: unknown): string[];
-export declare function looksLikeHost(text: unknown): boolean;
 export declare function scanObservationForLeaks(obs: unknown): string[];
 export declare function capObservation(obs: unknown): Observation;
 export declare function observationByteLength(obs: unknown): number;

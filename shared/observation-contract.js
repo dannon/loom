@@ -97,11 +97,16 @@ const NORMALIZERS = Object.freeze([
   [/\d{5,}/g, "<n>"],
 ]);
 
-export function normalizeSignature(text) {
-  let s = String(text ?? "")
+/** The line normalizeSignature reads, before any rewrite or cap. */
+export function rawSignatureLine(text) {
+  return String(text ?? "")
     .split(/\r?\n/)[0]
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export function normalizeSignature(text) {
+  let s = rawSignatureLine(text);
   for (const [re, repl] of NORMALIZERS) s = s.replace(re, repl);
   // Plain slice: appending an ellipsis would make the result non-ASCII and the
   // validator would then reject every truncated signature.
@@ -109,6 +114,40 @@ export function normalizeSignature(text) {
   // The intake route clusters on (kind, signature), so empty is not a legal
   // value. One owner of the fallback, here rather than in each caller.
   return s || UNKNOWN_SIGNATURE;
+}
+
+// Client rules NOT run at the early stage, because the later rewrites remove
+// what they match whole rather than mutilating it: a rooted path becomes
+// <path>, and an id phrase's long number becomes <id> or <n>. A relative path
+// or a short id number survives those rewrites and is caught at the full-table
+// stage. Running them early would withhold nearly every real Galaxy error.
+const EARLY_STAGE_SKIP = new Set(["path-separator", "id-phrase"]);
+
+/**
+ * The staged leak scan for a signature, as pattern names (empty when clean).
+ * Each shape is scanned while it is still intact, so no rewrite can hide one:
+ *
+ *   1. apply the <url> and <email> rewrites, which consume a whole token and
+ *      can't create or hide another shape;
+ *   2. run the client table over that text -- the shapes the <path>, <id> and
+ *      <n> rewrites could erase or mutilate (galaxyprod:12345 -> galaxyprod:<n>,
+ *      a UUID losing its first block to <n>);
+ *   3. apply the rest, then run the full table over the normalized text before
+ *      the length cap, so a host cut mid-label at the cap is still seen.
+ *
+ * The final capped value is scanned again with the rest of the payload by
+ * scanObservationForLeaks.
+ */
+export function signatureStageLeaks(text) {
+  let s = rawSignatureLine(text);
+  for (const [re, repl] of NORMALIZERS.slice(0, 2)) s = s.replace(re, repl);
+  const hits = [];
+  for (const [name, re] of CLIENT_LEAK_PATTERNS) {
+    if (!EARLY_STAGE_SKIP.has(name) && re.test(s)) hits.push(name);
+  }
+  for (const [re, repl] of NORMALIZERS.slice(2)) s = s.replace(re, repl);
+  hits.push(...textLeaks(s));
+  return [...new Set(hits)];
 }
 
 // The leak table. No `g` flags: `test()` on a global regex is stateful and
@@ -298,10 +337,11 @@ export function validateObservation(obj) {
 
 // Client-side only, on top of LEAK_PATTERNS, and deliberately NOT part of the
 // wire validator the intake Worker mirrors: these are the shapes the contract
-// table lets through that still name a machine, a person or a record. They
-// apply to the two free-text fields; structured fields get shape checks in the
-// builder instead. Known false positive, in the fail-closed direction: a
-// filename with an extension after a slash.
+// table lets through that still name a machine, a person or a record. They run
+// over every string in the payload (scanObservationForLeaks) and, staged, over
+// the error line the signature came from (signatureStageLeaks). Structured fields are also admitted from
+// allowlists in the builder, so for them this is the second line, not the
+// first.
 //
 // Real top-level domains plus the usual private suffixes. A dotted run counts
 // as a host only when its LAST label is one of these: that is what keeps
@@ -319,47 +359,52 @@ const HOST_SUFFIXES = [
   "internal|local|lan|corp|intranet|private|home|test|example|invalid|localhost|localdomain",
 ].join("|");
 export const CLIENT_LEAK_PATTERNS = Object.freeze([
+  // Bounded by "not a host character" rather than \b, so a host glued to a
+  // word character (galaxy.cancer-center.org_backup) still counts.
   Object.freeze([
     "hostname",
-    new RegExp(`\\b[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.(?:${HOST_SUFFIXES})\\b`, "i"),
+    new RegExp(
+      `(?<![A-Za-z0-9-])[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.(?:${HOST_SUFFIXES})(?![A-Za-z0-9-])`,
+      "i",
+    ),
   ]),
-  // A single-label host with a port: galaxyprod:8080, localhost:8443. Four or
-  // five digits, so `line:42` and `HTTPError:400` stay out.
-  Object.freeze(["host-port", /\b[A-Za-z][A-Za-z0-9-]*:\d{4,5}\b/]),
-  // The contract's email rule needs a dotted domain; alice@localhost doesn't.
-  Object.freeze(["user-at-host", /[A-Za-z0-9._%+-]+@[A-Za-z][A-Za-z0-9-]*/]),
-  Object.freeze(["ipv4", /\b\d{1,3}(?:\.\d{1,3}){3}\b/]),
+  // A single-label host with a port: galaxyprod:8080, galaxy_prod:8080 (a
+  // Docker service name), localhost:80. Ports 80 and 443 by name, otherwise
+  // four to six digits (six, because the early stage of the signature scan
+  // sees the port before <n> does), so `line:42` and `HTTPError:400` stay
+  // out.
+  Object.freeze(["host-port", /(?<![\w-])[A-Za-z][\w-]*:(?:80|443|\d{4,6})\b/]),
+  // Anything at anything: the contract's email rule needs a dotted domain, and
+  // alice@localhost, alice@7node and alice@3lab don't have one.
+  Object.freeze(["user-at-host", /[^\s@]@[A-Za-z0-9]/]),
+  // No word boundaries: node_10.12.4.7, srv_192.168.17.42 and 10.0.0.5x are
+  // still addresses.
+  Object.freeze(["ipv4", /\d{1,3}(?:\.\d{1,3}){3}/]),
   Object.freeze([
     "ipv6",
     /\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*\]|[0-9A-Fa-f]{0,4}::[0-9A-Fa-f]{0,4}|(?:[0-9A-Fa-f]{1,4}:){3,}[0-9A-Fa-f]{1,4}/,
   ]),
   Object.freeze(["uuid", /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i]),
-  // Relative and UNC paths: two separators, or one separator before a
-  // filename with an extension. The normalizer's path rule needs a leading
-  // root, so `Users/alice/x` and `alice\Desktop\x.xlsx` reach here intact.
-  Object.freeze([
-    "relative-path",
-    /[\w.~-]+[\\/][\w.-]+[\\/]|[\w-]+[\\/][\w-]+\.[A-Za-z][A-Za-z0-9]{0,4}\b|\\\\/,
-  ]),
+  // Any scheme, not just http: s3://, gs://, ftp://, file://.
+  Object.freeze(["scheme-url", /[A-Za-z][A-Za-z0-9+.-]*:\/\//]),
+  // Any path separator at all. The normalizer turns a rooted path into
+  // <path>, which has none, so what is left is a relative path, a one-segment
+  // path (/Alice_Smith), the tail of a path with a space in it, or a UNC
+  // share -- and from here none of them can be told apart from a name. The
+  // cost, in the fail-closed direction: "and/or" and "400/500" refuse too.
+  Object.freeze(["path-separator", /[\w-]*[\\/]|%2[Ff]|%5[Cc]/]),
   Object.freeze(["tilde-user", /~[A-Za-z_]/]),
-  // The contract's id phrase misses `history_id=12` and plurals. Job and
-  // invocation numbers are left alone: Galaxy's own messages say "Job 3 is in
-  // error state", and a small decoded job number names nothing.
+  // The contract's id phrase misses `history_id=12`, `dataset id: 42`,
+  // `histories 12 and 13` and other plurals. A bare job or invocation number
+  // is left alone -- Galaxy's own messages say "Job 3 is in error state", and
+  // a small decoded job number names nothing -- but one labelled as an id
+  // (`invocation_id=73`, `job id 9`) is an id. "history number 12" and
+  // "dataset no. 42" are the same phrase with a word in the way.
   Object.freeze([
     "id-phrase",
-    /\b(?:history|dataset|hid|collection|hda|hdca)s?(?:_?ids?)?\b[^A-Za-z0-9]{0,4}\d/i,
+    /\b(?:histor(?:y|ies)|datasets?|hids?|collections?|hdas?|hdcas?)(?:[\s_-]?ids?)?\b[^A-Za-z0-9]{0,4}(?:(?:number|num|no)\b[^A-Za-z0-9]{0,4})?\d|\b(?:jobs?|invocations?|workflows?|users?)[\s_-]?ids?\b[^A-Za-z0-9]{0,4}\d/i,
   ]),
 ]);
-
-/** True when `text` contains something host-shaped. Used on structured fields too. */
-export function looksLikeHost(text) {
-  if (typeof text !== "string") return false;
-  return ["hostname", "host-port", "ipv4", "ipv6", "uuid"].some((name) =>
-    CLIENT_LEAK_PATTERNS.find(([n]) => n === name)[1].test(text),
-  );
-}
-
-const FREE_TEXT_FIELDS = new Set(["signature", "description"]);
 
 /** Names of every leak pattern (contract and client-side) that `text` trips. */
 export function textLeaks(text) {
@@ -370,26 +415,35 @@ export function textLeaks(text) {
   return hits;
 }
 
+// A public toolshed id is a host and a path by construction, so scanning it
+// whole would always trip. Its host is fixed, and the segments after it are
+// what the model wrote, so those are scanned one at a time instead.
+const PUBLIC_TOOLSHED_PREFIX_RE =
+  /^(?:toolshed\.g2\.bx\.psu\.edu|testtoolshed\.g2\.bx\.psu\.edu)\/repos\//;
+
 /**
- * Belt-and-braces: run the leak table over EVERY string in the payload, at any
- * depth, not just the two free-text fields. Structured fields are shape-checked
- * upstream, so this should always come back empty -- when it does not, the
- * caller drops the observation. installToken is skipped because it is 32 hex by
- * construction and would trip the long-hex rule.
+ * The strings in a payload that the leak table runs over, as [path, text]. A
+ * few fields are exact-shape by contract and would trip a rule by design (a
+ * UUID id, an ISO timestamp, an allowlisted server name, the 32-hex install
+ * token); each is skipped only while it actually has that exact shape, so a
+ * hostile value in one of them is still scanned.
  */
-export function scanObservationForLeaks(obs) {
-  const hits = [];
+function scannableStrings(obs) {
+  const out = [];
   const walk = (value, path) => {
     if (typeof value === "string") {
-      if (path === "installToken") return;
-      for (const [name, re] of LEAK_PATTERNS) {
-        if (re.test(value)) hits.push(`${path}:${name}`);
+      if (path === "installToken" && INSTALL_TOKEN_RE.test(value)) return;
+      if (path === "id" && UUID_V4_RE.test(value)) return;
+      if (path === "clientTs" && ISO_TS_RE.test(value)) return;
+      if (path === "galaxy.server" && PUBLIC_GALAXY_SERVERS.includes(value)) return;
+      if (/^tools\[\d+\]\.id$/.test(path) && PUBLIC_TOOLSHED_PREFIX_RE.test(value)) {
+        value
+          .replace(PUBLIC_TOOLSHED_PREFIX_RE, "")
+          .split("/")
+          .forEach((seg, i) => out.push([`${path}/${i}`, seg]));
+        return;
       }
-      if (FREE_TEXT_FIELDS.has(path)) {
-        for (const [name, re] of CLIENT_LEAK_PATTERNS) {
-          if (re.test(value)) hits.push(`${path}:${name}`);
-        }
-      }
+      out.push([path, value]);
       return;
     }
     if (Array.isArray(value)) {
@@ -401,7 +455,22 @@ export function scanObservationForLeaks(obs) {
     }
   };
   walk(obs, "");
-  return hits;
+  return out;
+}
+
+/**
+ * Run the whole leak table -- the contract's and the client-side one -- over
+ * EVERY string in the payload, at any depth. Structured fields are admitted
+ * from allowlists upstream, so on a builder-made payload this comes back
+ * empty; when it does not, the caller drops the observation. Hits are
+ * `path:pattern`; a hit in a toolshed id segment is reported against the id.
+ */
+export function scanObservationForLeaks(obs) {
+  const hits = [];
+  for (const [path, text] of scannableStrings(obs)) {
+    for (const name of textLeaks(text)) hits.push(`${path.replace(/\/\d+$/, "")}:${name}`);
+  }
+  return [...new Set(hits)];
 }
 
 function sliceOr(v, max, fallback) {

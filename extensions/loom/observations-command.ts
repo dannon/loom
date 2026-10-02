@@ -31,6 +31,7 @@ import {
   observationsFilePath,
   readRetractToken,
   readSentLog,
+  removeFromObservationOutbox,
   retractObservation,
 } from "./observations.js";
 import type { ObservationFacts, ObservationSentEntry } from "./observations.js";
@@ -38,6 +39,7 @@ import {
   deliverObservation,
   lastObservationFacts,
   liveDeliverDeps,
+  localWriteWarning,
 } from "./observation-triggers.js";
 import {
   PRIVACY_STATEMENT,
@@ -54,7 +56,7 @@ export function formatObservationsStatus(info: {
   hardDisabled: boolean;
   hasToken: boolean;
   sentLogPath: string;
-  counts: { sent: number; queued: number; retracted: number };
+  counts: { sent: number; queued: number; retracted: number; cancelled: number };
 }): string {
   const lines = [
     "Observations -- failure patterns reported back so they become lessons Loom surfaces to everyone",
@@ -67,12 +69,12 @@ export function formatObservationsStatus(info: {
   }
   lines.push(
     `  install token: ${info.hasToken ? "stored locally (not shown)" : "not generated yet"}`,
-    `  ${info.counts.sent} sent, ${info.counts.queued} queued, ${info.counts.retracted} retracted`,
+    `  ${info.counts.sent} sent, ${info.counts.queued} queued, ${info.counts.retracted} retracted, ${info.counts.cancelled} cancelled`,
     `  log: ${info.sentLogPath}`,
     "",
     "  off  -- collect nothing",
-    "  ask  -- show the exact payload and send only on a confirm (default)",
-    "  auto -- send without asking, and log what was sent",
+    "  ask  -- show the exact payload, error text and description included, and send only on a confirm (default)",
+    "  auto -- send without asking, structured fields only: no error text, no description",
     "",
     OBSERVATIONS_USAGE,
   );
@@ -94,7 +96,7 @@ export function sentLogSummary(rows: ObservationSentEntry[]): string {
     );
     if (row.description) lines.push(`      ${row.description}`);
   }
-  lines.push("", "Delete one with /observations retract <id>.");
+  lines.push("", "Delete a sent one, or cancel a queued one, with /observations retract <id>.");
   return lines.join("\n");
 }
 
@@ -121,22 +123,31 @@ const REPRESENTATIVE_FACTS: ObservationFacts = {
 export function sampleObservationFacts(): ObservationFacts {
   const last = lastObservationFacts();
   if (last) {
-    const probe = buildObservation(last, collectObservationEnvelope(SAMPLE_INSTALL_TOKEN));
+    const probe = buildObservation(
+      last,
+      collectObservationEnvelope(SAMPLE_INSTALL_TOKEN),
+      "structured",
+    );
     if (validateObservation(probe).ok && scanObservationForLeaks(probe).length === 0) return last;
   }
   return REPRESENTATIVE_FACTS;
 }
 
 export async function confirmAutoMode(ctx: ExtensionContext): Promise<boolean> {
+  // The auto shape: the sample has to show what auto actually sends, which is
+  // the structured fields with no signature text and no description.
   const sample = buildObservation(
     sampleObservationFacts(),
     collectObservationEnvelope(peekInstallToken() ?? SAMPLE_INSTALL_TOKEN),
+    "structured",
   );
   try {
     return await ctx.ui.confirm(
       "Send observations automatically from now on?",
       `${PURPOSE_STATEMENT}\n\n` +
-        "This is exactly what one looks like -- the same fields, from this install:\n\n" +
+        "This is exactly what one looks like in auto mode -- the same fields, from this " +
+        "install. The error text is never sent in auto, so the signature is always " +
+        "`unknown` and there is no description:\n\n" +
         `${renderObservationForConfirm(sample)}\n\n${PRIVACY_STATEMENT}`,
     );
   } catch {
@@ -148,7 +159,7 @@ async function showStatus(ctx: ExtensionContext): Promise<void> {
   const rows = readSentLog();
   const latest = new Map<string, ObservationSentEntry>();
   for (const row of rows) latest.set(row.id, row);
-  const counts = { sent: 0, queued: 0, retracted: 0 };
+  const counts = { sent: 0, queued: 0, retracted: 0, cancelled: 0 };
   for (const row of latest.values()) {
     if (row.status in counts) counts[row.status] += 1;
   }
@@ -195,6 +206,25 @@ async function changeMode(ctx: ExtensionContext, requested: string): Promise<voi
   ctx.ui.notify(`Observations mode is now ${requested}.`, "info");
 }
 
+/** A follow-up sent-log row for `id`, carrying over what the log already had. */
+function sentLogRowFor(id: string, status: "retracted" | "cancelled"): ObservationSentEntry {
+  const previous = readSentLog().find((r) => r.id === id);
+  return {
+    at: new Date().toISOString(),
+    id,
+    status,
+    kind: previous?.kind ?? "other",
+    stage: previous?.stage ?? "unknown",
+    trigger: previous?.trigger ?? "explicit",
+    signature: previous?.signature ?? "",
+    tools: previous?.tools ?? [],
+    ...(previous?.mcpTool ? { mcpTool: previous.mcpTool } : {}),
+    datatypes: previous?.datatypes ?? [],
+    server: previous?.server ?? "private",
+    description: previous?.description ?? "",
+  };
+}
+
 async function doRetract(ctx: ExtensionContext, id: string): Promise<void> {
   if (!id) {
     ctx.ui.notify(`Which one?\n${OBSERVATIONS_USAGE}`, "warning");
@@ -202,8 +232,30 @@ async function doRetract(ctx: ExtensionContext, id: string): Promise<void> {
   }
   const token = readRetractToken(id);
   if (!token) {
+    // No token means it was never accepted by the service -- but it may still
+    // be sitting in the outbox, due to go on the next settle. Take it out.
+    const removal = removeFromObservationOutbox(id);
+    if (removal === "removed") {
+      appendSentLog(sentLogRowFor(id, "cancelled"));
+      ctx.ui.notify(`Cancelled ${id}. It was still queued, and now it will never be sent.`, "info");
+      return;
+    }
+    if (removal === "busy") {
+      ctx.ui.notify(
+        `Queued observations are being sent right now, so ${id} can't be cancelled this moment. Try again shortly.`,
+        "warning",
+      );
+      return;
+    }
+    if (removal === "failed") {
+      ctx.ui.notify(
+        `Couldn't update the local outbox to cancel ${id}, so nothing was changed. Check that the Loom state directory is writable.`,
+        "error",
+      );
+      return;
+    }
     ctx.ui.notify(
-      `There is no retract token stored for "${id}". /observations sent lists the ids this install can still retract.`,
+      `There is no retract token stored for "${id}", and it isn't queued. /observations sent lists the ids this install can still retract.`,
       "warning",
     );
     return;
@@ -217,23 +269,16 @@ async function doRetract(ctx: ExtensionContext, id: string): Promise<void> {
     return;
   }
   forgetRetractToken(id);
-  const previous = readSentLog().find((r) => r.id === id);
-  appendSentLog({
-    at: new Date().toISOString(),
-    id,
-    status: "retracted",
-    kind: previous?.kind ?? "other",
-    stage: previous?.stage ?? "unknown",
-    trigger: previous?.trigger ?? "explicit",
-    signature: previous?.signature ?? "",
-    tools: previous?.tools ?? [],
-    ...(previous?.mcpTool ? { mcpTool: previous.mcpTool } : {}),
-    datatypes: previous?.datatypes ?? [],
-    server: previous?.server ?? "private",
-    description: previous?.description ?? "",
-  });
+  // A row that was sent but whose outbox rewrite never happened (lock
+  // contention, a crash mid-drain) would otherwise go again on the next drain
+  // -- and after a retract the service would accept it as new.
+  const leftover = removeFromObservationOutbox(id);
+  appendSentLog(sentLogRowFor(id, "retracted"));
   ctx.ui.notify(
-    res.alreadyGone ? `${id} was already gone -- nothing is stored.` : `Retracted ${id}.`,
+    (res.alreadyGone ? `${id} was already gone -- nothing is stored.` : `Retracted ${id}.`) +
+      (leftover === "busy" || leftover === "failed"
+        ? " A copy may still be queued locally; run the same retract again to cancel it."
+        : ""),
     "info",
   );
 }
@@ -287,9 +332,16 @@ async function doObserve(args: string | undefined, ctx: ExtensionContext): Promi
   // should see what it normalized to before it goes, and the description is
   // theirs to write rather than a model call's.
   const outcome = await deliverObservation(facts, ctx, liveDeliverDeps("ask"));
+  const warning = localWriteWarning(outcome);
   if (outcome === "sent") ctx.ui.notify("Thanks -- that was sent.", "info");
+  else if (warning) ctx.ui.notify(warning, "warning");
   else if (outcome === "queued")
     ctx.ui.notify("Saved locally; it'll go when the service is reachable.", "warning");
+  else if (outcome === "skipped")
+    ctx.ui.notify(
+      "Nothing was sent: observations were turned off before it went, or this session has already sent its share.",
+      "info",
+    );
   else if (outcome === "invalid")
     ctx.ui.notify(
       "That couldn't be sent safely -- it looked like it carried an id, path or address. Nothing was sent.",

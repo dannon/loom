@@ -29,6 +29,7 @@ import { normalizeSignature } from "../../shared/observation-contract.js";
 import { appendActivityEvent } from "./activity.js";
 import { getNotebookPath } from "./state.js";
 import { resolveObservationsMode } from "./observations-config.js";
+import { shapeForMode } from "./observations.js";
 import {
   buildAndRecordObservation,
   decideToolResultObservation,
@@ -111,6 +112,10 @@ export function registerObservationReplay(pi: ExtensionAPI): void {
       payload: { file: path.relative(sessionDir, file), entries: entries.length },
     });
 
+    // Built in the shape the configured mode would send, so the replay pins
+    // what would actually leave the machine.
+    const mode = resolveObservationsMode();
+    const shape = shapeForMode(mode === "auto" ? "auto" : "ask");
     const state = newTriggerState();
     const deps = {
       installToken: () => DRY_RUN_INSTALL_TOKEN,
@@ -133,6 +138,7 @@ export function registerObservationReplay(pi: ExtensionAPI): void {
         { ...facts, kind: decision.kind, trigger: decision.trigger },
         "",
         deps,
+        shape,
       );
     }
   });

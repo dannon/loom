@@ -18,11 +18,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
-import {
-  normalizeSignature,
-  scanObservationForLeaks,
-  validateObservation,
-} from "../../shared/observation-contract.js";
+import { normalizeSignature } from "../../shared/observation-contract.js";
 import type {
   Observation,
   ObservationKind,
@@ -31,7 +27,7 @@ import type {
 import {
   appendSentLog,
   appendToObservationOutbox,
-  buildObservation,
+  buildCheckedObservation,
   collectObservationEnvelope,
   drainObservationOutbox,
   extractDatatypes,
@@ -40,9 +36,16 @@ import {
   resetGalaxyVersion,
   saveRetractToken,
   sentLogEntryFor,
+  shapeForMode,
   submitObservation,
+  withheldReason,
 } from "./observations.js";
-import type { ObservationFacts, SubmitObservationResult } from "./observations.js";
+import type {
+  ObservationFacts,
+  ObservationProblems,
+  ObservationShape,
+  SubmitObservationResult,
+} from "./observations.js";
 import { getOrCreateInstallToken, resolveObservationsMode } from "./observations-config.js";
 import type { ObservationsMode } from "./observations-config.js";
 import { onEvidenceDecision } from "./evidence-gate.js";
@@ -165,7 +168,15 @@ export function factsForToolResult(
 // Delivery
 // -----------------------------------------------------------------------------
 
-export type DeliveryOutcome = "sent" | "queued" | "declined" | "invalid" | "skipped";
+/**
+ * `unsaved`: the send failed in a way worth retrying, but the outbox could not
+ * be written, so nothing is kept. `sent-unretractable`: it went, but its
+ * retract token could not be saved. Both are local-write failures the user has
+ * to hear about, since the usual message ("saved locally", "retract it any
+ * time") would be untrue.
+ */
+export type DeliveryOutcome =
+  "sent" | "sent-unretractable" | "queued" | "unsaved" | "declined" | "invalid" | "skipped";
 
 /**
  * Everything impure, injected. The privacy-relevant decisions -- does this
@@ -173,11 +184,20 @@ export type DeliveryOutcome = "sent" | "queued" | "declined" | "invalid" | "skip
  * testable with no pi session, no filesystem and no network.
  */
 export interface DeliverDeps {
+  /** The mode this delivery started under; it decides the payload shape. */
   mode: ObservationsMode;
+  /**
+   * The mode right now. Read again immediately before the POST, because the
+   * confirm can sit open for minutes and another session (or the user, in
+   * another window) can turn collection off in the meantime.
+   */
+  currentMode(): ObservationsMode;
   state: TriggerState;
   installToken(): string;
-  describe(facts: ObservationFacts, ctx: ExtensionContext): Promise<string>;
-  confirm(obs: Observation, ctx: ExtensionContext): Promise<boolean>;
+  /** Gets the built observation, never the raw facts. */
+  describe(obs: Observation, ctx: ExtensionContext): Promise<string>;
+  /** `note` is a one-line reason shown above the payload, e.g. why text was withheld. */
+  confirm(obs: Observation, ctx: ExtensionContext, note?: string): Promise<boolean>;
   submit(obs: Observation): Promise<SubmitObservationResult>;
   record(kind: string, payload: Record<string, unknown>): void;
 }
@@ -187,6 +207,8 @@ export interface BuiltObservation {
   valid: boolean;
   errors: string[];
   leaks: string[];
+  /** Patterns that got the signature withheld (ask only); empty otherwise. */
+  withheld: string[];
 }
 
 /**
@@ -196,38 +218,43 @@ export interface BuiltObservation {
  * that cannot send because there is nothing to send with, not because a stub
  * refused.
  */
-const WITHHELD = "(withheld)";
-
 export function buildAndRecordObservation(
   facts: ObservationFacts,
   description: string,
   deps: Pick<DeliverDeps, "installToken" | "record">,
+  shape: ObservationShape,
 ): BuiltObservation {
-  const obs = buildObservation(
+  const { obs, errors, leaks, withheld } = buildCheckedObservation(
     { ...facts, description },
     collectObservationEnvelope(deps.installToken()),
+    shape,
   );
-  const validity = validateObservation(obs);
-  const leaks = scanObservationForLeaks(obs);
-  // A payload that failed is exactly the one whose free-form fields may carry
-  // the leak, so they are withheld from the activity log too -- the
-  // observation.invalid row that follows names the field and the pattern.
-  const clean = validity.ok && leaks.length === 0;
-  const shown = (value: string): string => (clean ? value : WITHHELD);
+  const valid = errors.length === 0;
+  // No free text in this row, ever. It is written before anyone has agreed to
+  // anything -- before the ask confirm, and for /observe the signature is the
+  // user's own sentence -- and a refused payload's text is exactly the text
+  // that may carry the leak. The structured fields are safe to show: they are
+  // admitted from allowlists by the builder. A withheld signature is named by
+  // the patterns it tripped, never by its text.
   deps.record("observation.built", {
     kind: obs.kind,
     trigger: obs.trigger,
     stage: obs.stage,
-    signature: shown(obs.signature),
-    mcpTool: shown(obs.mcpTool ?? ""),
-    toolIds: shown(obs.tools.map((t) => t.id).join(",")),
-    datatypes: shown(obs.datatypes.join(",")),
+    shape,
+    mcpTool: obs.mcpTool ?? "",
+    toolIds: obs.tools.map((t) => t.id).join(","),
+    datatypes: obs.datatypes.join(","),
     server: obs.galaxy.server,
     descriptionLength: obs.description.length,
-    valid: validity.ok,
+    signatureWithheld: withheld.join(","),
+    valid,
     leakScan: leaks.length === 0 ? "clean" : "dirty",
   });
-  return { obs, valid: validity.ok, errors: validity.ok ? [] : validity.errors, leaks };
+  return { obs, valid, errors, leaks, withheld };
+}
+
+function isClean(p: ObservationProblems): boolean {
+  return p.errors.length === 0 && p.leaks.length === 0;
 }
 
 export async function deliverObservation(
@@ -249,20 +276,24 @@ export async function deliverObservation(
     return "skipped";
   }
 
-  // Check the structured half before asking anyone for a description: if it
-  // can't be sent, prompting the user (or spending a model call) for one is
-  // wasted, and the build below records the refusal either way.
-  const precheck = buildObservation(
-    { ...facts, description: "" },
-    collectObservationEnvelope(deps.installToken()),
-  );
-  const sendable =
-    validateObservation(precheck).ok && scanObservationForLeaks(precheck).length === 0;
+  const shape = shapeForMode(deps.mode);
 
+  // Check the rest of the payload before asking anyone for a description: if
+  // it can't be sent, prompting the user for one is wasted, and the build
+  // below records the refusal either way. `auto` never asks -- it carries no
+  // free text.
   let description = "";
-  if (sendable) {
+  const precheck =
+    shape === "full"
+      ? buildCheckedObservation(
+          { ...facts, description: "" },
+          collectObservationEnvelope(deps.installToken()),
+          shape,
+        )
+      : undefined;
+  if (precheck && isClean(precheck)) {
     try {
-      description = await deps.describe(facts, ctx);
+      description = await deps.describe(precheck.obs, ctx);
     } catch {
       // A description is a nice-to-have; the structured observation is the point.
       description = "";
@@ -272,7 +303,12 @@ export async function deliverObservation(
   // The install token is written to config here, before any confirm, because a
   // valid payload needs one and the confirm has to show the real payload. It
   // is local state until the user says send.
-  const { obs, valid, errors, leaks } = buildAndRecordObservation(facts, description, deps);
+  const { obs, valid, errors, leaks, withheld } = buildAndRecordObservation(
+    facts,
+    description,
+    deps,
+    shape,
+  );
 
   if (!valid || leaks.length > 0) {
     // Fail closed. Nothing is sent, and only field and pattern names are
@@ -285,22 +321,48 @@ export async function deliverObservation(
     return "invalid";
   }
 
-  if (deps.mode === "ask" && !(await deps.confirm(obs, ctx))) {
+  const note = withheld.length > 0 ? withheldReason(withheld) : undefined;
+  if (deps.mode === "ask" && !(await deps.confirm(obs, ctx, note))) {
     // No signature: the user said no, and for /observe it is their own words.
     deps.record("observation.declined", { kind: obs.kind });
     return "declined";
   }
 
+  // Consent is checked where it is spent. Off means off, even mid-confirm; and
+  // an auto delivery no longer goes once the user has stepped back to ask,
+  // since they never saw this one. An ask that was confirmed still goes under
+  // auto: the user has already seen it and said yes.
+  const now = deps.currentMode();
+  if (now === "off" || (deps.mode === "auto" && now !== "auto")) {
+    deps.record("observation.skipped", { reason: "mode-changed" });
+    return "skipped";
+  }
+
   const res = await deps.submit(obs);
   if (res.ok) {
-    if (res.retractToken) saveRetractToken(obs.id, res.retractToken);
+    const tokenLost = Boolean(res.retractToken) && !saveRetractToken(obs.id, res.retractToken!);
     appendSentLog(sentLogEntryFor(obs, "sent"));
     deps.state.delivered += 1;
-    deps.record("observation.sent", { id: obs.id, kind: obs.kind, signature: obs.signature });
-    return "sent";
+    deps.record("observation.sent", {
+      id: obs.id,
+      kind: obs.kind,
+      // After consent, so the normalized signature may be logged -- except the
+      // user's own /observe sentence, which stays in the sent log only.
+      ...(obs.trigger === "explicit" ? {} : { signature: obs.signature }),
+      ...(tokenLost ? { tokenWrite: "failed" } : {}),
+    });
+    return tokenLost ? "sent-unretractable" : "sent";
   }
   if (res.queueable) {
-    appendToObservationOutbox(obs);
+    if (!appendToObservationOutbox(obs)) {
+      deps.record("observation.unsaved", {
+        id: obs.id,
+        kind: obs.kind,
+        status: res.status ?? 0,
+        reason: "outbox-write-failed",
+      });
+      return "unsaved";
+    }
     appendSentLog(sentLogEntryFor(obs, "queued"));
     deps.state.delivered += 1;
     deps.record("observation.queued", {
@@ -315,7 +377,9 @@ export async function deliverObservation(
   deps.record("observation.invalid", {
     kind: obs.kind,
     status: res.status ?? 0,
-    errors: (res.errors ?? []).join(","),
+    // The Worker's error list is endpoint-controlled text, and the endpoint
+    // can be repointed; only `field:reason` names are kept.
+    errors: (res.errors ?? []).filter(isFieldReason).join(","),
     leaks: "",
   });
   return "invalid";
@@ -324,6 +388,31 @@ export async function deliverObservation(
 // -----------------------------------------------------------------------------
 // Registration
 // -----------------------------------------------------------------------------
+
+const FIELD_REASON_RE = /^[A-Za-z0-9_.<>[\]]{1,60}:[a-z0-9-]{1,40}$/;
+
+function isFieldReason(v: unknown): boolean {
+  return typeof v === "string" && FIELD_REASON_RE.test(v);
+}
+
+// A filesystem error message carries the path, and the path carries the
+// username; only the error's code or name is printed.
+function errorTag(err: unknown): string {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  if (typeof code === "string") return code;
+  return err instanceof Error ? err.name : "error";
+}
+
+/** What to tell the user when a delivery's local write failed, if anything. */
+export function localWriteWarning(outcome: DeliveryOutcome): string | undefined {
+  if (outcome === "unsaved") {
+    return "An observation couldn't be sent right now, and it couldn't be saved locally to retry either (check that the Loom state directory is writable). Nothing was kept.";
+  }
+  if (outcome === "sent-unretractable") {
+    return "An observation was sent, but its retract token couldn't be saved locally, so /observations retract won't be able to delete it.";
+  }
+  return undefined;
+}
 
 /** Activity rows land beside the session's notebook, like every other row. */
 export function recordObservationActivity(
@@ -347,9 +436,10 @@ export function liveDeliverDeps(
 ): DeliverDeps {
   return {
     mode: ctxMode,
+    currentMode: resolveObservationsMode,
     state,
     installToken: getOrCreateInstallToken,
-    describe: (facts, ctx) => describeObservation(ctxMode, facts, ctx),
+    describe: (obs, ctx) => describeObservation(ctxMode, obs, ctx),
     confirm: confirmObservation,
     submit: submitObservation,
     record: (kind, payload) => recordObservationActivity(kind, payload),
@@ -422,22 +512,30 @@ export function registerObservationTriggers(pi: ExtensionAPI): void {
     // prompt -- but never while collection is off.
     if (resolveObservationsMode() !== "off") {
       try {
-        const drained = await drainObservationOutbox(submitObservation);
+        const drained = await drainObservationOutbox(
+          submitObservation,
+          () => resolveObservationsMode() !== "off",
+        );
         if (drained.sent + drained.dropped > 0) {
           recordObservationActivity("observation.outbox", { ...drained });
         }
+        if (drained.unretractable && ctx.hasUI) {
+          ctx.ui.notify(localWriteWarning("sent-unretractable") ?? "", "warning");
+        }
       } catch (err) {
-        console.error("observation outbox drain failed:", err);
+        console.error("observation outbox drain failed:", errorTag(err));
       }
     }
     while (pending.length > 0) {
       const facts = pending.shift();
       if (!facts) break;
       try {
-        await deliverObservation(facts, ctx, liveDeliverDeps());
+        const outcome = await deliverObservation(facts, ctx, liveDeliverDeps());
+        const warning = localWriteWarning(outcome);
+        if (warning && ctx.hasUI) ctx.ui.notify(warning, "warning");
       } catch (err) {
         // A failed delivery must never take the settle handler down with it.
-        console.error("observation delivery failed:", err);
+        console.error("observation delivery failed:", errorTag(err));
       }
     }
   });

@@ -13,7 +13,9 @@ import {
   getGalaxyVersion,
   resetGalaxyVersion,
   buildObservation,
+  isAdmissibleMcpTool,
 } from "../extensions/loom/observations.js";
+import { factsForToolResult } from "../extensions/loom/observation-triggers.js";
 import { validateObservation, scanObservationForLeaks } from "../shared/observation-contract.js";
 import type { ObservationEnvelope } from "../extensions/loom/observations.js";
 
@@ -97,9 +99,7 @@ describe("extractToolIds", () => {
     }
   });
 
-  it("drops anything outside the id shape allowlist", () => {
-    // A path and a toolshed id are made of the same characters, so the rule is
-    // that every segment starts with a word character -- not a character set.
+  it("drops anything that is neither a Galaxy built-in nor a public toolshed id", () => {
     expect(extractToolIds({ tool_id: "../../etc/passwd" })).toEqual([]);
     expect(extractToolIds({ tool_id: "/etc/passwd" })).toEqual([]);
     expect(extractToolIds({ tool_id: "C:/Users/bob/tool.xml" })).toEqual([]);
@@ -108,12 +108,13 @@ describe("extractToolIds", () => {
   });
 
   it("caps the count and dedupes", () => {
-    expect(extractToolIds({ tool_ids: ["a", "a", "b", "c", "d", "e", "f", "g"] })).toEqual([
-      "a",
-      "b",
-      "c",
-      "d",
-      "e",
+    const ids = ["Filter1", "Filter1", "Grep1", "cat1", "Cut1", "sort1", "upload1", "comp1"];
+    expect(extractToolIds({ tool_ids: ids })).toEqual([
+      "Filter1",
+      "Grep1",
+      "cat1",
+      "Cut1",
+      "sort1",
     ]);
   });
 
@@ -121,6 +122,78 @@ describe("extractToolIds", () => {
     expect(extractToolIds(undefined)).toEqual([]);
     expect(extractToolIds({})).toEqual([]);
     expect(extractToolIds({ tool_id: 7 } as unknown as Record<string, unknown>)).toEqual([]);
+  });
+});
+
+describe("structured fields are admitted from allowlists, not shapes", () => {
+  const base = {
+    kind: "tool-error" as const,
+    trigger: "tool_error" as const,
+    toolIds: [],
+    datatypes: [],
+    rawSignature: "x",
+  };
+
+  it("sends none of the reviewer's identifying words as structure", () => {
+    const facts = factsForToolResult(
+      "mcp",
+      {
+        server: "galaxy",
+        tool: "alice_smith",
+        args: { tool_id: "Alice_Smith", file_type: "patient_17.fastq" },
+      },
+      "Unknown tool",
+    )!;
+    const obs = buildObservation(facts, envelope, "structured");
+    expect("mcpTool" in obs).toBe(false);
+    expect(obs.tools).toEqual([]);
+    expect(obs.datatypes).toEqual([]);
+    expect(JSON.stringify(obs)).not.toMatch(/alice|smith|patient/i);
+  });
+
+  it("keeps a private hostname out of the toolshed version slot", () => {
+    const id = "toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2/biobank.internal";
+    expect(extractToolIds({ tool_id: id })).toEqual([
+      "toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2",
+    ]);
+    const obs = buildObservation({ ...base, toolIds: [id] }, envelope, "structured");
+    expect(obs.tools).toEqual([{ id: "toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2" }]);
+  });
+
+  it("refuses a datatype- or version-shaped name", () => {
+    expect(extractDatatypes({ file_type: "patient07_smith" })).toEqual([]);
+    expect(
+      extractToolIds({ tool_id: "toolshed.g2.bx.psu.edu/repos/iuc/x/y/patient07_smith" }),
+    ).toEqual(["toolshed.g2.bx.psu.edu/repos/iuc/x/y"]);
+  });
+
+  it("drops a four-part version that reads as an IPv4 address, keeping the id", () => {
+    expect(
+      extractToolIds({ tool_id: "toolshed.g2.bx.psu.edu/repos/devteam/bwa/bwa/0.7.17.4" }),
+    ).toEqual(["toolshed.g2.bx.psu.edu/repos/devteam/bwa/bwa"]);
+  });
+
+  it("admits real galaxy-mcp names, Galaxy datatypes and Galaxy's own bare tool ids", () => {
+    expect(isAdmissibleMcpTool("galaxy_run_tool")).toBe(true);
+    expect(isAdmissibleMcpTool("galaxy_get_job_details")).toBe(true);
+    expect(isAdmissibleMcpTool("galaxy_alice_smith")).toBe(false);
+    expect(extractDatatypes({ file_type: "BAM" })).toEqual(["bam"]);
+    expect(extractDatatypes({ file_type: "fastqsanger.bz2" })).toEqual(["fastqsanger.bz2"]);
+    expect(extractToolIds({ tool_id: "__MERGE_COLLECTION__" })).toEqual(["__MERGE_COLLECTION__"]);
+  });
+
+  it("scans every string, so a toolshed segment that names a host is still refused", () => {
+    const obs = buildObservation(
+      { ...base, toolIds: ["toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2/2.2.1+galaxy1"] },
+      envelope,
+      "structured",
+    );
+    expect(scanObservationForLeaks(obs)).toEqual([]);
+    const forged = {
+      ...obs,
+      tools: [{ id: "toolshed.g2.bx.psu.edu/repos/biobank.internal/x/y" }],
+    };
+    expect(scanObservationForLeaks(forged)).toContain("tools[0].id:hostname");
   });
 });
 
@@ -132,7 +205,7 @@ describe("extractDatatypes", () => {
     expect(extractDatatypes({ datatype: "tabular" })).toEqual(["tabular"]);
   });
 
-  it("drops auto and anything outside the shape allowlist", () => {
+  it("drops auto and anything not on Galaxy's datatype list", () => {
     expect(extractDatatypes({ file_type: "auto" })).toEqual([]);
     expect(extractDatatypes({ file_type: "C:/Users/bob" })).toEqual([]);
     expect(extractDatatypes({ ext: "x".repeat(41) })).toEqual([]);
@@ -256,6 +329,7 @@ describe("buildObservation", () => {
           "mail alice.researcher@institute.edu",
       },
       envelope,
+      "full",
     );
     expect(obs.signature).toBe(
       "ToolExecutionError: dataset <id> in history <n> failed; wrote <path> see <url> mail <email>",
@@ -292,6 +366,7 @@ describe("buildObservation", () => {
         rawSignature: "evidence gate blocked a plan-step completion",
       },
       envelope,
+      "full",
     );
     expect(obs.stage).toBe("result-interpretation");
   });
@@ -300,6 +375,7 @@ describe("buildObservation", () => {
     const obs = buildObservation(
       { kind: "other", trigger: "explicit", toolIds: [], datatypes: [], rawSignature: "x" },
       { ...envelope, galaxyVersion: "24.2.1", wsl: true, app: "orbit", platform: "linux" },
+      "full",
     );
     expect(obs.galaxy).toEqual({ server: "usegalaxy.org", version: "24.2.1" });
     expect(obs.client).toEqual({ app: "orbit", version: "0.8.0", platform: "linux", wsl: true });
@@ -317,13 +393,59 @@ describe("buildObservation", () => {
         description: "the run for alice@institute.edu failed",
       },
       envelope,
+      "full",
     );
     expect(obs.description).toBe("");
     expect(validateObservation(obs)).toEqual({ ok: true });
   });
 });
 
-import { UNKNOWN_SIGNATURE } from "../shared/observation-contract.js";
+import { UNKNOWN_SIGNATURE, normalizeSignature } from "../shared/observation-contract.js";
+import {
+  buildCheckedObservation,
+  observationProblems,
+  withheldReason,
+} from "../extensions/loom/observations.js";
+import { acceptDescription } from "../extensions/loom/observation-ui.js";
+
+describe("buildObservation in the structured (auto) shape", () => {
+  const hostile = {
+    kind: "tool-error" as const,
+    trigger: "tool_error" as const,
+    mcpTool: "galaxy_run_tool",
+    toolIds: ["toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2/2.2.1+galaxy1"],
+    datatypes: ["fastqsanger.gz"],
+    rawSignature: "ValueError: could not convert string to float: 'Alice Smith'",
+    description: "Alice Smith had BRCA1 expression 3.14",
+  };
+
+  it("carries no free text at all, and keeps every structured field", () => {
+    const obs = buildObservation(hostile, envelope, "structured");
+    expect(obs.signature).toBe(UNKNOWN_SIGNATURE);
+    expect(obs.description).toBe("");
+    expect(obs.mcpTool).toBe("galaxy_run_tool");
+    expect(obs.stage).toBe("tool-parameterization");
+    expect(obs.tools).toEqual([
+      { id: "toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2", version: "2.2.1+galaxy1" },
+    ]);
+    expect(obs.datatypes).toEqual(["fastqsanger.gz"]);
+    expect(validateObservation(obs)).toEqual({ ok: true });
+    expect(JSON.stringify(obs)).not.toMatch(/Alice|Smith|BRCA1|3\.14/);
+  });
+
+  it("sends the reviewer's name-and-value messages as nothing but structure", () => {
+    for (const raw of [
+      "ValueError: could not convert string to float: 'Alice Smith'",
+      "KeyError: 'patient_07_jane'",
+      "History 'Smith cohort RNA-seq' is not accessible",
+      "Error in sample Alice_Smith: column padj not found",
+    ]) {
+      const obs = buildObservation({ ...hostile, rawSignature: raw }, envelope, "structured");
+      expect(obs.signature, raw).toBe(UNKNOWN_SIGNATURE);
+      expect(JSON.stringify(obs), raw).not.toMatch(/Alice|Smith|jane/);
+    }
+  });
+});
 
 describe("buildObservation signature fallback", () => {
   const facts = {
@@ -335,14 +457,18 @@ describe("buildObservation signature fallback", () => {
 
   it("carries the normalizer's unknown literal through", () => {
     for (const raw of ["", "   ", "\n\n"]) {
-      const obs = buildObservation({ ...facts, rawSignature: raw }, envelope);
+      const obs = buildObservation({ ...facts, rawSignature: raw }, envelope, "full");
       expect(obs.signature, JSON.stringify(raw)).toBe(UNKNOWN_SIGNATURE);
       expect(validateObservation(obs)).toEqual({ ok: true });
     }
   });
 
   it("keeps a placeholder-only signature as the placeholder", () => {
-    const obs = buildObservation({ ...facts, rawSignature: "/Users/alice/run.log" }, envelope);
+    const obs = buildObservation(
+      { ...facts, rawSignature: "/Users/alice/run.log" },
+      envelope,
+      "full",
+    );
     expect(obs.signature).toBe("<path>");
     expect(validateObservation(obs)).toEqual({ ok: true });
   });
@@ -367,7 +493,7 @@ describe("shape checks on model-authored fields", () => {
       "3f2b8c1a-1234-4abc-8def-a123b56c89ab",
     ]) {
       expect(extractToolIds({ tool_id: id }), id).toEqual([]);
-      expect(buildObservation({ ...base, toolIds: [id] }, envelope).tools, id).toEqual([]);
+      expect(buildObservation({ ...base, toolIds: [id] }, envelope, "full").tools, id).toEqual([]);
     }
     expect(
       extractToolIds({ tool_id: "testtoolshed.g2.bx.psu.edu/repos/iuc/x/y/1.0" }),
@@ -380,7 +506,7 @@ describe("shape checks on model-authored fields", () => {
       "galaxy.corp-internal.example",
       "galaxy_alice smith thesis",
     ]) {
-      const obs = buildObservation({ ...base, mcpTool: name }, envelope);
+      const obs = buildObservation({ ...base, mcpTool: name }, envelope, "full");
       expect("mcpTool" in obs, name).toBe(false);
       expect(obs.stage).toBe("unknown");
     }
@@ -391,9 +517,9 @@ describe("shape checks on model-authored fields", () => {
     expect(extractDatatypes({ file_type: "corp.example.org" })).toEqual([]);
     expect(extractDatatypes({ file_type: "example.com" })).toEqual([]);
     expect(extractDatatypes({ file_type: "fastqsanger.gz" })).toEqual(["fastqsanger.gz"]);
-    expect(buildObservation({ ...base, datatypes: ["Patient07.csv"] }, envelope).datatypes).toEqual(
-      [],
-    );
+    expect(
+      buildObservation({ ...base, datatypes: ["Patient07.csv"] }, envelope, "full").datatypes,
+    ).toEqual([]);
   });
 
   it("keeps a free-form site suffix out of the galaxy version", () => {
@@ -409,7 +535,125 @@ describe("shape checks on model-authored fields", () => {
     const obs = buildObservation(
       { ...base, description: "failed against postgres-prod.lab.example.edu" },
       envelope,
+      "full",
     );
     expect(obs.description).toBe("");
+  });
+});
+
+describe("the leak scan runs before normalization and truncation", () => {
+  const base = {
+    kind: "tool-error" as const,
+    trigger: "tool_error" as const,
+    mcpTool: "galaxy_run_tool",
+    toolIds: [],
+    datatypes: [],
+  };
+
+  function problemsFor(rawSignature: string): string[] {
+    const obs = buildObservation({ ...base, rawSignature }, envelope, "full");
+    return observationProblems(obs, { rawSignature }).leaks;
+  }
+
+  it("refuses a host whose port the normalizer would have turned into <n>", () => {
+    const raw = "Connection to galaxyprod:12345 refused";
+    expect(normalizeSignature(raw)).toBe("Connection to galaxyprod:<n> refused");
+    expect(problemsFor(raw)).toContain("signature.staged:host-port");
+  });
+
+  it("refuses a hostname the signature cap would have cut mid-label", () => {
+    const a = "x".repeat(179) + " galaxy.hospital.internal";
+    expect(normalizeSignature(a).endsWith("galaxy.hospital.inte")).toBe(true);
+    expect(problemsFor(a)).toContain("signature.staged:hostname");
+
+    const b = "x".repeat(176) + " galaxy.cancer-center.org failed";
+    expect(normalizeSignature(b).endsWith("galaxy.cancer-center.or")).toBe(true);
+    expect(problemsFor(b)).toContain("signature.staged:hostname");
+  });
+
+  it("refuses a UUID the long-number rule would have half-rewritten", () => {
+    const raw = "lost 12345678-abcd-4abc-8abc-abcdefabcdef";
+    expect(normalizeSignature(raw)).toBe("lost <n>-abcd-4abc-8abc-abcdefabcdef");
+    expect(problemsFor(raw)).toContain("signature.staged:uuid");
+  });
+
+  it("drops a description whose hostname the description cap would have cut", () => {
+    const description = "x".repeat(479) + " galaxy.hospital.internal";
+    const obs = buildObservation(
+      { ...base, rawSignature: "ToolExecutionError: header-only table", description },
+      envelope,
+      "full",
+    );
+    expect(obs.description).toBe("");
+    expect(acceptDescription(description)).toBe("");
+  });
+
+  it("withholds each of those signatures in ask and keeps the rest of the report", () => {
+    for (const rawSignature of [
+      "Connection to galaxyprod:12345 refused",
+      "x".repeat(179) + " galaxy.hospital.internal",
+      "x".repeat(176) + " galaxy.cancer-center.org failed",
+      "lost 12345678-abcd-4abc-8abc-abcdefabcdef",
+    ]) {
+      const checked = buildCheckedObservation(
+        { ...base, rawSignature, description: "A connection was refused." },
+        envelope,
+        "full",
+      );
+      expect(checked.obs.signature, rawSignature).toBe(UNKNOWN_SIGNATURE);
+      expect(checked.obs.description).toBe("A connection was refused.");
+      expect(checked.obs.mcpTool).toBe("galaxy_run_tool");
+      expect(checked.withheld.length, rawSignature).toBeGreaterThan(0);
+      expect(checked.errors).toEqual([]);
+      expect(checked.leaks).toEqual([]);
+    }
+  });
+
+  it("normalizes common real Galaxy errors and keeps them", () => {
+    for (const [rawSignature, expected] of [
+      ["Dataset 1a2b3c4d5e6f7a8b9c0d not found", "Dataset <id> not found"],
+      ["History 0123456789abcdef0123 is deleted", "History <id> is deleted"],
+      [
+        "Failed to fetch https://usegalaxy.org/api/datasets/1a2b3c4d5e6f7a8b",
+        "Failed to fetch <url>",
+      ],
+      [
+        "No such file: /galaxy/server/database/objects/0/0/1/dataset_001.dat",
+        "No such file: <path>",
+      ],
+      ["Job 12345 failed", "Job <n> failed"],
+    ]) {
+      const checked = buildCheckedObservation({ ...base, rawSignature }, envelope, "full");
+      expect(checked.obs.signature, rawSignature).toBe(expected);
+      expect(checked.withheld, rawSignature).toEqual([]);
+      expect(checked.errors).toEqual([]);
+      expect(checked.leaks).toEqual([]);
+    }
+  });
+
+  it("says why in one line, by kind of shape and never by value", () => {
+    expect(withheldReason(["host-port"])).toBe("error text withheld: it contained a host name");
+    expect(withheldReason(["uuid", "path-separator", "long-hex"])).toBe(
+      "error text withheld: it contained an id and a path",
+    );
+  });
+
+  it("does not scan raw text the structured shape never carries", () => {
+    const rawSignature = "Connection to galaxyprod:12345 refused";
+    const obs = buildObservation({ ...base, rawSignature }, envelope, "structured");
+    expect(observationProblems(obs).leaks).toEqual([]);
+    expect(JSON.stringify(obs)).not.toContain("galaxyprod");
+  });
+});
+
+describe("the generated allowlists", () => {
+  it("hold nothing the leak scan would refuse, so an admitted field can always be sent", async () => {
+    const { GALAXY_MCP_TOOLS, GALAXY_DATATYPES, GALAXY_BUILTIN_TOOL_IDS } =
+      await import("../extensions/loom/observation-allowlists.js");
+    const { textLeaks } = await import("../shared/observation-contract.js");
+    for (const set of [GALAXY_MCP_TOOLS, GALAXY_DATATYPES, GALAXY_BUILTIN_TOOL_IDS]) {
+      expect(set.size).toBeGreaterThan(40);
+      for (const v of set) expect(textLeaks(v), v).toEqual([]);
+    }
   });
 });

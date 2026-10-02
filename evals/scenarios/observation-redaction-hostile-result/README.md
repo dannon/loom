@@ -1,25 +1,34 @@
 # observation-redaction-hostile-result
 
-One fixture does three jobs.
+One fixture, replayed in the default `ask` shape -- the one that carries a
+signature -- through the real build-and-check path.
 
 The first line is a Galaxy tool error with a researcher's absolute path, a
 project directory name, a 32-hex dataset id, a five-digit history number, a
 dataset URL and an email address, all on one line -- the normalizer only ever
 sees the first line, so putting them on separate lines would prove nothing.
-The asserted signature is the fully scrubbed form, so the test fails if any one
-of the five replacements regresses, and `leakScan: clean` is the collector's own
-whole-payload check reported as data.
+The leak scan is staged: `<url>` and `<email>` first, then the client-side
+shapes the later rewrites could hide (hosts, ports, addresses, UUIDs), then the
+`<path>`/`<id>`/`<n>` rewrites and the full table over the result. Nothing on
+this line survives the rewrites, so it passes, scrubbed.
 
-The second line carries hostile _arguments_ rather than hostile output:
-`../../etc/passwd` as a tool id and `C:/Users/bob` as a datatype. Both must be
-dropped by the shape allowlist, which is what the empty `toolIds` and
-`datatypes` assert. A flat character-class allowlist admits the first one, since
-a path and a toolshed id are made of the same characters.
+The second line carries hostile _arguments_: `../../etc/passwd` as a tool id
+and `C:/Users/bob` as a datatype. The empty `toolIds` and `datatypes` show the
+allowlists dropped both.
 
 Lines three and four repeat the first byte for byte, which takes that signature
-to the retry-loop threshold. So the run also pins that the loop is reported once,
-as `retry-loop`, and that the two silent occurrences in between stay silent.
+to the retry-loop threshold: the loop is reported once, as `retry-loop`, and the
+silent occurrence in between stays silent.
 
-Nothing is sent: the replay calls the build step, not the delivery path, so no
-`observation.sent`, `observation.queued`, `observation.invalid`,
-`observation.declined` or `observation.skipped` row may appear.
+The fifth line is a clean failure. The sixth, `Connection to galaxyprod:12345
+refused`, is the case the staging exists for: the `<n>` rewrite would turn the
+port into `<n>` and hide the host. The early stage catches it, so the signature
+is withheld (`signatureWithheld: host-port`) and the report keeps its structured
+fields rather than being refused.
+
+No `observation.built` row carries a signature -- it is written before anyone
+has consented to anything -- so the exact signatures are pinned by
+`tests/evals-scenarios.test.ts` over this same fixture. Nothing is sent: the
+replay calls the build step, not the delivery path, so no `observation.sent`,
+`observation.queued`, `observation.invalid`, `observation.declined` or
+`observation.skipped` row may appear.
