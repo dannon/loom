@@ -1822,6 +1822,12 @@ body.platform-darwin #files-title {
   line-height: 1.4;
 }
 
+#input.file-drop-target {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  background: var(--bg-surface);
+}
+
 #input-hint > span {
   flex: 1;
   min-width: 0;

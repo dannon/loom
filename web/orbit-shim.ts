@@ -135,6 +135,8 @@ async function fetchMode(): Promise<"remote" | "desktop"> {
 // Expose the same OrbitAPI shape the renderer expects.
 (window as unknown as Record<string, unknown>).orbit = {
   prompt: (message: string) => invoke("agent:prompt", message),
+  // Browsers do not expose OS file paths. Never substitute a file name for one.
+  getPathForFile: (_file: File) => "",
   abort: () => invoke("agent:abort"),
   newSession: () => invoke("agent:new-session"),
   getState: () => invoke("agent:get-state"),
