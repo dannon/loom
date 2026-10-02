@@ -558,7 +558,7 @@ describe("review fixes", () => {
     const edits: [string, string][] = [
       ["by: agent:loom", "by: human:loom-maintainers-x"],
       ["graduated_to: []", "graduated_to:\n  - https://github.com/galaxyproject/galaxy/pull/1"],
-      ["upstream: []", "upstream:\n  - https://example.org/x"],
+      ["upstream: []", "upstream:\n  - https://github.com/galaxyproject/galaxy/issues/1"],
       ["supersedes: []", "supersedes:\n  - stats/de-contrast-direction-and-sample-labels"],
     ];
     const draft = draftFilePath("stats", "na-coerced-to-zero-in-filters");

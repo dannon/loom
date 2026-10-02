@@ -165,6 +165,18 @@ describe("/lesson list", () => {
     expect(h.notifications[0].msg).not.toContain("evil.example");
   });
 
+  it("holds a hand-dropped galaxy-api lesson to that namespace's rules", async () => {
+    // Valid anywhere else; a galaxy-api lesson must say where its fix lives.
+    expect(VALID).toContain("graduated_to: []");
+    plantLesson("galaxy-api", "planted", VALID);
+    const h = harness();
+    await h.run("list");
+    expect(h.notifications[0].msg).toContain("galaxy-api/planted  [invalid]");
+    await h.run("show galaxy-api/planted");
+    expect(h.notifications[1].level).toBe("warning");
+    expect(h.notifications[1].msg).toMatch(/must say where the durable fix lives in graduated_to/);
+  });
+
   it("shows an unreadable file as such rather than hiding it", () => {
     const listing = formatLessonListing(
       [{ id: "stats/broken", namespace: "stats", slug: "broken", path: "/x/stats/broken.md" }],

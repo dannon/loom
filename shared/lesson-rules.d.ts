@@ -106,12 +106,24 @@ export declare function lessonIdFromPath(relPath: string): string | null;
 
 export type LessonValidation = { ok: true } | { ok: false; errors: string[] };
 /** Errors are `"<line>: <message>"`. */
-export declare function validateLessonMarkdown(text: string): LessonValidation;
+export declare function validateLessonMarkdown(
+  text: string,
+  opts?: { namespace?: string },
+): LessonValidation;
 /** Corpus form: `relPath` is `<namespace>/<slug>.md`; lines are `path:line: message`. */
 export declare function validateLessonFile(relPath: string, raw: string): string[];
 
 export declare function normalizeSignature(text: unknown): string;
-export declare function identifyingShapes(text: string, opts?: { allowUrls?: boolean }): string[];
+/**
+ * The corpus validator's own checks, imported from lessons/validate.mjs. Each
+ * returns `"<where> contains <what>"` messages (or `"<where> is too long to
+ * check"`); an empty list means the text passed.
+ */
+export declare function markupProblems(text: string, where: string): string[];
+export declare function identifyingProblems(text: string, where: string): string[];
+/** For a field that may hold a link: one canonical https URL to a LINK_HOSTS host. */
+export declare function linkProblems(link: string, where: string): string[];
+export declare const LINK_HOSTS: readonly string[];
 export declare function loadFrontmatter(fmText: string): {
   value: unknown;
   problems: string[];

@@ -160,7 +160,7 @@ export function formatLessonListing(
     }
     // A file someone dropped in by hand is listed but flagged, not trusted:
     // the title is only shown if the whole lesson passes the schema.
-    const valid = validateLessonMarkdown(result.text).ok;
+    const valid = validateLessonMarkdown(result.text, { namespace: lesson.namespace }).ok;
     const fm = valid ? parseLesson(result.text).frontmatter : null;
     const status = typeof fm?.status === "string" ? fm.status : "invalid";
     const marks = [status, ...(suppress.includes(lesson.id) ? ["suppressed"] : [])].join(", ");
@@ -243,7 +243,7 @@ export function registerLessonCommand(pi: ExtensionAPI): void {
           ctx.ui.notify(`No lesson ${full} on this machine (${result.detail}).`, "warning");
           return;
         }
-        const valid = validateLessonMarkdown(result.text);
+        const valid = validateLessonMarkdown(result.text, { namespace: id.namespace });
         ctx.ui.notify(
           valid.ok
             ? result.text
