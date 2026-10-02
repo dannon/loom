@@ -1077,7 +1077,8 @@ describe("the committed corpus", () => {
     for (const rel of collectLessonFiles(CORPUS).filter((r) => r.startsWith("galaxy-api/"))) {
       const { frontmatter } = parseLesson(readFileSync(join(CORPUS, rel), "utf8"));
       expect(frontmatter.graduated_to.length, rel).toBeGreaterThan(0);
-      expect(frontmatter.status, rel).toBe("stable");
+      // Deprecated is how one is retired; anything else would surface it.
+      expect(["stable", "deprecated"], rel).toContain(frontmatter.status);
     }
   });
 });

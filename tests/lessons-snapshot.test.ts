@@ -26,12 +26,16 @@ const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CORPUS = join(REPO_ROOT, "lessons");
 const SCRIPT = join(CORPUS, "build-snapshot.mjs");
 const SNAPSHOT = join(CORPUS, "snapshot.json");
+// The transform and the drift gate are tested against a corpus of their own.
+// Against the live one, the first lesson anybody retires would turn CI red.
+// It holds a deprecated lesson so the "left out" path is always exercised.
+const FIXTURE = join(REPO_ROOT, "tests", "fixtures", "lessons");
 
 // Fixed so a test never depends on the clock.
 const BUILT_AT = "2026-09-30T00:00:00.000Z";
 const COMMIT = "0".repeat(40);
 
-const build = () => buildSnapshot({ builtAt: BUILT_AT, commit: COMMIT });
+const build = () => buildSnapshot({ dir: FIXTURE, builtAt: BUILT_AT, commit: COMMIT });
 
 let temps: string[] = [];
 afterEach(() => {
@@ -44,12 +48,18 @@ function corpusOf(patches: Record<string, (text: string) => string>): string {
   const dir = mkdtempSync(join(tmpdir(), "loom-snapshot-"));
   temps.push(dir);
   mkdirSync(join(dir, "stats"), { recursive: true });
-  const base = readFileSync(join(CORPUS, "stats", "na-coerced-to-zero-in-filters.md"), "utf8");
+  const base = readFileSync(join(FIXTURE, "stats", "na-coerced-to-zero-in-filters.md"), "utf8");
   for (const [slug, patch] of Object.entries(patches)) {
     writeFileSync(join(dir, "stats", `${slug}.md`), patch(base), "utf8");
   }
   return dir;
 }
+
+describe("the fixture corpus", () => {
+  it("validates clean, so a failure below is about the snapshot and not the lessons", () => {
+    expect(validateLessonsDir(FIXTURE)).toEqual([]);
+  });
+});
 
 describe("the snapshot envelope", () => {
   it("carries the schema, licence and source the contract names", () => {
@@ -63,10 +73,15 @@ describe("the snapshot envelope", () => {
     expect(snapshot.built_at).toBe(BUILT_AT);
   });
 
-  it("holds one entry per lesson file, keyed by its path", () => {
-    const { snapshot } = build();
-    const ids = collectLessonFiles(CORPUS).map((rel) => rel.replace(/\.md$/, ""));
-    expect(snapshot.lessons.map((l: { id: string }) => l.id)).toEqual(ids);
+  it("holds one entry per lesson file it keeps, keyed by its path", () => {
+    const { snapshot, skipped } = build();
+    expect(snapshot.lessons.map((l: { id: string }) => l.id)).toEqual([
+      "galaxy-api/hid-is-not-an-id",
+      "stats/na-coerced-to-zero-in-filters",
+    ]);
+    expect(skipped).toEqual([
+      { id: "data/downloaded-file-is-not-what-its-extension-says", why: "status: deprecated" },
+    ]);
   });
 
   it("serializes as 2-space JSON with a trailing newline", () => {
@@ -86,8 +101,9 @@ describe("the frontmatter round-trip", () => {
   // than against a hand-written expectation that can drift from it.
   it("carries every frontmatter field and every section through unchanged", () => {
     const { snapshot } = build();
-    for (const rel of collectLessonFiles(CORPUS)) {
-      const { frontmatter, sections } = parseLesson(readFileSync(join(CORPUS, rel), "utf8"));
+    for (const rel of collectLessonFiles(FIXTURE)) {
+      const { frontmatter, sections } = parseLesson(readFileSync(join(FIXTURE, rel), "utf8"));
+      if (frontmatter.status === "deprecated") continue;
       const id = rel.replace(/\.md$/, "");
       const entry = snapshot.lessons.find((l: { id: string }) => l.id === id);
       expect(entry, `${id} is missing from the snapshot`).toBeDefined();
