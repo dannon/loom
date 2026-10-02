@@ -32,11 +32,16 @@ import type { SearchHit } from "./lessons/search";
 import { clip, collapse, firstSentence } from "./lessons/text";
 import type { Lesson, Match, SurfaceKind } from "./lessons/types";
 import { redactLessonText, wrapLessons } from "./lessons/wrapper";
+import {
+  isLessonHintBlock,
+  LESSON_HINT_MARKER,
+  withoutLessonHints,
+} from "../../shared/lesson-hint-marker.js";
 import { galaxyCall } from "./mcp-recovery";
 import { getNotebookPath } from "./state";
 
 /** Distinctive opening, so a hint can't be mistaken for the tool's own output. */
-export const LESSON_HINT_MARKER = "[loom lesson]";
+export { LESSON_HINT_MARKER };
 
 export const LESSONS_SEARCH_TOOL = "lessons_search";
 
@@ -89,10 +94,12 @@ export function decideToolResultHint(
   lessons: readonly Lesson[],
   armed: ReadonlySet<string>,
 ): HintDecision | null {
-  const resultText = resultTextOf(ev.content);
   // Any hint already present wins, including a different lesson's: this is the
   // idempotency guard for a re-delivered result, and the one-per-result rule.
-  if (resultText.includes(LESSON_HINT_MARKER)) return null;
+  // A hint is a block of its own, so tool output that merely quotes the marker
+  // no longer counts as one.
+  if (ev.content.some(isLessonHintBlock)) return null;
+  const resultText = resultTextOf(withoutLessonHints(ev.content));
 
   const match = matchToolEvent(
     { toolName: ev.toolName, input: ev.input ?? {}, resultText },
