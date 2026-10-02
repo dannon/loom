@@ -50,6 +50,7 @@ const LESSON = lessonFile({
 
 let dir: string;
 let prevHome: string | undefined;
+let prevAnthropic: string | undefined;
 
 beforeEach(() => {
   resetState();
@@ -70,13 +71,15 @@ beforeEach(() => {
     path.join(stateDir, "lessons", "reproduction", "metadata-quotes-a-key.md"),
     LESSON,
   );
+  prevAnthropic = process.env.ANTHROPIC_API_KEY;
   process.env.ANTHROPIC_API_KEY = ENV_KEY;
   fs.writeFileSync(path.join(dir, "notebook.md"), "# nb\n");
   setNotebookPath(path.join(dir, "notebook.md"));
 });
 
 afterEach(() => {
-  delete process.env.ANTHROPIC_API_KEY;
+  if (prevAnthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+  else process.env.ANTHROPIC_API_KEY = prevAnthropic;
   if (prevHome === undefined) delete process.env.HOME;
   else process.env.HOME = prevHome;
   setNotebookPath(null);
@@ -132,5 +135,51 @@ describe("a user-local lesson quoting a key", () => {
     const out = result.content.map((c) => c.text).join("\n");
     expect(out).toContain(ID);
     expectScrubbed(out);
+  });
+});
+
+describe("a key the clip would cut in half", () => {
+  // Long enough that the 300-char Check first clip and the 240-char first
+  // sentence both land inside it, with no space to back off to.
+  const LONG_KEY = "LongLessonKey" + "Q".repeat(120);
+  const PAD = "y".repeat(225);
+
+  beforeEach(() => {
+    process.env.ANTHROPIC_API_KEY = LONG_KEY;
+    fs.writeFileSync(
+      path.join(dir, "home", ".loom", "lessons", "reproduction", "metadata-quotes-a-key.md"),
+      lessonFile({
+        title: "Deposited metadata disagrees with the paper",
+        trigger: {
+          signatures: '["condition column is empty for every sample"]',
+          step_keywords: '["reconcile", "metadata"]',
+        },
+        body: LESSON.slice(LESSON.indexOf("\n## Symptom"))
+          .replace(/## Check first\n\n[^\n]*/, `## Check first\n\nUse ${PAD}${LONG_KEY} now.`)
+          .replace(/## Intervention\n\n[^\n]*/, `## Intervention\n\nUse ${PAD}${LONG_KEY} now.`),
+      }),
+    );
+    resetLessonStore();
+  });
+
+  const noPrefix = (out: string) => expect(out).not.toContain("LongLessonKey");
+
+  it("leaves no prefix of it in the inline hint", () => {
+    const decision = decideHintForEvent(
+      {
+        toolName: "bash",
+        input: {},
+        content: [{ type: "text", text: "condition column is empty for every sample" }],
+      },
+      new Set(),
+    );
+    expect(decision).not.toBeNull();
+    noPrefix(JSON.stringify(decision!.content));
+  });
+
+  it("leaves no prefix of it in the /execute note", () => {
+    const note = buildStepLessonNote("Reconcile the metadata against the paper");
+    expect(note).toContain(ID);
+    noPrefix(note);
   });
 });
