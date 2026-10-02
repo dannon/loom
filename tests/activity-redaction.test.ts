@@ -76,3 +76,49 @@ describe("summarizeResult", () => {
     expect(summarizeResult("plain output")).toBe("plain output");
   });
 });
+
+describe("the activity log and lessons_search", () => {
+  it("records neither the query nor the lesson prose, while other tools still log", async () => {
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const { registerActivityHooks } = await import("../extensions/loom/activity-hooks");
+    const { setNotebookPath } = await import("../extensions/loom/state");
+    const { resetActivity } = await import("../extensions/loom/activity");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-activity-lessons-"));
+    setNotebookPath(path.join(dir, "notebook.md"));
+    resetActivity();
+    try {
+      const handlers = new Map<string, (e: unknown) => Promise<unknown>>();
+      registerActivityHooks({
+        on: (name: string, fn: (e: unknown) => Promise<unknown>) => handlers.set(name, fn),
+      } as never);
+      const query = "my starsolo run on patient cohort fails";
+      await handlers.get("tool_execution_start")!({
+        toolCallId: "1",
+        toolName: "lessons_search",
+        args: { query },
+      });
+      await handlers.get("tool_execution_end")!({
+        toolCallId: "1",
+        toolName: "lessons_search",
+        isError: false,
+        result: { content: [{ type: "text", text: "Check first: the lesson prose" }] },
+      });
+      await handlers.get("tool_execution_start")!({
+        toolCallId: "2",
+        toolName: "bash",
+        args: { command: "true" },
+      });
+      const log = fs.readFileSync(path.join(dir, "activity.jsonl"), "utf-8");
+      expect(log).not.toContain("starsolo");
+      expect(log).not.toContain("lesson prose");
+      expect(log).not.toContain("lessons_search");
+      expect(log).toContain('"toolName":"bash"');
+    } finally {
+      setNotebookPath(null);
+      resetActivity();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
