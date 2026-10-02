@@ -115,11 +115,11 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // collector reads the content the model actually gets -- reading the raw
   // result would put an API key one normalization away from the wire.
   registerObservationTriggers(pi);
-  // AFTER redaction, and it must also stay after the observation triggers once
-  // they are registered here. pi feeds each tool_result handler the previous
-  // one's content, so anything registered after the hint reads it as part of
-  // the result -- a Galaxy error with no text of its own would get Loom's hint
-  // as its error signature. Lesson text is redacted where it is rendered, so
+  // AFTER redaction and after the observation triggers. pi feeds each
+  // tool_result handler the previous one's content, so anything registered
+  // after the hint reads it as part of the result -- a Galaxy error with no
+  // text of its own would get Loom's hint as its error signature (the triggers
+  // also drop hint blocks themselves, so this is the first line of defence). Lesson text is redacted where it is rendered, so
   // it needs nothing from the redactor. After the oversized-output recovery,
   // so it lands after the preview the model actually reads.
   registerLessonHint(pi);
