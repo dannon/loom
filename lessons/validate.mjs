@@ -188,67 +188,99 @@ const CREDENTIALS = [
   /(?<![A-Za-z0-9])eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}/,
 ];
 
-// Galaxy collection types are written `list:paired`, which is otherwise
-// exactly the shape of a scheme.
-const COLLECTION_TYPE =
-  /^(?:list|paired|paired_or_unpaired|record|sample_sheet)(?::(?:list|paired|paired_or_unpaired|record|sample_sheet))+$/;
 // Pseudonyms in generated.by and verified.by have their own strict pattern.
 const AUTHOR = /^(?:agent|human):[A-Za-z0-9._/@-]{1,80}$/;
 
-/**
- * `word:` followed directly by something, the shape of any URI scheme. Not
- * `word::`, which is a namespace in R, C++ and Rust and never a scheme.
- */
+// Schemes that are a link whatever follows them. Any other `word:` is only a
+// scheme when what follows looks like a host or an address, because `word:`
+// is also an R interaction term (`batch:condition`), a Galaxy collection type
+// (`list:paired`) and a slice (`arr[i:j]`).
+const SCHEMES =
+  "https?|s?ftps?|mailto|file|data|javascript|vbscript|ssh|git|svn|s3|gs|hdfs|tel|sms|callto|wss?|irc|ldap|smb|nfs|telnet|gopher|news|nntp|blob|about|chrome|view-source|jar|magnet|xmpp|sip|urn|rtsp|webcal|feed|intent|ms-[a-z-]+";
+const KNOWN_SCHEME = new RegExp(`(?<![A-Za-z0-9+.-])(?:${SCHEMES}):(?=\\S)`, "i");
+
 function hasScheme(text) {
-  const re = /(?<![A-Za-z0-9+.:-])([A-Za-z][A-Za-z0-9+.-]*):(?=[^\s\d:])/g;
+  if (KNOWN_SCHEME.test(text)) return true;
+  // The lookbehind pins each match to the start of a word, which keeps this
+  // linear on a long run of letters.
+  const re = /(?<![A-Za-z0-9+.:-])[A-Za-z][A-Za-z0-9+.-]*:(?!:)(\S*)/g;
   for (const m of text.matchAll(re)) {
-    const word = /^\S*/.exec(text.slice(m.index))[0].replace(/[`'"),.;\]}>]+$/, "");
-    if (COLLECTION_TYPE.test(word) || AUTHOR.test(word)) continue;
-    return true;
+    if (AUTHOR.test(m[0].replace(/[`'"),.;\]}>]+$/, ""))) continue;
+    if (/[@%]|[A-Za-z0-9-]\.[A-Za-z]{2,}/.test(m[1])) return true;
   }
   return false;
 }
 
 // Top-level domains that mean a network name rather than a file extension:
-// `.gz`, `.md`, `.ts` and friends are country codes too, and lessons talk about
-// files all the time.
-const TLDS =
-  "com|org|net|edu|gov|mil|int|io|dev|cloud|info|biz|internal|local|localdomain|lan|corp|intranet|private|home|arpa|example|test|invalid|localhost|uk|de|fr|nl|ch|eu|ca|au|jp|cn|se|dk|fi|es|nz|br";
+// `.gz`, `.md`, `.ts`, `.sh`, `.py` and friends are country codes too, and
+// lessons talk about files all the time. A host on a TLD not listed here gets
+// past; this is a shape check.
+const PRIVATE_TLDS =
+  "internal|local|localdomain|lan|corp|intranet|private|home|arpa|example|test|invalid|localhost";
+const TLDS = `com|org|net|edu|gov|mil|int|io|dev|cloud|info|biz|ai|co|ly|xyz|us|app|ru|me|tv|cc|gg|site|online|tech|top|ws|to|${PRIVATE_TLDS}|uk|de|fr|nl|ch|eu|ca|au|jp|cn|se|dk|fi|es|nz|br`;
 
 const URL_SHAPES = ["a URL", "a hostname"];
+
+/** An IPv4 octet, and the four of them with nothing numeric on either side. */
+const OCTET = "(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
+// The first octet is never 0: 0.0.0.0/8 identifies nothing, and four-part
+// tool versions like 0.7.17.4 would otherwise read as addresses.
+const IPV4 = new RegExp(
+  `(?<![\\d.])(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d?)(?:\\.${OCTET}){3}(?!\\.?\\d)`,
+);
 
 /**
  * Shapes that point at a person, a machine, a dataset or a credential. The
  * observation validator's list, minus its hid/dataset/history-followed-by-a-
- * number rule: lessons talk about hids in the abstract.
+ * number rule: lessons talk about hids in the abstract. Every unbounded
+ * repetition is pinned to a word start with a lookbehind, so a 16 KB run of
+ * letters costs one pass rather than one pass per character.
  */
 const IDENTIFYING = [
   [
     "a URL",
     (s) =>
       // A scheme with slashes, a protocol-relative //host, www., a scheme-less
-      // host/path, or any `scheme:` at all (`https:example.org` and
-      // `mailto:` both resolve).
-      /[A-Za-z][A-Za-z0-9+.-]*:\/\/|(?:^|[^A-Za-z0-9:])\/\/[A-Za-z0-9]|(?<![A-Za-z0-9])www\.|(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\/\S|\b(?:javascript|data|vbscript|file):/i.test(
+      // host/path, or a `scheme:` (`https:example.org` and `mailto:` both
+      // resolve).
+      /(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]*:\/\/|(?:^|[^A-Za-z0-9:])\/\/[A-Za-z0-9]|(?<![A-Za-z0-9])www\.|(?<![A-Za-z0-9.-])(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\/\S/i.test(
         s,
       ) || hasScheme(s),
   ],
-  ["a hostname", new RegExp(`(?:[A-Za-z0-9-]+\\.)+(?:${TLDS})(?![A-Za-z0-9-])`, "i")],
-  ["a home-directory path", /\/(?:Users|home|root)\/|~[A-Za-z0-9._-]*[\\/]/i],
-  // Any lead-in that is not itself part of a word or a relative path.
-  ["an absolute path", /(?:^|[^A-Za-z0-9._~/-])\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]/],
-  ["a Windows path", /\b[A-Za-z]:[\\/]|\\\\[A-Za-z0-9.-]+\\/],
+  [
+    "a hostname",
+    new RegExp(`(?<![A-Za-z0-9.-])(?:[A-Za-z0-9-]+\\.)+(?:${TLDS})(?![A-Za-z0-9-])`, "i"),
+  ],
+  [
+    "a home-directory path",
+    /\/(?:Users|home|root)\/|~[A-Za-z0-9._-]*[\\/]|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?[\\/]|%[A-Za-z_][A-Za-z0-9_]*%[\\/]/i,
+  ],
+  // Any lead-in that is not itself part of a word or a relative path (`./`,
+  // `../`, `a/b`), and any segment characters at all: `/data@lab/` is a path.
+  ["an absolute path", /(?:^|[^A-Za-z0-9_~/.])\/[^\s/\\]+\/[^\s/]/],
+  [
+    "a Windows path",
+    /\b[A-Za-z]:[\\/]|\\\\[A-Za-z0-9.-]+\\|(?:^|[^A-Za-z0-9_\\])\\[^\s\\]+\\[^\s\\]/,
+  ],
   ["a hex id of 16+ characters", /[0-9a-fA-F]{16,}/],
   ["a uuid", /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i],
   [
     "an IP address",
-    // No word boundaries: `node_10.12.4.7` is still an address. The `::` form
-    // needs a hex group on one side and nothing word-like hugging it, so
-    // `dplyr::filter` and `std::vector` stay prose.
-    /(?:\d{1,3}\.){3}\d{1,3}|(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}|(?<![0-9A-Fa-f:])(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*)?|::[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*)(?![A-Za-z0-9:])/i,
+    (s) =>
+      IPV4.test(s) ||
+      // The full form, then the `::` forms. Nothing word-like or `[` may hug
+      // a `::`, so `dplyr::filter`, `base::c()`, `std::vector` and `x[::2]`
+      // stay prose; `_` may, so `node_2001:db8::1` is still an address.
+      /(?<![0-9A-Za-z:])(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}(?![0-9A-Za-z:])/i.test(s) ||
+      /(?<![0-9A-Za-z:[])(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*)?|::[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*)(?![A-Za-z0-9_:(\]])/i.test(
+        s,
+      ),
   ],
   // Anything@domain, quoted local parts included.
-  ["an email address", /[A-Za-z0-9._%+"-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/],
+  [
+    "an email address",
+    /(?<![A-Za-z0-9._%+"-])[A-Za-z0-9._%+"-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/,
+  ],
   ["a credential-shaped string", (s) => CREDENTIALS.some((re) => re.test(s))],
 ];
 
@@ -269,7 +301,17 @@ function shapesIn(text, skip = []) {
  * contains <shape>; lessons carry none`.
  */
 export function identifyingProblems(text, where) {
+  if (tooLongToCheck(text)) return [`${where} is too long to check`];
   return shapesIn(text).map((shape) => `${where} contains ${shape}; lessons carry none`);
+}
+
+/**
+ * Nothing in a lesson is longer than the file cap, and the parser and the
+ * shape table both cost more than linear time on some inputs, so a longer
+ * string is refused rather than checked.
+ */
+function tooLongToCheck(text) {
+  return String(text ?? "").length > LIMITS.fileBytes;
 }
 
 /** A string that is, or carries, a URL or a hostname. */
@@ -301,14 +343,27 @@ export function linkProblems(link, where) {
     if (url.username || url.password) out.push(`${where} has credentials in a URL`);
     if (url.port) out.push(`${where} has a port in a URL`);
     if (/[?#]/.test(raw)) out.push(`${where} has a query or fragment in a URL`);
+    // Messages never echo the host or the path: a refused link is exactly
+    // the text that must not reach a log.
     if (url.protocol === "https:" && !LINK_HOSTS.includes(url.hostname)) {
-      out.push(
-        `${where} links to ${JSON.stringify(url.hostname)}, which is not an allowed link host`,
-      );
+      out.push(`${where} links to a host that is not in LINK_HOSTS`);
     }
     // The origin-only form is the one difference new URL() is allowed to make.
     if (url.href !== raw && url.href !== `${raw}/`) {
-      out.push(`${where} is not a canonical URL; write it as ${JSON.stringify(url.href)}`);
+      out.push(
+        `${where} is not a canonical URL (lowercase host, no default port, no dot segments)`,
+      );
+    }
+    // A path is words, digits and separators. Anything else (`[`, `!`, `:`,
+    // `@`, `<`) is how markup or an address rides along under an allowed host.
+    if (!/^[A-Za-z0-9._~/+-]*$/.test(url.pathname)) {
+      out.push(`${where} has a character in its path that a link does not need`);
+    }
+    // The host is pinned by the allowlist, so the path is what can still name
+    // a machine; only the absolute-path rule is left out, since every URL path
+    // is one.
+    for (const shape of shapesIn(url.pathname, ["an absolute path"])) {
+      out.push(`${where} contains ${shape} inside a URL path`);
     }
   }
   if (/%/.test(raw)) out.push(`${where} has a percent-escape in a URL`);
@@ -343,6 +398,17 @@ const CHAR_REF = /&#[0-9]+;?|&#[xX][0-9A-Fa-f]+;?|&[A-Za-z][A-Za-z0-9]*;/;
 // renderer that disagreed about where the span ends could turn into a live
 // tag: no closing tags, comments, attribute values, quotes or schemes.
 const INERT_PLACEHOLDER = /^<[A-Za-z][A-Za-z0-9 _-]*>$/;
+// Elements that change how everything after them parses, or fetch something,
+// even with no attributes. Never a placeholder.
+const LIVE_ELEMENTS =
+  /^<\s*(?:script|style|iframe|frame|frameset|object|embed|applet|plaintext|xmp|textarea|title|noscript|noembed|noframes|svg|math|base|link|meta|form|input|button|img|image|video|audio|source|track|picture|template|portal|select|option|marquee)\b/i;
+// What normalizeSignature writes. A stored signature carries these as text,
+// so they are not HTML.
+const NORMALIZER_PLACEHOLDERS = new Set(["<url>", "<email>", "<path>", "<id>", "<n>"]);
+
+function inertPlaceholder(raw) {
+  return INERT_PLACEHOLDER.test(raw) && !LIVE_ELEMENTS.test(raw);
+}
 
 function childTokens(token) {
   const out = [];
@@ -390,6 +456,7 @@ function markupFindings(text) {
     out.push({ kind: "charref", offset: m.index });
   }
   const tokens = walkTokens(text, (token, offset) => {
+    if (token.type === "html" && NORMALIZER_PLACEHOLDERS.has(token.raw)) return;
     if (["link", "image", "html", "def", "escape"].includes(token.type)) {
       out.push({ kind: token.type, offset });
     } else if (token.type === "codespan" && !inertCodeSpan(token.text)) {
@@ -436,7 +503,9 @@ function inertCodeSpan(content) {
       (t) =>
         t.type === "link" ||
         t.type === "image" ||
-        (t.type === "html" && !INERT_PLACEHOLDER.test(t.raw)) ||
+        (t.type === "html" && !inertPlaceholder(t.raw)) ||
+        // A span inside a span is still read by some renderer as markup.
+        (t.type === "codespan" && !inertCodeSpan(t.text)) ||
         bad(childTokens(t)),
     );
   return !bad(inner);
@@ -448,6 +517,7 @@ function inertCodeSpan(content) {
  * own. Each problem reads `<where> contains <what>`.
  */
 export function markupProblems(text, where) {
+  if (tooLongToCheck(text)) return [`${where} is too long to check`];
   const kinds = [...new Set(markupFindings(String(text ?? "")).map((f) => f.kind))];
   return kinds.map((k) => `${where} contains ${MARKUP[k].noun}`);
 }
@@ -917,7 +987,11 @@ export function validateLessonFile(relPath, raw) {
   // Every string, not just the prose fields: a title, a cue or a source id
   // reaches the snapshot and the public index exactly like the body does.
   eachString(fm, "", (label, value) => {
-    const line = at(label.split(/[.[]/)[0]);
+    // trigger's lists each have a line of their own; elsewhere the nested key
+    // names repeat (`by` is in generated and in verified) so the parent's line
+    // is the honest one.
+    const [top, sub] = label.split(/[.[]/);
+    const line = top === "trigger" && sub ? at(sub) : at(top);
     // The file-level ASCII check reads raw bytes, and a YAML escape like "\u202e"
     // is ASCII on disk. This is the check that sees the decoded value.
     for (const bad of value.matchAll(/[^\x20-\x7e]/gu)) {
@@ -934,13 +1008,20 @@ export function validateLessonFile(relPath, raw) {
       return;
     }
     if (field === "trigger.hosts") {
-      // A host is the whole point of this field; its own pattern pins the shape.
+      // A host is the whole point of this field; its own pattern pins the
+      // shape. A private one names somebody's network, so it never ships.
       for (const shape of shapesIn(value, URL_SHAPES)) {
         add(line, `${label} contains ${shape}; lessons carry none`);
+      }
+      if (new RegExp(`\\.(?:${PRIVATE_TLDS})$`, "i").test(value)) {
+        add(line, `${label} is a private hostname; only public hosts go in a lesson`);
       }
       return;
     }
     for (const p of identifyingProblems(value, label)) add(line, p);
+    // A pseudonym's own pattern already pins it, and `@` in it would read as
+    // a GFM email autolink.
+    if (field === "generated.by" || field === "verified.by") return;
     for (const p of markupProblems(value, label)) add(line, p);
   });
 

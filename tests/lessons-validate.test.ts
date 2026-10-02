@@ -733,16 +733,21 @@ describe("the second review's bypasses", () => {
         'sources:\n  - { id: "loom#1" }',
         'sources:\n  - { id: "loom#1", resource: "https://galaxy.cancer-center.internal/x" }',
       );
-      expect(check(text).join("\n")).toMatch(
-        /sources\[0\]\.resource links to "galaxy\.cancer-center\.internal", which is not an allowed link host/,
-      );
+      const out = check(text).join("\n");
+      expect(out).toMatch(/sources\[0\]\.resource links to a host that is not in LINK_HOSTS/);
+      // The message must not repeat the host it refused.
+      expect(out).not.toContain("cancer-center");
     });
 
     it.each([
-      ["upstream", "https://10.12.4.7/x", /not an allowed link host/],
+      ["upstream", "https://10.12.4.7/x", /a host that is not in LINK_HOSTS/],
       ["upstream", "https://example.com/123e4567-e89b-12d3-a456-426614174000", /a uuid inside/],
       ["graduated_to", "https://example.com/f2db41e1fa331b3e", /hex id of 16\+ characters inside/],
-      ["upstream", "https://example.org/srv/lab/jane/patient07.csv", /not an allowed link host/],
+      [
+        "upstream",
+        "https://example.org/srv/lab/jane/patient07.csv",
+        /a host that is not in LINK_HOSTS/,
+      ],
       ["upstream", "https://example.org/home/alice/../../guide", /dot segment/],
     ])("refuses %s: %j", (key, link, message) => {
       expect(field(key, link)).toMatch(message);
@@ -841,7 +846,7 @@ describe("the second review's bypasses", () => {
     expect(check(swap("upstream: []", 'upstream: ["https://github.com"]'))).toEqual([]);
     // A host off the allowlist is refused for that, not as a malformed URL.
     const out = check(swap("upstream: []", 'upstream: ["https://example.org"]')).join("\n");
-    expect(out).toMatch(/not an allowed link host/);
+    expect(out).toMatch(/a host that is not in LINK_HOSTS/);
     expect(out).not.toMatch(/malformed|not a single URL/);
   });
 
@@ -926,6 +931,160 @@ describe("the second review's bypasses", () => {
       expect(out).toHaveLength(1);
       expect(check(swap(BODY_LINE, line.replace(" on lab.private.example", "")))).toEqual([]);
     });
+  });
+});
+
+// A second hostile pass, over the parser-based version, with only the diff to
+// go on. Its accepted inputs, verbatim.
+describe("the fresh-eyes review's bypasses", () => {
+  const BODY_LINE = "Exclude the missing values explicitly before comparing.";
+  const body = (text: string) => check(swap(BODY_LINE, text)).join("\n");
+  const upstream = (link: string) =>
+    check(swap("upstream: []", `upstream: ["${link}"]`)).join("\n");
+
+  it.each([
+    ["https://github.com/galaxy.cancer-center.internal/x", /a hostname inside a URL path/],
+    ["https://github.com/x/www.evil.example", /a URL inside a URL path/],
+    ["https://github.com/x/mailto:alice", /a character in its path/],
+    ["https://github.com/a/[x](https://evil.example/p)", /a character in its path/],
+    ["https://github.com/x/![i](https://evil.example/t.png)", /a character in its path/],
+  ])("refuses markup or a host riding in an allowed link's path: %j", (link, message) => {
+    expect(upstream(link)).toMatch(message);
+  });
+
+  it.each([
+    ["https://github.com/galaxyproject/galaxy/pull/21994"],
+    ["https://doi.org/10.1371/journal.pone.0123456"],
+    ["https://training.galaxyproject.org/topics/transcriptomics/tutorial.html"],
+  ])("still accepts an ordinary link: %j", (link) => {
+    expect(upstream(link)).toBe("");
+  });
+
+  it("accepts a signature in the exact form normalization asks for", () => {
+    const raw = 'signatures: ["FileNotFoundError: /srv/lab/jane/x.csv missing"]';
+    const asked = check(swap('signatures: ["a literal normalized signature"]', raw)).join("\n");
+    const stored = /store "([^"]+)"/.exec(asked)?.[1];
+    expect(stored).toBe("FileNotFoundError: <path> missing");
+    const text = swap(
+      'signatures: ["a literal normalized signature"]',
+      `signatures: ["${stored}"]`,
+    );
+    expect(check(text)).toEqual([]);
+    for (const p of ["<id>", "<url>", "<n>", "<email>"]) {
+      expect(markupProblems(`failed on ${p} again`, "sig"), p).toEqual([]);
+    }
+  });
+
+  it("does not treat a live element as a placeholder", () => {
+    expect(markupProblems("failed on <script> again", "sig")).toEqual(["sig contains HTML"]);
+    for (const tag of ["`<script>`", "`<iframe>`", "`<plaintext>`"]) {
+      expect(markupProblems(tag, "body"), tag).toEqual([
+        "body contains a link or HTML in a code span",
+      ]);
+    }
+  });
+
+  it.each([
+    ["/data@lab/jane/sample07.csv", "an absolute path"],
+    ["/mnt+lab/jane/patient07.csv", "an absolute path"],
+    ["--/srv/lab/jane/x", "an absolute path"],
+    ["$HOME/projects/jane/x.csv", "a home-directory path"],
+    ["%USERPROFILE%\\Desktop\\jane.csv", "a home-directory path"],
+    ["\\Users\\alice\\Documents\\data.csv", "a Windows path"],
+    ["\\srv\\lab\\jane\\x.csv", "a Windows path"],
+  ])("refuses the path %j", (line, shape) => {
+    expect(body(line)).toContain(`${shape} in a lesson body`);
+  });
+
+  it("refuses HTML in a code span nested inside another code span", () => {
+    expect(body('Use `` a ` <a href="x">m</a> ` b `` here.')).toMatch(
+      /no links or HTML inside a code span/,
+    );
+    expect(markupProblems('`` ` <a href="x">m</a> ` ``', "title")).toEqual([
+      "title contains a link or HTML in a code span",
+    ]);
+  });
+
+  it.each([["evil-fix.ai or bit.ly"], ["galaxy.cancer.ai"], ["lab.example.xyz"]])(
+    "refuses the bare domain %j",
+    (line) => {
+      expect(body(line)).toContain("a hostname in a lesson body");
+    },
+  );
+
+  it("refuses a bare domain dressed as a tool id", () => {
+    expect(check(swap("tools: [deseq2]", "tools: [deseq2, galaxy.cancer.ai]")).join("\n")).toMatch(
+      /trigger\.tools\[1\] contains a hostname/,
+    );
+  });
+
+  it.each([["galaxy.cancer-center.internal"], ["jane-smith-laptop.local"]])(
+    "refuses the private trigger host %j",
+    (host) => {
+      expect(check(swap('hosts: ["zenodo.org"]', `hosts: ["${host}"]`)).join("\n")).toMatch(
+        /trigger\.hosts\[0\] is a private hostname/,
+      );
+    },
+  );
+
+  it("still accepts a public trigger host with www", () => {
+    expect(check(swap('hosts: ["zenodo.org"]', 'hosts: ["www.ncbi.nlm.nih.gov"]'))).toEqual([]);
+  });
+
+  it("refuses rather than checks a string longer than any lesson", () => {
+    const long = "a".repeat(LIMITS.fileBytes + 1);
+    expect(identifyingProblems(long, "x")).toEqual(["x is too long to check"]);
+    expect(markupProblems(long, "x")).toEqual(["x is too long to check"]);
+  });
+
+  // Quadratic regexes made a 64 KB run of letters take ten seconds. The bound
+  // is loose on purpose: it fails on a regression to quadratic, not on a slow
+  // machine.
+  it.each([
+    ["a run of letters", "a"],
+    ["dotted labels", "a."],
+    ["at signs", "a@"],
+    ["scheme-like words", "a:"],
+  ])("checks a max-size string of %s in linear time", (_name, unit) => {
+    const text = unit.repeat(Math.floor(LIMITS.fileBytes / unit.length));
+    const start = performance.now();
+    identifyingProblems(text, "x");
+    markupProblems(text, "x");
+    expect(performance.now() - start).toBeLessThan(500);
+  });
+
+  it.each([
+    ["an R interaction term", "Fit ~ batch + condition + batch:condition here."],
+    ["another interaction term", "Test genotype:treatment first."],
+    ["a Galaxy repeat key", "Set `input|type:paired` for it."],
+    ["a slice", "Take arr[i:j] and x[::2] there."],
+    ["R namespaces with hex-only names", "Call base::c() and stats::ecdf(x) on it."],
+    ["a four-part wrapper version", "Run bwa mem 0.7.17.4 on it."],
+    ["a word followed by a colon", "The input data: counts, then about: nothing."],
+  ])("still allows %s", (_name, line) => {
+    expect(check(swap(BODY_LINE, line))).toEqual([]);
+  });
+
+  it("refuses a known scheme even with no slashes or host after it", () => {
+    expect(body("Call tel:5551234567 for it.")).toMatch(/no URLs in a lesson body/);
+  });
+
+  it("reports a signature problem on the signatures line, not the trigger line", () => {
+    // A decoded non-ASCII character is caught by the per-string pass, which is
+    // the one that used to report on the parent key's line.
+    const text = swap(
+      'signatures: ["a literal normalized signature"]',
+      'signatures: ["a literal \\u00e9 normalized signature"]',
+    );
+    const line = GOOD.split("\n").findIndex((l) => l.includes("signatures:")) + 1;
+    expect(check(text).join("\n")).toContain(
+      `stats/a-good-lesson.md:${line}: trigger.signatures[0] contains control or non-ASCII character U+00E9`,
+    );
+  });
+
+  it("does not read an @ in generated.by as an email autolink", () => {
+    const text = swap('by: "human:loom-maintainers"', 'by: "agent:loom/0.8.0@dev"');
+    expect(check(text)).toEqual([]);
   });
 });
 

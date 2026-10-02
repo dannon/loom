@@ -71,7 +71,11 @@ line regex. Refused at any depth (inside blockquotes, list items and tables
 too): links of every kind (inline, reference, autolinks), link reference
 definitions, images, HTML, backslash escapes and character references
 (`&#64;`, `&#x40;`, `&amp;`). A code span may show a placeholder such as
-`<collection id>`, but not a tag with attributes, a closing tag or a link.
+`<collection id>`, but not a tag with attributes, a closing tag, a link, a nested
+code span hiding either, or an element like `<script>` or `<iframe>` that is
+live even bare. The placeholders `normalizeSignature` writes (`<path>`, `<id>`,
+`<url>`, `<n>`, `<email>`) are text anywhere. A string longer than the file cap
+is refused unchecked.
 
 ## What the validator adds on top of the field list
 
@@ -93,14 +97,21 @@ them, and they are part of the schema.
   top-level domains, or credential-shaped strings (provider API keys, AWS key
   ids, GitHub and Slack tokens, private key headers, JWTs) in the body, in any
   frontmatter value or on any raw frontmatter line. `trigger.hosts` is the one
-  field that holds a hostname. No URL, and nothing shaped like a `scheme:`, in
-  the body or in a frontmatter field, except Galaxy collection types like
-  `list:paired`.
+  field that holds a hostname, and it must be a public one (no `.internal`,
+  `.local`, `.lan`, `.corp` and the like). No URL in the body or in a
+  frontmatter field: nothing with `://`, no `www.`, no known scheme such as
+  `mailto:`, `tel:` or `data:` followed by anything, and no other `word:`
+  followed by a host or an address. A plain `word:word` (`batch:condition`,
+  `list:paired`) is prose. Paths include `$HOME/...`, `%USERPROFILE%\...` and
+  drive-less backslash paths. An IPv4 address starting with `0.` is not
+  refused, so a four-part tool version like `0.7.17.4` is not either; one
+  starting with any other number is.
 - **Links** go only in `graduated_to`, `upstream` and `sources[].resource`, and
   each must be a canonical `https` URL to one of the hosts in `LINK_HOSTS` at the
   top of `validate.mjs`: no port, credentials, query, fragment, percent-escape
-  or `..`, and the whole string still gets the identifying-data checks (so no
-  commit SHAs, uuids or home paths in the path). Those fields may hold free text
+  or `..`; a path of letters, digits and `._~/+-` only; and the path still gets
+  the identifying-data checks, hostnames and URLs included (so no commit SHAs,
+  uuids, home paths or a second host in the path). Those fields may hold free text
   instead, like `galaxy-mcp#55`. To link somewhere new, add the host to
   `LINK_HOSTS` in the same pull request and say why.
 - **These are shape checks, not meaning checks.** A private hostname written as
