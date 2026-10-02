@@ -470,8 +470,8 @@ Run `/tester-id` with no argument to see the current value. It writes only the `
 #### Sharing Galaxy failure patterns
 
 When a Galaxy tool fails, or the same step fails three times in a row, Loom
-can report the _shape_ of it -- which tool, which stage, which datatypes, and a
-normalized one-line signature, never your data -- to the Galaxy team's private
+can report the _shape_ of it -- which tool, which stage, which datatypes, and,
+in `ask` mode, a normalized one-line signature -- to the Galaxy team's private
 intake queue. Those reports are how a problem one person hits becomes a lesson
 Loom surfaces for the next person who hits it (you included), and how the team
 finds what to fix upstream. Nothing goes without your say-so: the default `ask`
@@ -481,20 +481,24 @@ only if you confirm.
 ```
 /observations               # mode, counts, and where the local log lives
 /observations mode ask      # show me the payload and ask, every time (default)
-/observations mode auto     # send without asking, and log what was sent
+/observations mode auto     # send without asking, structured fields only
 /observations mode off      # collect nothing
 /observations sent          # everything this install has sent
-/observations retract <id>  # delete one row from the queue
+/observations retract <id>  # delete a sent row, or cancel one still queued
 /observe <note>             # report something yourself
 ```
 
-What is sent is structured signals plus one short generic description, checked
-by a validator before it leaves the machine: no transcript text, no data
-values, no file paths, no history or dataset ids, no URLs, no email addresses.
-The server is recorded as its public name (`usegalaxy.org`, `usegalaxy.eu`,
-...) or as the literal `private` for anything else -- an institutional mirror
-is never named. Rows are tied to a random per-install token, not to your
-account, and expire after 180 days.
+In `ask` mode the signature and your optional description are shown to you in
+full and sent only if you say yes. In `auto` mode no free text is sent at all:
+no error text and no description, only the structured fields (tool, stage,
+datatypes, server, client). Every field is checked before it leaves the machine
+-- tool names and datatypes against Galaxy's own lists, and the text against a
+validator that refuses the whole report if the raw error line looks like it
+carries a path, URL, address, host or id. No pattern catches every name, which
+is why only `ask`, where you read it first, sends text. The server is recorded as its
+public name (`usegalaxy.org`, `usegalaxy.eu`, ...) or as the literal `private`
+for anything else -- an institutional mirror is never named. Rows are tied to a
+random per-install token, not to your account, and expire after 180 days.
 
 Switching to `auto` shows you a real sample payload first. For a managed
 deployment, `ORBIT_OBSERVATIONS=off` (or `LOOM_OBSERVATIONS=off`) disables the
