@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isHandledPrompt } from "../app/src/renderer/handled-prompt.js";
+import { isHandledPrompt, promptStartsNoTurn } from "../shared/handled-prompt.js";
 
 describe("isHandledPrompt", () => {
   it("recognizes a prompt an extension command consumed", () => {
@@ -27,5 +27,20 @@ describe("isHandledPrompt", () => {
 
   it("is a no-op for pi versions that send no disposition", () => {
     expect(isHandledPrompt({ type: "response", command: "prompt", success: true })).toBe(false);
+  });
+});
+
+describe("promptStartsNoTurn", () => {
+  it("covers handled commands and rejected prompts only", () => {
+    const base = { type: "response", command: "prompt" };
+    expect(promptStartsNoTurn({ ...base, success: true, data: { disposition: "handled" } })).toBe(
+      true,
+    );
+    expect(promptStartsNoTurn({ ...base, success: false, error: "Preflight failed" })).toBe(true);
+    expect(promptStartsNoTurn({ ...base, success: true, data: { disposition: "started" } })).toBe(
+      false,
+    );
+    expect(promptStartsNoTurn({ ...base, success: true })).toBe(false);
+    expect(promptStartsNoTurn({ ...base, command: "steer", success: false })).toBe(false);
   });
 });

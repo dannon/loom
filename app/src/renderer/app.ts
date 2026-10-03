@@ -15,7 +15,7 @@ import { refreshGalaxyInvocations } from "./galaxy-invocations.js";
 import { refreshGalaxyHistory } from "./galaxy-history.js";
 import { formatGalaxyTooltip } from "./galaxy-tooltip.js";
 import { PromptQueue, queuedPreview } from "./prompt-queue.js";
-import { isHandledPrompt } from "./handled-prompt.js";
+import { isHandledPrompt } from "../../../shared/handled-prompt.js";
 import { attachFilePathDrop } from "./file-drop.js";
 import { FeedbackDraftStore } from "./feedback-draft.js";
 import {
