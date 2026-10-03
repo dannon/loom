@@ -6,8 +6,8 @@
  * invocation_outputs, ...). Galaxy does NOT reject other code fences -- a ```txt
  * block validates fine -- but it renders as a raw monospace <pre> block, not as
  * formatted content or a live directive, which is almost never what was meant.
- * The push adapter (galaxy-markdown-adapter.ts) only rewrites ```loom-invocation
- * fences; everything else in notebook.md is sent to the page verbatim, so a
+ * The push adapter (galaxy-markdown-adapter.ts) only rewrites Loom's own typed
+ * fences (invocation, job, session); everything else in notebook.md is sent to the page verbatim, so a
  * ```txt fence the model writes lands on the page unchanged. The reliable place
  * to prevent that is here -- steer the author -- not a lossy after-the-fact
  * rewrite that can't recover the table or prose the content should have been.

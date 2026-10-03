@@ -11,7 +11,10 @@ import {
   UNTRUSTED_BEGIN,
   UNTRUSTED_END,
 } from "../extensions/loom/galaxy-pages-sync";
-import { loomToGalaxyMarkdown } from "../extensions/loom/galaxy-markdown-adapter";
+import {
+  loomToGalaxyMarkdown,
+  galaxyMarkdownToLoom,
+} from "../extensions/loom/galaxy-markdown-adapter";
 
 vi.mock("../extensions/loom/galaxy-pages-api");
 vi.mock("../extensions/loom/galaxy-api");
@@ -114,6 +117,84 @@ describe("pushNotebookToGalaxy", () => {
     // the local notebook stays canonical -- the raw fence, not the projection
     const writtenLocal = vi.mocked(notebookWriter.writeNotebook).mock.calls[0][1];
     expect(writtenLocal).toContain("```loom-invocation");
+  });
+
+  it("projects loom-job and loom-session blocks to carriers, never raw fences", async () => {
+    // Echo whatever id was asked for, so both the invocation and job lookups
+    // validate. Galaxy can't render loom-* cells, so none may reach the page.
+    vi.mocked(galaxyApi.galaxyGet).mockImplementation(async (path: string) => ({
+      id: path.split("/").pop(),
+    }));
+    const notebook = [
+      "# Analysis",
+      "",
+      "```loom-invocation",
+      "invocation_id: f2db41e1fa331b3e",
+      "label: BWA alignment",
+      "status: completed",
+      "```",
+      "",
+      "```loom-job",
+      "job_id: 0a1b2c3d4e5f6789",
+      "label: FastQC",
+      "status: completed",
+      "```",
+      "",
+      "```loom-session",
+      "id: s-1",
+      "started_at: 2026-05-20T10:00:00Z",
+      "ended_at: 2026-05-20T11:00:00Z",
+      "notebook: notebook.md",
+      "orphaned_active_steps: 0",
+      "```",
+      "",
+    ].join("\n");
+    vi.mocked(notebookWriter.readNotebook).mockResolvedValue(notebook);
+    vi.mocked(pagesApi.createPage).mockResolvedValue({
+      id: "p1",
+      slug: "analysis",
+      latest_revision_id: "r1",
+      revision_ids: ["r1"],
+      title: "Analysis",
+      create_time: "2026-05-20T00:00:00Z",
+      update_time: "2026-05-20T00:00:00Z",
+    });
+
+    await pushNotebookToGalaxy({ historyId: "h1", title: "Analysis" });
+
+    const sent = vi.mocked(pagesApi.createPage).mock.calls[0][0].content;
+    expect(sent).not.toMatch(/^```loom-/m);
+    expect(sent).toMatch(/^\[loom-invocation:v1\]: #loom "/m);
+    expect(sent).toMatch(/^\[loom-job:v1\]: #loom "/m);
+    expect(sent).toMatch(/^\[loom-session:v1\]: #loom "/m);
+    expect(sent).toContain("invocation_outputs(invocation_id=f2db41e1fa331b3e)");
+    expect(sent).toContain("job_parameters(job_id=0a1b2c3d4e5f6789)");
+    expect(galaxyApi.galaxyGet).toHaveBeenCalledWith("/jobs/0a1b2c3d4e5f6789");
+    // Pulling the pushed page back yields the canonical notebook unchanged.
+    expect(galaxyMarkdownToLoom(sent)).toBe(notebook);
+  });
+
+  it("omits the job directive (but keeps the carrier) when Galaxy doesn't know the job", async () => {
+    vi.mocked(galaxyApi.galaxyGet).mockRejectedValue(new Error("404"));
+    vi.mocked(notebookWriter.readNotebook).mockResolvedValue(
+      "# A\n\n```loom-job\njob_id: 0a1b2c3d4e5f6789\nstatus: in_progress\n```\n",
+    );
+    vi.mocked(pagesApi.createPage).mockResolvedValue({
+      id: "p1",
+      slug: "a",
+      latest_revision_id: "r1",
+      revision_ids: ["r1"],
+      title: "A",
+      create_time: "2026-05-20T00:00:00Z",
+      update_time: "2026-05-20T00:00:00Z",
+    });
+
+    await pushNotebookToGalaxy({ historyId: "h1", title: "A" });
+
+    const sent = vi.mocked(pagesApi.createPage).mock.calls[0][0].content;
+    expect(sent).not.toContain("job_parameters(");
+    expect(sent).not.toContain("```loom-job");
+    expect(sent).toMatch(/^\[loom-job:v1\]: #loom "/m);
   });
 
   it("updates the existing page when a binding is present", async () => {
@@ -298,6 +379,45 @@ describe("pullNotebookFromGalaxy", () => {
     expect(begin).toBeGreaterThanOrEqual(0);
     expect(block).toBeGreaterThan(begin);
     expect(end).toBeGreaterThan(block);
+  });
+
+  it("reconstructs job and session carriers on pull", async () => {
+    const bound = [
+      "```loom-galaxy-page",
+      "page_id: p1",
+      "page_slug: a",
+      'galaxy_server_url: "https://galaxy.example"',
+      "history_id: h1",
+      "last_synced_revision: r1",
+      "bound_at: 2026-05-20T10:00:00Z",
+      "```",
+      "",
+    ].join("\n");
+    vi.mocked(notebookWriter.readNotebook).mockResolvedValue(bound);
+    const jobBlock = ["```loom-job", "job_id: 0a1b2c3d4e5f6789", "label: FastQC", "```"].join("\n");
+    const sessionBlock = ["```loom-session", "id: s-1", "orphaned_active_steps: 0", "```"].join(
+      "\n",
+    );
+    const remote = loomToGalaxyMarkdown(`# Remote\n\n${jobBlock}\n\n${sessionBlock}\n`);
+    vi.mocked(pagesApi.getPage).mockResolvedValue({
+      id: "p1",
+      slug: "a",
+      latest_revision_id: "r2",
+      revision_ids: ["r1", "r2"],
+      title: "A",
+      content: remote,
+      content_format: "markdown",
+      create_time: "2026-05-20T00:00:00Z",
+      update_time: "2026-05-21T00:00:00Z",
+    });
+
+    await pullNotebookFromGalaxy();
+
+    const written = vi.mocked(notebookWriter.writeNotebook).mock.calls.at(-1)![1];
+    expect(written).toContain(jobBlock);
+    expect(written).toContain(sessionBlock);
+    expect(written).not.toContain("[loom-job:v1]");
+    expect(written).not.toContain("[loom-session:v1]");
   });
 });
 

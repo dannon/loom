@@ -12,7 +12,7 @@ export const NOTEBOOK_FENCE_WRITE_PREFIX = "loom";
 
 export const NOTEBOOK_FENCE_READ_PREFIXES = Object.freeze(["loom", "orbit"]);
 
-/** @typedef {"session" | "invocation" | "job" | "galaxy-page"} NotebookFenceKind */
+/** @typedef {"session" | "invocation" | "job" | "galaxy-page" | "udt"} NotebookFenceKind */
 
 /** @param {NotebookFenceKind} kind @returns {string} */
 export function notebookFenceOpen(kind) {

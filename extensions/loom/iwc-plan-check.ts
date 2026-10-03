@@ -82,7 +82,7 @@ export function registerIwcPlanCheck(pi: ExtensionAPI): void {
     if (!draftsPlan(event.messages as Message[])) return;
 
     nudged = true;
-    if (!deliverAutoFollowUp(IWC_PLAN_NUDGE)) return;
+    if (!deliverAutoFollowUp(IWC_PLAN_NUDGE, { dropOnStop: true })) return;
     const notebook = getNotebookPath();
     if (notebook) {
       appendActivityEvent(path.dirname(notebook), {

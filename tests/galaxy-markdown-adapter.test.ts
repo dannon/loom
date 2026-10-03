@@ -4,10 +4,21 @@ import {
   galaxyMarkdownToLoom,
   loomToGalaxyMarkdownRich,
   galaxyInvocationValidator,
+  galaxyJobValidator,
+  type DirectiveValidators,
 } from "../extensions/loom/galaxy-markdown-adapter";
 import * as galaxyApi from "../extensions/loom/galaxy-api";
 
 vi.mock("../extensions/loom/galaxy-api");
+
+const ALL_VALID: DirectiveValidators = {
+  invocation: { isValid: async () => true },
+  job: { isValid: async () => true },
+};
+const NONE_VALID: DirectiveValidators = {
+  invocation: { isValid: async () => false },
+  job: { isValid: async () => false },
+};
 
 const NOTEBOOK = [
   "# chrM Variant Calling",
@@ -88,7 +99,7 @@ describe("galaxy-markdown-adapter -- round trip", () => {
     const human = ["```galaxy", "history_dataset_display(history_dataset_id=abc)", "```"].join(
       "\n",
     );
-    const pushed = await loomToGalaxyMarkdownRich(NOTEBOOK, { isValid: async () => true });
+    const pushed = await loomToGalaxyMarkdownRich(NOTEBOOK, ALL_VALID);
     // Drop a hand-authored galaxy fence into the pushed page (with a blank line,
     // as a human would), then pull.
     const pulled = galaxyMarkdownToLoom(`${human}\n\n${pushed}`);
@@ -109,7 +120,7 @@ describe("galaxy-markdown-adapter -- round trip", () => {
 
 describe("galaxy-markdown-adapter -- rich push", () => {
   it("emits a galaxy directive when the invocation id validates, plus the carrier", async () => {
-    const out = await loomToGalaxyMarkdownRich(NOTEBOOK, { isValid: async () => true });
+    const out = await loomToGalaxyMarkdownRich(NOTEBOOK, ALL_VALID);
     expect(out).toContain("```galaxy");
     expect(out).toContain("invocation_outputs(invocation_id=abc123)");
     expect(out).toMatch(/^\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+"$/m);
@@ -118,7 +129,7 @@ describe("galaxy-markdown-adapter -- rich push", () => {
   });
 
   it("omits the directive when the id does not validate, but keeps the carrier", async () => {
-    const out = await loomToGalaxyMarkdownRich(NOTEBOOK, { isValid: async () => false });
+    const out = await loomToGalaxyMarkdownRich(NOTEBOOK, NONE_VALID);
     expect(out).not.toContain("```galaxy");
     expect(out).toMatch(/^\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+"$/m);
     expect(galaxyMarkdownToLoom(out)).toBe(NOTEBOOK);
@@ -141,7 +152,7 @@ describe("galaxy-markdown-adapter -- rich push", () => {
         throw new Error("validator must not be consulted when there is no invocation_id");
       },
     };
-    const out = await loomToGalaxyMarkdownRich(noId, validator);
+    const out = await loomToGalaxyMarkdownRich(noId, { invocation: validator, job: validator });
     expect(out).not.toContain("```galaxy");
     expect(out).toMatch(/^\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+"$/m);
     expect(galaxyMarkdownToLoom(out)).toBe(noId);
@@ -150,7 +161,7 @@ describe("galaxy-markdown-adapter -- rich push", () => {
 
 describe("galaxy-markdown-adapter -- carrier whitespace tolerance", () => {
   it("decodes a carrier that picked up trailing whitespace and still strips its directive", async () => {
-    const rich = await loomToGalaxyMarkdownRich(NOTEBOOK, { isValid: async () => true });
+    const rich = await loomToGalaxyMarkdownRich(NOTEBOOK, ALL_VALID);
     // Simulate a storage round trip that appended whitespace to the carrier line.
     const withTrailingWs = rich.replace(
       /(\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+")$/m,
@@ -188,5 +199,195 @@ describe("galaxy-markdown-adapter -- galaxyInvocationValidator", () => {
   it("rejects when the lookup throws", async () => {
     vi.mocked(galaxyApi.galaxyGet).mockRejectedValue(new Error("404"));
     expect(await galaxyInvocationValidator.isValid("abc123")).toBe(false);
+  });
+});
+
+const JOB_BLOCK = [
+  "```loom-job",
+  "job_id: 5f2c1a9e0b7d3c44",
+  "galaxy_server_url: https://test.galaxyproject.org",
+  "notebook_anchor: plan-a-step-3",
+  "label: FastQC",
+  "tool_id: toolshed.g2.bx.psu.edu/repos/devteam/fastqc/fastqc/0.74+galaxy0",
+  "submitted_at: 2026-05-29T12:30:00Z",
+  "status: completed",
+  "```",
+].join("\n");
+
+const SESSION_BLOCK = [
+  "```loom-session",
+  "id: 0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
+  "started_at: 2026-05-29T11:00:00Z",
+  "ended_at: 2026-05-29T13:00:00Z",
+  "notebook: notebook.md",
+  "orphaned_active_steps: 0",
+  "```",
+].join("\n");
+
+const HUMAN_GALAXY = ["```galaxy", "history_dataset_display(history_dataset_id=abc)", "```"].join(
+  "\n",
+);
+
+const MIXED = [
+  NOTEBOOK,
+  "",
+  "## QC",
+  "",
+  JOB_BLOCK,
+  "",
+  "Here is the report I pinned by hand:",
+  "",
+  HUMAN_GALAXY,
+  "",
+  SESSION_BLOCK,
+  "",
+].join("\n");
+
+describe("galaxy-markdown-adapter -- job and session fences", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("carries a loom-job fence and round-trips it", () => {
+    const body = `# NB\n\n${JOB_BLOCK}\n\ntail\n`;
+    const pushed = loomToGalaxyMarkdown(body);
+    expect(pushed).not.toContain("```loom-job");
+    expect(pushed).toMatch(/^\[loom-job:v1\]: #loom "[A-Za-z0-9+/=]+"$/m);
+    expect(galaxyMarkdownToLoom(pushed)).toBe(body);
+  });
+
+  it("carries a loom-session fence and round-trips it", () => {
+    const body = `# NB\n\n${SESSION_BLOCK}\n`;
+    const pushed = loomToGalaxyMarkdown(body);
+    expect(pushed).not.toContain("```loom-session");
+    expect(pushed).toMatch(/^\[loom-session:v1\]: #loom "[A-Za-z0-9+/=]+"$/m);
+    expect(galaxyMarkdownToLoom(pushed)).toBe(body);
+  });
+
+  it("emits a job_parameters directive directly above a validated job's carrier", async () => {
+    const isValid = vi.fn(async () => true);
+    const out = await loomToGalaxyMarkdownRich(`# NB\n\n${JOB_BLOCK}\n`, {
+      invocation: { isValid: async () => false },
+      job: { isValid },
+    });
+    expect(isValid).toHaveBeenCalledWith("5f2c1a9e0b7d3c44");
+    const lines = out.split("\n");
+    const at = lines.indexOf("job_parameters(job_id=5f2c1a9e0b7d3c44)");
+    expect(at).toBeGreaterThan(0);
+    expect(lines[at - 1]).toBe("```galaxy");
+    expect(lines[at + 1]).toBe("```");
+    expect(lines[at + 2]).toMatch(/^\[loom-job:v1\]: #loom "/);
+    expect(galaxyMarkdownToLoom(out)).toBe(`# NB\n\n${JOB_BLOCK}\n`);
+  });
+
+  it("omits the job directive when the job id does not validate", async () => {
+    const out = await loomToGalaxyMarkdownRich(`# NB\n\n${JOB_BLOCK}\n`, NONE_VALID);
+    expect(out).not.toContain("```galaxy");
+    expect(out).not.toContain("job_parameters(");
+    expect(out).toMatch(/^\[loom-job:v1\]: #loom "/m);
+    expect(galaxyMarkdownToLoom(out)).toBe(`# NB\n\n${JOB_BLOCK}\n`);
+  });
+
+  it("never emits a directive for a malformed job id, even through the real validator", async () => {
+    const hostile = JOB_BLOCK.replace("job_id: 5f2c1a9e0b7d3c44", "job_id: ../jobs");
+    const out = await loomToGalaxyMarkdownRich(`# NB\n\n${hostile}\n`, {
+      invocation: galaxyInvocationValidator,
+      job: galaxyJobValidator,
+    });
+    expect(out).not.toContain("job_parameters(");
+    expect(galaxyApi.galaxyGet).not.toHaveBeenCalled();
+    expect(galaxyMarkdownToLoom(out)).toBe(`# NB\n\n${hostile}\n`);
+  });
+
+  it("gives a session block a carrier only, never a directive", async () => {
+    const invocation = vi.fn(async () => true);
+    const job = vi.fn(async () => true);
+    const out = await loomToGalaxyMarkdownRich(`# NB\n\n${SESSION_BLOCK}\n`, {
+      invocation: { isValid: invocation },
+      job: { isValid: job },
+    });
+    expect(out).not.toContain("```galaxy");
+    expect(invocation).not.toHaveBeenCalled();
+    expect(job).not.toHaveBeenCalled();
+    expect(galaxyMarkdownToLoom(out)).toBe(`# NB\n\n${SESSION_BLOCK}\n`);
+  });
+
+  it("round-trips a mixed notebook and keeps the human-authored ```galaxy block", async () => {
+    const out = await loomToGalaxyMarkdownRich(MIXED, ALL_VALID);
+    for (const kind of ["invocation", "job", "session"]) {
+      expect(out).not.toContain("```loom-" + kind);
+      expect(out).toMatch(new RegExp(`^\\[loom-${kind}:v1\\]: #loom "`, "m"));
+    }
+    expect(out).toContain("invocation_outputs(invocation_id=abc123)");
+    expect(out).toContain("job_parameters(job_id=5f2c1a9e0b7d3c44)");
+    expect(out).toContain(HUMAN_GALAXY);
+
+    const pulled = galaxyMarkdownToLoom(out);
+    expect(pulled).toBe(MIXED);
+    expect(pulled).not.toContain("job_parameters(");
+    expect(pulled).not.toContain("invocation_outputs(");
+  });
+
+  it("decodes a hand-built old-format invocation carrier and strips its directive", () => {
+    // Byte-for-byte the shape of pages pushed before job/session support.
+    const start = NOTEBOOK.indexOf("```loom-invocation");
+    const block = NOTEBOOK.slice(start, NOTEBOOK.indexOf("\n```", start) + 4);
+    expect(block.endsWith("```")).toBe(true);
+    const b64 = Buffer.from(block, "utf8").toString("base64");
+    const carrier = `[loom-invocation:v1]: #loom "${b64}"`;
+    const page = [
+      "# Old page",
+      "```galaxy",
+      "invocation_outputs(invocation_id=abc123)",
+      "```",
+      carrier,
+      "",
+    ].join("\n");
+    expect(galaxyMarkdownToLoom(page)).toBe(`# Old page\n${block}\n`);
+    // And the encoder still writes exactly that carrier line.
+    expect(loomToGalaxyMarkdown(block)).toBe(carrier);
+  });
+
+  it("decodes job and session carriers labelled with the orbit prefix", () => {
+    const orbitJob = JOB_BLOCK.replace("```loom-job", "```orbit-job");
+    const orbitSession = SESSION_BLOCK.replace("```loom-session", "```orbit-session");
+    const enc = (s: string) => Buffer.from(s, "utf8").toString("base64");
+    const page = [
+      "```galaxy",
+      "job_parameters(job_id=5f2c1a9e0b7d3c44)",
+      "```",
+      `[orbit-job:v1]: #orbit "${enc(orbitJob)}"`,
+      `[orbit-session:v1]: #orbit "${enc(orbitSession)}"`,
+    ].join("\n");
+    expect(galaxyMarkdownToLoom(page)).toBe(`${orbitJob}\n${orbitSession}`);
+  });
+
+  it("leaves a carrier-shaped line of an unknown kind alone", () => {
+    const page = '[loom-galaxy-page:v1]: #loom "YWJj"\n';
+    expect(galaxyMarkdownToLoom(page)).toBe(page);
+  });
+});
+
+describe("galaxy-markdown-adapter -- galaxyJobValidator", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("rejects a path-like id before making any network call", async () => {
+    expect(await galaxyJobValidator.isValid("../histories")).toBe(false);
+    expect(await galaxyJobValidator.isValid(".")).toBe(false);
+    expect(galaxyApi.galaxyGet).not.toHaveBeenCalled();
+  });
+
+  it("validates a hex id when the server echoes the same id", async () => {
+    vi.mocked(galaxyApi.galaxyGet).mockResolvedValue({ id: "abc123" });
+    expect(await galaxyJobValidator.isValid("abc123")).toBe(true);
+    expect(galaxyApi.galaxyGet).toHaveBeenCalledWith("/jobs/abc123");
+  });
+
+  it("rejects when the server returns 200 for a different resource", async () => {
+    vi.mocked(galaxyApi.galaxyGet).mockResolvedValue({ id: "somethingelse" });
+    expect(await galaxyJobValidator.isValid("abc123")).toBe(false);
+  });
+
+  it("rejects when the lookup throws", async () => {
+    vi.mocked(galaxyApi.galaxyGet).mockRejectedValue(new Error("404"));
+    expect(await galaxyJobValidator.isValid("abc123")).toBe(false);
   });
 });

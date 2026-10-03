@@ -1,21 +1,29 @@
 /**
  * Loom <-> Galaxy-flavored-markdown content adapter. notebook.md is canonical.
  *
- * Push replaces each `loom-invocation` fenced block with a hidden carrier holding
- * the literal block, base64-encoded. The carrier is a CommonMark link-reference
- * definition (`[loom-invocation:v1]: #loom "<base64>"`): it renders to nothing and
- * is preserved byte-for-byte on store, so pull restores the original fences exactly.
- * (HTML comments do NOT work here -- Galaxy's page renderer escapes them to visible
- * text rather than hiding them, verified live against 26.1.rc1. A reference
- * definition is pure markdown, so it stays invisible.) base64 keeps the payload free
- * of quotes and newlines, so the carrier is always one well-formed line.
+ * Push replaces each typed notebook fence Loom keeps in the notebook body --
+ * `loom-invocation`, `loom-job`, and `loom-session` -- with a hidden carrier
+ * holding the literal block, base64-encoded. Galaxy has no renderer for these
+ * fence kinds, so a raw one shows up on the page as a "cell type is not
+ * available" error. The carrier is a CommonMark link-reference definition
+ * (`[loom-<kind>:v1]: #loom "<base64>"`): it renders to nothing and is preserved
+ * byte-for-byte on store, so pull restores the original fences exactly.
+ * (HTML comments do NOT work here -- Galaxy's page renderer escapes them to
+ * visible text rather than hiding them, verified live against 26.1.rc1. A
+ * reference definition is pure markdown, so it stays invisible.) base64 keeps
+ * the payload free of quotes and newlines, so the carrier is always one
+ * well-formed line. `loom-galaxy-page` binding blocks never reach this adapter;
+ * the sync helper strips them before push.
  *
- * Phase 2 adds a visible ` ```galaxy ` directive alongside the carrier; pull
- * strips the directives Loom emitted (Loom owns the projection under the
- * loom-canonical model and regenerates them each push). A Loom directive always
- * sits immediately above a carrier with no blank line between, so pull strips
- * only ```galaxy blocks in that position -- a ```galaxy fence a human wrote (or
- * a co-author added on the Galaxy side) survives the round trip.
+ * Invocation and job blocks also get a visible ` ```galaxy ` directive
+ * (`invocation_outputs` / `job_parameters`) alongside the carrier when their id
+ * validates against the connected server; session blocks are a local ledger
+ * and get the carrier only. Pull strips the directives Loom emitted (Loom owns
+ * the projection under the loom-canonical model and regenerates them each
+ * push). A Loom directive always sits immediately above a carrier with no blank
+ * line between, so pull strips only ```galaxy blocks in that position -- a
+ * ```galaxy fence a human wrote (or a co-author added on the Galaxy side)
+ * survives the round trip.
  */
 
 import { galaxyGet } from "./galaxy-api";
@@ -28,26 +36,38 @@ import {
 const FENCE_CLOSE = "```";
 const GALAXY_FENCE_OPEN = "```galaxy";
 
+/** Notebook fence kinds that are carried through a Galaxy page push. */
+const CARRIED_KINDS = ["invocation", "job", "session"] as const;
+type CarriedKind = (typeof CARRIED_KINDS)[number];
+
 // Anchored to a whole line (`m` flag): the carrier is always its own line, so
 // this never decodes carrier-like syntax that appears inline in prose (e.g. a
 // notebook documenting Loom's own format). The `g` flag replaces every carrier.
 // Tolerate trailing horizontal whitespace -- a storage round trip can append a
-// space, and an unmatched carrier silently loses the invocation on pull.
+// space, and an unmatched carrier silently loses the block on pull.
 // The carrier's label and anchor carry the product prefix too, so a page pushed
 // by a newer (or older) client still decodes; the payload is the block verbatim,
 // fence line included, so pull restores whatever prefix was pushed.
 const CARRIER_PREFIX_ALT = NOTEBOOK_FENCE_READ_PREFIXES.join("|");
-const CARRIER_BODY = `\\[(?:${CARRIER_PREFIX_ALT})-invocation:v1\\]: #(?:${CARRIER_PREFIX_ALT}) "([A-Za-z0-9+/=]+)"[ \\t]*`;
+const CARRIER_KIND_ALT = CARRIED_KINDS.join("|");
+const CARRIER_BODY = `\\[(?:${CARRIER_PREFIX_ALT})-(?:${CARRIER_KIND_ALT}):v1\\]: #(?:${CARRIER_PREFIX_ALT}) "([A-Za-z0-9+/=]+)"[ \\t]*`;
 const CARRIER_RE = new RegExp(`^${CARRIER_BODY}$`, "gm");
 
-/** base64 an invocation block into a (render-invisible) link-reference carrier. */
-function encodeCarrier(block: string): string {
+/** base64 a typed block into a (render-invisible) link-reference carrier. */
+function encodeCarrier(kind: CarriedKind, block: string): string {
   const p = NOTEBOOK_FENCE_WRITE_PREFIX;
-  return `[${p}-invocation:v1]: #${p} "${Buffer.from(block, "utf8").toString("base64")}"`;
+  return `[${p}-${kind}:v1]: #${p} "${Buffer.from(block, "utf8").toString("base64")}"`;
+}
+
+function carriedKindOf(line: string): CarriedKind | null {
+  for (const kind of CARRIED_KINDS) {
+    if (isNotebookFenceOpen(line, kind)) return kind;
+  }
+  return null;
 }
 
 /**
- * Push (pure, no network): loom-invocation fences -> hidden base64 carriers,
+ * Push (pure, no network): typed notebook fences -> hidden base64 carriers,
  * narrative untouched. The sync helper pushes via loomToGalaxyMarkdownRich
  * (which also emits validated directives); this plain form is kept for
  * non-network callers and the round-trip tests.
@@ -57,11 +77,12 @@ export function loomToGalaxyMarkdown(body: string): string {
   const out: string[] = [];
   let i = 0;
   while (i < lines.length) {
-    if (isNotebookFenceOpen(lines[i], "invocation")) {
+    const kind = carriedKindOf(lines[i]);
+    if (kind) {
       let end = i + 1;
       while (end < lines.length && lines[end].trim() !== FENCE_CLOSE) end++;
       const block = lines.slice(i, end + 1).join("\n");
-      out.push(encodeCarrier(block));
+      out.push(encodeCarrier(kind, block));
       i = end + 1;
     } else {
       out.push(lines[i]);
@@ -72,8 +93,8 @@ export function loomToGalaxyMarkdown(body: string): string {
 }
 
 /** Pull: strip the ```galaxy directives Loom emitted, then carriers -> original
- *  loom-invocation fences. Stripping runs first, while carriers are still single
- *  lines, so the "directive sits directly above a carrier" check is exact. */
+ *  typed fences. Stripping runs first, while carriers are still single lines,
+ *  so the "directive sits directly above a carrier" check is exact. */
 export function galaxyMarkdownToLoom(body: string): string {
   const withoutLoomDirectives = stripLoomGalaxyDirectiveBlocks(body);
   return withoutLoomDirectives.replace(CARRIER_RE, (_m, b64: string) =>
@@ -90,8 +111,8 @@ const CARRIER_LINE_RE = new RegExp(`^${CARRIER_BODY}$`);
 /**
  * Remove only the ```galaxy directive blocks Loom itself emitted.
  * loomToGalaxyMarkdownRich always writes the directive immediately above the
- * invocation's carrier with no blank line between, so a ```galaxy block is
- * Loom's iff the line right after its closing fence is a carrier. Every other
+ * block's carrier with no blank line between, so a ```galaxy block is Loom's
+ * iff the line right after its closing fence is a carrier. Every other
  * ```galaxy block was authored by a human and is preserved verbatim -- stripping
  * those unconditionally was silent data loss on pull.
  */
@@ -116,13 +137,22 @@ function stripLoomGalaxyDirectiveBlocks(body: string): string {
   return out.join("\n");
 }
 
-/** Decides whether an invocation id is renderable on the connected server. */
-export interface InvocationValidator {
-  isValid(invocationId: string): Promise<boolean>;
+/** Decides whether a Galaxy id is renderable on the connected server. */
+export interface IdValidator {
+  isValid(id: string): Promise<boolean>;
+}
+
+export type InvocationValidator = IdValidator;
+export type JobValidator = IdValidator;
+
+/** One validator per directive-bearing block kind. */
+export interface DirectiveValidators {
+  invocation: InvocationValidator;
+  job: JobValidator;
 }
 
 /**
- * Real validator: a GET that resolves AND echoes back the same id means the id
+ * Real validators: a GET that resolves AND echoes back the same id means the id
  * decodes and exists on the connected server (galaxyGet reads GALAXY_URL, not a
  * block's own galaxy_server_url -- so an id from a different server validates as
  * false and its directive is safely omitted, correct under the single-server
@@ -138,51 +168,73 @@ export interface InvocationValidator {
  */
 const ENCODED_ID_RE = /^[0-9a-fA-F]+$/;
 
-export const galaxyInvocationValidator: InvocationValidator = {
-  async isValid(invocationId: string): Promise<boolean> {
-    if (!ENCODED_ID_RE.test(invocationId)) return false;
-    try {
-      const inv = await galaxyGet<{ id?: string }>(
-        `/invocations/${encodeURIComponent(invocationId)}`,
-      );
-      return inv?.id === invocationId;
-    } catch {
-      return false;
-    }
+function echoingIdValidator(collection: string): IdValidator {
+  return {
+    async isValid(id: string): Promise<boolean> {
+      if (!ENCODED_ID_RE.test(id)) return false;
+      try {
+        const res = await galaxyGet<{ id?: string }>(`/${collection}/${encodeURIComponent(id)}`);
+        return res?.id === id;
+      } catch {
+        return false;
+      }
+    },
+  };
+}
+
+export const galaxyInvocationValidator: InvocationValidator = echoingIdValidator("invocations");
+export const galaxyJobValidator: JobValidator = echoingIdValidator("jobs");
+
+export const galaxyDirectiveValidators: DirectiveValidators = {
+  invocation: galaxyInvocationValidator,
+  job: galaxyJobValidator,
+};
+
+const DIRECTIVES: Record<
+  keyof DirectiveValidators,
+  { idRe: RegExp; render: (id: string) => string }
+> = {
+  invocation: {
+    idRe: /^invocation_id:\s*(.+)$/,
+    render: (id) => `invocation_outputs(invocation_id=${id})`,
+  },
+  job: {
+    idRe: /^job_id:\s*(.+)$/,
+    render: (id) => `job_parameters(job_id=${id})`,
   },
 };
 
-const INV_ID_RE = /^invocation_id:\s*(.+)$/;
-
 /**
- * Push with rich rendering: each loom-invocation block becomes a hidden carrier
- * AND, when its id validates, a visible `invocation_outputs` directive. The
+ * Push with rich rendering: each typed block becomes a hidden carrier AND, for
+ * invocation and job blocks whose id validates, a visible directive. The
  * directive is gated because Galaxy 400s the whole page on an undecodable id.
  */
 export async function loomToGalaxyMarkdownRich(
   body: string,
-  validator: InvocationValidator,
+  validators: DirectiveValidators,
 ): Promise<string> {
   const lines = body.split("\n");
   const out: string[] = [];
   let i = 0;
   while (i < lines.length) {
-    if (isNotebookFenceOpen(lines[i], "invocation")) {
+    const kind = carriedKindOf(lines[i]);
+    if (kind) {
+      const directive = kind === "session" ? null : DIRECTIVES[kind];
       let end = i + 1;
-      let invId: string | null = null;
+      let id: string | null = null;
       while (end < lines.length && lines[end].trim() !== FENCE_CLOSE) {
-        const m = lines[end].match(INV_ID_RE);
-        if (m) invId = m[1].trim();
+        const m = directive ? lines[end].match(directive.idRe) : null;
+        if (m) id = m[1].trim();
         end++;
       }
       const block = lines.slice(i, end + 1).join("\n");
-      const carrier = encodeCarrier(block);
+      const carrier = encodeCarrier(kind, block);
       // Emit the directive immediately before the carrier with NO extra blank
       // line, so stripping the 3 fence lines on pull restores the carrier in
       // the block's exact original position -- keeping the round trip identical.
-      if (invId && (await validator.isValid(invId))) {
+      if (directive && kind !== "session" && id && (await validators[kind].isValid(id))) {
         out.push(GALAXY_FENCE_OPEN);
-        out.push(`invocation_outputs(invocation_id=${invId})`);
+        out.push(directive.render(id));
         out.push(FENCE_CLOSE);
       }
       out.push(carrier);

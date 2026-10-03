@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 export interface AgentEvent {
   type: string;
@@ -49,6 +49,8 @@ export interface PromptOptions {
 
 export interface OrbitAPI {
   prompt(message: string, options?: PromptOptions): Promise<void>;
+  /** Absolute path for an OS-backed dropped File; empty for synthetic files. */
+  getPathForFile(file: File): string;
   abort(): Promise<void>;
   newSession(): Promise<{ cancelled: boolean }>;
   getState(): Promise<unknown>;
@@ -215,6 +217,7 @@ export interface OrbitAPI {
 
 const api: OrbitAPI = {
   prompt: (message, options) => ipcRenderer.invoke("agent:prompt", message, options),
+  getPathForFile: (file) => webUtils.getPathForFile(file),
   abort: () => ipcRenderer.invoke("agent:abort"),
   newSession: () => ipcRenderer.invoke("agent:new-session"),
   getState: () => ipcRenderer.invoke("agent:get-state"),

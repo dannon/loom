@@ -13,6 +13,8 @@ interface AnthropicLikeError {
   type?: string;
   error?: { type?: string; message?: string; code?: string | number };
   message?: string;
+  // FastAPI-style bodies, e.g. the ChatGPT/Codex backend: {"detail": "..."}
+  detail?: unknown;
 }
 
 const RETRIABLE_TYPES = new Set(["overloaded_error", "rate_limit_error", "api_error"]);
@@ -94,6 +96,19 @@ function isContextOverflowError(text: string): boolean {
 // text instead of being swallowed into the generic nudge.
 const UNKNOWN_PROVIDER_ERROR = /^an unknown error occurred[.!?]*$/i;
 
+// pi's formatProviderError() prefixes the HTTP body with its status, either
+// "403: {...}" or "<Provider> (403): {...}". Anchored so free text that merely
+// contains a colon and a brace isn't mistaken for a wrapped body.
+const STATUS_PREFIXED_BODY = /^(?:\d{3}|[^:\r\n]+\s+\(\d{3}\)):\s*(\{[\s\S]*\})$/;
+
+// OpenAI gates some ChatGPT/Codex requests behind its Trusted Access for Cyber
+// program (Daybreak) and its extra bio/cyber safety checks. The refusal arrives
+// as {"detail":"Unable to verify Daybreak Blue access. Please try again."},
+// which reads like an Orbit, Galaxy or MCP failure (issue #533). The response
+// doesn't say whether the account's verification or the request's content
+// tripped it, so the message has to cover both without guessing.
+const DAYBREAK_ACCESS_DENIED = /\bunable\s+to\s+verify\s+(?:your\s+)?daybreak\s+blue\s+access\b/i;
+
 function isOpaqueProviderError(text: string): boolean {
   return UNKNOWN_PROVIDER_ERROR.test(text);
 }
@@ -134,7 +149,9 @@ export function humanizeAgentError(
     };
   }
 
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+  const body = STATUS_PREFIXED_BODY.exec(trimmed)?.[1] ?? trimmed;
+
+  if (!body.startsWith("{") && !body.startsWith("[")) {
     // The opaque provider sentinel is always a bare string (pi throws
     // `new Error("An unknown error occurred")`), so only catch it here -- a
     // structured error that merely embeds the phrase should still get the typed
@@ -155,7 +172,7 @@ export function humanizeAgentError(
 
   let parsed: AnthropicLikeError;
   try {
-    parsed = JSON.parse(trimmed) as AnthropicLikeError;
+    parsed = JSON.parse(body) as AnthropicLikeError;
   } catch {
     return { text: raw, retriable: false };
   }
@@ -163,7 +180,21 @@ export function humanizeAgentError(
   const inner = parsed.error;
   const errType = inner?.type;
   const errCode = inner?.code;
-  const errMsg = inner?.message ?? parsed.message ?? "";
+  const errMsg =
+    inner?.message ?? parsed.message ?? (typeof parsed.detail === "string" ? parsed.detail : "");
+
+  if (DAYBREAK_ACCESS_DENIED.test(errMsg)) {
+    return {
+      text:
+        "OpenAI blocked this request: it couldn't verify Daybreak Blue (Trusted Access for " +
+        "Cyber) access. This comes from OpenAI's extra safety checks on biology and " +
+        "cybersecurity requests, not from Orbit or Galaxy, and OpenAI doesn't say whether " +
+        "your account's verification or the request itself triggered it. If you're enrolled " +
+        "in Daybreak, check your status at chatgpt.com/cyber; otherwise rephrase the request " +
+        `or switch to another provider or model in Preferences. ${INTERRUPTED_TASK_NOTE}`,
+      retriable: false,
+    };
+  }
 
   // Google's consumer Generative Language API geo-blocks unsupported regions
   // with a 400 FAILED_PRECONDITION. It keys the error on `status`/`code`, not

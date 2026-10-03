@@ -35,19 +35,26 @@ let sessionStart: { id: string; startedAt: string } | null = null;
 export function registerSessionLifecycle(pi: ExtensionAPI): void {
   // Refreshed each session_start; a no-op until then.
   let notifyUser: (text: string) => void = () => {};
+  let isIdle: () => boolean = () => true;
   const followUps = createFollowUpDelivery(
-    (text) => {
-      // Fired from a timer, so a rejected/throwing send must not escape.
-      try {
-        void pi.sendUserMessage(text, { deliverAs: "followUp" });
-      } catch (err) {
-        console.error("[galaxy-poller] auto-resume send failed:", err);
-      }
-    },
-    { onPaused: (text) => notifyUser(text) },
+    // Pi swallows a rejected prompt; delivery watches for the turn to start.
+    (text) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
+    { onPaused: (text) => notifyUser(text), isIdle: () => isIdle() },
   );
   setActiveFollowUpDelivery(followUps);
   pi.on("agent_start", async () => followUps.agentStarted());
+  pi.on("message_end", async (event) => {
+    const msg = event.message;
+    if (msg.role !== "user") return;
+    const text =
+      typeof msg.content === "string"
+        ? msg.content
+        : msg.content
+            .filter((c) => c.type === "text")
+            .map((c) => c.text)
+            .join("\n");
+    followUps.userMessageRecorded(text);
+  });
   pi.on("agent_settled", async () => followUps.agentSettled());
   // Our own follow-ups (and other brain-sent prompts) arrive as "extension";
   // only what a person typed counts as permission to keep going.
@@ -97,6 +104,13 @@ export function registerSessionLifecycle(pi: ExtensionAPI): void {
       }
     };
     notifyUser = (text) => toast(text, "info");
+    isIdle = () => {
+      try {
+        return ctx.isIdle();
+      } catch {
+        return true; // stale context: let the ack timeout decide
+      }
+    };
     startGalaxyPoller(toast, resumeFn);
 
     // Live Galaxy history for the dashboard panel, pushed from the poller tick

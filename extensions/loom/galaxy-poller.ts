@@ -350,7 +350,7 @@ function jobFinishedToast(
   switch (status) {
     case "completed":
       return [
-        `✅ Galaxy: "${label}" finished${willResume ? " — output verification queued." : " — automatic follow-up disabled."}`,
+        `✅ Galaxy: "${label}" finished${willResume ? " — outputs require verification." : " — automatic follow-up disabled."}`,
         "info",
       ];
     case "cancelled":
@@ -359,7 +359,7 @@ function jobFinishedToast(
       return [`⏭️ Galaxy: "${label}" was skipped — its step's condition wasn't met.`, "info"];
     default:
       return [
-        `❌ Galaxy: "${label}" failed (${state})${willResume ? " — investigation queued." : " — automatic follow-up disabled."}`,
+        `❌ Galaxy: "${label}" failed (${state})${willResume ? " — failure recorded." : " — automatic follow-up disabled."}`,
         "warning",
       ];
   }
@@ -577,7 +577,7 @@ async function runTick(): Promise<void> {
         }
         if (r.autoAction === "completed") {
           notifySafely(
-            `✅ Galaxy: "${label}" finished (${r.jobSummary?.ok ?? 0} jobs ok)${willResume ? " — output verification queued." : " — automatic follow-up disabled."}`,
+            `✅ Galaxy: "${label}" finished (${r.jobSummary?.ok ?? 0} jobs ok)${willResume ? " — outputs require verification." : " — automatic follow-up disabled."}`,
             "info",
           );
           followUps.push({
@@ -589,7 +589,7 @@ async function runTick(): Promise<void> {
           });
         } else if (r.autoAction === "failed") {
           notifySafely(
-            `❌ Galaxy: "${label}" failed (${r.jobSummary?.error ?? 0} job error(s))${willResume ? " — investigation queued." : " — automatic follow-up disabled."}`,
+            `❌ Galaxy: "${label}" failed (${r.jobSummary?.error ?? 0} job error(s))${willResume ? " — failure recorded." : " — automatic follow-up disabled."}`,
             "warning",
           );
           followUps.push({
@@ -608,7 +608,7 @@ async function runTick(): Promise<void> {
         } else if (r.autoAction === "failing" && !announcedFailing.has(r.invocationId)) {
           announcedFailing.add(r.invocationId);
           notifySafely(
-            `⚠️ Galaxy: "${label}" — ${r.jobSummary?.error ?? 0} job(s) failed, ${r.activeJobs ?? 0} still running${willResume ? " — investigation queued." : " — automatic follow-up disabled."}`,
+            `⚠️ Galaxy: "${label}" — ${r.jobSummary?.error ?? 0} job(s) failed, ${r.activeJobs ?? 0} still running${willResume ? " — failure recorded." : " — automatic follow-up disabled."}`,
             "warning",
           );
           followUps.push({
