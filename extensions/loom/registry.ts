@@ -45,6 +45,7 @@ export * from "./registry-schema";
 export { computeHandoffEligible } from "./registry-eligibility";
 export { applyImportRule } from "./registry-import";
 export { STALE_LOCK_MS, type RegistryFs, type LockRecord } from "./registry-lock";
+export type { Submitter, SubmitOutcome, TemplateSnapshot } from "./registry-submitter";
 
 /** Past this, a registry file or carrier is rejected unread. */
 export const MAX_REGISTRY_BYTES = 4 * 1024 * 1024;
