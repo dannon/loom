@@ -1925,8 +1925,17 @@ function dispatchSubmittedText(text: string): void {
 }
 
 function promptAgent(message: string): void {
-  const options = streaming ? ({ streamingBehavior: "followUp" } as const) : undefined;
-  void window.orbit.prompt(message, options);
+  // The renderer's streaming flag can lag behind Pi during model retries.
+  // This policy works for both a fresh prompt and one that arrives mid-turn.
+  void window.orbit.prompt(message, { streamingBehavior: "followUp" }).catch((error: unknown) => {
+    chat.hideThinking();
+    chat.addErrorMessage(error instanceof Error ? error.message : String(error));
+    streaming = false;
+    stopTurnTimer();
+    setStatusBadge("error");
+    sendBtn.classList.remove("hidden");
+    abortBtn.classList.add("hidden");
+  });
 }
 
 // Plan draft actions from chat cards — forward approve/reject as user messages,
