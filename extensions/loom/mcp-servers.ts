@@ -39,7 +39,7 @@ export function loomMcpServers(
   // Public, anonymous BRC genome/assembly/lineage lookups -- no credentials, so
   // always on.
   servers["brc-analytics"] = {
-    url: "https://dev.brc-analytics.org/api/v1/mcp/",
+    url: "https://brc-analytics.org/api/v1/mcp/",
     exposure: "direct",
   };
 

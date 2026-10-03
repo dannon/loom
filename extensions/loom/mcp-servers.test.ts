@@ -29,7 +29,7 @@ describe("loomMcpServers", () => {
 
   it("always registers BRC Analytics as direct tools", () => {
     expect(loomMcpServers({})["brc-analytics"]).toEqual({
-      url: "https://dev.brc-analytics.org/api/v1/mcp/",
+      url: "https://brc-analytics.org/api/v1/mcp/",
       exposure: "direct",
     });
   });

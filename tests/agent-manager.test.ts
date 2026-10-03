@@ -87,6 +87,40 @@ describe("AgentManager", () => {
     readdirSyncMock.mockReturnValue([]);
   });
 
+  it("reports prompt preflight rejection and refuses commands without a brain", async () => {
+    const proc = makeProcess(101);
+    spawnMock.mockReturnValue(proc);
+    const { AgentManager } = await import("../app/src/main/agent.js");
+    const window = {
+      isDestroyed: () => false,
+      setTitle: vi.fn(),
+      webContents: { send: vi.fn() },
+    };
+    const manager = new AgentManager(window as any, "/analysis");
+
+    await expect(manager.sendCommand({ type: "prompt", message: "are we done?" })).rejects.toThrow(
+      "Agent is not running",
+    );
+    manager.start();
+    const reply = manager.sendCommand({
+      type: "prompt",
+      message: "are we done?",
+      streamingBehavior: "followUp",
+    });
+    const sent = JSON.parse(proc.stdin.write.mock.calls.at(-1)![0]);
+    lineHandler?.(
+      JSON.stringify({
+        type: "response",
+        id: sent.id,
+        command: "prompt",
+        success: false,
+        error: "Preflight failed",
+      }),
+    );
+    await expect(reply).rejects.toThrow("Preflight failed");
+    manager.stop();
+  });
+
   it("restarts in the new cwd without using --continue", async () => {
     const firstProc = makeProcess(101);
     const secondProc = makeProcess(202);
@@ -267,6 +301,106 @@ describe("AgentManager", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it.each([
+      ["a handled command", { success: true, data: { disposition: "handled" } }],
+      ["a rejected prompt", { success: false, error: "Preflight failed" }],
+    ])("stands down after %s, which starts no turn", async (_label, outcome) => {
+      vi.useFakeTimers();
+      try {
+        const proc = makeProcess(101);
+        spawnMock.mockReturnValue(proc);
+        const { AgentManager, TURN_SILENCE_TIMEOUT_MS } = await import("../app/src/main/agent.js");
+        const window = {
+          isDestroyed: () => false,
+          setTitle: vi.fn(),
+          webContents: { send: vi.fn() },
+        };
+        const manager = new AgentManager(window as any, "/analysis");
+        manager.start();
+
+        manager.send({ type: "prompt", message: "/status" });
+        lineHandler?.(JSON.stringify({ type: "response", command: "prompt", ...outcome }));
+        vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS * 2);
+
+        expect(errorEvents(window)).toHaveLength(0);
+        expect(proc.stdin.write).not.toHaveBeenCalledWith(expect.stringMatching(/"type":"abort"/));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps watching a running turn when a queued prompt is handled", async () => {
+      vi.useFakeTimers();
+      try {
+        const proc = makeProcess(101);
+        spawnMock.mockReturnValue(proc);
+        const { AgentManager, TURN_SILENCE_TIMEOUT_MS } = await import("../app/src/main/agent.js");
+        const window = {
+          isDestroyed: () => false,
+          setTitle: vi.fn(),
+          webContents: { send: vi.fn() },
+        };
+        const manager = new AgentManager(window as any, "/analysis");
+        manager.start();
+
+        manager.send({ type: "prompt", message: "hi" });
+        lineHandler?.(JSON.stringify({ type: "agent_start" }));
+        manager.send({ type: "prompt", message: "/status", streamingBehavior: "followUp" });
+        lineHandler?.(
+          JSON.stringify({
+            type: "response",
+            command: "prompt",
+            success: true,
+            data: { disposition: "handled" },
+          }),
+        );
+        vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS + 1);
+
+        expect(errorEvents(window)).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("forwards an awaited prompt response so the renderer sees its disposition", async () => {
+      const proc = makeProcess(101);
+      spawnMock.mockReturnValue(proc);
+      const { AgentManager } = await import("../app/src/main/agent.js");
+      const window = {
+        isDestroyed: () => false,
+        setTitle: vi.fn(),
+        webContents: { send: vi.fn() },
+      };
+      const manager = new AgentManager(window as any, "/analysis");
+      manager.start();
+
+      const reply = manager.sendCommand({ type: "prompt", message: "/status" });
+      const sent = JSON.parse(proc.stdin.write.mock.calls.at(-1)![0]);
+      const response = {
+        type: "response",
+        id: sent.id,
+        command: "prompt",
+        success: true,
+        data: { disposition: "handled" },
+      };
+      lineHandler?.(JSON.stringify(response));
+
+      await expect(reply).resolves.toEqual({ disposition: "handled" });
+      expect(agentEvents(window).map((c: unknown[]) => c[1])).toContainEqual(response);
+
+      // Other awaited commands stay private to their caller.
+      const state = manager.sendCommand({ type: "get_state" });
+      const stateId = JSON.parse(proc.stdin.write.mock.calls.at(-1)![0]).id;
+      lineHandler?.(
+        JSON.stringify({ type: "response", id: stateId, command: "get_state", success: true }),
+      );
+      await state;
+      expect(
+        agentEvents(window).some((c: unknown[]) => (c[1] as { id?: string }).id === stateId),
+      ).toBe(false);
+      manager.stop();
     });
 
     it("does not fire when the brain keeps streaming activity", async () => {
