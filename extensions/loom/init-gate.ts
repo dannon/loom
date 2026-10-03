@@ -20,7 +20,14 @@ import * as fs from "fs";
 import { getNotebookPath, isGalaxyConnected, getCurrentHistoryId } from "./state.js";
 import { isLocalShellDisabled } from "./local-exec.js";
 
-export type Routing = "local" | "galaxy" | "hybrid" | "remote" | "unknown";
+export type Routing = "local" | "hybrid" | "remote" | "unknown";
+
+/** `[galaxy]` is the old spelling of `[remote]`; existing notebooks still use it. */
+export function normalizeRouting(tag: string | undefined): Routing {
+  const t = tag?.toLowerCase();
+  if (!t) return "unknown";
+  return t === "galaxy" ? "remote" : (t as Routing);
+}
 
 // Same spelling the evidence gate matches steps on, so an anchor captured
 // here and an anchor written into a block are the same string.
@@ -78,7 +85,7 @@ export function parseMostRecentPlan(content: string): ParsedPlanRef | null {
     if (m) {
       latestPlanLine = i;
       latestPlanTitle = `${m[1].trim()}: ${m[2].trim()}`;
-      latestPlanRouting = (m[3]?.toLowerCase() as Routing) ?? "unknown";
+      latestPlanRouting = normalizeRouting(m[3]);
     }
   }
 
@@ -199,14 +206,13 @@ export function checkPreconditions(): GateResult {
     return { ok: false, hardFailed: false, failures, plan };
   }
 
-  const needsGalaxy =
-    plan.routing === "galaxy" || plan.routing === "hybrid" || plan.routing === "remote";
+  const needsGalaxy = plan.routing === "hybrid" || plan.routing === "remote";
 
   let hardFailed = false;
 
   // A plan whose routing requires a local execution leg can't run when the
   // shell removed bash (Windows remote-only). unknown is included because an
-  // untagged plan falls back to local. galaxy/remote have no local leg and pass
+  // untagged plan falls back to local. remote has no local leg and passes
   // untouched. This is the user-facing "re-tag your plan" affordance -- the
   // actual containment is the removed bash tool, not this gate.
   const needsLocalShell =
@@ -216,7 +222,7 @@ export function checkPreconditions(): GateResult {
     failures.push({
       name: "local_exec",
       severity: "hard",
-      remediation: `Plan "${plan.title}" needs local execution, unavailable on Windows (remote-only) -- re-tag the plan \`[galaxy]\`/\`[remote]\`, or enable local power mode (future).`,
+      remediation: `Plan "${plan.title}" needs local execution, unavailable on Windows (remote-only) -- re-tag the plan \`[remote]\`, or enable local power mode (future).`,
     });
   }
 

@@ -88,7 +88,7 @@ export interface PlanSection {
   id: string;
   /** `Plan A: chrM Variant Calling`. */
   title: string;
-  /** The `[hybrid]` / `[galaxy]` tag on the heading, lowercased. */
+  /** The `[remote]` / `[hybrid]` / `[local]` tag on the heading, lowercased as written (older notebooks say `[galaxy]` for remote). */
   routing: string | null;
   steps: PlanStep[];
 }

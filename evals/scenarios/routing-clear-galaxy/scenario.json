@@ -1,6 +1,6 @@
 {
   "name": "routing: a compute-heavy genomics task should route to Galaxy",
-  "description": "Whole-genome alignment of many samples against a reference -- far beyond a laptop. The correct routing is galaxy (or hybrid). Tests that the model recognizes when to offload to Galaxy.",
+  "description": "Whole-genome alignment of many samples against a reference -- far beyond a laptop. The correct routing is remote (or hybrid). Tests that the model recognizes when to offload to Galaxy.",
   "tier": 2,
   "requiresModel": true,
   "loomArgs": ["--tools", "read,write,edit"],
@@ -13,7 +13,7 @@
     "events": { "mustInclude": ["agent_start", "turn_end"] },
     "plan": {
       "exists": true,
-      "routingIn": ["galaxy"],
+      "routingIn": ["remote"],
       "minPendingSteps": 3,
       "eachStepHasDescription": true,
       "mentionsOneOf": ["BWA", "bwa-mem", "Bowtie", "minimap", "DRAGEN"]

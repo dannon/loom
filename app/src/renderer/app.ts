@@ -15,6 +15,8 @@ import { refreshGalaxyInvocations } from "./galaxy-invocations.js";
 import { refreshGalaxyHistory } from "./galaxy-history.js";
 import { formatGalaxyTooltip } from "./galaxy-tooltip.js";
 import { PromptQueue, queuedPreview } from "./prompt-queue.js";
+import { isHandledPrompt } from "../../../shared/handled-prompt.js";
+import { attachFilePathDrop } from "./file-drop.js";
 import { FeedbackDraftStore } from "./feedback-draft.js";
 import {
   ProviderFieldStore,
@@ -30,7 +32,12 @@ import { shouldAcceptSlashCommandOnEnter } from "./slash-popup-nav.js";
 import { buildDiscoveredModelOptions, type ModelOption } from "./model-options.js";
 import { planModelDiscovery } from "./model-discovery-gate.js";
 import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
-import { ALLOWED_SKILLS_PREFIX, isAllowedSkillUrl } from "../../../shared/loom-config.js";
+import {
+  ALLOWED_SKILLS_PREFIX,
+  isAllowedSkillUrl,
+  isBundledSkillRepo,
+} from "../../../shared/loom-config.js";
+import { SKILLS_PIN } from "../../../shared/skills-pin.js";
 import {
   SCHEMA_VERSION,
   formatActivityTail,
@@ -713,6 +720,7 @@ async function refreshGalaxyStatus(): Promise<void> {
   const { connected, url } = await window.orbit.getGalaxyStatus();
   // A newer refresh started while we awaited -- let it win.
   if (seq !== galaxyStatusSeq) return;
+  chat.setGalaxyServerUrl(connected ? url : null);
 
   if (connected && url) {
     galaxyStatus.classList.add("status-dot-connected");
@@ -1696,7 +1704,9 @@ window.orbit.onSessionHistory((history) => {
       chat.addReplayUserMessage(seg.text, ++replayNum);
       continue;
     }
-    chat.startAssistantMessage();
+    // Historical bare IDs must not be linked to today's possibly different server.
+    // Explicit links and server metadata in the replay still render normally.
+    chat.startAssistantMessage(null);
     if (seg.text) chat.appendDelta(seg.text);
     if (seg.tools) {
       // Mirror the live-streaming policy: skip per-tool chat cards on
@@ -1903,6 +1913,7 @@ function submit(): void {
 }
 
 function dispatchSubmittedText(text: string): void {
+  handledPromptPending = false;
   // Slash commands handled locally may run without an LLM round-trip. Commands
   // that do call the agent run here only after the current turn is idle.
   if (text.startsWith("/") && handleSlashCommand(text)) return;
@@ -1914,8 +1925,17 @@ function dispatchSubmittedText(text: string): void {
 }
 
 function promptAgent(message: string): void {
-  const options = streaming ? ({ streamingBehavior: "followUp" } as const) : undefined;
-  void window.orbit.prompt(message, options);
+  // The renderer's streaming flag can lag behind Pi during model retries.
+  // This policy works for both a fresh prompt and one that arrives mid-turn.
+  void window.orbit.prompt(message, { streamingBehavior: "followUp" }).catch((error: unknown) => {
+    chat.hideThinking();
+    chat.addErrorMessage(error instanceof Error ? error.message : String(error));
+    streaming = false;
+    stopTurnTimer();
+    setStatusBadge("error");
+    sendBtn.classList.remove("hidden");
+    abortBtn.classList.add("hidden");
+  });
 }
 
 // Plan draft actions from chat cards — forward approve/reject as user messages,
@@ -2692,6 +2712,15 @@ inputEl.addEventListener("input", () => {
   maybeOpenSlashPopup();
 });
 
+attachFilePathDrop(
+  inputEl,
+  (file) => window.orbit.getPathForFile(file),
+  () =>
+    chat.addInfoMessage(
+      "Could not read a local path for this file. Drag it from your file manager or Orbit's Files pane.",
+    ),
+);
+
 inputEl.addEventListener("blur", () => {
   // Defer so a click inside the popup can still fire.
   setTimeout(() => closeSlashPopup(), 100);
@@ -2713,6 +2742,8 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ── Agent Events ──────────────────────────────────────────────────────────────
+
+let handledPromptPending = false;
 
 window.orbit.onAgentEvent((event) => {
   const type = event.type as string;
@@ -2736,11 +2767,28 @@ window.orbit.onAgentEvent((event) => {
   feedShell(event);
 
   switch (type) {
+    case "response":
+      // A slash command the brain ran without starting a turn never sends
+      // agent_end, so nothing else would clear the thinking state it got on send.
+      if (isHandledPrompt(event) && !streaming) {
+        chat.hideThinking();
+        setStatusBadge("");
+        handledPromptPending = true;
+      }
+      break;
+
     case "agent_start":
       streaming = true;
       sendBtn.classList.add("hidden");
       abortBtn.classList.remove("hidden");
       startTurnTimer();
+      // A handled command can still kick off a turn of its own (/connect
+      // reloads, /execute prompts); put back the thinking state it cleared.
+      if (handledPromptPending) {
+        handledPromptPending = false;
+        chat.showThinking();
+        setStatusBadge("thinking", "thinking...");
+      }
       // Don't hide thinking yet — wait for actual text content
       break;
 
@@ -3652,9 +3700,25 @@ function renderSkillsRows(): void {
   }
   prefsSkillsState.forEach((repo, idx) => {
     const tr = document.createElement("tr");
-    tr.appendChild(makeSkillCell(repo, idx, "name", "text"));
-    tr.appendChild(makeSkillCell(repo, idx, "url", "text"));
-    tr.appendChild(makeSkillCell(repo, idx, "branch", "text"));
+    // A repo left at what we ship reads from the package, so say so and say at
+    // which commit -- otherwise the row claims a branch nothing is fetching.
+    const badge = document.createElement("span");
+    badge.className = "prefs-skills-bundled";
+    const refreshBadge = () => {
+      const bundled = isBundledSkillRepo(prefsSkillsState[idx]);
+      badge.textContent = bundled ? `bundled @${SKILLS_PIN.commit.slice(0, 7)}` : "";
+      badge.title = bundled
+        ? `Ships inside Loom from ${SKILLS_PIN.repo}@${SKILLS_PIN.commit}` +
+          `${SKILLS_PIN.commitDate ? ` (${SKILLS_PIN.commitDate})` : ""}. ` +
+          `Point it at another branch or URL to fetch it live instead.`
+        : "";
+    };
+    tr.appendChild(makeSkillCell(repo, idx, "name", "text", refreshBadge));
+    tr.appendChild(makeSkillCell(repo, idx, "url", "text", refreshBadge));
+    const branchTd = makeSkillCell(repo, idx, "branch", "text", refreshBadge);
+    branchTd.appendChild(badge);
+    refreshBadge();
+    tr.appendChild(branchTd);
 
     const enabledTd = document.createElement("td");
     enabledTd.className = "prefs-skills-enabled";
@@ -3691,6 +3755,7 @@ function makeSkillCell(
   idx: number,
   field: "name" | "url" | "branch",
   inputType: "text",
+  onInput?: () => void,
 ): HTMLTableCellElement {
   const td = document.createElement("td");
   td.className = `prefs-skills-${field}`;
@@ -3701,6 +3766,7 @@ function makeSkillCell(
   if (field === "branch") input.placeholder = "main";
   input.addEventListener("input", () => {
     prefsSkillsState[idx][field] = input.value.trim();
+    onInput?.();
   });
   td.appendChild(input);
   return td;

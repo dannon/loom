@@ -113,7 +113,7 @@ export interface PlanAssertions {
    */
   source?: "chat" | "notebook" | "any";
   /** routing tag in the heading must be one of these */
-  routingIn?: ("local" | "galaxy" | "hybrid" | "remote")[];
+  routingIn?: ("local" | "hybrid" | "remote")[];
   /** plan section must have at least N pending (`- [ ]`) steps */
   minPendingSteps?: number;
   /**

@@ -1,6 +1,6 @@
 # Eval fixture notebook
 
-## Plan A: chrM variant calling [galaxy]
+## Plan A: chrM variant calling [remote]
 
 ### Steps
 

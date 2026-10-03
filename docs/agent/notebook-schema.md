@@ -50,9 +50,11 @@ Question: how do mtDNA variants distribute across tissues in this dataset?
 
 Conventions:
 
-- `## Plan X: <Title> [routing]` — routing tag is `[galaxy]`, `[hybrid]`,
-  `[local]`, or `[remote]`. `[galaxy]` is the default when a matching Galaxy
-  tool/workflow exists. Future tooling greps for these literals.
+- `## Plan X: <Title> [routing]` — routing tag is `[remote]`, `[hybrid]`, or
+  `[local]`, by where the compute runs (see `galaxy-routing.md`). `[remote]`
+  is the default when every step runs on Galaxy. Older notebooks may say
+  `[galaxy]`, which Loom reads as `[remote]`. Future tooling greps for these
+  literals.
 - `{#plan-x-step-N}` anchors so invocation YAML can reference steps.
 - Every step needs a concrete `Verification:` sub-bullet describing the
   evidence required before completion.

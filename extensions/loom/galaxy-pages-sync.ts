@@ -14,7 +14,7 @@ import { readNotebook, writeNotebook, withNotebookLock } from "./notebook-writer
 import { createPage, updatePage, getPage } from "./galaxy-pages-api";
 import {
   loomToGalaxyMarkdownRich,
-  galaxyInvocationValidator,
+  galaxyDirectiveValidators,
   galaxyMarkdownToLoom,
 } from "./galaxy-markdown-adapter";
 import {
@@ -251,7 +251,7 @@ export async function pushNotebookToGalaxy(opts: PushOptions = {}): Promise<Push
         );
       }
       const updated = await updatePage(existing.pageId, {
-        content: await loomToGalaxyMarkdownRich(stripped, galaxyInvocationValidator),
+        content: await loomToGalaxyMarkdownRich(stripped, galaxyDirectiveValidators),
         content_format: "markdown",
         edit_source: "agent",
       });
@@ -277,7 +277,7 @@ export async function pushNotebookToGalaxy(opts: PushOptions = {}): Promise<Push
       title: opts.title ?? "Untitled notebook",
       slug: opts.slug,
       annotation: opts.annotation,
-      content: await loomToGalaxyMarkdownRich(stripped, galaxyInvocationValidator),
+      content: await loomToGalaxyMarkdownRich(stripped, galaxyDirectiveValidators),
       content_format: "markdown",
     });
     const binding: GalaxyPageBindingYaml = {

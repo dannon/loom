@@ -14,11 +14,11 @@ import { isTeamDispatchEnabled } from "./teams/is-enabled";
 import { isSessionIndexEnabled } from "./session-index/is-enabled";
 import { loadConfig } from "./config";
 import { listEnabledSkillRepos, type ConfiguredSkillRepo } from "./skills";
+import { isBundledRepo } from "./vendor-skills";
 import {
-  readCatalog,
+  resolveCatalogEntries,
   selectSkills,
   backgroundRefreshSkills,
-  BUILTIN_CATALOG,
   type SkillEntry,
 } from "./skills-discovery";
 import { findGalaxyPageBlocks } from "./galaxy-page-binding";
@@ -28,6 +28,8 @@ import { SRA_IMPORT_GUIDANCE } from "./sra-import-gate";
 import { MCP_RECOVERY_GUIDANCE } from "./mcp-recovery";
 import { GALAXY_POLL_GUIDANCE } from "./galaxy-poll-guard";
 import { GALAXY_PAGE_MARKDOWN_GUIDANCE } from "./galaxy-page-markdown-guidance";
+import { GALAXY_ARTIFACT_LINK_GUIDANCE } from "./galaxy-artifact-link-guidance";
+import { galaxyArtifactUrl, type GalaxyArtifactKind } from "../../shared/galaxy-artifact-links.js";
 import {
   buildUserInstructionsBlock,
   buildWorkspaceInstructionsContext,
@@ -117,15 +119,19 @@ export function buildGalaxyPageBindingBlock(): string {
   }
   const binding = findGalaxyPageBlocks(content)[0];
   if (!binding) return "";
+  const link = (kind: GalaxyArtifactKind, value: string | null) => {
+    const url = galaxyArtifactUrl(binding.galaxyServerUrl, kind, value, { pageId: binding.pageId });
+    return url ? `[${value ?? binding.galaxyServerUrl}](${url})` : `\`${value ?? "<none>"}\``;
+  };
   return `
 ## Galaxy page binding
 
-This notebook is linked to a Galaxy page on \`${binding.galaxyServerUrl}\`:
+This notebook is linked to a Galaxy page on ${link("server", binding.galaxyServerUrl)}:
 
-- page_id: \`${binding.pageId}\`
+- page_id: ${link("page", binding.pageId)}
 - page_slug: \`${binding.pageSlug ?? "<none>"}\`
-- history_id: \`${binding.historyId}\`
-- last_synced_revision: \`${binding.lastSyncedRevision ?? "<none>"}\`
+- history_id: ${link("history", binding.historyId)}
+- last_synced_revision: ${link("revision", binding.lastSyncedRevision)}
 
 Use \`notebook_push_to_galaxy\` to share progress with the user (creates a new
 revision of the Galaxy page). Use \`notebook_pull_from_galaxy\` to fetch
@@ -316,15 +322,36 @@ page id:
 5. Then read the bound history (its datasets/results) to see what actually
    happened before proposing new analysis.
 
+### Finding a community workflow (IWC)
+
+When the user describes an analysis they want run on their data -- even as
+a question ("which genes changed between my samples?") rather than a
+request for a plan -- check the IWC registry before assembling tools by hand:
+
+1. \`galaxy_recommend_iwc_workflows({ intent, limit: 5 })\` with their goal in
+   plain words. It ranks by word overlap and always returns something, so a
+   ranked hit is a candidate, not a match.
+2. \`galaxy_get_iwc_workflow_details({ trs_id })\` on the plausible ones, for
+   the **inputs**. Compare them with the data the user actually has (reads vs
+   count tables, paired vs single-end, collection vs dataset). The right
+   analysis with the wrong starting point is not a match -- though it may be
+   the second half of one, after a workflow that produces its inputs.
+3. Offer the one or two that fit, in plain language: what each does and what
+   it needs from them. If none fit, say so and draft step-by-step.
+4. Once they choose: \`galaxy_import_workflow_from_iwc({ trs_id })\`, then invoke
+   it as below.
+
+\`galaxy_search_iwc_workflows\` is plain keyword search for when the user
+names a workflow or tool; it has no limit, so prefer recommend for a goal.
+
 ### Drafting a new plan
 
 When drafting a plan, **first** consult Galaxy
 resources before deciding what runs where:
 
-1. Search the IWC workflow registry for matching workflows
-   (\`galaxy_search_iwc\` / similar Galaxy MCP tool). If a full match
-   exists, propose running the plan as a single Galaxy invocation
-   (mode: **remote**).
+1. Check the IWC registry as above. If a workflow (or a chain of them)
+   covers the analysis, propose running it on Galaxy -- the steps are
+   those invocations.
 2. Otherwise, draft step-by-step. Per step:
    - Heavy compute (alignment, large variant calling, big assemblies,
      long-running BLAST, etc.) → check Galaxy tool availability
@@ -361,13 +388,14 @@ resources before deciding what runs where:
 - **Workflow invocation**: a single run of a Galaxy workflow on a
   history. Tracked in the notebook via \`loom-invocation\` blocks.
 - **IWC**: Intergalactic Workflow Commission — registry of curated
-  workflows. \`galaxy_search_iwc\` queries it.
+  workflows. See "Finding a community workflow" above.
 
-The three operating modes are an *outcome* of the plan you draft, not a
-mode setting:
-- **local** — every step runs locally
-- **hybrid** — some local, some Galaxy
-- **remote** — entire plan is a Galaxy workflow invocation
+The routing tag records where the plan's compute runs and its provenance
+lives -- an *outcome* of the plan you draft, not a mode setting:
+- **remote** — all compute runs on Galaxy: tool jobs, UDT jobs, workflow
+  invocations alike
+- **hybrid** — some steps run on Galaxy, some on this machine
+- **local** — everything runs on this machine
 
 ### Uploading local data
 
@@ -623,9 +651,8 @@ export function buildNoLocalShellBlock(): string {
 ## Execution: remote-only (Galaxy)
 
 This build has no local shell. All computation runs on Galaxy via the Galaxy
-MCP tools -- there is no bash, conda, or local-pipeline path here. Route every
-plan step \`[galaxy]\` or \`[remote]\`; do not propose local shell or conda
-steps. You can still read and write files in the workspace (the notebook and
+MCP tools -- there is no bash, conda, or local-pipeline path here. Tag every
+plan \`[remote]\`; do not propose local shell or conda steps. You can still read and write files in the workspace (the notebook and
 its inputs/outputs).
 `;
 }
@@ -841,7 +868,10 @@ the geographic distribution analysis").
 
 ### Plan lifecycle — the four-stage approval gate
 
-When the user **does** ask for a plan, follow this order strictly:
+When the user **does** ask for a plan, follow this order strictly. With
+Galaxy connected, the order starts before the draft: call
+\`galaxy_recommend_iwc_workflows\`, then check tool availability (see
+"Drafting a new plan") -- the routing tag depends on what they return.
 
 1. **Draft in chat (NOT in the notebook yet).** Reply in chat with a
    \`\`\`plan fenced block formatted as a plan section (see template
@@ -884,7 +914,7 @@ content. **Use a \`\`\`plan fence** in chat (not \`\`\`markdown) so Orbit
 renders it as an interactive draft card with Approve/Edit/Reject buttons.
 
 \`\`\`plan
-## Plan A: chrM Variant Calling [galaxy]
+## Plan A: chrM Variant Calling [remote]
 
 Identify mitochondrial variants from 4 paired-end WGS samples using
 the IWC \`bwa-mem-chrM\` workflow. Output: chrM VCF + per-sample QC.
@@ -921,15 +951,17 @@ markdown so the notebook stays a clean durable record.
 Conventions (please re-read the heading line above before drafting):
 
 - Heading **must** be \`## Plan <Letter>: <Title> [<routing>]\`.
-  Examples that pass: \`## Plan A: RNA-seq DE [galaxy]\`,
+  Examples that pass: \`## Plan A: RNA-seq DE [remote]\`,
   \`## Plan B: Quick local QC [local]\`. Examples that **fail** and
   must be avoided: \`## Plan: ...\` (missing letter),
   \`## Plan A: ...\` (missing routing tag),
-  \`## Plan A - Title [galaxy]\` (dash instead of colon).
-- Routing tag in the section header is one of \`[galaxy]\`, \`[hybrid]\`,
-  \`[local]\`, or \`[remote]\`. Default to \`[galaxy]\` when the work has a
-  matching Galaxy workflow/tool; \`[hybrid]\` when some steps are local
-  and some Galaxy; \`[local]\` only for personal-scale or ad-hoc work.
+  \`## Plan A - Title [remote]\` (dash instead of colon).
+- Routing tag in the section header is one of \`[remote]\`, \`[hybrid]\`,
+  or \`[local]\`, by where the compute runs. Default to \`[remote]\` when
+  every step runs on Galaxy (tools, UDTs or workflows); \`[hybrid]\` when
+  some steps are local and some Galaxy; \`[local]\` only for
+  personal-scale or ad-hoc work. Older notebooks may say \`[galaxy]\`,
+  which means \`[remote]\`.
   Tag literal, lowercase, square brackets, no spaces inside the
   brackets so tooling can grep.
 ${anchorGuidance(omitAnchors)}
@@ -1004,6 +1036,8 @@ literal \`**asterisks**\` instead of bold. Two rules:
 When you do post a multi-line update, prefer a markdown list or a
 fenced code block over inline-bold-heavy run-on prose. Lists naturally
 get blank lines from the renderer; run-on prose does not.
+
+${GALAXY_ARTIFACT_LINK_GUIDANCE}
 `;
 }
 
@@ -1078,23 +1112,31 @@ answers, and turn-by-turn dialogue that doesn't need persistence.
 export function renderSkillsSection(
   repos: ConfiguredSkillRepo[],
   entriesByRepo: Map<string, SkillEntry[]>,
+  bundled: ReadonlySet<string> = new Set(),
 ): string {
   if (repos.length === 0) return "";
   const sections: string[] = [];
   sections.push(`## Skills repositories (operational know-how)`);
   sections.push("");
+  // Only promise a refresh when something here is actually fetched. A bundled
+  // repo is read from the package, so "refreshes each session" would be a
+  // description of machinery that no longer runs for it.
+  const allBundled = repos.every((r) => bundled.has(r.name));
+  const freshness = allBundled
+    ? `The catalog below ships with Loom and reads from disk, so it works offline.`
+    : `The catalog below refreshes each session; deep reference docs cache for 24h.`;
   sections.push(
     `Use the \`skills_fetch({ repo, path })\` tool to load a skill on demand. ` +
       `**Don't guess operational patterns from training data — fetch the relevant ` +
-      `skill first.** The catalog below refreshes each session; deep reference docs ` +
-      `cache for 24h. When \`repo\` is omitted, the first enabled repo is used.`,
+      `skill first.** ${freshness} When \`repo\` is omitted, the first enabled repo is used.`,
   );
   sections.push("");
 
   sections.push(`### Configured repos`);
   sections.push("");
   for (const r of repos) {
-    sections.push(`- **${r.name}** — ${r.url} (branch: ${r.branch || "main"})`);
+    const where = bundled.has(r.name) ? "bundled" : `branch: ${r.branch || "main"}`;
+    sections.push(`- **${r.name}** — ${r.url} (${where})`);
   }
   sections.push("");
 
@@ -1119,19 +1161,22 @@ export function renderSkillsSection(
   return sections.join("\n");
 }
 
-function buildSkillsContext(): string {
+/** Exported so a test can measure the section the system prompt actually gets. */
+export function buildSkillsContext(): string {
   const repos = listEnabledSkillRepos();
   const entriesByRepo = new Map<string, SkillEntry[]>();
+  const bundled = new Set<string>();
   for (const r of repos) {
-    const entries = readCatalog(r)?.skills ?? BUILTIN_CATALOG[r.name] ?? [];
-    entriesByRepo.set(r.name, selectSkills(entries));
+    if (isBundledRepo(r)) bundled.add(r.name);
+    entriesByRepo.set(r.name, selectSkills(resolveCatalogEntries(r)));
   }
-  // Don't emit a contentless skills section. If nothing resolved (e.g. a
-  // user-added repo whose catalog hasn't been fetched yet, no builtin), stay
-  // silent until the background refresh populates it next session.
+  // Don't emit a contentless skills section. If nothing resolved -- a user-added
+  // repo whose catalog has not been fetched yet, and nothing of it in the
+  // package -- stay silent until the background refresh populates it next
+  // session.
   const hasAny = [...entriesByRepo.values()].some((e) => e.length > 0);
   if (!hasAny) return "";
-  return renderSkillsSection(repos, entriesByRepo);
+  return renderSkillsSection(repos, entriesByRepo, bundled);
 }
 
 /**

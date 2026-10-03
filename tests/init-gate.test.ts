@@ -6,6 +6,7 @@ import {
   parseMostRecentPlan,
   parseProjectContext,
   checkPreconditions,
+  normalizeRouting,
   renderFailures,
 } from "../extensions/loom/init-gate";
 import { setNotebookPath, setGalaxyConnection, resetState } from "../extensions/loom/state";
@@ -28,6 +29,17 @@ function writeNotebook(contents: string) {
   fs.writeFileSync(nbPath, contents, "utf-8");
   setNotebookPath(nbPath);
 }
+
+describe("normalizeRouting", () => {
+  it("reads the legacy [galaxy] tag as remote and passes the rest through", () => {
+    expect(normalizeRouting("galaxy")).toBe("remote");
+    expect(normalizeRouting("Galaxy")).toBe("remote");
+    expect(normalizeRouting("remote")).toBe("remote");
+    expect(normalizeRouting("HYBRID")).toBe("hybrid");
+    expect(normalizeRouting("local")).toBe("local");
+    expect(normalizeRouting(undefined)).toBe("unknown");
+  });
+});
 
 describe("parseMostRecentPlan", () => {
   it("returns null when no plan heading is present", () => {
@@ -75,7 +87,8 @@ describe("parseMostRecentPlan", () => {
 - [ ] 1. **Active step** -- run something
 `);
     expect(plan!.title).toBe("B: Second");
-    expect(plan!.routing).toBe("galaxy");
+    // [galaxy] is the legacy spelling of [remote].
+    expect(plan!.routing).toBe("remote");
     expect(plan!.nextStep!.raw).toContain("Active step");
   });
 

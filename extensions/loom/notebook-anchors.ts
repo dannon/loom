@@ -78,7 +78,7 @@ export type AnchorResolution =
 /**
  * Slugify heading text the way GitHub does: drop the inline markup, lowercase,
  * strip punctuation, spaces to hyphens. `## Plan A: chrM Variant Calling
- * [galaxy]` becomes `plan-a-chrm-variant-calling-galaxy`.
+ * [remote]` becomes `plan-a-chrm-variant-calling-remote`.
  */
 export function slugifyHeading(text: string): string {
   return text

@@ -4,11 +4,17 @@ Notable, user-facing changes to Loom and Orbit. Each release lists a short set o
 highlights; the full commit-level notes live on the GitHub release pages. Add a
 new `## [<version>] - <date>` block with a `### Highlights` list at release time.
 
-## [Unreleased]
+## [0.8.0] - 2026-09-28
 
 ### Highlights
 
 - Loom is being renamed Orbit in the next release: the CLI, the desktop app, and the GitHub repo will all be called Orbit. Once that happens, this version will tell you where to get the new one
+- Orbit has a Dashboard tab beside the notebook, built from widgets for plan progress, Galaxy jobs, results and history that you can arrange yourself
+- When a Galaxy job or workflow finishes or fails, Loom now checks the outputs or starts investigating on its own instead of waiting to be asked. It stops after three automatic turns in a row and pauses when you hit Stop. It also reconnects to Galaxy by itself when the connection drops, polls less, shows progress on long waits, and no longer aborts a turn after the laptop sleeps
+- Describe the analysis you want ("which genes changed in my RNA-seq?") and Loom looks for a community IWC workflow first, checks that its inputs match the data you have, and suggests a chain when one workflow isn't enough. Plans are now tagged by where the compute runs: `[remote]` for Galaxy, `[hybrid]`, or `[local]` (older `[galaxy]` plans still work)
+- Smaller Galaxy fixes: SRA downloads are batched into one job instead of one per accession, Galaxy datasets and histories are clickable links in the notebook and chat, and a large catalog of user-defined tools no longer floods the conversation
+- Galaxy skill content now ships inside Loom, pinned to a commit of `galaxyproject/agentic-plugins`, so a fresh install has the full catalog with no network and no waiting. Preferences shows which repos are bundled and at which commit, and pointing a repo at a branch goes back to fetching it live. The failure-triage guidance is now a whole Foundry cast, with eleven more for finding, adapting and validating workflows. None of them enter the system prompt
+- Your Galaxy API key is no longer sent along when a request is redirected to a different host
 
 ## [0.7.0] - 2026-09-17
 

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -21,6 +21,21 @@ import {
 } from "../extensions/loom/state";
 import { isUlid } from "../extensions/loom/ulid";
 
+// Hook run right after the notebook writer reads a file, so a test can land a
+// competing write inside the read-then-rename window deterministically.
+let afterRead: ((file: string) => void) | undefined;
+vi.mock("fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs/promises")>();
+  return {
+    ...actual,
+    readFile: async (...args: Parameters<typeof actual.readFile>) => {
+      const content = await actual.readFile(...args);
+      afterRead?.(String(args[0]));
+      return content;
+    },
+  };
+});
+
 let tmpDir: string;
 let nbPath: string;
 
@@ -36,6 +51,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  afterRead = undefined;
   resetState();
   resetSubmissionCapture();
   fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -331,14 +347,17 @@ describe("submission capture: writing alongside other writers", () => {
     // current bytes instead of renaming stale content over someone's edit.
     const marker = "## Notes added while the tool was running";
 
-    // Fires during capture's stat/read awaits, i.e. after it has read and
-    // before it writes.
-    const competing = setTimeout(() => {
+    // Lands after capture has read the notebook and before it renames.
+    let competed = false;
+    afterRead = (file) => {
+      if (file !== nbPath) return;
+      afterRead = undefined;
       fs.appendFileSync(nbPath, `\n${marker}\n`, "utf-8");
-    }, 0);
+      competed = true;
+    };
 
     await submit("galaxy_run_tool", { tool_id: "fastp" }, mcpResult(THREE_JOBS));
-    clearTimeout(competing);
+    expect(competed).toBe(true);
 
     const after = notebook();
     expect(after).toContain(marker);

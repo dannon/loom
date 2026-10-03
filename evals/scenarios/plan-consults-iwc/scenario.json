@@ -9,7 +9,7 @@
   "timeoutMs": 420000,
   "assertions": {
     "toolCalls": {
-      "mustInclude": [{ "name": "galaxy_search_iwc" }]
+      "mustInclude": [{ "name": "galaxy_recommend_iwc_workflows" }]
     },
     "plan": { "exists": true }
   }

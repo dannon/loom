@@ -610,6 +610,11 @@ body.files-collapsed #files-divider {
     color 0.1s;
   white-space: nowrap;
 }
+/* display:inline-flex above is an author rule and beats the UA stylesheet's
+   [hidden] { display: none }, so without this the button never hides (#534). */
+.chat-copy-btn[hidden] {
+  display: none;
+}
 .chat-copy-btn:hover {
   background: var(--bg-hover);
   border-color: var(--accent);
@@ -1817,6 +1822,12 @@ body.platform-darwin #files-title {
   line-height: 1.4;
 }
 
+#input.file-drop-target {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  background: var(--bg-surface);
+}
+
 #input-hint > span {
   flex: 1;
   min-width: 0;
@@ -2545,6 +2556,19 @@ body.platform-darwin #files-title {
 .prefs-table .prefs-skills-branch {
   width: 12%;
 }
+.prefs-skills-bundled:not(:empty) {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 1.6;
+  white-space: nowrap;
+  color: var(--text-dim);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+}
+
 .prefs-table .prefs-skills-enabled {
   width: 8%;
   text-align: center;

@@ -55,7 +55,7 @@ describe("evals assertions: dimension tagging", () => {
   it("tags a routing failure as 'routing' and a validity failure as 'validity'", () => {
     const run = makeRun({
       notebookContent: "## Plan 1: Thing [local]\n- [ ] 1. **Do** -- a real description here",
-      assertions: { notebook: { plan: { routingIn: ["galaxy"], minPendingSteps: 3 } } },
+      assertions: { notebook: { plan: { routingIn: ["remote"], minPendingSteps: 3 } } },
     });
     const failures = evaluate(run);
     const routing = failures.find((f) => f.assertion.endsWith("routingIn"));
@@ -111,7 +111,7 @@ describe("evals assertions: source-aware plan (Assertions.plan)", () => {
     const run = makeRun({
       events: textEvents("Here is a draft idea, no formal plan."),
       notebookContent: "## Plan 1: Real [galaxy]\n- [ ] 1. **Align** -- HISAT2 over hg38 reads",
-      assertions: { plan: { routingIn: ["galaxy"], mentionsOneOf: ["HISAT2"] } },
+      assertions: { plan: { routingIn: ["remote"], mentionsOneOf: ["HISAT2"] } },
     });
     expect(evaluate(run)).toHaveLength(0);
   });
@@ -129,7 +129,7 @@ describe("evals assertions: source-aware plan (Assertions.plan)", () => {
     const run = makeRun({
       events: textEvents("## Plan 1: Chatted [hybrid]\n- [ ] 1. **Step** -- do the thing here"),
       notebookContent: "## Plan 1: Notebook [galaxy]\n- [ ] 1. **Step** -- other thing here",
-      assertions: { plan: { source: "chat", routingIn: ["galaxy"] } },
+      assertions: { plan: { source: "chat", routingIn: ["remote"] } },
     });
     // chat routing is hybrid; expected galaxy -> exactly one routing failure.
     // If `plan` is unimplemented this yields 0 failures and the test fails.
@@ -181,7 +181,7 @@ describe("evals assertions: null notebook content with plan assertions", () => {
         notebook: {
           plan: {
             exists: true,
-            routingIn: ["galaxy"],
+            routingIn: ["remote"],
             mentionsOneOf: ["STAR"],
           },
         },
@@ -207,7 +207,7 @@ describe("evals assertions: null plan fails all declared dimensions", () => {
       assertions: {
         plan: {
           exists: true,
-          routingIn: ["galaxy"],
+          routingIn: ["remote"],
           minPendingSteps: 4,
           mentionsOneOf: ["STAR"],
         },

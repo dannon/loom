@@ -17,6 +17,7 @@ import {
 } from "../../../shared/brain-exit.js";
 import { noLocalShellSpawnExtras } from "./local-shell.js";
 import { TurnWatchdog } from "./turn-watchdog.js";
+import { promptStartsNoTurn } from "../../../shared/handled-prompt.js";
 import { formatWindowTitle } from "./window-title.js";
 import { isOAuthOnlyProvider } from "./oauth-handler.js";
 import { DESKTOP_SHELL_KIND, readEnv, writeEnv } from "../../../shared/orbit-env.js";
@@ -180,8 +181,6 @@ export class AgentManager {
   // SIGTERM session_shutdown writes (which only append to the *old* .jsonl,
   // not the symlink).
   private pinnedSessionFile: string | null = null;
-  private mcpBootstrapRestartDone = false; // → guard: only auto-restart once per app lifetime
-  private silentRestarting = false; // → suppresses status flicker during MCP bootstrap restart
 
   /**
    * Crash-restart bookkeeping. We allow up to MAX_RESTARTS_PER_WINDOW
@@ -426,12 +425,7 @@ export class AgentManager {
     // When resuming with --continue, the agent reloads its in-memory context
     // from the on-disk session but the renderer has no way to see prior turns.
     // Replay them into the chat pane so the UI reflects what the model remembers.
-    if (
-      wantsContinue &&
-      this.pinnedSessionFile &&
-      !this.silentRestarting &&
-      !this.window.isDestroyed()
-    ) {
+    if (wantsContinue && this.pinnedSessionFile && !this.window.isDestroyed()) {
       try {
         const history = loadSessionHistory(this.pinnedSessionFile);
         if (history.length > 0) {
@@ -645,6 +639,9 @@ export class AgentManager {
   }
 
   sendCommand(obj: Record<string, unknown>): Promise<unknown> {
+    if (!this.process?.stdin?.writable) {
+      return Promise.reject(new Error("Agent is not running"));
+    }
     const id = `cmd_${++this.idCounter}`;
     return new Promise((resolve, reject) => {
       this.pendingResponses.set(id, { resolve, reject });
@@ -674,9 +671,6 @@ export class AgentManager {
       this.watchdog.stop();
     }
     log("status:", status, message || "");
-    // During a silent restart we suppress the transient stopped→running flicker;
-    // the renderer keeps showing "running" the whole time.
-    if (this.silentRestarting && (status === "stopped" || status === "running")) return;
     if (!this.window.isDestroyed()) {
       this.window.webContents.send("agent:status", status, message);
     }
@@ -725,6 +719,13 @@ export class AgentManager {
     // watchdog before we act on (or early-return from) this event.
     this.watchdog.observe(type);
 
+    // send() armed the watchdog for this prompt, but a handled command or a
+    // rejected prompt means no turn follows -- left armed, it would report a
+    // stall two minutes later and abort whatever runs next.
+    if (promptStartsNoTurn(data) && !this.turnActive) {
+      this.watchdog.stop();
+    }
+
     if (type === "response" && data.id) {
       const pending = this.pendingResponses.get(data.id as string);
       if (pending) {
@@ -734,21 +735,18 @@ export class AgentManager {
         } else {
           pending.resolve(data.data ?? data);
         }
-        return;
+        // The renderer also reads prompt responses (a handled command clears
+        // its thinking state), even when a caller awaited this one.
+        if (data.command !== "prompt") return;
       }
     }
 
     if (type === "extension_ui_request") {
       log("  ui request:", (data as { method?: string }).method, (data as { id?: string }).id);
-      // First-run MCP bootstrap emits a notify telling the user to restart so
-      // newly-cached tool metadata loads as direct tools. Swallow it and do the
-      // restart silently instead — users shouldn't have to care.
-      if (this.shouldSwallowMcpBootstrapNotify(data)) {
-        log("swallowing MCP bootstrap notify → scheduling silent restart");
-        this.mcpBootstrapRestartDone = true;
-        setTimeout(() => this.silentRestart(), 0);
-        return;
-      }
+      // MCP catalog bootstrap can finish during a request. Its restart notice
+      // is advisory, not a lifecycle command: restarting here cancels tools,
+      // drops pending work, and leaves the restored session idle. Forward the
+      // notice; newly cached direct tools load on the next explicit restart.
       this.window.webContents.send("agent:ui-request", data);
       return;
     }
@@ -760,27 +758,5 @@ export class AgentManager {
     }
 
     this.window.webContents.send("agent:event", data);
-  }
-
-  private shouldSwallowMcpBootstrapNotify(data: Record<string, unknown>): boolean {
-    if (this.mcpBootstrapRestartDone) return false;
-    if ((data as { method?: string }).method !== "notify") return false;
-    const message = (data as { message?: string }).message;
-    return typeof message === "string" && message.includes("will be available after restart");
-  }
-
-  private silentRestart(): void {
-    log("silent restart (MCP bootstrap)");
-    // Preserve chat continuity across the restart so the user sees no turn break.
-    this.hasStartedBefore = true;
-    this.nextStartSkipContinue = false;
-    this.nextStartIsFresh = false;
-    this.silentRestarting = true;
-    try {
-      this.stop();
-      this.start();
-    } finally {
-      this.silentRestarting = false;
-    }
   }
 }

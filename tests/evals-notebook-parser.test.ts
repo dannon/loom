@@ -15,7 +15,7 @@ describe("evals notebook-parser: parseLatestPlan", () => {
     );
     expect(plan).not.toBeNull();
     expect(plan!.title).toBe("A: RNA-seq DE");
-    expect(plan!.routing).toBe("galaxy");
+    expect(plan!.routing).toBe("remote");
     expect(plan!.pendingSteps).toHaveLength(1);
   });
 
@@ -112,8 +112,8 @@ describe("evals notebook-parser: parseLatestPlan", () => {
     expect(plan!.pendingSteps[0].descriptionLength).toBe("sub belongs to step".length);
   });
 
-  it("treats `[Galaxy]` (capitalized) as the galaxy routing tag", () => {
+  it("reads a legacy `[Galaxy]` tag (any case) as remote", () => {
     const plan = parseLatestPlan("## Plan A: Caps [Galaxy]\n- [ ] 1. **Step** -- desc");
-    expect(plan!.routing).toBe("galaxy");
+    expect(plan!.routing).toBe("remote");
   });
 });

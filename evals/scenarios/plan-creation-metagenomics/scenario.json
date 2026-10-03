@@ -13,7 +13,7 @@
     "events": { "mustInclude": ["agent_start", "turn_end"] },
     "plan": {
       "exists": true,
-      "routingIn": ["galaxy", "hybrid"],
+      "routingIn": ["remote", "hybrid"],
       "minPendingSteps": 4,
       "eachStepHasDescription": true,
       "mentionsOneOf": ["Kraken", "MetaPhlAn", "Kaiju", "Centrifuge", "Bracken"]

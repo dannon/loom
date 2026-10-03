@@ -22,7 +22,7 @@ function run(modelId: string, runIndex: number, failDims: string[]): ScenarioRun
 describe("evals aggregate", () => {
   it("declaredDimensions reflects which assertions a scenario uses", () => {
     const a: Assertions = {
-      plan: { routingIn: ["galaxy"], minPendingSteps: 3, mentionsOneOf: ["X"] },
+      plan: { routingIn: ["remote"], minPendingSteps: 3, mentionsOneOf: ["X"] },
       behavior: { asksClarifyingQuestion: true },
     };
     const s = { name: "s", tier: 2, inputs: ["x"], assertions: a } as Scenario;
@@ -47,7 +47,7 @@ describe("evals aggregate", () => {
       run("tacc:x", 2, []),
     ];
     // declare routing for the scenario so it's counted
-    runs.forEach((r) => (r.scenario.assertions = { plan: { routingIn: ["galaxy"] } }));
+    runs.forEach((r) => (r.scenario.assertions = { plan: { routingIn: ["remote"] } }));
     const cells = aggregateCells(runs);
     expect(cells).toHaveLength(1);
     expect(cells[0].dimensions.routing.pass).toBe(2);

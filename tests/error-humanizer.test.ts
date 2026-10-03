@@ -88,6 +88,62 @@ describe("humanizeAgentError", () => {
   // in-progress work (e.g. a figure write) had completed, so they couldn't act on
   // it (issue #316). Every retriable termination must say the turn was interrupted
   // and the task may be incomplete.
+  describe("OpenAI Daybreak access refusal (#533)", () => {
+    const daybreak = JSON.stringify({
+      detail: "Unable to verify Daybreak Blue access. Please try again.",
+    });
+
+    it("explains the bare {detail} body instead of echoing it", () => {
+      const result = humanizeAgentError(daybreak);
+      expect(result.text).not.toContain("{");
+      expect(result.text).toMatch(/OpenAI blocked this request/);
+      expect(result.text).toContain("chatgpt.com/cyber");
+      expect(result.text).toMatch(/not from Orbit or Galaxy/);
+      expect(result.retriable).toBe(false);
+    });
+
+    it("recognizes the body behind pi's status prefixes", () => {
+      for (const raw of [`403: ${daybreak}`, `OpenAI Codex (403): ${daybreak}`]) {
+        const result = humanizeAgentError(raw);
+        expect(result.text).toMatch(/OpenAI blocked this request/);
+        expect(result.retriable).toBe(false);
+      }
+    });
+
+    it("doesn't fire on a mere mention of Daybreak Blue", () => {
+      const raw = JSON.stringify({ detail: "Daybreak Blue is enabled for this account." });
+      expect(humanizeAgentError(raw).text).toBe("Daybreak Blue is enabled for this account.");
+      const bare = "Unable to verify Daybreak Blue access. Please try again.";
+      expect(humanizeAgentError(bare).text).toBe(bare);
+    });
+  });
+
+  describe("FastAPI-style {detail} bodies", () => {
+    it("unwraps a string detail", () => {
+      const raw = JSON.stringify({ detail: "Model gpt-x is not supported on this plan." });
+      const result = humanizeAgentError(raw);
+      expect(result.text).toBe("Model gpt-x is not supported on this plan.");
+      expect(result.retriable).toBe(false);
+    });
+
+    it("leaves a non-string detail (e.g. validation errors) as the raw body", () => {
+      const raw = JSON.stringify({ detail: [{ loc: ["body"], msg: "field required" }] });
+      expect(humanizeAgentError(raw).text).toBe(raw);
+    });
+
+    it("leaves a status-prefixed malformed body untouched", () => {
+      const raw = '403: {"detail": "unterminated';
+      expect(humanizeAgentError(raw).text).toBe(raw);
+    });
+
+    it("still classifies typed errors behind a status prefix", () => {
+      const raw = `529: ${JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "Overloaded" } })}`;
+      const result = humanizeAgentError(raw);
+      expect(result.text).toMatch(/overloaded/i);
+      expect(result.retriable).toBe(true);
+    });
+  });
+
   describe("transient errors flag an interrupted task (issue #316)", () => {
     it("tells the user the task may be incomplete on a 500 api_error", () => {
       const raw = JSON.stringify({

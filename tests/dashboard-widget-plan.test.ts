@@ -249,6 +249,14 @@ describe("plan widget -- the current plan", () => {
     expect(has(h, "Runs on Galaxy")).toBe(true);
   });
 
+  it("says a [remote] plan runs on Galaxy, same as the older [galaxy] spelling", () => {
+    const h = harness();
+    planWidget.mount(h.el, h.ctx);
+    h.notebook("## Plan A: Fresh [remote]\n\n- [ ] 1. **One** -- a\n");
+    expect(has(h, "Runs on Galaxy")).toBe(true);
+    expect(h.text()).not.toContain("workflow, start to finish");
+  });
+
   it("leads with the failure rather than the next pending step", () => {
     const h = harness();
     planWidget.mount(h.el, h.ctx);

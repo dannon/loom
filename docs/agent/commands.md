@@ -7,7 +7,7 @@ Loom registers a small set of tools at the extension layer:
 | Category                     | Tools                                                                                           |
 | ---------------------------- | ----------------------------------------------------------------------------------------------- |
 | GTN tutorials                | `gtn_search`, `gtn_fetch`                                                                       |
-| Skills                       | `skills_fetch` (fetch SKILL.md / reference docs from configured repos)                          |
+| Skills                       | `skills_fetch` (SKILL.md / reference docs; `repo: "foundry"` reads bundled Foundry casts)       |
 | Saved MCP output             | `mcp_read_output` (search/page a response already saved by the MCP adapter)                     |
 | Galaxy invocations           | `galaxy_invocation_record`, `galaxy_invocation_check_all`, `galaxy_invocation_check_one`        |
 | Dashboard                    | `dashboard_read`, `dashboard_update`                                                            |
@@ -16,7 +16,7 @@ Loom registers a small set of tools at the extension layer:
 
 Galaxy MCP (separately registered when credentials are present)
 provides `galaxy_connect`, `galaxy_search_tools_by_name`,
-`galaxy_run_tool`, `galaxy_invoke_workflow`, `galaxy_search_iwc`,
+`galaxy_run_tool`, `galaxy_invoke_workflow`, `galaxy_search_iwc_workflows`,
 history/dataset operations, etc.
 
 Pi built-ins (`bash`, `read_file`, `write_file`, `edit_file`, `glob`,

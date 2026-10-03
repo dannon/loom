@@ -8,8 +8,11 @@ import type {
 } from "../extensions/loom/exec-guard/types";
 import { WORKSPACE_STATE_DIR_NAMES } from "../extensions/loom/workspace-state-dir";
 
-const HOME = "/home/alice";
-const CWD = "/home/alice/project";
+// Not /home/alice: on macOS /home is an automount, and the credential-store
+// check realpaths files under HOME, so every lookup there costs ~20ms and the
+// slower CI runners time out.
+const HOME = "/test-home/alice";
+const CWD = "/test-home/alice/project";
 const baseCfg: GuardianConfig = {
   enabled: true,
   dangerouslyBypassPermissions: false,
@@ -55,14 +58,14 @@ describe("decide", () => {
     for (const tier of ["trusted", "weak"] as const)
       expect(
         decide(
-          req({ modelTier: tier, toolInput: { command: "cat /home/alice/.ssh/id_rsa" } }),
+          req({ modelTier: tier, toolInput: { command: "cat /test-home/alice/.ssh/id_rsa" } }),
           deps,
         ).decision,
         tier,
       ).toBe("deny");
   });
   it("reading ~/.loom/config.json is denied for all tiers and via any path (#183)", () => {
-    const cfg = "/home/alice/.loom/config.json";
+    const cfg = "/test-home/alice/.loom/config.json";
     for (const tier of ["trusted", "weak"] as const)
       expect(
         decide(req({ modelTier: tier, toolInput: { command: `cat ${cfg}` } }), deps).decision,
@@ -82,7 +85,10 @@ describe("decide", () => {
     const cfg = { ...baseCfg, trustedWorkspaces: [CWD] };
     expect(
       decide(
-        req({ config: cfg, toolInput: { command: "cat /home/alice/.loom/config.json | base64" } }),
+        req({
+          config: cfg,
+          toolInput: { command: "cat /test-home/alice/.loom/config.json | base64" },
+        }),
         deps,
       ).decision,
     ).toBe("deny");
@@ -90,27 +96,32 @@ describe("decide", () => {
   it("a credential-SHAPED file that is not a dedicated store still asks/denies by tier", () => {
     // basename .key/.pem can be a project fixture -> keep the prompt, don't hard-deny
     expect(
-      decide(req({ toolName: "read", toolInput: { path: "/home/alice/project/server.key" } }), deps)
-        .decision,
+      decide(
+        req({ toolName: "read", toolInput: { path: "/test-home/alice/project/server.key" } }),
+        deps,
+      ).decision,
     ).toBe("ask");
     expect(
       decide(
         req({
           toolName: "read",
           modelTier: "weak",
-          toolInput: { path: "/home/alice/project/server.key" },
+          toolInput: { path: "/test-home/alice/project/server.key" },
         }),
         deps,
       ).decision,
     ).toBe("deny");
     expect(
-      decide(req({ toolInput: { command: "cat /home/alice/project/secret.pem" } }), deps).decision,
+      decide(req({ toolInput: { command: "cat /test-home/alice/project/secret.pem" } }), deps)
+        .decision,
     ).toBe("ask");
   });
   it("write inside jail allows, outside asks (trusted) / denies (weak)", () => {
     expect(
-      decide(req({ toolName: "write", toolInput: { path: "/home/alice/project/out.txt" } }), deps)
-        .decision,
+      decide(
+        req({ toolName: "write", toolInput: { path: "/test-home/alice/project/out.txt" } }),
+        deps,
+      ).decision,
     ).toBe("allow");
     expect(
       decide(req({ toolName: "write", toolInput: { path: "/etc/cron.d/x" } }), deps).decision,
@@ -129,7 +140,7 @@ describe("decide", () => {
           req({
             toolName: "read",
             modelTier: tier,
-            toolInput: { path: "/home/alice/.aws/credentials" },
+            toolInput: { path: "/test-home/alice/.aws/credentials" },
           }),
           deps,
         ).decision,
@@ -144,7 +155,7 @@ describe("decide", () => {
             req({
               toolName: tool,
               modelTier: tier,
-              toolInput: { path: "/home/alice/.ssh/id_rsa" },
+              toolInput: { path: "/test-home/alice/.ssh/id_rsa" },
             }),
             deps,
           ).decision,
@@ -159,12 +170,14 @@ describe("decide", () => {
   it("write/edit to a sensitive path is floored even inside the jail", () => {
     // id_rsa lives inside the workspace here, but its credential shape must win.
     expect(
-      decide(req({ toolName: "write", toolInput: { path: "/home/alice/project/id_rsa" } }), deps)
-        .decision,
+      decide(
+        req({ toolName: "write", toolInput: { path: "/test-home/alice/project/id_rsa" } }),
+        deps,
+      ).decision,
     ).toBe("ask");
     expect(
       decide(
-        req({ toolName: "edit", toolInput: { path: "/home/alice/project/secrets.pem" } }),
+        req({ toolName: "edit", toolInput: { path: "/test-home/alice/project/secrets.pem" } }),
         deps,
       ).decision,
     ).toBe("ask");
@@ -174,7 +187,7 @@ describe("decide", () => {
         req({
           toolName: "write",
           modelTier: "weak",
-          toolInput: { path: "/home/alice/project/.env" },
+          toolInput: { path: "/test-home/alice/project/.env" },
         }),
         deps,
       ).decision,
@@ -185,14 +198,17 @@ describe("decide", () => {
       decide(
         req({
           toolName: "write",
-          toolInput: { path: "/home/alice/project/.git/hooks/pre-commit" },
+          toolInput: { path: "/test-home/alice/project/.git/hooks/pre-commit" },
         }),
         deps,
       ).decision,
     ).toBe("ask");
     expect(
       decide(
-        req({ toolName: "edit", toolInput: { path: "/home/alice/project/.loom/config.json" } }),
+        req({
+          toolName: "edit",
+          toolInput: { path: "/test-home/alice/project/.loom/config.json" },
+        }),
         deps,
       ).decision,
     ).toBe("ask");
@@ -201,7 +217,7 @@ describe("decide", () => {
     // Orbit's DEFAULT_CWD is ~/.loom/analyses, so the analysis workspace sits
     // under a .loom segment. The notebook the agent edits constantly must be
     // allowed, while .loom/.git state *inside* the workspace still prompts.
-    const wcwd = "/home/alice/.loom/analyses/proj";
+    const wcwd = "/test-home/alice/.loom/analyses/proj";
     const wresolver: PathResolver = {
       contains: (p) => ({ resolved: p, inside: p.startsWith(wcwd) || p.startsWith("/tmp") }),
     };
@@ -229,7 +245,7 @@ describe("decide", () => {
     // Parity with the write tool three tests up: the same file, the same
     // workspace. The catastrophic pattern for Loom state used to deny this
     // outright because Orbit's DEFAULT_CWD lives under ~/.loom.
-    const wcwd = "/home/alice/.loom/analyses/proj";
+    const wcwd = "/test-home/alice/.loom/analyses/proj";
     const wdeps = {
       resolver: { contains: (p: string) => ({ resolved: p, inside: p.startsWith(wcwd) }) },
       home: HOME,
@@ -251,14 +267,14 @@ describe("decide", () => {
     // The classifier only sees the string. A path that looks like ordinary work
     // product but realpaths into Loom's own state has to come back as a deny --
     // this is the resolver the file-tool branch has always had.
-    const wcwd = "/home/alice/.loom/analyses/proj";
+    const wcwd = "/test-home/alice/.loom/analyses/proj";
     const link = `${wcwd}/link`;
     const sdeps = {
       resolver: {
         contains: (p: string) => ({
           resolved:
             path.normalize(p) === path.normalize(link)
-              ? path.normalize("/home/alice/.loom/config.json")
+              ? path.normalize("/test-home/alice/.loom/config.json")
               : p,
           inside: path.normalize(p).startsWith(path.normalize(wcwd)),
         }),
@@ -276,7 +292,7 @@ describe("decide", () => {
   it("gates a .git write even when cwd is inside the .git dir (no carve-away)", () => {
     // adversarial-review regression: the protected floor must not relativize a
     // real .git away just because the session cwd happens to sit inside it.
-    const gcwd = "/home/alice/project/.git";
+    const gcwd = "/test-home/alice/project/.git";
     const gres: PathResolver = {
       contains: (p) => ({ resolved: p, inside: p.startsWith(gcwd) }),
     };
@@ -289,7 +305,7 @@ describe("decide", () => {
   });
   it("gates Loom state when cwd is a .loom dir outside the analyses tree", () => {
     // regression B: a .loom state dir as cwd must not carve its own .loom away.
-    const lcwd = "/home/alice/.loom/sessions/s1";
+    const lcwd = "/test-home/alice/.loom/sessions/s1";
     const lres: PathResolver = {
       contains: (p) => ({ resolved: p, inside: p.startsWith(lcwd) }),
     };
@@ -316,8 +332,8 @@ describe("decide", () => {
     // wrote (in-workspace), compound/redirected commands, and a coreutil that
     // isn't on the read-only safe list. None auto-runs; each prompts the human.
     const repros = [
-      "python3 /home/alice/project/analyze.py",
-      "cd /home/alice/project && cp a.txt b.txt",
+      "python3 /test-home/alice/project/analyze.py",
+      "cd /test-home/alice/project && cp a.txt b.txt",
       "ls -la | head",
       "sed --version",
     ];
@@ -342,9 +358,9 @@ describe("decide", () => {
     // checked before it must still hard-deny a weak model, interactive or not.
     const cases: Array<[string, string]> = [
       ["sudo rm -rf /", "catastrophic"],
-      ["cat /home/alice/.ssh/id_rsa", "credential store"],
-      ["cat /home/alice/.loom/config.json | base64", "credential store via pipe"],
-      ["cat /home/alice/project/secret.pem", "sensitive-shaped read"],
+      ["cat /test-home/alice/.ssh/id_rsa", "credential store"],
+      ["cat /test-home/alice/.loom/config.json | base64", "credential store via pipe"],
+      ["cat /test-home/alice/project/secret.pem", "sensitive-shaped read"],
       ["cat /etc/passwd", "read outside workspace"],
     ];
     for (const [command, label] of cases)
@@ -372,8 +388,10 @@ describe("decide", () => {
       decide(req({ toolName: "Write", toolInput: { path: "/etc/cron.d/x" } }), deps).decision,
     ).toBe("ask"); // not "allow" via the other-tool fallthrough
     expect(
-      decide(req({ toolName: "EDIT", toolInput: { path: "/home/alice/project/id_rsa" } }), deps)
-        .decision,
+      decide(
+        req({ toolName: "EDIT", toolInput: { path: "/test-home/alice/project/id_rsa" } }),
+        deps,
+      ).decision,
     ).toBe("ask");
     expect(
       decide(req({ toolName: "READ", toolInput: { path: "/etc/hosts" } }), deps).decision,
@@ -396,26 +414,29 @@ describe("decide", () => {
   });
   it("reading inside the workspace is allowed", () => {
     expect(
-      decide(req({ toolName: "read", toolInput: { path: "/home/alice/project/data/x.csv" } }), deps)
-        .decision,
+      decide(
+        req({ toolName: "read", toolInput: { path: "/test-home/alice/project/data/x.csv" } }),
+        deps,
+      ).decision,
     ).toBe("allow");
   });
   it("a safe bash read outside the workspace -> ask; inside -> allow", () => {
     expect(decide(req({ toolInput: { command: "cat /etc/passwd" } }), deps).decision).toBe("ask");
     expect(
-      decide(req({ toolInput: { command: "cat /home/alice/project/notes.txt" } }), deps).decision,
+      decide(req({ toolInput: { command: "cat /test-home/alice/project/notes.txt" } }), deps)
+        .decision,
     ).toBe("allow");
   });
   it("a safe bash enumeration/metadata command outside the workspace -> ask (#224)", () => {
     // ls/find/stat/wc/du/file are 'safe' but reveal structure/metadata/content of
     // their target; pointed outside the workspace they must prompt, same as cat.
     for (const command of [
-      "ls /home/alice/Desktop/experiment",
-      "find /home/alice/Desktop -name '*.csv'",
-      "stat /home/alice/Desktop/exp.csv",
-      "wc -l /home/alice/Desktop/exp.csv",
-      "du -sh /home/alice/Desktop/experiment",
-      "file /home/alice/Desktop/exp.bin",
+      "ls /test-home/alice/Desktop/experiment",
+      "find /test-home/alice/Desktop -name '*.csv'",
+      "stat /test-home/alice/Desktop/exp.csv",
+      "wc -l /test-home/alice/Desktop/exp.csv",
+      "du -sh /test-home/alice/Desktop/experiment",
+      "file /test-home/alice/Desktop/exp.bin",
     ])
       expect(decide(req({ toolInput: { command } }), deps).decision, command).toBe("ask");
   });
@@ -425,16 +446,17 @@ describe("decide", () => {
     // only models absolute membership, so these cases use absolute in-workspace
     // paths and path-less forms.
     for (const command of [
-      "ls /home/alice/project/data",
+      "ls /test-home/alice/project/data",
       "ls -la",
-      "find /home/alice/project",
-      "stat /home/alice/project/notes.txt",
+      "find /test-home/alice/project",
+      "stat /test-home/alice/project/notes.txt",
     ])
       expect(decide(req({ toolInput: { command } }), deps).decision, command).toBe("allow");
   });
   it("df pointed outside the workspace -> ask (#224)", () => {
     expect(
-      decide(req({ toolInput: { command: "df /home/alice/Desktop/experiment" } }), deps).decision,
+      decide(req({ toolInput: { command: "df /test-home/alice/Desktop/experiment" } }), deps)
+        .decision,
     ).toBe("ask");
   });
   it("a quoted path operand is matched against the jail unquoted (#224)", () => {
@@ -442,7 +464,7 @@ describe("decide", () => {
     // prompt); without quote-stripping the literal-quoted token fails the
     // workspace check -- the same gap that lets a quoted EXTERNAL path slip past.
     expect(
-      decide(req({ toolInput: { command: `ls "/home/alice/project/data"` } }), deps).decision,
+      decide(req({ toolInput: { command: `ls "/test-home/alice/project/data"` } }), deps).decision,
     ).toBe("allow");
   });
 });
@@ -563,7 +585,11 @@ describe("decide -- the file_path alias (P0.3)", () => {
       for (const modelTier of TIERS)
         expect(
           decide(
-            req({ toolName: "read", modelTier, toolInput: { [key]: "/home/alice/.ssh/id_rsa" } }),
+            req({
+              toolName: "read",
+              modelTier,
+              toolInput: { [key]: "/test-home/alice/.ssh/id_rsa" },
+            }),
             deps,
           ).decision,
           `${key}/${modelTier}`,
@@ -574,7 +600,7 @@ describe("decide -- the file_path alias (P0.3)", () => {
     for (const key of KEYS) {
       expect(
         decide(
-          req({ toolName: "read", toolInput: { [key]: "/home/alice/project/server.key" } }),
+          req({ toolName: "read", toolInput: { [key]: "/test-home/alice/project/server.key" } }),
           deps,
         ).decision,
         key,
@@ -584,7 +610,7 @@ describe("decide -- the file_path alias (P0.3)", () => {
           req({
             toolName: "read",
             modelTier: "weak",
-            toolInput: { [key]: "/home/alice/project/server.key" },
+            toolInput: { [key]: "/test-home/alice/project/server.key" },
           }),
           deps,
         ).decision,
@@ -597,12 +623,13 @@ describe("decide -- the file_path alias (P0.3)", () => {
     for (const toolName of ["grep", "ls", "find"])
       for (const key of KEYS) {
         expect(
-          decide(req({ toolName, toolInput: { [key]: "/home/alice/Desktop" } }), deps).decision,
+          decide(req({ toolName, toolInput: { [key]: "/test-home/alice/Desktop" } }), deps)
+            .decision,
           `${toolName}/${key}`,
         ).toBe("ask");
         expect(
           decide(
-            req({ toolName, modelTier: "weak", toolInput: { [key]: "/home/alice/Desktop" } }),
+            req({ toolName, modelTier: "weak", toolInput: { [key]: "/test-home/alice/Desktop" } }),
             deps,
           ).decision,
           `${toolName}/${key}/weak`,
@@ -614,7 +641,7 @@ describe("decide -- the file_path alias (P0.3)", () => {
     for (const key of KEYS)
       for (const toolName of ["write", "edit"]) {
         const r = decide(
-          req({ toolName, toolInput: { [key]: "/home/alice/project/.git/hooks/pre-commit" } }),
+          req({ toolName, toolInput: { [key]: "/test-home/alice/project/.git/hooks/pre-commit" } }),
           deps,
         );
         expect(r.decision, `${toolName}/${key}`).toBe("ask");
@@ -624,7 +651,7 @@ describe("decide -- the file_path alias (P0.3)", () => {
             req({
               toolName,
               modelTier: "weak",
-              toolInput: { [key]: "/home/alice/project/.loom/activity.jsonl" },
+              toolInput: { [key]: "/test-home/alice/project/.loom/activity.jsonl" },
             }),
             deps,
           ).decision,
@@ -651,8 +678,10 @@ describe("decide -- the file_path alias (P0.3)", () => {
   it("a sensitive write is floored under either key", () => {
     for (const key of KEYS)
       expect(
-        decide(req({ toolName: "write", toolInput: { [key]: "/home/alice/project/id_rsa" } }), deps)
-          .decision,
+        decide(
+          req({ toolName: "write", toolInput: { [key]: "/test-home/alice/project/id_rsa" } }),
+          deps,
+        ).decision,
         key,
       ).toBe("ask");
   });
@@ -665,8 +694,8 @@ describe("decide -- the file_path alias (P0.3)", () => {
         req({
           toolName: "read",
           toolInput: {
-            path: "/home/alice/project/notes.txt",
-            file_path: "/home/alice/.ssh/id_rsa",
+            path: "/test-home/alice/project/notes.txt",
+            file_path: "/test-home/alice/.ssh/id_rsa",
           },
         }),
         deps,
@@ -675,7 +704,7 @@ describe("decide -- the file_path alias (P0.3)", () => {
     const w = decide(
       req({
         toolName: "write",
-        toolInput: { path: "/home/alice/project/out.txt", file_path: "/etc/cron.d/x" },
+        toolInput: { path: "/test-home/alice/project/out.txt", file_path: "/etc/cron.d/x" },
       }),
       deps,
     );
@@ -687,7 +716,7 @@ describe("decide -- the file_path alias (P0.3)", () => {
     for (const key of KEYS)
       expect(
         decide(
-          req({ toolName: "write", toolInput: { [key]: "/home/alice/project/out.txt" } }),
+          req({ toolName: "write", toolInput: { [key]: "/test-home/alice/project/out.txt" } }),
           deps,
         ).decision,
         key,
@@ -696,7 +725,10 @@ describe("decide -- the file_path alias (P0.3)", () => {
       decide(
         req({
           toolName: "read",
-          toolInput: { path: "/home/alice/project/a.txt", file_path: "/home/alice/project/b.txt" },
+          toolInput: {
+            path: "/test-home/alice/project/a.txt",
+            file_path: "/test-home/alice/project/b.txt",
+          },
         }),
         deps,
       ).decision,
@@ -714,7 +746,7 @@ describe("decide -- the file_path alias (P0.3)", () => {
 // spelling. Which one the workspace uses must not change what either protects.
 describe.each(WORKSPACE_STATE_DIR_NAMES)("decide -- %s state dir", (D) => {
   const OTHER = WORKSPACE_STATE_DIR_NAMES.find((n) => n !== D)!;
-  const wcwd = `/home/alice/${D}/analyses/proj`;
+  const wcwd = `/test-home/alice/${D}/analyses/proj`;
   const wdeps = {
     resolver: { contains: (p: string) => ({ resolved: p, inside: p.startsWith(wcwd) }) },
     home: HOME,
@@ -788,7 +820,10 @@ describe.each(WORKSPACE_STATE_DIR_NAMES)("decide -- %s state dir", (D) => {
 
   it("a bash write through a symlink into either spelling's state is denied", () => {
     const link = `${wcwd}/link`;
-    for (const target of [`/home/alice/${D}/config.json`, `/home/alice/${OTHER}/config.json`]) {
+    for (const target of [
+      `/test-home/alice/${D}/config.json`,
+      `/test-home/alice/${OTHER}/config.json`,
+    ]) {
       const sdeps = {
         resolver: {
           contains: (p: string) => ({
@@ -805,7 +840,7 @@ describe.each(WORKSPACE_STATE_DIR_NAMES)("decide -- %s state dir", (D) => {
   });
 
   it("gates state when cwd is a state dir outside the analyses tree", () => {
-    const lcwd = `/home/alice/${D}/sessions/s1`;
+    const lcwd = `/test-home/alice/${D}/sessions/s1`;
     const lres: PathResolver = { contains: (p) => ({ resolved: p, inside: p.startsWith(lcwd) }) };
     expect(
       decide(req({ cwd: lcwd, toolName: "write", toolInput: { path: `${lcwd}/activity.jsonl` } }), {

@@ -7,31 +7,36 @@ import {
 } from "../extensions/loom/exec-guard/sensitive-read";
 import { WORKSPACE_STATE_DIR_NAMES } from "../extensions/loom/workspace-state-dir";
 
-const HOME = "/home/alice";
+// Not /home/alice: on macOS /home is an automount, and the credential-store
+// check realpaths files under HOME, so every lookup there costs ~20ms and the
+// slower CI runners time out.
+const HOME = "/test-home/alice";
 describe("isSensitivePath", () => {
   it("flags ssh, aws, gcloud, netrc, env, loom config", () => {
     for (const p of [
-      "/home/alice/.ssh/id_rsa",
-      "/home/alice/.aws/credentials",
-      "/home/alice/.config/gcloud/access_tokens.db",
-      "/home/alice/.netrc",
-      "/home/alice/project/.env",
-      "/home/alice/.loom/config.json",
-      "/home/alice/.orbit/config.json",
+      "/test-home/alice/.ssh/id_rsa",
+      "/test-home/alice/.aws/credentials",
+      "/test-home/alice/.config/gcloud/access_tokens.db",
+      "/test-home/alice/.netrc",
+      "/test-home/alice/project/.env",
+      "/test-home/alice/.loom/config.json",
+      "/test-home/alice/.orbit/config.json",
     ])
       expect(isSensitivePath(p, HOME), p).toBe(true);
   });
   it("flags key/pem files anywhere", () => {
-    expect(isSensitivePath("/home/alice/project/server.key", HOME)).toBe(true);
+    expect(isSensitivePath("/test-home/alice/project/server.key", HOME)).toBe(true);
     expect(isSensitivePath("/tmp/foo.pem", HOME)).toBe(true);
   });
   it("flags macOS keychains", () => {
-    expect(isSensitivePath("/home/alice/Library/Keychains/login.keychain-db", HOME)).toBe(true);
-    expect(isSensitivePath("/home/alice/Library/Keychains/x.keychain", HOME)).toBe(true);
+    expect(isSensitivePath("/test-home/alice/Library/Keychains/login.keychain-db", HOME)).toBe(
+      true,
+    );
+    expect(isSensitivePath("/test-home/alice/Library/Keychains/x.keychain", HOME)).toBe(true);
   });
   it("allows ordinary project files", () => {
-    expect(isSensitivePath("/home/alice/project/notebook.md", HOME)).toBe(false);
-    expect(isSensitivePath("/home/alice/project/data/reads.fastq", HOME)).toBe(false);
+    expect(isSensitivePath("/test-home/alice/project/notebook.md", HOME)).toBe(false);
+    expect(isSensitivePath("/test-home/alice/project/data/reads.fastq", HOME)).toBe(false);
   });
 });
 
@@ -46,17 +51,17 @@ describe("credential stores on a case-insensitive filesystem", () => {
   // refused. The web file surface reads through this policy, so the miss was
   // reachable from a browser with the session cwd at $HOME.
   it.each([
-    "/home/alice/library/keychains/user.kb",
-    "/home/alice/LIBRARY/KEYCHAINS/user.kb",
-    "/home/alice/.SSH/known_hosts",
-    "/home/alice/.Config/GCloud/creds.db",
-    "/home/alice/.AWS/credentials.bak",
+    "/test-home/alice/library/keychains/user.kb",
+    "/test-home/alice/LIBRARY/KEYCHAINS/user.kb",
+    "/test-home/alice/.SSH/known_hosts",
+    "/test-home/alice/.Config/GCloud/creds.db",
+    "/test-home/alice/.AWS/credentials.bak",
   ])("refuses %s whatever case it is written in", (p) => {
     expect(isCredentialStore(p, HOME), p).toBe(true);
     expect(isSensitivePath(p, HOME), p).toBe(true);
   });
 
-  it.each(["/home/alice/.NETRC", "/home/alice/.Loom/Config.json"])(
+  it.each(["/test-home/alice/.NETRC", "/test-home/alice/.Loom/Config.json"])(
     "refuses the exact-file entry %s whatever case it is written in",
     (p) => {
       expect(isCredentialStore(p, HOME), p).toBe(true);
@@ -64,93 +69,99 @@ describe("credential stores on a case-insensitive filesystem", () => {
   );
 
   it("still lets an ordinary file through", () => {
-    expect(isCredentialStore("/home/alice/project/Library/notes.md", HOME)).toBe(false);
-    expect(isSensitivePath("/home/alice/project/Keychains.md", HOME)).toBe(false);
+    expect(isCredentialStore("/test-home/alice/project/Library/notes.md", HOME)).toBe(false);
+    expect(isSensitivePath("/test-home/alice/project/Keychains.md", HOME)).toBe(false);
   });
 });
 
 describe("isCredentialStore", () => {
   it("flags the dedicated home credential stores (dirs + exact files)", () => {
     for (const p of [
-      "/home/alice/.ssh/id_rsa",
-      "/home/alice/.aws/credentials",
-      "/home/alice/.gnupg/secring.gpg",
-      "/home/alice/.config/gcloud/access_tokens.db",
-      "/home/alice/.kube/config",
-      "/home/alice/.docker/config.json",
-      "/home/alice/Library/Keychains/login.keychain-db",
-      "/home/alice/.netrc",
-      "/home/alice/.pgpass",
-      "/home/alice/.npmrc",
-      "/home/alice/.loom/config.json",
-      "/home/alice/.orbit/config.json",
+      "/test-home/alice/.ssh/id_rsa",
+      "/test-home/alice/.aws/credentials",
+      "/test-home/alice/.gnupg/secring.gpg",
+      "/test-home/alice/.config/gcloud/access_tokens.db",
+      "/test-home/alice/.kube/config",
+      "/test-home/alice/.docker/config.json",
+      "/test-home/alice/Library/Keychains/login.keychain-db",
+      "/test-home/alice/.netrc",
+      "/test-home/alice/.pgpass",
+      "/test-home/alice/.npmrc",
+      "/test-home/alice/.loom/config.json",
+      "/test-home/alice/.orbit/config.json",
     ])
       expect(isCredentialStore(p, HOME), p).toBe(true);
   });
   it("does NOT flag credential-shaped files that may be project fixtures", () => {
     // sensitive by basename, but not a dedicated store -> stays an ask, not a deny
-    expect(isCredentialStore("/home/alice/project/.env", HOME)).toBe(false);
-    expect(isCredentialStore("/home/alice/project/server.key", HOME)).toBe(false);
+    expect(isCredentialStore("/test-home/alice/project/.env", HOME)).toBe(false);
+    expect(isCredentialStore("/test-home/alice/project/server.key", HOME)).toBe(false);
     expect(isCredentialStore("/tmp/foo.pem", HOME)).toBe(false);
     // every store is still sensitive; the inverse just isn't true
-    expect(isSensitivePath("/home/alice/project/.env", HOME)).toBe(true);
+    expect(isSensitivePath("/test-home/alice/project/.env", HOME)).toBe(true);
   });
   it("does NOT flag ordinary files, and is not fooled by lookalikes", () => {
-    expect(isCredentialStore("/home/alice/project/notebook.md", HOME)).toBe(false);
-    expect(isCredentialStore("/home/alice/.loom/analyses/proj/config.json", HOME)).toBe(false);
-    expect(isCredentialStore("/home/alice/.sshconfig", HOME)).toBe(false);
+    expect(isCredentialStore("/test-home/alice/project/notebook.md", HOME)).toBe(false);
+    expect(isCredentialStore("/test-home/alice/.loom/analyses/proj/config.json", HOME)).toBe(false);
+    expect(isCredentialStore("/test-home/alice/.sshconfig", HOME)).toBe(false);
   });
 });
 
 describe("isProtectedWritePath", () => {
   it("flags writes under .git or .loom", () => {
-    expect(isProtectedWritePath("/home/alice/project/.git/hooks/pre-commit")).toBe(true);
-    expect(isProtectedWritePath("/home/alice/project/.git/config")).toBe(true);
-    expect(isProtectedWritePath("/home/alice/project/.loom/config.json")).toBe(true);
+    expect(isProtectedWritePath("/test-home/alice/project/.git/hooks/pre-commit")).toBe(true);
+    expect(isProtectedWritePath("/test-home/alice/project/.git/config")).toBe(true);
+    expect(isProtectedWritePath("/test-home/alice/project/.loom/config.json")).toBe(true);
   });
   it("allows ordinary project writes", () => {
-    expect(isProtectedWritePath("/home/alice/project/notebook.md")).toBe(false);
-    expect(isProtectedWritePath("/home/alice/project/src/main.py")).toBe(false);
+    expect(isProtectedWritePath("/test-home/alice/project/notebook.md")).toBe(false);
+    expect(isProtectedWritePath("/test-home/alice/project/src/main.py")).toBe(false);
     // not fooled by a substring -- only a real path segment counts
-    expect(isProtectedWritePath("/home/alice/project/gitignore.md")).toBe(false);
+    expect(isProtectedWritePath("/test-home/alice/project/gitignore.md")).toBe(false);
   });
 
   // Orbit files analyses under $HOME/.loom/analyses/<name>, so the workspace's own
   // ancestry contains a .loom segment. That ancestor must NOT make every write
   // "protected" -- only real Loom state / git dirs should gate.
   it("allows analysis work product under ~/.loom/analyses (ancestor .loom carved out)", () => {
-    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/notebook.md", HOME)).toBe(false);
-    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/src/run.py", HOME)).toBe(false);
+    expect(isProtectedWritePath("/test-home/alice/.loom/analyses/proj/notebook.md", HOME)).toBe(
+      false,
+    );
+    expect(isProtectedWritePath("/test-home/alice/.loom/analyses/proj/src/run.py", HOME)).toBe(
+      false,
+    );
   });
   it("still flags .git/.loom state nested inside an analysis", () => {
-    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/.loom/activity.jsonl", HOME)).toBe(
-      true,
-    );
     expect(
-      isProtectedWritePath("/home/alice/.loom/analyses/proj/.git/hooks/pre-commit", HOME),
+      isProtectedWritePath("/test-home/alice/.loom/analyses/proj/.loom/activity.jsonl", HOME),
+    ).toBe(true);
+    expect(
+      isProtectedWritePath("/test-home/alice/.loom/analyses/proj/.git/hooks/pre-commit", HOME),
     ).toBe(true);
   });
   it("flags Loom home state OUTSIDE the analyses tree", () => {
-    expect(isProtectedWritePath("/home/alice/.loom/sessions/s1/activity.jsonl", HOME)).toBe(true);
-    expect(isProtectedWritePath("/home/alice/.loom/cache/skills/x.md", HOME)).toBe(true);
-    expect(isProtectedWritePath("/home/alice/.loom/config.json", HOME)).toBe(true);
+    expect(isProtectedWritePath("/test-home/alice/.loom/sessions/s1/activity.jsonl", HOME)).toBe(
+      true,
+    );
+    expect(isProtectedWritePath("/test-home/alice/.loom/cache/skills/x.md", HOME)).toBe(true);
+    expect(isProtectedWritePath("/test-home/alice/.loom/config.json", HOME)).toBe(true);
   });
   // regression (adversarial review): a .git must never be relativized/carved away,
   // even when the cwd itself sits inside a .git dir -- hook injection stays gated.
   it("flags a real .git even when it is the cwd's own ancestor", () => {
-    expect(isProtectedWritePath("/home/alice/project/.git/hooks/pre-commit", HOME)).toBe(true);
+    expect(isProtectedWritePath("/test-home/alice/project/.git/hooks/pre-commit", HOME)).toBe(true);
   });
   // regression: a per-workspace .loom for a normal (non-analyses) cwd still gates.
   it("flags a per-workspace .loom outside the analyses tree", () => {
-    expect(isProtectedWritePath("/home/alice/myproj/.loom/activity.jsonl", HOME)).toBe(true);
+    expect(isProtectedWritePath("/test-home/alice/myproj/.loom/activity.jsonl", HOME)).toBe(true);
   });
   it("folds case on the .git/.loom segment (macOS HFS+)", () => {
-    expect(isProtectedWritePath("/home/alice/project/.Git/hooks/x", HOME)).toBe(true);
-    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/.LOOM/x", HOME)).toBe(true);
+    expect(isProtectedWritePath("/test-home/alice/project/.Git/hooks/x", HOME)).toBe(true);
+    expect(isProtectedWritePath("/test-home/alice/.loom/analyses/proj/.LOOM/x", HOME)).toBe(true);
   });
   it("with no home, falls back to the absolute-path check", () => {
-    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/notebook.md")).toBe(true);
-    expect(isProtectedWritePath("/home/alice/project/.git/config")).toBe(true);
+    expect(isProtectedWritePath("/test-home/alice/.loom/analyses/proj/notebook.md")).toBe(true);
+    expect(isProtectedWritePath("/test-home/alice/project/.git/config")).toBe(true);
   });
 });
 
@@ -159,37 +170,43 @@ describe("isProtectedWritePath", () => {
 describe.each(WORKSPACE_STATE_DIR_NAMES)("isProtectedWritePath / isLoomStatePath -- %s", (D) => {
   const OTHER = WORKSPACE_STATE_DIR_NAMES.find((n) => n !== D)!;
   it("flags writes under the state dir", () => {
-    expect(isProtectedWritePath(`/home/alice/project/${D}/config.json`)).toBe(true);
-    expect(isLoomStatePath(`/home/alice/project/${D}/config.json`)).toBe(true);
+    expect(isProtectedWritePath(`/test-home/alice/project/${D}/config.json`)).toBe(true);
+    expect(isLoomStatePath(`/test-home/alice/project/${D}/config.json`)).toBe(true);
   });
   it("allows analysis work product under ~/<state>/analyses", () => {
-    expect(isProtectedWritePath(`/home/alice/${D}/analyses/proj/notebook.md`, HOME)).toBe(false);
-    expect(isProtectedWritePath(`/home/alice/${D}/analyses/proj/src/run.py`, HOME)).toBe(false);
+    expect(isProtectedWritePath(`/test-home/alice/${D}/analyses/proj/notebook.md`, HOME)).toBe(
+      false,
+    );
+    expect(isProtectedWritePath(`/test-home/alice/${D}/analyses/proj/src/run.py`, HOME)).toBe(
+      false,
+    );
   });
   it("still flags .git and either state dir nested inside an analysis", () => {
     for (const nested of [D, OTHER]) {
       expect(
-        isProtectedWritePath(`/home/alice/${D}/analyses/proj/${nested}/activity.jsonl`, HOME),
+        isProtectedWritePath(`/test-home/alice/${D}/analyses/proj/${nested}/activity.jsonl`, HOME),
         nested,
       ).toBe(true);
     }
-    expect(isProtectedWritePath(`/home/alice/${D}/analyses/proj/.git/hooks/pre-commit`, HOME)).toBe(
-      true,
-    );
+    expect(
+      isProtectedWritePath(`/test-home/alice/${D}/analyses/proj/.git/hooks/pre-commit`, HOME),
+    ).toBe(true);
   });
   it("flags home state outside the analyses tree", () => {
-    expect(isProtectedWritePath(`/home/alice/${D}/sessions/s1/activity.jsonl`, HOME)).toBe(true);
-    expect(isProtectedWritePath(`/home/alice/${D}/cache/skills/x.md`, HOME)).toBe(true);
-    expect(isProtectedWritePath(`/home/alice/${D}/config.json`, HOME)).toBe(true);
+    expect(isProtectedWritePath(`/test-home/alice/${D}/sessions/s1/activity.jsonl`, HOME)).toBe(
+      true,
+    );
+    expect(isProtectedWritePath(`/test-home/alice/${D}/cache/skills/x.md`, HOME)).toBe(true);
+    expect(isProtectedWritePath(`/test-home/alice/${D}/config.json`, HOME)).toBe(true);
   });
   it("flags a per-workspace state dir outside the analyses tree", () => {
-    expect(isProtectedWritePath(`/home/alice/myproj/${D}/activity.jsonl`, HOME)).toBe(true);
-    expect(isProtectedWritePath(`/home/alice/myproj/${D}/env/bin/python`, HOME)).toBe(true);
+    expect(isProtectedWritePath(`/test-home/alice/myproj/${D}/activity.jsonl`, HOME)).toBe(true);
+    expect(isProtectedWritePath(`/test-home/alice/myproj/${D}/env/bin/python`, HOME)).toBe(true);
   });
   it("folds case on the segment (macOS HFS+)", () => {
-    expect(isProtectedWritePath(`/home/alice/myproj/${D.toUpperCase()}/x`, HOME)).toBe(true);
+    expect(isProtectedWritePath(`/test-home/alice/myproj/${D.toUpperCase()}/x`, HOME)).toBe(true);
     expect(
-      isProtectedWritePath(`/home/alice/${D}/analyses/proj/${OTHER.toUpperCase()}/x`, HOME),
+      isProtectedWritePath(`/test-home/alice/${D}/analyses/proj/${OTHER.toUpperCase()}/x`, HOME),
     ).toBe(true);
   });
   // path.win32.relative folds case, and on NTFS .LOOM really is the same dir as .loom.
@@ -197,12 +214,12 @@ describe.each(WORKSPACE_STATE_DIR_NAMES)("isProtectedWritePath / isLoomStatePath
     "does not fold case on the carve-out (folding would widen an exemption)",
     () => {
       expect(
-        isProtectedWritePath(`/home/alice/${D.toUpperCase()}/analyses/proj/notebook.md`, HOME),
+        isProtectedWritePath(`/test-home/alice/${D.toUpperCase()}/analyses/proj/notebook.md`, HOME),
       ).toBe(true);
     },
   );
   it("with no home, falls back to the absolute-path check", () => {
-    expect(isProtectedWritePath(`/home/alice/${D}/analyses/proj/notebook.md`)).toBe(true);
+    expect(isProtectedWritePath(`/test-home/alice/${D}/analyses/proj/notebook.md`)).toBe(true);
   });
   it("a directory that merely ends in the name is not state", () => {
     expect(isProtectedWritePath(`/data/My${D}/foo`, HOME)).toBe(false);

@@ -6,7 +6,7 @@
  * after the swap.
  */
 
-export type Routing = "local" | "galaxy" | "hybrid" | "remote" | "unknown";
+export type Routing = "local" | "hybrid" | "remote" | "unknown";
 
 export interface ParsedPlan {
   title: string;
@@ -27,7 +27,10 @@ export function parseLatestPlan(content: string): ParsedPlan | null {
     if (m) {
       latestPlanLine = i;
       latestPlanTitle = `${m[1].trim()}: ${m[2].trim()}`;
-      latestPlanRouting = (m[3]?.toLowerCase() as Routing) ?? "unknown";
+      // [galaxy] is the old spelling of [remote]; models trained on older
+      // notebooks still emit it, so grade it as what it means.
+      const tag = m[3]?.toLowerCase();
+      latestPlanRouting = !tag ? "unknown" : tag === "galaxy" ? "remote" : (tag as Routing);
     }
   }
 

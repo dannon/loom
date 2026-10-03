@@ -18,11 +18,22 @@ import { renderInvocationYaml, type InvocationYaml } from "../extensions/loom/no
 import * as galaxyApi from "../extensions/loom/galaxy-api";
 import { checkInvocations } from "../extensions/loom/tools";
 import {
-  appendInvocationFailureHint,
   INVOCATION_FAILURE_REFERENCE,
   JOB_FAILURE_REFERENCE,
 } from "../extensions/loom/invocation-failure-hint";
 import { readVendoredSkill } from "../extensions/loom/vendor-skills";
+import { applySkillTriggers } from "../extensions/loom/skill-triggers";
+
+// The hint now fires through the skill-triggers table; drive it the way a
+// galaxy_invocation_check_all result reaches it.
+function appendInvocationFailureHint<T extends { type: string; text?: string }>(content: T[]) {
+  return (
+    applySkillTriggers(
+      { toolName: "galaxy_invocation_check_all", isError: false, content },
+      () => [],
+    )?.content ?? null
+  );
+}
 
 function invocation(overrides: Partial<InvocationYaml> = {}): InvocationYaml {
   return {

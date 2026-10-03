@@ -100,15 +100,15 @@ function pruneOpened(opened: Set<string>, live: ReadonlySet<string>): void {
 }
 
 /**
- * The four routing tags the notebook schema defines, in the words of someone
- * who has to decide whether to leave the laptop open. Definitions follow
- * `docs/agent/galaxy-routing.md`.
+ * The routing tags the notebook schema defines, in the words of someone who
+ * has to decide whether to leave the laptop open. Definitions follow
+ * `docs/agent/galaxy-routing.md`; `galaxy` is the older spelling of `remote`.
  */
 const ROUTING_WORDS: Record<string, string> = {
+  remote: "Runs on Galaxy",
   galaxy: "Runs on Galaxy",
   local: "Runs on this computer",
   hybrid: "Part on Galaxy, part on this computer",
-  remote: "One Galaxy workflow, start to finish",
 };
 
 interface StepGlyph {
@@ -205,7 +205,7 @@ function percent(part: number, whole: number): number {
 }
 
 /**
- * Only the four tags the schema defines become a sentence. The host's heading
+ * Only the tags the schema defines become a sentence. The host's heading
  * parser reads any trailing `[word]` as routing, so `## Plan A: Call variants
  * on [chrM]` arrives here as routing "chrm" -- saying `Routed "chrm"` would
  * present a chromosome name to a non-developer as a routing decision. An

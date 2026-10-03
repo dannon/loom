@@ -5,8 +5,8 @@
  * fails. A manual check can observe the transition first, so it also needs
  * an agent-facing nudge in the tool result from
  * `galaxy_invocation_check_all` / `_check_one`, which carries `autoAction:
- * "failed"` for anything that just transitioned. Hook it the same way
- * `confusables-hint.ts` does and append a triage nudge.
+ * "failed"` for anything that just transitioned. The hook is a row in
+ * `skill-triggers.ts`; this module holds the hint and the detector.
  *
  * Shape follows the lesson from #210/#249: a deterministic nudge cannot depend
  * on a pull for the part that makes it actionable. So the *imperative* is
@@ -17,19 +17,15 @@
  * with Loom rather than fetched, so the pointer resolves offline.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { VENDOR_REPO_NAME } from "./vendor-skills";
 
-const INVOCATION_CHECK_TOOLS = new Set([
-  "galaxy_invocation_check_all",
-  "galaxy_invocation_check_one",
-]);
+// Bundled paths mirror the cast's own layout upstream, so the string handed to
+// the model here is the same string a live fetch of that cast would use.
+const CAST_NOTES = "debug-galaxy-workflow-output/references/notes";
+export const INVOCATION_FAILURE_REFERENCE = `${CAST_NOTES}/galaxy-workflow-invocation-failure-reference.md`;
+export const JOB_FAILURE_REFERENCE = `${CAST_NOTES}/galaxy-tool-job-failure-reference.md`;
 
-export const INVOCATION_FAILURE_REFERENCE = "galaxy-workflow-invocation-failure-reference.md";
-export const JOB_FAILURE_REFERENCE = "galaxy-tool-job-failure-reference.md";
-
-// Distinctive opening, reused as the idempotency guard -- guaranteed present
-// once appended and unique enough that no Galaxy tool result contains it.
+// Distinctive opening, so the hint can't be mistaken for Galaxy's own output.
 const HINT_MARKER = "[loom] A Galaxy workflow invocation just failed";
 
 export const INVOCATION_FAILED_HINT =
@@ -58,41 +54,4 @@ export function hasFailedTransition(text: string): boolean {
   const results = (parsed as { results?: unknown })?.results;
   if (!Array.isArray(results)) return false;
   return results.some((r) => (r as { autoAction?: unknown })?.autoAction === "failed");
-}
-
-/**
- * Append the triage hint to a tool-result's content. Returns a changed copy, or
- * `null` if there is nothing to add (already hinted, or no failed transition).
- * The original array is never mutated.
- */
-export function appendInvocationFailureHint<T extends { type: string; text?: string }>(
-  content: T[],
-): T[] | null {
-  const alreadyHinted = content.some(
-    (c) => c.type === "text" && typeof c.text === "string" && c.text.includes(HINT_MARKER),
-  );
-  if (alreadyHinted) return null;
-
-  const idx = content.findIndex(
-    (c) => c.type === "text" && typeof c.text === "string" && hasFailedTransition(c.text),
-  );
-  if (idx === -1) return null;
-
-  const target = content[idx];
-  const next = content.slice();
-  next[idx] = { ...target, text: `${target.text}\n\n${INVOCATION_FAILED_HINT}` };
-  return next;
-}
-
-export function registerInvocationFailureHint(pi: ExtensionAPI): void {
-  pi.on("message_end", (event) => {
-    const msg = event.message;
-    if (msg.role !== "toolResult" || msg.isError) return;
-    if (!msg.toolName || !INVOCATION_CHECK_TOOLS.has(msg.toolName)) return;
-
-    const updated = appendInvocationFailureHint(msg.content);
-    if (!updated) return;
-
-    return { message: { ...msg, content: updated } };
-  });
 }

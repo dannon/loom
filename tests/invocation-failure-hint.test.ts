@@ -1,11 +1,22 @@
 import { describe, it, expect } from "vitest";
 import {
-  appendInvocationFailureHint,
   hasFailedTransition,
   INVOCATION_FAILED_HINT,
   INVOCATION_FAILURE_REFERENCE,
   JOB_FAILURE_REFERENCE,
 } from "../extensions/loom/invocation-failure-hint";
+import { applySkillTriggers } from "../extensions/loom/skill-triggers";
+
+// The hint now fires through the skill-triggers table; drive it the way a
+// galaxy_invocation_check_all result reaches it.
+function appendInvocationFailureHint<T extends { type: string; text?: string }>(content: T[]) {
+  return (
+    applySkillTriggers(
+      { toolName: "galaxy_invocation_check_all", isError: false, content },
+      () => [],
+    )?.content ?? null
+  );
+}
 
 function checkResult(results: unknown[]): string {
   return JSON.stringify({ success: true, checked: results.length, results }, null, 2);

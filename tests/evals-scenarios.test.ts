@@ -41,9 +41,9 @@ describe("evals scenarios: every scenario.json parses with required fields", () 
     });
   }
 
-  it("rnaseq routes galaxy/hybrid and names a known RNA-seq tool", () => {
+  it("rnaseq routes remote/hybrid and names a known RNA-seq tool", () => {
     const s = loadScenario("plan-creation-rnaseq");
-    expect(s.assertions.plan?.routingIn).toEqual(["galaxy", "hybrid"]);
+    expect(s.assertions.plan?.routingIn).toEqual(["remote", "hybrid"]);
     expect(s.assertions.plan?.mentionsOneOf).toContain("HISAT2");
   });
 

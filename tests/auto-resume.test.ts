@@ -117,16 +117,36 @@ describe("createFollowUpDelivery", () => {
   });
 
   it("pauses after the cap, tells the user once, and resumes on user input", () => {
+    vi.useFakeTimers();
     const send = vi.fn();
     const onPaused = vi.fn();
-    const d = createFollowUpDelivery(send, { maxConsecutive: 3, onPaused });
-    for (const t of ["1", "2", "3", "4", "5"]) d.deliver(t);
+    const d = createFollowUpDelivery(send, { graceMs: 100, maxConsecutive: 3, onPaused });
+    const turn = () => {
+      d.userMessageRecorded(send.mock.lastCall![0]);
+      d.agentStarted();
+      d.agentSettled();
+      vi.advanceTimersByTime(100);
+    };
+    d.deliver("1");
+    d.deliver("2"); // held: "1" hasn't started its turn yet
+    turn();
+    d.deliver("3");
+    turn();
+    d.deliver("4");
+    d.deliver("5");
+    turn();
     expect(send.mock.calls.map(([t]) => t)).toEqual(["1", "2", "3"]);
     expect(onPaused).toHaveBeenCalledOnce();
     expect(onPaused.mock.calls[0][0]).toMatch(/paused after 3 automatic turn/);
     d.userInput();
+    d.agentStarted();
     d.deliver("6");
-    expect(send).toHaveBeenLastCalledWith("6");
+    vi.advanceTimersByTime(5000);
+    expect(send).toHaveBeenCalledTimes(3);
+    d.agentSettled();
+    vi.advanceTimersByTime(100);
+    expect(send).toHaveBeenLastCalledWith("4\n\n5\n\n6");
+    expect(send).toHaveBeenCalledTimes(4);
   });
 
   it("takes the default cap from config", () => {
@@ -138,7 +158,7 @@ describe("createFollowUpDelivery", () => {
     expect(send).toHaveBeenCalledOnce();
   });
 
-  it("drops held follow-ups on Stop and stays quiet until the user speaks", () => {
+  it("retains held follow-ups on Stop and waits for the user's next turn to settle", () => {
     vi.useFakeTimers();
     const send = vi.fn();
     const onPaused = vi.fn();
@@ -153,8 +173,197 @@ describe("createFollowUpDelivery", () => {
     expect(onPaused).toHaveBeenCalledOnce();
     expect(onPaused.mock.calls[0][0]).toMatch(/stopped/);
     d.userInput();
+    d.agentStarted();
     d.deliver("after");
-    expect(send).toHaveBeenCalledExactlyOnceWith("after");
+    expect(send).not.toHaveBeenCalled();
+    d.agentSettled();
+    vi.advanceTimersByTime(100);
+    expect(send).toHaveBeenCalledExactlyOnceWith("held\n\nlater\n\nafter");
+  });
+
+  it("retains a late batch failure after three successful automatic turns", () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const d = createFollowUpDelivery(send, { graceMs: 100, maxConsecutive: 3 });
+    for (let i = 0; i < 3; i++) {
+      d.deliver(
+        buildResumePrompt([
+          { kind: "job", id: `finished-${i}`, label: "cohort", outcome: "completed" },
+        ]),
+      );
+      d.userMessageRecorded(send.mock.lastCall![0]);
+      d.agentStarted();
+      if (i === 2) {
+        d.deliver(
+          buildResumePrompt([
+            {
+              kind: "job",
+              id: "last-cohort",
+              label: "cohort",
+              outcome: "failed",
+              detail: "exit 1",
+            },
+          ]),
+        );
+      }
+      d.agentSettled();
+      vi.advanceTimersByTime(100);
+    }
+    expect(send).toHaveBeenCalledTimes(3);
+    d.userInput(); // No new Galaxy transition will occur for this terminal job.
+    d.agentStarted();
+    d.agentSettled();
+    vi.advanceTimersByTime(100);
+    expect(send).toHaveBeenCalledTimes(4);
+    expect(send.mock.lastCall![0]).toContain('"id": "last-cohort"');
+    expect(send.mock.lastCall![0]).toContain('"outcome": "failed"');
+    vi.advanceTimersByTime(10000);
+    expect(send).toHaveBeenCalledTimes(4);
+  });
+
+  it("keeps a send Pi never acted on, without retrying in a loop", () => {
+    // Pi's extension sendUserMessage returns nothing and swallows a refused
+    // prompt, so a turn that never starts is the only sign it was dropped.
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const onPaused = vi.fn();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const d = createFollowUpDelivery(send, { graceMs: 100, ackMs: 1000, onPaused });
+    d.deliver("job-failed");
+    vi.advanceTimersByTime(1000);
+    expect(onPaused).toHaveBeenCalledOnce();
+    expect(onPaused.mock.calls[0][0]).toMatch(/kept for your next message/);
+    vi.advanceTimersByTime(60_000);
+    expect(send).toHaveBeenCalledOnce();
+    d.userInput();
+    d.agentStarted();
+    d.agentSettled();
+    vi.advanceTimersByTime(100);
+    expect(send.mock.calls).toEqual([["job-failed"], ["job-failed"]]);
+    log.mockRestore();
+  });
+
+  it("waits out a compaction before deciding a send was dropped", () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    let idle = false;
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const d = createFollowUpDelivery(send, { graceMs: 100, ackMs: 1000, isIdle: () => idle });
+    idle = true;
+    d.deliver("result");
+    idle = false; // Pi compacts before starting the prompt's turn
+    vi.advanceTimersByTime(5000);
+    idle = true;
+    d.userMessageRecorded("result");
+    d.agentStarted();
+    d.agentSettled();
+    vi.advanceTimersByTime(5000);
+    expect(send).toHaveBeenCalledOnce();
+    expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it("does not send while Pi is compacting outside a turn", () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    let idle = false;
+    const d = createFollowUpDelivery(send, { graceMs: 100, isIdle: () => idle });
+    d.deliver("result");
+    vi.advanceTimersByTime(1000);
+    expect(send).not.toHaveBeenCalled();
+    idle = true;
+    vi.advanceTimersByTime(100);
+    expect(send).toHaveBeenCalledExactlyOnceWith("result");
+  });
+
+  it("does not wake the agent for a slash command after Stop", () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const d = createFollowUpDelivery(send, { graceMs: 100 });
+    d.agentStarted();
+    d.deliver("held");
+    d.aborted();
+    d.agentSettled();
+    d.userInput(); // e.g. /tester-id, which starts no turn
+    vi.advanceTimersByTime(60_000);
+    expect(send).not.toHaveBeenCalled();
+    d.agentStarted();
+    d.agentSettled();
+    vi.advanceTimersByTime(100);
+    expect(send).toHaveBeenCalledExactlyOnceWith("held");
+  });
+
+  it("drops a stale nudge on Stop but keeps Galaxy results", () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const d = createFollowUpDelivery(send, { graceMs: 100 });
+    d.agentStarted();
+    d.deliver("galaxy result");
+    d.deliver("plan nudge", { dropOnStop: true });
+    d.aborted();
+    d.agentSettled();
+    d.userInput();
+    d.agentStarted();
+    d.agentSettled();
+    vi.advanceTimersByTime(100);
+    expect(send).toHaveBeenCalledExactlyOnceWith("galaxy result");
+  });
+
+  it("doesn't take someone else's turn as delivery", () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const d = createFollowUpDelivery(send, { graceMs: 100, ackMs: 1000 });
+    d.deliver("result"); // Pi refuses it silently
+    d.userMessageRecorded("what's happening?"); // the user's own turn
+    d.agentStarted();
+    vi.advanceTimersByTime(1000);
+    d.agentSettled();
+    vi.advanceTimersByTime(100);
+    expect(send.mock.calls).toEqual([["result"], ["result"]]);
+    log.mockRestore();
+  });
+
+  it("doesn't resend a batch that was only slow to land", () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const d = createFollowUpDelivery(send, { graceMs: 100, ackMs: 1000 });
+    d.deliver("result");
+    vi.advanceTimersByTime(1000); // long auth refresh: counted as undelivered
+    d.userMessageRecorded("result"); // ...then Pi runs it after all
+    d.agentStarted();
+    d.agentSettled();
+    vi.advanceTimersByTime(5000);
+    expect(send).toHaveBeenCalledOnce();
+    log.mockRestore();
+  });
+
+  it("forgets an unacknowledged send when the session ends", () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const d = createFollowUpDelivery(send, { graceMs: 100, ackMs: 1000 });
+    d.deliver("old-session");
+    d.clear();
+    vi.advanceTimersByTime(5000);
+    d.deliver("new-session");
+    expect(send.mock.calls).toEqual([["old-session"], ["new-session"]]);
+    expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it("retains a synchronous send failure for the next delivery opportunity", () => {
+    vi.useFakeTimers();
+    const send = vi.fn().mockImplementationOnce(() => {
+      throw new Error("not ready");
+    });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const d = createFollowUpDelivery(send, { graceMs: 100 });
+    d.deliver("first");
+    d.deliver("second");
+    expect(send.mock.calls).toEqual([["first"], ["first\n\nsecond"]]);
+    log.mockRestore();
   });
 
   it("drops held follow-ups when the session shuts down", () => {
