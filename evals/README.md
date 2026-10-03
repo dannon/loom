@@ -34,6 +34,11 @@ PROXY_API_KEY=<your-key>
 (Variable names match `~/work/tacc-inference/.env` so symlinking that file
 straight in works: `ln -s ~/work/tacc-inference/.env evals/.env`.)
 
+Scenarios marked `requiresGalaxy: true` call Galaxy MCP tools and need a real
+server. Add `GALAXY_URL` and `GALAXY_API_KEY` (a test.galaxyproject.org account
+is the safe choice) to `evals/.env` to run them; without both, the runner skips
+them with a warning rather than grading a Galaxy server that never registered.
+
 ## Dimensions and the leaderboard
 
 Tier 2 scenarios are graded on up to four decision-correctness dimensions.
