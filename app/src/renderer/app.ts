@@ -15,6 +15,7 @@ import { refreshGalaxyInvocations } from "./galaxy-invocations.js";
 import { refreshGalaxyHistory } from "./galaxy-history.js";
 import { formatGalaxyTooltip } from "./galaxy-tooltip.js";
 import { PromptQueue, queuedPreview } from "./prompt-queue.js";
+import { isHandledPrompt } from "../../../shared/handled-prompt.js";
 import { attachFilePathDrop } from "./file-drop.js";
 import { FeedbackDraftStore } from "./feedback-draft.js";
 import {
@@ -1912,6 +1913,7 @@ function submit(): void {
 }
 
 function dispatchSubmittedText(text: string): void {
+  handledPromptPending = false;
   // Slash commands handled locally may run without an LLM round-trip. Commands
   // that do call the agent run here only after the current turn is idle.
   if (text.startsWith("/") && handleSlashCommand(text)) return;
@@ -2732,6 +2734,8 @@ document.addEventListener("keydown", (e) => {
 
 // ── Agent Events ──────────────────────────────────────────────────────────────
 
+let handledPromptPending = false;
+
 window.orbit.onAgentEvent((event) => {
   const type = event.type as string;
   console.log("[orbit] event:", type, JSON.stringify(event).slice(0, 150));
@@ -2754,11 +2758,28 @@ window.orbit.onAgentEvent((event) => {
   feedShell(event);
 
   switch (type) {
+    case "response":
+      // A slash command the brain ran without starting a turn never sends
+      // agent_end, so nothing else would clear the thinking state it got on send.
+      if (isHandledPrompt(event) && !streaming) {
+        chat.hideThinking();
+        setStatusBadge("");
+        handledPromptPending = true;
+      }
+      break;
+
     case "agent_start":
       streaming = true;
       sendBtn.classList.add("hidden");
       abortBtn.classList.remove("hidden");
       startTurnTimer();
+      // A handled command can still kick off a turn of its own (/connect
+      // reloads, /execute prompts); put back the thinking state it cleared.
+      if (handledPromptPending) {
+        handledPromptPending = false;
+        chat.showThinking();
+        setStatusBadge("thinking", "thinking...");
+      }
       // Don't hide thinking yet — wait for actual text content
       break;
 

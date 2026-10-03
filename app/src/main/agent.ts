@@ -17,6 +17,7 @@ import {
 } from "../../../shared/brain-exit.js";
 import { noLocalShellSpawnExtras } from "./local-shell.js";
 import { TurnWatchdog } from "./turn-watchdog.js";
+import { promptStartsNoTurn } from "../../../shared/handled-prompt.js";
 import { formatWindowTitle } from "./window-title.js";
 import { isOAuthOnlyProvider } from "./oauth-handler.js";
 import { DESKTOP_SHELL_KIND, readEnv, writeEnv } from "../../../shared/orbit-env.js";
@@ -715,6 +716,13 @@ export class AgentManager {
     // watchdog before we act on (or early-return from) this event.
     this.watchdog.observe(type);
 
+    // send() armed the watchdog for this prompt, but a handled command or a
+    // rejected prompt means no turn follows -- left armed, it would report a
+    // stall two minutes later and abort whatever runs next.
+    if (promptStartsNoTurn(data) && !this.turnActive) {
+      this.watchdog.stop();
+    }
+
     if (type === "response" && data.id) {
       const pending = this.pendingResponses.get(data.id as string);
       if (pending) {
@@ -724,7 +732,9 @@ export class AgentManager {
         } else {
           pending.resolve(data.data ?? data);
         }
-        return;
+        // The renderer also reads prompt responses (a handled command clears
+        // its thinking state), even when a caller awaited this one.
+        if (data.command !== "prompt") return;
       }
     }
 
