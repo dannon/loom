@@ -485,6 +485,26 @@ function scanLoomWrite(
 // `cd`/`pushd` whose target visibly names Loom state (even inside a python -c
 // string) is never auto-allowed.
 
+// Everything below models bash, so its paths are POSIX strings whatever the
+// host. On a Windows host Node's own path module would inject a drive and
+// backslashes into some results and not others, and the membership checks would
+// compare strings that never match.
+const P = path.posix;
+
+// A Windows host hands over `C:\Users\me`; carry the drive as a leading
+// segment (`/C:/Users/me`) so posix joins treat it as absolute.
+function toShellPath(p: string): string {
+  if (!p) return p;
+  const f = p.replace(/\\/g, "/");
+  return /^[A-Za-z]:(\/|$)/.test(f) ? "/" + f : f;
+}
+
+// ...and back again for the host-path checks in sensitive-read, which already
+// accept forward slashes on every platform.
+function toHostPath(p: string): string {
+  return p.replace(/^\/([A-Za-z]:)(?=\/|$)/, "$1");
+}
+
 interface CwdState {
   /** Absolute directory, or null once a `cd` target could not be resolved. */
   dir: string | null;
@@ -610,8 +630,8 @@ function resolveWordFrom(word: WordFragment[], home: string, base: string | null
     }
   }
   if (text.startsWith("~") || /[*?$`\\{}[\]]/.test(text)) return null;
-  if (path.isAbsolute(text)) return path.resolve(text);
-  return base ? path.resolve(base, text) : null;
+  if (P.isAbsolute(text)) return P.resolve(text);
+  return base ? P.resolve(base, text) : null;
 }
 
 // The `$(...)` and backtick bodies inside a word, wherever bash would run them.
@@ -676,7 +696,10 @@ interface Segment {
   heredocs: number;
 }
 
-function scanCdContext(command: string, home: string, cwd: string): CdScan {
+function scanCdContext(command: string, hostHome: string, hostCwd: string): CdScan {
+  const home = toShellPath(hostHome);
+  const cwd = toShellPath(hostCwd);
+  const isState = (p: string) => isLoomStatePath(toHostPath(p), hostHome);
   const out: CdScan = { catastrophic: false, readPaths: [], writeTargets: [], guarded: false };
   // isCredentialStore realpaths a handful of files; a script that cds back
   // and forth asks about the same few directories over and over.
@@ -684,12 +707,12 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
   const stateFor = (dir: string): CwdState => {
     const hit = seen.get(dir);
     if (hit) return hit;
-    const state = isLoomStatePath(dir, home);
+    const state = isState(dir);
     const v = {
       dir,
       state,
       nearState: hasStateSegment(dir),
-      guarded: state || (!!home && isCredentialStore(dir, home)),
+      guarded: state || (!!home && isCredentialStore(toHostPath(dir), hostHome)),
     };
     seen.set(dir, v);
     return v;
@@ -702,7 +725,7 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
       if (abs ? stateFor(abs).guarded : SUSPECT_CD.test(raw)) out.guarded = true;
     }
   };
-  const start: CwdState = cwd && path.isAbsolute(cwd) ? { ...UNKNOWN, dir: cwd } : UNKNOWN;
+  const start: CwdState = cwd && P.isAbsolute(cwd) ? { ...UNKNOWN, dir: cwd } : UNKNOWN;
   walk(
     command,
     {
@@ -902,14 +925,14 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
     for (const w of reads) {
       const abs = resolveWordFrom(w, home, base);
       if (abs) {
-        out.readPaths.push(abs);
+        out.readPaths.push(toHostPath(abs));
       } else if (base === null && where.state && home) {
         // Somewhere in Loom state we could not pin down: judge a relative read
         // as if it were in either config dir, so `config.json` still denies.
         const rel = wordText(w);
-        if (!path.isAbsolute(rel) && !rel.split("/").includes("..")) {
+        if (!P.isAbsolute(rel) && !rel.split("/").includes("..")) {
           for (const name of WORKSPACE_STATE_DIR_NAMES)
-            out.readPaths.push(path.join(home, name, rel));
+            out.readPaths.push(toHostPath(P.join(home, name, rel)));
         }
       }
     }
@@ -931,8 +954,8 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
       const text = wordText(w);
       const abs = resolveWordFrom(w, home, base);
       if (abs !== null) {
-        if (isLoomStatePath(abs, home)) out.catastrophic = true;
-        else if (hasStateSegment(abs)) out.writeTargets.push(abs);
+        if (isState(abs)) out.catastrophic = true;
+        else if (hasStateSegment(abs)) out.writeTargets.push(toHostPath(abs));
         // `..` is collapsed lexically, but the kernel walks it physically: hand
         // the directory it climbs out of to the policy layer to realpath.
         const segs = text.split("/");
@@ -943,8 +966,8 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
             home,
             base,
           );
-          if (prefix && hasStateSegment(prefix)) out.writeTargets.push(prefix);
-          if (base && hasStateSegment(base)) out.writeTargets.push(base);
+          if (prefix && hasStateSegment(prefix)) out.writeTargets.push(toHostPath(prefix));
+          if (base && hasStateSegment(base)) out.writeTargets.push(toHostPath(base));
         }
       } else if (where.state) {
         out.catastrophic = true;
@@ -955,9 +978,9 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
         const plain =
           base &&
           !/[$`~\\]/.test(text) &&
-          !path.isAbsolute(text) &&
+          !P.isAbsolute(text) &&
           !text.split("/").some((p) => p === ".." || /^\.[^/]*[*?[{]/.test(p));
-        if (plain && isLoomStatePath(path.resolve(base, text), home)) {
+        if (plain && isState(P.resolve(base, text))) {
           out.catastrophic = true;
         } else if (
           !plain &&
@@ -1034,7 +1057,7 @@ function scanCdContext(command: string, home: string, cwd: string): CdScan {
       } else if (/^[+-]\d+$/.test(text)) {
         // A pushd/popd stack rotation we do not model: assume the worst entry.
         next = [worst(union(sh.cur, ...stack))];
-      } else if (sh.steered && !path.isAbsolute(text) && !text.startsWith("$")) {
+      } else if (sh.steered && !P.isAbsolute(text) && !text.startsWith("$")) {
         next = [LOST];
       } else {
         next = targetStates(target, sh);

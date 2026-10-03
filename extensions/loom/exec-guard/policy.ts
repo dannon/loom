@@ -29,11 +29,13 @@ function denyCredentialStore(p: string, home: string): PolicyResult {
 
 // Reasons land in the activity log, and a path the classifier resolved is
 // absolute; spelling the home dir as `~` keeps the username out of it.
+// Compared as forward-slashed strings so the spelling is the same on every host.
 function shown(p: string, home: string): string {
-  if (!home || !path.isAbsolute(p)) return p;
-  const rel = path.relative(home, p);
-  if (rel === "") return "~";
-  return rel.startsWith("..") || path.isAbsolute(rel) ? p : `~/${rel}`;
+  const fp = p.replace(/\\/g, "/");
+  const fh = home.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!fh) return p;
+  if (fp.toLowerCase() === fh.toLowerCase()) return "~";
+  return fp.toLowerCase().startsWith(fh.toLowerCase() + "/") ? `~/${fp.slice(fh.length + 1)}` : p;
 }
 
 const FILE_WRITE_TOOLS = new Set(["write", "edit"]);
