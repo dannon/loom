@@ -5,18 +5,23 @@ import * as path from "path";
 
 let tmpHome: string;
 const realHome = process.env.HOME;
+const realUserProfile = process.env.USERPROFILE;
 
 beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "loom-obs-cfg-"));
   fs.mkdirSync(path.join(tmpHome, ".loom"), { recursive: true });
   process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome;
   delete process.env.ORBIT_OBSERVATIONS;
   delete process.env.LOOM_OBSERVATIONS;
   vi.resetModules();
 });
 
 afterEach(() => {
-  process.env.HOME = realHome;
+  if (realHome === undefined) delete process.env.HOME;
+  else process.env.HOME = realHome;
+  if (realUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = realUserProfile;
   delete process.env.ORBIT_OBSERVATIONS;
   delete process.env.LOOM_OBSERVATIONS;
   fs.rmSync(tmpHome, { recursive: true, force: true });

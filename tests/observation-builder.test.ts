@@ -241,12 +241,17 @@ describe("currentGalaxyUrl", () => {
   // against an empty temp HOME rather than whatever the developer has.
   let emptyHome: string;
   const realHome = process.env.HOME;
+  const realUserProfile = process.env.USERPROFILE;
   beforeEach(() => {
     emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), "loom-obs-nohome-"));
     process.env.HOME = emptyHome;
+    process.env.USERPROFILE = emptyHome;
   });
   afterEach(() => {
-    process.env.HOME = realHome;
+    if (realHome === undefined) delete process.env.HOME;
+    else process.env.HOME = realHome;
+    if (realUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = realUserProfile;
     fs.rmSync(emptyHome, { recursive: true, force: true });
   });
 
@@ -272,6 +277,7 @@ describe("currentGalaxyUrl", () => {
       "utf-8",
     );
     process.env.HOME = tmpHome;
+    process.env.USERPROFILE = tmpHome;
     try {
       vi.resetModules();
       const m = await import("../extensions/loom/observations.js");
@@ -281,6 +287,7 @@ describe("currentGalaxyUrl", () => {
       );
     } finally {
       process.env.HOME = emptyHome;
+      process.env.USERPROFILE = emptyHome;
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
   });

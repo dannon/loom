@@ -161,13 +161,18 @@ describe("deliverObservation", () => {
   // the state dir, so every case runs against a throwaway HOME.
   let tmpHome: string;
   const realHome = process.env.HOME;
+  const realUserProfile = process.env.USERPROFILE;
   beforeEach(() => {
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "loom-obs-trig-"));
     fs.mkdirSync(path.join(tmpHome, ".loom"), { recursive: true });
     process.env.HOME = tmpHome;
+    process.env.USERPROFILE = tmpHome;
   });
   afterEach(() => {
-    process.env.HOME = realHome;
+    if (realHome === undefined) delete process.env.HOME;
+    else process.env.HOME = realHome;
+    if (realUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = realUserProfile;
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
@@ -539,6 +544,7 @@ describe("deliverObservation", () => {
 describe("registerObservationTriggers", () => {
   let tmpHome: string;
   const realHome = process.env.HOME;
+  const realUserProfile = process.env.USERPROFILE;
   beforeEach(() => {
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "loom-obs-reg-"));
     fs.mkdirSync(path.join(tmpHome, ".loom"), { recursive: true });
@@ -547,11 +553,15 @@ describe("registerObservationTriggers", () => {
       JSON.stringify({ observations: { mode: "ask" } }),
     );
     process.env.HOME = tmpHome;
+    process.env.USERPROFILE = tmpHome;
     delete process.env.ORBIT_OBSERVATIONS;
     delete process.env.LOOM_OBSERVATIONS;
   });
   afterEach(() => {
-    process.env.HOME = realHome;
+    if (realHome === undefined) delete process.env.HOME;
+    else process.env.HOME = realHome;
+    if (realUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = realUserProfile;
     vi.unstubAllGlobals();
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });

@@ -6,6 +6,7 @@ import type { Observation } from "../shared/observation-contract.js";
 
 let tmpHome: string;
 const realHome = process.env.HOME;
+const realUserProfile = process.env.USERPROFILE;
 
 const obs: Observation = {
   schemaVersion: 1,
@@ -29,6 +30,7 @@ beforeEach(() => {
   fs.mkdirSync(path.join(tmpHome, ".loom"), { recursive: true });
   fs.writeFileSync(path.join(tmpHome, ".loom", "config.json"), "{}", "utf-8");
   process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome;
   delete process.env.ORBIT_OBSERVATIONS_URL;
   delete process.env.LOOM_OBSERVATIONS_URL;
   delete process.env.ORBIT_FEEDBACK_KEY;
@@ -38,7 +40,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.env.HOME = realHome;
+  if (realHome === undefined) delete process.env.HOME;
+  else process.env.HOME = realHome;
+  if (realUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = realUserProfile;
   delete process.env.ORBIT_FEEDBACK_KEY;
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
@@ -286,7 +291,10 @@ describe("local logs", () => {
     m.appendToObservationOutbox(obs);
     m.appendSentLog(m.sentLogEntryFor(obs, "sent"));
     for (const name of ["observations-outbox.jsonl", "observations-sent.jsonl"]) {
-      expect(fs.statSync(path.join(tmpHome, ".loom", name)).mode & 0o777, name).toBe(0o600);
+      // chmod is a no-op on Windows, so the mode there is whatever the runner reports.
+      if (process.platform !== "win32") {
+        expect(fs.statSync(path.join(tmpHome, ".loom", name)).mode & 0o777, name).toBe(0o600);
+      }
     }
   });
 
@@ -355,7 +363,7 @@ describe("retract-token store", () => {
     m.saveRetractToken(obs.id, "b".repeat(32));
     expect(m.readRetractToken(obs.id)).toBe("b".repeat(32));
     const store = path.join(tmpHome, ".loom", "observations-tokens.json");
-    expect(fs.statSync(store).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(fs.statSync(store).mode & 0o777).toBe(0o600);
     m.forgetRetractToken(obs.id);
     expect(m.readRetractToken(obs.id)).toBeUndefined();
   });
@@ -391,7 +399,7 @@ describe("drainObservationOutbox", () => {
     expect(m.readSentLog().at(-1)?.status).toBe("sent");
     expect(m.readRetractToken(obs.id)).toBe("c".repeat(32));
     const file = path.join(tmpHome, ".loom", "observations-outbox.jsonl");
-    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(fs.statSync(file).mode & 0o777).toBe(0o600);
   });
 
   it("keeps a row that is still queueable and drops one refused for good", async () => {
