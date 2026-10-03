@@ -97,6 +97,14 @@ describe("classifyGalaxyDestructive -- code mode run_galaxy_tool({code}) (#338 F
     ).toMatchObject({ kind: "history-delete" });
   });
 
+  it("flags a script that calls the tool by pi's prefixed name", () => {
+    expect(
+      classifyGalaxyDestructive("mcp__galaxy__run_galaxy_tool", {
+        code: "call_tool('mcp__galaxy__update_history', {'deleted': True})",
+      }),
+    ).toMatchObject({ kind: "history-delete" });
+  });
+
   it("does NOT flag a non-destructive code script", () => {
     expect(
       classifyGalaxyDestructive("galaxy_run_galaxy_tool", {

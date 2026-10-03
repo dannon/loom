@@ -244,7 +244,7 @@ function classifyCode(code) {
   const s = String(code == null ? "" : code);
   // Tolerate the tool name appearing as a positional or kwarg, with or without the
   // galaxy_ prefix: call_tool('update_history', ...) / call_tool(name="mcp__galaxy__update_history", ...).
-  if (!/call_tool\([^)]*["'](?:galaxy_)?update_history["']/.test(s)) return null;
+  if (!/call_tool\([^)]*["'](?:galaxy_|mcp__galaxy__)?update_history["']/.test(s)) return null;
   const purge = hasPurge(s);
   if (!purge && !/["']?deleted["']?\s*[:=]\s*["']?true\b/i.test(s)) return null;
   /** @type {GalaxyDestructiveOp} */
