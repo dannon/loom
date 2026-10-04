@@ -3,8 +3,8 @@
 import asyncio
 import json
 
-from olit.drivers.loop import invocation_outcome
-from olit.drivers.loop.tools import ToolSurface
+from olit.loop import invocation_outcome
+from olit.loop.tools import ToolSurface
 
 from .fakes import FakeSubstrate
 
@@ -100,7 +100,8 @@ class InvocationGalaxy:
 
 def _dispatch(galaxy, args):
     substrate = FakeSubstrate(galaxy=galaxy, capabilities=("llm", "local", "read"))
-    return json.loads(asyncio.run(ToolSurface(substrate).dispatch("get_invocations", args)).text)
+    answer = json.loads(asyncio.run(ToolSurface(substrate).dispatch("get_invocations", args)).text)
+    return answer["data"]
 
 
 def test_one_invocation_is_rolled_up():

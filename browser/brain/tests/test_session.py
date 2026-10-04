@@ -4,8 +4,8 @@ import asyncio
 
 from olit import config as config_module
 from olit import runtime
-from olit.drivers.loop.agent import LoopDriver
-from olit.registry import ProcessRegistry
+from olit.loop.agent import LoopDriver
+from olit.processes import ProcessRegistry
 from olit.substrate import Confirmation
 from olit.substrate.llm import Reply
 
@@ -38,13 +38,12 @@ def _processes():
     return registry
 
 
-def test_the_session_is_built_once_and_rebuilt_only_for_a_different_config(monkeypatch):
+def test_the_session_is_built_once_and_reused(monkeypatch):
+    """Which changes rebuild it and which are rebound is `test_session_identity.py`."""
     monkeypatch.setattr(runtime, "_session", None)
     first = asyncio.run(runtime._session_for(config_module.parse({})))
     again = asyncio.run(runtime._session_for(config_module.parse({})))
-    other = asyncio.run(runtime._session_for(config_module.parse({"dataset_id": "d1"})))
     assert again is first
-    assert other is not first
 
 
 def test_a_turns_artifacts_do_not_leak_into_the_next():

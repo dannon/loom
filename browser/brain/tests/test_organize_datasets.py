@@ -2,9 +2,7 @@
 
 import asyncio
 
-from olit.registry import ProcessRegistry, load_primitives
-
-load_primitives()
+from olit.processes import ProcessRegistry
 
 SRA = [
     {"id": f"ds{i}", "name": f"SRR100{n}_{m}.fastq.gz", "history_content_type": "dataset"}
@@ -12,6 +10,16 @@ SRA = [
 ]
 # Files as they arrive from an unzipped archive: no mate markers.
 ZIPPED = [{"id": f"z{i}", "name": f"run_{i}.txt", "history_content_type": "dataset"} for i in range(3, 7)]
+
+
+# What a history item is when it says nothing: shown, and not deleted.
+ITEM_DEFAULTS = {"visible": True, "deleted": False}
+
+
+def _filtered(contents, asked):
+    """Galaxy's q/qv filtering, as the contents endpoint applies it."""
+    wanted = dict(zip(asked.get("q") or [], asked.get("qv") or []))
+    return [d for d in contents if all(str(d.get(f, ITEM_DEFAULTS.get(f))) == v for f, v in wanted.items())]
 
 
 class FakeCatalog:
@@ -24,7 +32,7 @@ class FakeCatalog:
     async def call(self, target, input=None):
         self.calls.append((target, input or {}))
         if target.endswith("contents.get"):
-            return {"ok": True, "result": self.contents}
+            return {"ok": True, "result": _filtered(self.contents, input or {})}
         if target == "galaxy.dataset_collections.post":
             return {"ok": True, "result": {"id": "hdca1", "name": (input or {}).get("name")}}
         if target == "galaxy.histories.show.contents.bulk.put":
@@ -127,7 +135,7 @@ def test_a_caller_who_names_neither_structure_nor_collection_still_gets_pairs():
 
 def test_a_call_without_a_history_is_refused_before_galaxy_is_touched():
     """The guard is the generated schema, checked in dispatch, whichever kind the process is."""
-    from olit.drivers.loop.tools import ToolSurface
+    from olit.loop.tools import ToolSurface
 
     substrate = FakeSubstrate(SRA)
     surface = ToolSurface(substrate, ProcessRegistry().load_packaged())
@@ -218,7 +226,7 @@ def test_an_uncompressed_datatype_is_refused_for_gzipped_reads():
     An agent planning this work wrote `fastqsanger` three times and hedged with
     "or fastq depending on the server's default". Nothing checked the argument.
     """
-    from olit.registry.python.organize_datasets import summarize_state
+    from olit.processes.organize_datasets import summarize_state
 
     catalog, result = _run(SRA, datatype="fastqsanger")
     summary = summarize_state(result["state"])
@@ -243,9 +251,42 @@ def test_an_uncompressed_datatype_is_fine_for_uncompressed_files():
 
 def test_galaxys_own_detected_extension_counts_as_compressed():
     """The name may not end in .gz when Galaxy already typed it that way."""
-    from olit.registry.python.organize_datasets import compression_lost
+    from olit.processes.organize_datasets import compression_lost
 
     detected = [{"id": "d1", "name": "reads_1", "extension": "fastqsanger.gz"}]
     assert compression_lost("fastqsanger", detected) == ["reads_1"]
     assert compression_lost("fastqsanger.gz", detected) == []
     assert compression_lost(None, detected) == []
+
+
+# A history that already holds a collection: Galaxy keeps a hidden copy per element, under the
+# same name as the dataset it was built from.
+WITH_HIDDEN = [
+    {"id": "v1", "name": "contigs_A.fasta.gz", "history_content_type": "dataset"},
+    {"id": "v2", "name": "contigs_B.fasta.gz", "history_content_type": "dataset"},
+    {"id": "h1", "name": "contigs_A.fasta.gz", "history_content_type": "dataset", "visible": False},
+    {"id": "h2", "name": "contigs_B.fasta.gz", "history_content_type": "dataset", "visible": False},
+    {"id": "d1", "name": "contigs_C.fasta.gz", "history_content_type": "dataset", "deleted": True},
+]
+
+
+def test_a_hidden_copy_is_not_collected_beside_the_dataset_it_copies():
+    """Duplicate element identifiers are refused by Galaxy, so the collection is never built."""
+    catalog, _ = _run(WITH_HIDDEN, structure="list")
+    body = catalog.input_for("dataset_collections.post")
+
+    assert [e["id"] for e in body["element_identifiers"]] == ["v1", "v2"]
+
+
+def test_a_deleted_dataset_is_left_out():
+    catalog, _ = _run(WITH_HIDDEN, structure="list")
+    body = catalog.input_for("dataset_collections.post")
+
+    assert "d1" not in [e["id"] for e in body["element_identifiers"]]
+
+
+def test_a_retype_touches_only_what_the_user_can_see():
+    catalog, _ = _run(WITH_HIDDEN, structure="list", datatype="fasta.gz")
+    body = catalog.input_for("contents.bulk.put")
+
+    assert [i["id"] for i in body["items"]] == ["v1", "v2"]

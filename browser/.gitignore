@@ -2,7 +2,6 @@ node_modules
 .cache
 .DS_Store
 lerna-debug.log
-**/package-lock.json
 
 # Python
 __pycache__/
@@ -20,7 +19,7 @@ temp/
 # Vendored skills corpus: a build artifact fetched by skills.install.js. The exact
 # revision is pinned in the committed skills.lock.json, so builds stay reproducible
 # without carrying 860 KB of third-party content in this repo.
-brain/olit/registry/skills/galaxy-skills/
+brain/olit/skills/galaxy-skills/
 
 # Eval output
 evals/*.json

@@ -56,6 +56,11 @@ self.onmessage = async (e) => {
         );
         console.log(`Loaded ${whl}`);
       }
+      // Imported rather than bundled: this worker is served as a file, not built by vite.
+      for (const module of [payload.opsModule, payload.chartsModule].filter(Boolean)) {
+        const peer = await import(`${payload.indexURL}/${module}`);
+        peer.install(payload.galaxy || {});
+      }
       self.postMessage({ type: "ready" });
     } catch (err) {
       self.postMessage({ type: "error", error: String(err) });

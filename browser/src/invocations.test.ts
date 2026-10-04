@@ -8,11 +8,14 @@ import {
   galaxyStateReader,
   isFailure,
   isTerminal,
+  outcomeOf,
   settleInvocation,
   type Watched,
 } from "./invocations";
 
-const runToolResult = (jobs: unknown[]) => JSON.stringify({ jobs, outputs: [{ id: "ds1" }] });
+/** A Galaxy tool result as the brain renders one; the boundary test holds this shape to it. */
+const galaxyResult = (payload: unknown) => JSON.stringify({ data: payload });
+const runToolResult = (jobs: unknown[]) => galaxyResult({ jobs, outputs: [{ id: "ds1" }] });
 
 describe("extractWatched", () => {
   it("takes queued job ids out of a run_tool result", () => {
@@ -21,8 +24,14 @@ describe("extractWatched", () => {
     expect(out).toEqual([{ kind: "job", id: "job1", label: "run_tool", state: "new" }]);
   });
 
+  it("takes queued job ids out of a run_user_tool result", () => {
+    const out = extractWatched("run_user_tool", runToolResult([{ id: "job2", state: "queued" }]));
+
+    expect(out).toEqual([{ kind: "job", id: "job2", label: "run_user_tool", state: "queued" }]);
+  });
+
   it("takes the invocation id out of an invoke_workflow result", () => {
-    const out = extractWatched("invoke_workflow", JSON.stringify({ id: "inv1", state: "new" }));
+    const out = extractWatched("invoke_workflow", galaxyResult({ id: "inv1", state: "new" }));
 
     expect(out).toEqual([
       { kind: "invocation", id: "inv1", label: "invoke_workflow", state: "new" },
@@ -90,7 +99,14 @@ describe("terminal states", () => {
   it("separates failure from completion so the user is told which", () => {
     expect(isFailure("job", "error")).toBe(true);
     expect(isFailure("job", "ok")).toBe(false);
-    expect(isFailure("invocation", "cancelled")).toBe(true);
+    expect(isFailure("invocation", "failed")).toBe(true);
+  });
+
+  it("answers cancelled as itself, because a stop the user asked for is not a failure", () => {
+    expect(outcomeOf("invocation", "cancelled")).toBe("cancelled");
+    expect(outcomeOf("invocation", "failed")).toBe("failed");
+    expect(outcomeOf("invocation", "completed")).toBe("completed");
+    expect(isFailure("invocation", "cancelled")).toBe(false);
   });
 });
 
@@ -129,6 +145,26 @@ describe("InvocationWatcher", () => {
 
     expect(settled).toHaveLength(1);
     expect(watcher.pending).toBe(0);
+    watcher.stop();
+  });
+
+  it("names what it is still watching, so a turn need not read it to learn it is running", () => {
+    const { watcher } = make(["running"]);
+    watcher.ingest("run_tool", runToolResult([{ id: "job1", state: "new" }]));
+
+    expect(watcher.watched()).toEqual([
+      { kind: "job", id: "job1", state: "new", label: "run_tool" },
+    ]);
+    watcher.stop();
+  });
+
+  it("names nothing once an item settles, because settlement is its own to report", async () => {
+    const { watcher } = make(["ok"]);
+    watcher.ingest("run_tool", runToolResult([{ id: "job1", state: "new" }]));
+
+    await watcher.tick();
+
+    expect(watcher.watched()).toEqual([]);
     watcher.stop();
   });
 

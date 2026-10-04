@@ -3,7 +3,9 @@
 import copy
 
 from .catalog import Catalog
+from .galaxy_charts import GalaxyCharts
 from .galaxy_http import GalaxyHttp
+from .galaxy_ops import GalaxyOps
 from .llm import Llm
 from .local import LocalPython
 from .manifest import CapabilityManifest
@@ -16,12 +18,19 @@ class Substrate:
         self.local = LocalPython(self.manifest)
         self.llm = Llm(config, self.manifest)
         self.galaxy = GalaxyHttp(config, self.manifest)
+        self.ops = GalaxyOps(config, self.manifest)
+        self.charts = GalaxyCharts(config, self.manifest)
         self.catalog = Catalog(config, self.manifest)
 
     async def init(self):
-        await self.catalog.init()
+        await self.galaxy.probe()
         await self.llm.init()
         return self
+
+    async def close(self):
+        """Release what the session holds outside the process; safe to call more than once."""
+        await self.ops.close()
+        await self.charts.close()
 
     def scoped(self, capabilities):
         """A narrower view: the intersection of this manifest with `capabilities`."""
@@ -30,5 +39,7 @@ class Substrate:
         view.local = self.local.scoped(view.manifest)
         view.llm = self.llm.scoped(view.manifest)
         view.galaxy = self.galaxy.scoped(view.manifest)
+        view.ops = self.ops.scoped(view.manifest)
+        view.charts = self.charts.scoped(view.manifest)
         view.catalog = self.catalog.scoped(view.manifest)
         return view

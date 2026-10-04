@@ -1,6 +1,6 @@
 """A plugin's config template: the shape to fill, as a Galaxy tool already gets one."""
 
-from olit.drivers.loop.visualization_inputs import build_visualization_template, template_cases
+from olit.loop.visualization_inputs import build_visualization_template
 
 TYPES = {
     "text": {"stores": {"type": "string"}},
@@ -64,10 +64,20 @@ def test_a_conditional_nests_its_case_rather_than_flattening_it():
     assert "source.origin" not in settings and "origin" not in settings
 
 
-def test_the_other_cases_are_named_so_the_first_is_not_the_only_one_seen():
-    assert template_cases(IGV) == {"source": ["builtin", "igv"]}
-    assert template_cases(PLOTLY) == {}
-
-
 def test_a_plugin_with_no_tracks_gets_no_tracks_key():
     assert "tracks" not in build_visualization_template({"settings": []}, TYPES)
+
+
+def test_the_declared_test_value_selects_the_case():
+    """galaxy-charts `formatConditional` reads `test_param.value`; case order is not a default."""
+    plugin = {"settings": [dict(IGV["settings"][1], test_param={"name": "origin", "value": "igv"})]}
+    source = build_visualization_template(plugin, TYPES)["settings"]["source"]
+
+    assert source["origin"] == "igv"
+    assert source["genome"] == {"<from get_visualization_options>": True}
+
+
+def test_case_order_decides_only_when_nothing_is_declared():
+    source = build_visualization_template(IGV, TYPES)["settings"]["source"]
+
+    assert source["origin"] == "builtin"

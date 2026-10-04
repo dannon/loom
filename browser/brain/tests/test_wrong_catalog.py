@@ -1,15 +1,15 @@
 """Searching the Galaxy tool catalog for something that was never in it.
 
-A run asked for a plotly chart and searched for 'vintent', 'vintent_dataset', 'plotly'
+A run asked for a plotly chart and searched for 'organize', 'organize_datasets', 'plotly'
 and 'visualization' in turn. Each search was answered once, so no repeat guard fired;
 the catalog simply does not hold Olit tools or visualizations, and never said so.
 """
 
 import asyncio
 
-from olit.drivers.loop.galaxy_tools import _search_tools_by_name
-from olit.drivers.loop.tools import ToolSurface
-from olit.registry import ProcessRegistry
+from olit.loop.galaxy_tools import catalog_miss_hint
+from olit.loop.tools import ToolSurface
+from olit.processes import ProcessRegistry
 
 
 class _Manifest:
@@ -42,34 +42,35 @@ def _surface():
     return ToolSurface(_Substrate(), ProcessRegistry().load_packaged())
 
 
-def _search(query, tools=None, plugins=None):
+def _hint(query, tools=None, plugins=None, name="search_tools_by_name"):
+    """The hint a catalog search earns, whoever ran the search itself."""
     g = _Galaxy(tools, plugins)
-    return asyncio.run(_search_tools_by_name(g, {"query": query})), g
+    return asyncio.run(catalog_miss_hint(g, name, {"query": query}, tools or [])), g
 
 
 def test_searching_for_an_olit_tool_says_where_it_lives_without_directing_a_call():
-    """The directive form sent one run to vintent when the user had asked for plotly.
+    """The directive form sent one run to an Olit process when the user had asked for plotly.
 
     A search is the model orienting itself, so naming the tool is the answer; telling it to
     call the tool overrides whatever visualization the request actually named.
     """
-    outcome = asyncio.run(_surface().dispatch("search_tools_by_name", {"query": "vintent_dataset"}))
+    outcome = asyncio.run(_surface().dispatch("search_tools_by_name", {"query": "organize_datasets"}))
     assert outcome.is_error
     assert "is an Olit tool" in outcome.text
-    assert "Call vintent_dataset directly" not in outcome.text
+    assert "Call organize_datasets directly" not in outcome.text
 
 
 def test_asking_to_run_an_olit_tool_by_id_still_names_the_route():
     """A tool_id is the model trying to run that exact tool, so the directive belongs there."""
-    outcome = asyncio.run(_surface().dispatch("get_tool_details", {"tool_id": "vintent_dataset"}))
+    outcome = asyncio.run(_surface().dispatch("get_tool_details", {"tool_id": "organize_datasets"}))
     assert outcome.is_error
-    assert "Call vintent_dataset directly" in outcome.text
+    assert "Call organize_datasets directly" in outcome.text
 
 
 def test_a_partial_name_still_reaches_the_olit_tool():
-    """The run searched 'vintent' before it searched 'vintent_dataset'."""
-    outcome = asyncio.run(_surface().dispatch("search_tools_by_name", {"query": "vintent"}))
-    assert outcome.is_error and "vintent_dataset" in outcome.text
+    """The run searched 'organize' before it searched 'organize_datasets'."""
+    outcome = asyncio.run(_surface().dispatch("search_tools_by_name", {"query": "organize"}))
+    assert outcome.is_error and "organize_datasets" in outcome.text
     assert "directly" not in outcome.text
 
 
@@ -85,26 +86,32 @@ def test_an_ordinary_tool_search_is_untouched():
 
 
 def test_a_visualization_name_is_answered_with_where_it_lives():
-    result, _ = _search("plotly", tools=[], plugins=[{"name": "plotly"}, {"name": "igv"}])
-    assert result["tools"] == []
-    assert "'plotly' is a visualization" in result["hint"]
-    assert "list_visualizations" in result["hint"]
+    hint, _ = _hint("plotly", tools=[], plugins=[{"name": "plotly"}, {"name": "igv"}])
+    assert "'plotly' is a visualization" in hint
+    assert "list_visualizations" in hint
 
 
 def test_neither_this_agent_nor_the_frozen_plugin_is_named_back():
-    result, _ = _search("olit", tools=[], plugins=[{"name": "olit"}])
-    assert "visualization" not in result["hint"]
+    hint, _ = _hint("olit", tools=[], plugins=[{"name": "olit"}])
+    assert hint is None
 
 
 def test_a_search_that_matches_a_real_tool_never_asks_about_plugins():
-    result, g = _search("bowtie2", tools=[{"id": "bowtie2"}], plugins=[{"name": "plotly"}])
-    assert result == [{"id": "bowtie2"}]
+    hint, g = _hint("bowtie2", tools=[{"id": "bowtie2"}], plugins=[{"name": "plotly"}])
+    assert hint is None
     assert not any(p.startswith("api/plugins") for p in g.asked)
 
 
-def test_an_empty_search_that_names_nothing_keeps_the_exhausted_answer():
-    result, _ = _search("nonesuch", tools=[], plugins=[{"name": "plotly"}])
-    assert "No installed Galaxy tool matches this text" in result["hint"]
+def test_a_keyword_search_is_read_the_same_way():
+    g = _Galaxy(tools=[], plugins=[{"name": "plotly"}])
+    hint = asyncio.run(catalog_miss_hint(g, "search_tools_by_keywords", {"keywords": ["plotly"]}, []))
+    assert "'plotly' is a visualization" in hint
+
+
+def test_a_tool_that_is_not_a_catalog_search_earns_no_hint():
+    g = _Galaxy(tools=[], plugins=[{"name": "plotly"}])
+    assert asyncio.run(catalog_miss_hint(g, "get_histories", {"query": "plotly"}, [])) is None
+    assert not g.asked
 
 
 def test_a_settled_lookup_is_refused_on_the_third_asking():
@@ -173,7 +180,7 @@ def test_an_unknown_tool_is_named_without_its_control_token():
 
 
 def test_a_body_keeps_its_words_while_losing_the_token():
-    from olit.drivers.loop.tools import without_control_tokens
+    from olit.loop.tools import without_control_tokens
 
     assert without_control_tokens("before<|channel|>final<|message|>after") == "beforefinalafter"
     assert without_control_tokens("nothing to strip") == "nothing to strip"
@@ -182,9 +189,25 @@ def test_a_body_keeps_its_words_while_losing_the_token():
 
 def test_the_tool_message_carries_neither_a_contaminated_name_nor_body():
     """The name field poisons the transcript as surely as the content does."""
-    from olit.drivers.loop.tools import plain_tool_name, without_control_tokens
+    from olit.loop.tools import plain_tool_name, without_control_tokens
 
     name, body = "get_page<|channel|>commentary", "Unknown tool: get_page<|channel|>commentary"
     message = {"role": "tool", "name": plain_tool_name(name), "content": without_control_tokens(body)}
     assert "<|" not in message["name"] and "<|" not in message["content"]
     assert message["name"] == "get_page"
+
+
+def test_a_tool_that_is_not_a_process_is_also_named_as_olit_s():
+    """vega-layered-spec searched the catalog for 'vega' ten times and never called the tool.
+
+    The redirect used to read the process registry, which vega_dataset is not in.
+    """
+    outcome = asyncio.run(_surface().dispatch("search_tools_by_name", {"query": "vega"}))
+    assert outcome.is_error and "vega_dataset" in outcome.text
+    assert "already in your tool list" in outcome.text
+
+
+def test_a_galaxy_tool_name_still_reaches_galaxy():
+    """`upload` prefixes an Olit tool name, and Galaxy's own uploader is what was asked for."""
+    outcome = asyncio.run(_surface().dispatch("search_tools_by_name", {"query": "upload"}))
+    assert "Olit tool" not in outcome.text

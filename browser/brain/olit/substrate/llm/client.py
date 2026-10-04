@@ -38,7 +38,7 @@ class Llm:
         # The rate comes from the endpoint; one bucket per session, shared by scoped views.
         self._limiter = TokenBucketRateLimiter.from_requests_per_minute(self.target.rate_limit)
         logger.info(
-            "llm target: provider=%s model=%s window=%d max_tokens=%d",
+            "llm target: provider=%s model=%s window=%s max_tokens=%s",
             self.target.provider.id,
             self.target.model.id,
             self.target.context_window,
@@ -61,22 +61,14 @@ class Llm:
         view.manifest = manifest
         return view
 
-    async def complete(
-        self,
-        messages,
-        tools=None,
-        tool_choice=None,
-        parallel_tools=True,
-        cancellation=None,
-        on_retry=None,
-    ):
+    async def complete(self, messages, tools=None, cancellation=None, on_retry=None):
         self.manifest.require("llm")
         oversized = self.adapter.oversized_tools(self.target, tools)
         if oversized:
             # This endpoint rejects the whole request, not the offending tool.
             names = ", ".join(f"{name} ({size} bytes)" for name, size in oversized)
             raise ValueError(f"Tool schema too large for {self.target.provider.name}: {names}")
-        body = self.adapter.build_request(self.target, messages, tools, tool_choice, parallel_tools)
+        body = self.adapter.build_request(self.target, messages, tools)
         for attempt in range(EMPTY_REPLY_ATTEMPTS):
             await self._limiter.acquire()
             payload = await http.request(

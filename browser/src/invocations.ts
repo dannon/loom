@@ -1,4 +1,5 @@
 /** Background watcher for submitted Galaxy work; the analogue of loom's galaxy-poller. */
+import { galaxyObject } from "./tool-result";
 
 export type WatchKind = "job" | "invocation" | "dataset";
 
@@ -27,29 +28,36 @@ export function isTerminal(kind: WatchKind, state: string | undefined): boolean 
   return INVOCATION_TERMINAL.has(state);
 }
 
+/**
+ * What a settled state amounts to. Cancelling is its own answer, as it is in
+ * `brain/olit/drivers/loop/invocation_outcome.py`: a run the user stopped did not fail, and
+ * it did not do what was asked either, so neither word describes it.
+ */
+export type Outcome = "completed" | "failed" | "cancelled";
+
+export function outcomeOf(kind: WatchKind, state: string | undefined): Outcome {
+  if (kind === "invocation" && state === "cancelled") return "cancelled";
+  return isFailure(kind, state) ? "failed" : "completed";
+}
+
 export function isFailure(kind: WatchKind, state: string | undefined): boolean {
   if (!state) return false;
   if (kind === "job") return state === "error";
   if (kind === "dataset") return DATASET_FAILED.has(state);
-  return state === "failed" || state === "cancelled";
+  return state === "failed";
 }
 
 /** Ids worth watching in a tool result, or none; an unknown shape yields nothing. */
 export function extractWatched(toolName: string, content: string): Watched[] {
-  let payload: any;
-  try {
-    payload = JSON.parse(content);
-  } catch {
-    return [];
-  }
-  if (!payload || typeof payload !== "object") return [];
+  const payload = galaxyObject(content);
+  if (!payload) return [];
 
   const out: Watched[] = [];
-  if (toolName === "run_tool") {
-    // POST /api/tools answers with the jobs it queued.
+  if (toolName === "run_tool" || toolName === "run_user_tool") {
+    // POST /api/tools answers with the jobs it queued, for a user-defined tool too.
     for (const job of payload.jobs || []) {
       if (job && typeof job.id === "string") {
-        out.push({ kind: "job", id: job.id, label: "run_tool", state: job.state });
+        out.push({ kind: "job", id: job.id, label: toolName, state: job.state });
       }
     }
   } else if (toolName === "upload_file_from_url" || toolName === "upload_file") {
@@ -109,6 +117,11 @@ export class InvocationWatcher {
 
   get pending(): number {
     return this.watching.size;
+  }
+
+  /** What is still unfinished, for a turn that would otherwise read it again itself. */
+  watched(): Array<Watched> {
+    return [...this.watching.values()].map((w) => ({ ...w }));
   }
 
   /** One poll pass. Exposed so a test can step the loop without a timer. */
