@@ -7,6 +7,8 @@
 
 import {
   createGalaxyContext,
+  GalaxyConnectionError,
+  GalaxyError,
   getInvocations,
   type GalaxyContext,
   type InvocationDetail,
@@ -284,16 +286,25 @@ export async function galaxyGetMostRecentHistory(
  * The fetch galaxy-ops gets, so its requests keep the redirect guard every
  * other Galaxy call here has: openapi-fetch hands over a Request carrying
  * `x-api-key`, and Node would forward that header across origins on a 3xx.
+ *
+ * It also carries the caller's abort signal. galaxy-ops' ops don't all pass
+ * the context's signal to their requests (getInvocations doesn't, as of
+ * 0.3.1), so without this a cancelled check would keep its request running.
+ * Combined with the request's own signal, which galaxy-ops uses for timeouts.
  */
-const galaxyOpsFetch: typeof fetch = async (input, init) => {
-  const req = new Request(input, init);
-  const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
-  return fetchSameOriginOnly(
-    req.url,
-    { method: req.method, headers: req.headers, body, signal: req.signal },
-    GALAXY_REDIRECT_LABELS,
-  );
-};
+function galaxyOpsFetch(callerSignal?: AbortSignal): typeof fetch {
+  return async (input, init) => {
+    const req = new Request(input, init);
+    const body =
+      req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
+    const signal = callerSignal ? AbortSignal.any([req.signal, callerSignal]) : req.signal;
+    return fetchSameOriginOnly(
+      req.url,
+      { method: req.method, headers: req.headers, body, signal },
+      GALAXY_REDIRECT_LABELS,
+    );
+  };
+}
 
 /** A galaxy-ops context on the configured server, or null without credentials. */
 export function galaxyOpsContext(signal?: AbortSignal): GalaxyContext | null {
@@ -303,8 +314,25 @@ export function galaxyOpsContext(signal?: AbortSignal): GalaxyContext | null {
     baseUrl: config.url,
     apiKey: config.apiKey,
     signal,
-    fetchImpl: galaxyOpsFetch,
+    fetchImpl: galaxyOpsFetch(signal),
   });
+}
+
+/**
+ * A galaxy-ops failure, as the rest of the brain has always seen one. An HTTP
+ * failure becomes the GalaxyApiError galaxyGet throws -- same status, same
+ * message, built from the same raw body -- and a request that never got a
+ * reply (a refused redirect, an abort, a dead network) rethrows what fetch
+ * threw, which galaxy-ops had wrapped.
+ */
+function asLoomFailure(err: unknown): unknown {
+  if (!(err instanceof GalaxyError)) return err;
+  const http = err.http;
+  if (http && http.status !== null) {
+    return new GalaxyApiError(http.status, http.bodyText, http.reason ?? "");
+  }
+  if (err instanceof GalaxyConnectionError && err.cause !== undefined) return err.cause;
+  return err;
 }
 
 /**
@@ -318,7 +346,12 @@ export async function galaxyGetInvocation(
 ): Promise<InvocationDetail> {
   const ctx = galaxyOpsContext(signal);
   if (!ctx) throw new Error("Galaxy credentials not configured (GALAXY_URL, GALAXY_API_KEY)");
-  const result = await getInvocations({ invocationId, stepDetails: true }, ctx);
+  let result;
+  try {
+    result = await getInvocations({ invocationId, stepDetails: true }, ctx);
+  } catch (err) {
+    throw asLoomFailure(err);
+  }
   if (Array.isArray(result)) {
     throw new Error(`Galaxy answered a listing for invocation ${invocationId}`);
   }

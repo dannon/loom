@@ -80,3 +80,46 @@ describe("galaxy-ops requests keep the redirect guard", () => {
     expect(seen.every((s) => s.key === "secret-key")).toBe(true);
   });
 });
+
+// galaxy-ops 0.3.1's getInvocations doesn't pass the context's signal to its
+// request, so the caller's signal has to ride in on the fetch itself.
+describe("galaxy-ops requests honour the caller's abort signal", () => {
+  beforeEach(() => {
+    process.env.GALAXY_URL = "https://galaxy.example";
+    process.env.GALAXY_API_KEY = "secret-key";
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete process.env.GALAXY_URL;
+    delete process.env.GALAXY_API_KEY;
+  });
+
+  function hangUntilAborted() {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_input, init) =>
+        new Promise((_resolve, reject) => {
+          const signal = init?.signal;
+          if (signal?.aborted) return reject(signal.reason);
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    );
+  }
+
+  it("does not send a request on an already-aborted signal", async () => {
+    hangUntilAborted();
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled before"));
+    await expect(galaxyGetInvocation("inv-1", controller.signal)).rejects.toThrow(
+      /cancelled before/,
+    );
+  });
+
+  it("aborts a request in flight", async () => {
+    hangUntilAborted();
+    const controller = new AbortController();
+    const pending = galaxyGetInvocation("inv-1", controller.signal);
+    setTimeout(() => controller.abort(new Error("cancelled during")), 10);
+    await expect(pending).rejects.toThrow(/cancelled during/);
+  });
+});
