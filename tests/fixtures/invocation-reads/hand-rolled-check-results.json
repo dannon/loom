@@ -1,0 +1,382 @@
+[
+  {
+    "name": "every job ok",
+    "state": "scheduled",
+    "steps": [
+      [
+        {
+          "id": "j-ok",
+          "state": "ok",
+          "tool_id": "fastqc"
+        }
+      ],
+      [
+        {
+          "id": "j-ok",
+          "state": "ok",
+          "tool_id": "fastqc"
+        }
+      ]
+    ],
+    "block": {
+      "status": "completed",
+      "summary": "Workflow completed: 2 jobs succeeded"
+    },
+    "result": {
+      "invocationId": "bb01",
+      "notebookAnchor": "plan-a-step-1",
+      "label": "run bb01",
+      "invocationState": "scheduled",
+      "priorStatus": "in_progress",
+      "jobSummary": {
+        "ok": 2,
+        "running": 0,
+        "queued": 0,
+        "error": 0,
+        "other": 0
+      },
+      "otherStates": {},
+      "activeJobs": 0,
+      "newStatus": "completed",
+      "autoAction": "completed"
+    }
+  },
+  {
+    "name": "a job that errored",
+    "state": "scheduled",
+    "steps": [
+      [
+        {
+          "id": "j-ok",
+          "state": "ok",
+          "tool_id": "fastqc"
+        }
+      ],
+      [
+        {
+          "id": "j-error",
+          "state": "error",
+          "tool_id": "fastqc"
+        }
+      ]
+    ],
+    "block": {
+      "status": "failed",
+      "summary": "Workflow failed: 1 job(s) errored, 1 succeeded"
+    },
+    "result": {
+      "invocationId": "bb01",
+      "notebookAnchor": "plan-a-step-1",
+      "label": "run bb01",
+      "invocationState": "scheduled",
+      "priorStatus": "in_progress",
+      "jobSummary": {
+        "ok": 1,
+        "running": 0,
+        "queued": 0,
+        "error": 1,
+        "other": 0
+      },
+      "otherStates": {},
+      "activeJobs": 0,
+      "newStatus": "failed",
+      "autoAction": "failed"
+    }
+  },
+  {
+    "name": "a cancel that finished",
+    "state": "cancelled",
+    "steps": [
+      [
+        {
+          "id": "j-ok",
+          "state": "ok",
+          "tool_id": "fastqc"
+        }
+      ],
+      [
+        {
+          "id": "j-deleted",
+          "state": "deleted",
+          "tool_id": "fastqc"
+        }
+      ]
+    ],
+    "block": {
+      "status": "failed",
+      "summary": "Workflow cancelled: 1 job(s) finished before it stopped, 1 did not"
+    },
+    "result": {
+      "invocationId": "bb01",
+      "notebookAnchor": "plan-a-step-1",
+      "label": "run bb01",
+      "invocationState": "cancelled",
+      "priorStatus": "in_progress",
+      "jobSummary": {
+        "ok": 1,
+        "running": 0,
+        "queued": 0,
+        "error": 1,
+        "other": 0
+      },
+      "otherStates": {},
+      "activeJobs": 0,
+      "newStatus": "failed",
+      "autoAction": "cancelled"
+    }
+  },
+  {
+    "name": "a cancel still stopping",
+    "state": "cancelling",
+    "steps": [
+      [
+        {
+          "id": "j-running",
+          "state": "running",
+          "tool_id": "fastqc"
+        }
+      ]
+    ],
+    "block": {
+      "status": "in_progress",
+      "summary": "Workflow cancelling: 0 job(s) did not finish, 1 still running"
+    },
+    "result": {
+      "invocationId": "bb01",
+      "notebookAnchor": "plan-a-step-1",
+      "label": "run bb01",
+      "invocationState": "cancelling",
+      "priorStatus": "in_progress",
+      "jobSummary": {
+        "ok": 0,
+        "running": 1,
+        "queued": 0,
+        "error": 0,
+        "other": 0
+      },
+      "otherStates": {},
+      "activeJobs": 1,
+      "newStatus": "in_progress",
+      "autoAction": "cancelling"
+    }
+  },
+  {
+    "name": "a job still running",
+    "state": "scheduled",
+    "steps": [
+      [
+        {
+          "id": "j-ok",
+          "state": "ok",
+          "tool_id": "fastqc"
+        }
+      ],
+      [
+        {
+          "id": "j-running",
+          "state": "running",
+          "tool_id": "fastqc"
+        }
+      ]
+    ],
+    "block": {
+      "status": "in_progress",
+      "summary": null
+    },
+    "result": {
+      "invocationId": "bb01",
+      "notebookAnchor": "plan-a-step-1",
+      "label": "run bb01",
+      "invocationState": "scheduled",
+      "priorStatus": "in_progress",
+      "jobSummary": {
+        "ok": 1,
+        "running": 1,
+        "queued": 0,
+        "error": 0,
+        "other": 0
+      },
+      "otherStates": {},
+      "activeJobs": 1
+    }
+  },
+  {
+    "name": "a job still queued",
+    "state": "new",
+    "steps": [
+      [
+        {
+          "id": "j-queued",
+          "state": "queued",
+          "tool_id": "fastqc"
+        }
+      ]
+    ],
+    "block": {
+      "status": "in_progress",
+      "summary": null
+    },
+    "result": {
+      "invocationId": "bb01",
+      "notebookAnchor": "plan-a-step-1",
+      "label": "run bb01",
+      "invocationState": "new",
+      "priorStatus": "in_progress",
+      "jobSummary": {
+        "ok": 0,
+        "running": 0,
+        "queued": 1,
+        "error": 0,
+        "other": 0
+      },
+      "otherStates": {},
+      "activeJobs": 1
+    }
+  },
+  {
+    "name": "a run still scheduling",
+    "state": "ready",
+    "steps": [
+      [
+        {
+          "id": "j-ok",
+          "state": "ok",
+          "tool_id": "fastqc"
+        }
+      ]
+    ],
+    "block": {
+      "status": "in_progress",
+      "summary": null
+    },
+    "result": {
+      "invocationId": "bb01",
+      "notebookAnchor": "plan-a-step-1",
+      "label": "run bb01",
+      "invocationState": "ready",
+      "priorStatus": "in_progress",
+      "jobSummary": {
+        "ok": 1,
+        "running": 0,
+        "queued": 0,
+        "error": 0,
+        "other": 0
+      },
+      "otherStates": {},
+      "activeJobs": 0
+    }
+  },
+  {
+    "name": "a paused job",
+    "state": "scheduled",
+    "steps": [
+      [
+        {
+          "id": "j-ok",
+          "state": "ok",
+          "tool_id": "fastqc"
+        }
+      ],
+      [
+        {
+          "id": "j-paused",
+          "state": "paused",
+          "tool_id": "fastqc"
+        }
+      ]
+    ],
+    "block": {
+      "status": "in_progress",
+      "summary": null
+    },
+    "result": {
+      "invocationId": "bb01",
+      "notebookAnchor": "plan-a-step-1",
+      "label": "run bb01",
+      "invocationState": "scheduled",
+      "priorStatus": "in_progress",
+      "jobSummary": {
+        "ok": 1,
+        "running": 0,
+        "queued": 0,
+        "error": 0,
+        "other": 1
+      },
+      "otherStates": {
+        "paused": 1
+      },
+      "activeJobs": 1
+    }
+  },
+  {
+    "name": "a skipped step",
+    "state": "scheduled",
+    "steps": [
+      [
+        {
+          "id": "j-ok",
+          "state": "ok",
+          "tool_id": "fastqc"
+        }
+      ],
+      [
+        {
+          "id": "j-skipped",
+          "state": "skipped",
+          "tool_id": "fastqc"
+        }
+      ]
+    ],
+    "block": {
+      "status": "completed",
+      "summary": "Workflow completed: 1 jobs succeeded (1 skipped)"
+    },
+    "result": {
+      "invocationId": "bb01",
+      "notebookAnchor": "plan-a-step-1",
+      "label": "run bb01",
+      "invocationState": "scheduled",
+      "priorStatus": "in_progress",
+      "jobSummary": {
+        "ok": 1,
+        "running": 0,
+        "queued": 0,
+        "error": 0,
+        "other": 1
+      },
+      "otherStates": {
+        "skipped": 1
+      },
+      "activeJobs": 0,
+      "newStatus": "completed",
+      "autoAction": "completed"
+    }
+  },
+  {
+    "name": "Galaxy failing to schedule",
+    "state": "failed",
+    "steps": [[]],
+    "block": {
+      "status": "failed",
+      "summary": "Workflow failed: Galaxy reported invocation state \"failed\""
+    },
+    "result": {
+      "invocationId": "bb01",
+      "notebookAnchor": "plan-a-step-1",
+      "label": "run bb01",
+      "invocationState": "failed",
+      "priorStatus": "in_progress",
+      "jobSummary": {
+        "ok": 0,
+        "running": 0,
+        "queued": 0,
+        "error": 0,
+        "other": 0
+      },
+      "otherStates": {},
+      "activeJobs": 0,
+      "newStatus": "failed",
+      "autoAction": "failed"
+    }
+  }
+]
