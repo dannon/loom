@@ -83,7 +83,7 @@ describe("checkInvocations concurrency (#391)", () => {
     // Stand in for the agent appending a results section via bash/edit while
     // the poller is blocked on a Galaxy round trip. Those writes never take
     // withNotebookLock, so only ordering the I/O correctly can save them.
-    vi.spyOn(galaxyApi, "galaxyGet").mockImplementation(async () => {
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockImplementation(async () => {
       appendFileSync(nbPath, "\n### Marker comparison\n\nCD4 up, CD8 flat.\n", "utf-8");
       return galaxyResponse("inv-1", ["ok", "ok"]) as never;
     });
@@ -99,7 +99,7 @@ describe("checkInvocations concurrency (#391)", () => {
 
   it("retries instead of clobbering when the notebook changes after the in-lock read", async () => {
     writeFileSync(nbPath, `# Notes\n\n${renderInvocationYaml(invocation())}`, "utf-8");
-    vi.spyOn(galaxyApi, "galaxyGet").mockResolvedValue(
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockResolvedValue(
       galaxyResponse("inv-1", ["ok", "ok"]) as never,
     );
 
@@ -137,8 +137,8 @@ describe("checkInvocations concurrency (#391)", () => {
         ),
       "utf-8",
     );
-    vi.spyOn(galaxyApi, "galaxyGet").mockImplementation(async (path: string) => {
-      if (path.includes("inv-1")) throw new Error("Galaxy API 502: bad gateway");
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockImplementation(async (id: string) => {
+      if (id === "inv-1") throw new Error("Galaxy API 502: bad gateway");
       return galaxyResponse("inv-2", ["ok"]) as never;
     });
 
@@ -157,7 +157,7 @@ describe("checkInvocations concurrency (#391)", () => {
 
   it("does not touch the notebook when every Galaxy GET fails", async () => {
     writeFileSync(nbPath, `# Notes\n\n${renderInvocationYaml(invocation())}`, "utf-8");
-    vi.spyOn(galaxyApi, "galaxyGet").mockRejectedValue(new Error("Galaxy API 503"));
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockRejectedValue(new Error("Galaxy API 503"));
     const write = vi.spyOn(notebookWriter, "writeNotebook");
 
     const result = await checkInvocations(undefined);
@@ -169,7 +169,7 @@ describe("checkInvocations concurrency (#391)", () => {
 
   it("does not resurrect a block deleted while Galaxy was polled, and reports no transition", async () => {
     writeFileSync(nbPath, `# Notes\n\n${renderInvocationYaml(invocation())}`, "utf-8");
-    vi.spyOn(galaxyApi, "galaxyGet").mockImplementation(async () => {
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockImplementation(async () => {
       // The agent pruned the block from the notebook mid-poll.
       writeFileSync(nbPath, "# Notes\n\nblock removed by the agent\n", "utf-8");
       return galaxyResponse("inv-1", ["ok"]) as never;
@@ -189,7 +189,7 @@ describe("checkInvocations concurrency (#391)", () => {
     // hand edit, and applyInvocationUpdates stopped honouring those.
     const aheadOfUs = new Date(Date.now() + 5_000).toISOString();
     writeFileSync(nbPath, `# Notes\n\n${renderInvocationYaml(invocation())}`, "utf-8");
-    vi.spyOn(galaxyApi, "galaxyGet").mockImplementation(async () => {
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockImplementation(async () => {
       // A second checker got there first with a strictly later reading.
       writeFileSync(
         nbPath,
@@ -213,7 +213,7 @@ describe("checkInvocations concurrency (#391)", () => {
 
   it("does not re-announce a completion another poll recorded first", async () => {
     writeFileSync(nbPath, `# Notes\n\n${renderInvocationYaml(invocation())}`, "utf-8");
-    vi.spyOn(galaxyApi, "galaxyGet").mockImplementation(async () => {
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockImplementation(async () => {
       // An overlapping poll finished first with the same news and, unlike the
       // stale-poll case, a perfectly ordinary earlier timestamp.
       writeFileSync(
@@ -242,7 +242,7 @@ describe("checkInvocations concurrency (#391)", () => {
 
   it("keeps an agent edit to the block's own fields made during the poll", async () => {
     writeFileSync(nbPath, `# Notes\n\n${renderInvocationYaml(invocation())}`, "utf-8");
-    vi.spyOn(galaxyApi, "galaxyGet").mockImplementation(async () => {
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockImplementation(async () => {
       // The agent relabelled and re-anchored the block while we were waiting.
       writeFileSync(
         nbPath,
@@ -267,7 +267,9 @@ describe("checkInvocations concurrency (#391)", () => {
 
   it("leaves no scratch files behind", async () => {
     writeFileSync(nbPath, `# Notes\n\n${renderInvocationYaml(invocation())}`, "utf-8");
-    vi.spyOn(galaxyApi, "galaxyGet").mockResolvedValue(galaxyResponse("inv-1", ["ok"]) as never);
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockResolvedValue(
+      galaxyResponse("inv-1", ["ok"]) as never,
+    );
 
     await checkInvocations(undefined);
 
@@ -278,7 +280,7 @@ describe("checkInvocations concurrency (#391)", () => {
     writeFileSync(nbPath, `# Notes\n\n${renderInvocationYaml(invocation())}`, "utf-8");
 
     let lockFreeDuringPoll = false;
-    vi.spyOn(galaxyApi, "galaxyGet").mockImplementation(async () => {
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockImplementation(async () => {
       // A competing Loom writer must be able to take the lock while we are
       // waiting on Galaxy — that is what shrinks the clobber window. Race it
       // against a timer so a still-held lock fails the assert instead of

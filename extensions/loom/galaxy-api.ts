@@ -5,32 +5,19 @@
  * Provides typed wrappers for the specific endpoints used by invocation polling.
  */
 
+import {
+  createGalaxyContext,
+  getInvocations,
+  type GalaxyContext,
+  type InvocationDetail,
+} from "@galaxyproject/galaxy-ops";
 import { fetchSameOriginOnly } from "../../shared/redirect-guard.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Galaxy API response types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface GalaxyInvocationStepJob {
-  id: string;
-  state: string;
-  tool_id: string;
-}
-
-export interface GalaxyInvocationStep {
-  id: string;
-  order_index: number;
-  state: string | null;
-  jobs: GalaxyInvocationStepJob[];
-}
-
-export interface GalaxyInvocationResponse {
-  id: string;
-  state: string;
-  workflow_id: string;
-  history_id: string;
-  steps: GalaxyInvocationStep[];
-}
+export type { InvocationDetail } from "@galaxyproject/galaxy-ops";
 
 /**
  * Subset of GET /api/jobs/{jobId} we actually read.
@@ -287,4 +274,53 @@ export async function galaxyGetMostRecentHistory(
 ): Promise<GalaxyHistorySummary | null> {
   const res = await galaxyGet<GalaxyHistorySummary | null>("/histories/most_recently_used", signal);
   return res && typeof res.id === "string" && res.id.length > 0 ? res : null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// galaxy-ops
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The fetch galaxy-ops gets, so its requests keep the redirect guard every
+ * other Galaxy call here has: openapi-fetch hands over a Request carrying
+ * `x-api-key`, and Node would forward that header across origins on a 3xx.
+ */
+const galaxyOpsFetch: typeof fetch = async (input, init) => {
+  const req = new Request(input, init);
+  const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
+  return fetchSameOriginOnly(
+    req.url,
+    { method: req.method, headers: req.headers, body, signal: req.signal },
+    GALAXY_REDIRECT_LABELS,
+  );
+};
+
+/** A galaxy-ops context on the configured server, or null without credentials. */
+export function galaxyOpsContext(signal?: AbortSignal): GalaxyContext | null {
+  const config = getGalaxyConfig();
+  if (!config) return null;
+  return createGalaxyContext({
+    baseUrl: config.url,
+    apiKey: config.apiKey,
+    signal,
+    fetchImpl: galaxyOpsFetch,
+  });
+}
+
+/**
+ * One invocation with each step's jobs. `stepDetails` matters: without it
+ * Galaxy answers with every step's `jobs` list empty, so a run still going
+ * looks like one with nothing left to do.
+ */
+export async function galaxyGetInvocation(
+  invocationId: string,
+  signal?: AbortSignal,
+): Promise<InvocationDetail> {
+  const ctx = galaxyOpsContext(signal);
+  if (!ctx) throw new Error("Galaxy credentials not configured (GALAXY_URL, GALAXY_API_KEY)");
+  const result = await getInvocations({ invocationId, stepDetails: true }, ctx);
+  if (Array.isArray(result)) {
+    throw new Error(`Galaxy answered a listing for invocation ${invocationId}`);
+  }
+  return result;
 }

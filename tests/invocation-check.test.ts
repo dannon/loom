@@ -67,7 +67,7 @@ describe("checkInvocations", () => {
 
   it("marks an invocation completed when all jobs are ok", async () => {
     writeFileSync(nbPath, renderInvocationYaml(invocation()), "utf-8");
-    vi.spyOn(galaxyApi, "galaxyGet").mockResolvedValue({
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockResolvedValue({
       id: "inv-1",
       state: "scheduled",
       workflow_id: "wf-1",
@@ -98,7 +98,7 @@ describe("checkInvocations", () => {
 
   it("marks an invocation failed when any job errors", async () => {
     writeFileSync(nbPath, renderInvocationYaml(invocation()), "utf-8");
-    vi.spyOn(galaxyApi, "galaxyGet").mockResolvedValue({
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockResolvedValue({
       id: "inv-1",
       state: "scheduled",
       workflow_id: "wf-1",
@@ -130,34 +130,41 @@ describe("checkInvocations", () => {
     // Regression: the fetch omitted `step_details=true`. Galaxy still returns a
     // `jobs` key on every step but leaves it empty, so totalJobs came back 0,
     // neither the completed nor the failed branch could fire, and blocks sat at
-    // in_progress forever -- no status transition, no toast. Every test here
-    // mocks galaxyGet with jobs already populated (what step_details returns),
-    // which is exactly why the suite stayed green while this was broken. Assert
-    // the request itself, since a mocked response cannot catch it.
+    // in_progress forever -- no status transition, no toast. Every other test
+    // here mocks galaxyGetInvocation with jobs already populated, which is
+    // exactly why the suite stayed green while this was broken. So this one
+    // runs the real read and asserts the request that reaches the wire.
     writeFileSync(nbPath, renderInvocationYaml(invocation()), "utf-8");
-    const galaxyGet = vi.spyOn(galaxyApi, "galaxyGet").mockResolvedValue({
-      id: "inv-1",
-      state: "scheduled",
-      workflow_id: "wf-1",
-      history_id: "hist-1",
-      steps: [],
+    const urls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      urls.push(String(input instanceof Request ? input.url : input));
+      return new Response(
+        JSON.stringify({
+          id: "inv-1",
+          state: "scheduled",
+          workflow_id: "wf-1",
+          history_id: "hist-1",
+          steps: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
     });
 
     await checkInvocations(undefined);
 
-    expect(galaxyGet).toHaveBeenCalledWith(expect.stringContaining("step_details=true"), undefined);
+    expect(urls).toEqual(["https://usegalaxy.org/api/invocations/inv-1?step_details=true"]);
   });
 
   it("does not rewrite already completed invocations in check_all", async () => {
     writeFileSync(nbPath, renderInvocationYaml(invocation({ status: "completed" })), "utf-8");
-    const galaxyGet = vi.spyOn(galaxyApi, "galaxyGet");
+    const galaxyGetInvocation = vi.spyOn(galaxyApi, "galaxyGetInvocation");
 
     const result = await checkInvocations(undefined);
     const parsed = JSON.parse(result.content[0].text);
 
     expect(parsed.success).toBe(true);
     expect(parsed.results).toEqual([]);
-    expect(galaxyGet).not.toHaveBeenCalled();
+    expect(galaxyGetInvocation).not.toHaveBeenCalled();
   });
 });
 
@@ -193,7 +200,9 @@ describe("checkInvocations completion predicate", () => {
   });
 
   async function poll(state: string, jobStates: string[]) {
-    vi.spyOn(galaxyApi, "galaxyGet").mockResolvedValue(galaxyInvocation(state, jobStates));
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockResolvedValue(
+      galaxyInvocation(state, jobStates),
+    );
     const result = await checkInvocations(undefined);
     return {
       entry: JSON.parse(result.content[0].text).results[0],

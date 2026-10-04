@@ -42,10 +42,10 @@ import {
 } from "./notebook-anchors";
 import {
   getGalaxyConfig,
-  galaxyGet,
+  galaxyGetInvocation,
   sameGalaxyServer,
   verifyGalaxyRun,
-  type GalaxyInvocationResponse,
+  type InvocationDetail,
 } from "./galaxy-api";
 import { listEnabledSkillRepos, findSkillRepo } from "./skills";
 import { fetchSkillFile, githubRawBase } from "./skills-discovery";
@@ -970,7 +970,7 @@ export interface InvocationJobRollup {
 }
 
 /** Count an invocation's jobs by state, keeping what `other` is actually made of. */
-export function rollUpInvocationJobs(inv: GalaxyInvocationResponse): InvocationJobRollup {
+export function rollUpInvocationJobs(inv: InvocationDetail): InvocationJobRollup {
   const summary = { ok: 0, running: 0, queued: 0, error: 0, other: 0 };
   // What is actually behind `other`, counted by state. The rollup can't tell a
   // paused job (Galaxy will run it) from a skipped one (a conditional step that
@@ -1019,7 +1019,7 @@ export function rollUpInvocationJobs(inv: GalaxyInvocationResponse): InvocationJ
  * The poller asks this about an invocation whose notebook block has vanished:
  * a live run nobody is watching is worth saying out loud, a finished one isn't.
  */
-export function isInvocationLive(inv: GalaxyInvocationResponse): boolean {
+export function isInvocationLive(inv: InvocationDetail): boolean {
   if (!TERMINAL_INVOCATION_STATES.has(inv.state)) return true;
   return rollUpInvocationJobs(inv).activeJobs > 0;
 }
@@ -1114,15 +1114,11 @@ export async function checkInvocations(
 
   for (const block of toCheck) {
     try {
-      // `step_details=true` is required for the per-step `jobs` arrays to be
-      // populated. Without it Galaxy still returns a `jobs` key on every step,
-      // but always empty -- so every counter below lands on zero, neither the
+      // galaxyGetInvocation asks for step details, which the counters below
+      // depend on: without them every step's `jobs` list is empty, neither the
       // completed nor the failed branch can fire, and the block sits at
       // in_progress forever with no toast and no transition.
-      const inv = await galaxyGet<GalaxyInvocationResponse>(
-        `/invocations/${block.invocationId}?step_details=true`,
-        signal,
-      );
+      const inv = await galaxyGetInvocation(block.invocationId, signal);
 
       const { summary, otherStates, activeJobs, totalJobs, completedSteps } =
         rollUpInvocationJobs(inv);

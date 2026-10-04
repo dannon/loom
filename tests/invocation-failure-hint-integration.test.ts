@@ -123,7 +123,9 @@ describe("failed-invocation hint against real checkInvocations output", () => {
 
   it("fires on the payload a real failing invocation produces", async () => {
     writeFileSync(nbPath, renderInvocationYaml(invocation()), "utf-8");
-    vi.spyOn(galaxyApi, "galaxyGet").mockResolvedValue(galaxyInvocation(["ok", "error"]) as never);
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockResolvedValue(
+      galaxyInvocation(["ok", "error"]) as never,
+    );
 
     const result = await checkInvocations(undefined);
     const original = result.content[0].text;
@@ -144,7 +146,9 @@ describe("failed-invocation hint against real checkInvocations output", () => {
     // instruction rather than filler. If a summary ever does start travelling
     // in this payload, this test should fail and the hint text be revisited.
     writeFileSync(nbPath, renderInvocationYaml(invocation()), "utf-8");
-    vi.spyOn(galaxyApi, "galaxyGet").mockResolvedValue(galaxyInvocation(["ok", "error"]) as never);
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockResolvedValue(
+      galaxyInvocation(["ok", "error"]) as never,
+    );
 
     const parsed = JSON.parse((await checkInvocations(undefined)).content[0].text);
     const entry = parsed.results[0];
@@ -157,7 +161,9 @@ describe("failed-invocation hint against real checkInvocations output", () => {
 
   it("stays silent on a real completed invocation", async () => {
     writeFileSync(nbPath, renderInvocationYaml(invocation()), "utf-8");
-    vi.spyOn(galaxyApi, "galaxyGet").mockResolvedValue(galaxyInvocation(["ok", "ok"]) as never);
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockResolvedValue(
+      galaxyInvocation(["ok", "ok"]) as never,
+    );
 
     const result = await checkInvocations(undefined);
     expect(appendInvocationFailureHint(result.content)).toBeNull();
@@ -165,7 +171,7 @@ describe("failed-invocation hint against real checkInvocations output", () => {
 
   it("stays silent while jobs are still running", async () => {
     writeFileSync(nbPath, renderInvocationYaml(invocation()), "utf-8");
-    vi.spyOn(galaxyApi, "galaxyGet").mockResolvedValue(
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockResolvedValue(
       galaxyInvocation(["ok", "running"]) as never,
     );
 
@@ -178,7 +184,9 @@ describe("failed-invocation hint against real checkInvocations output", () => {
     // it didn't actually record the change. A user asking the agent to re-check
     // an already-failed run should not get the triage nudge a second time.
     writeFileSync(nbPath, renderInvocationYaml(invocation()), "utf-8");
-    vi.spyOn(galaxyApi, "galaxyGet").mockResolvedValue(galaxyInvocation(["ok", "error"]) as never);
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockResolvedValue(
+      galaxyInvocation(["ok", "error"]) as never,
+    );
 
     const first = await checkInvocations(undefined);
     expect(appendInvocationFailureHint(first.content)).not.toBeNull();
@@ -197,7 +205,7 @@ describe("failed-invocation hint against real checkInvocations output", () => {
     // A poll failure is not a run failure -- autoAction becomes `check_error:`,
     // and triage guidance would be actively misleading.
     writeFileSync(nbPath, renderInvocationYaml(invocation()), "utf-8");
-    vi.spyOn(galaxyApi, "galaxyGet").mockRejectedValue(new Error("Galaxy API 503"));
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockRejectedValue(new Error("Galaxy API 503"));
 
     const result = await checkInvocations(undefined);
     expect(appendInvocationFailureHint(result.content)).toBeNull();

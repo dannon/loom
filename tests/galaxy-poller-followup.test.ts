@@ -8,14 +8,14 @@ import { join } from "path";
 vi.mock("../extensions/loom/galaxy-api.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../extensions/loom/galaxy-api.js")>()),
   getGalaxyConfig: vi.fn(() => ({ url: "https://galaxy.test", apiKey: "k" })),
-  galaxyGet: vi.fn(),
+  galaxyGetInvocation: vi.fn(),
   galaxyGetJobDetails: vi.fn(),
 }));
 
 import { resetState, setNotebookPath } from "../extensions/loom/state";
 import { findInvocationBlocks, renderInvocationYaml } from "../extensions/loom/notebook-writer";
 import { findJobBlocks, renderJobYaml } from "../extensions/loom/galaxy-job-block";
-import { galaxyGet, galaxyGetJobDetails } from "../extensions/loom/galaxy-api.js";
+import { galaxyGetInvocation, galaxyGetJobDetails } from "../extensions/loom/galaxy-api.js";
 import {
   registerSubmissionCapture,
   resetSubmissionCapture,
@@ -26,7 +26,7 @@ import {
   stopGalaxyPoller,
 } from "../extensions/loom/galaxy-poller";
 
-const mockGet = vi.mocked(galaxyGet);
+const mockGet = vi.mocked(galaxyGetInvocation);
 const mockJob = vi.mocked(galaxyGetJobDetails);
 const common = {
   galaxyServerUrl: "https://galaxy.test",
