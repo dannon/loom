@@ -1,12 +1,11 @@
 /** Provider/model/key picker. Mirrors Orbit's BYO-key overlay behaviour. */
 
+import { defaultEndpoint, needsKey, providerById, PROVIDERS, takesModel } from "./agent/providers";
 import { discoverModels } from "./model-discovery";
 import {
   clearCredentials,
   credentialProblem,
   loadCredentials,
-  providerById,
-  providers,
   saveCredentials,
   type Credentials,
 } from "./credentials";
@@ -39,7 +38,7 @@ const MARKUP = `
         <label for="cred-key">API key</label>
         <input id="cred-key" type="password" autocomplete="off" spellcheck="false"
                placeholder="Paste your key" />
-        <p class="cred-note">Kept in this browser tab only. It is never sent to or stored by Galaxy.</p>
+        <p class="cred-note">Kept for this browser tab, where pages on this Galaxy site can read it. It is never sent to or stored by Galaxy.</p>
       </div>
       <div id="cred-error" class="cred-error"></div>
     </div>
@@ -54,12 +53,12 @@ const MARKUP = `
 
 /**
  * Resolve with usable credentials, showing the overlay only when what we have
- * cannot work. Rejecting up front beats starting a brain that dies on its first
+ * cannot work. Rejecting up front beats starting an agent that dies on its first
  * request, and the overlay stays up on a bad entry rather than stranding the
  * user in front of an agent that never connected.
  *
  * `cancellable` is only safe when a working selection already exists to fall back
- * on: dismissing the first-run picker would leave the brain with no key at all.
+ * on: dismissing the first-run picker would leave the agent with no key at all.
  * Resolves null when dismissed.
  */
 function openPicker(container: HTMLElement, cancellable: boolean): Promise<Credentials | null> {
@@ -80,7 +79,7 @@ function openPicker(container: HTMLElement, cancellable: boolean): Promise<Crede
   const errorEl = container.querySelector<HTMLElement>("#cred-error")!;
   const saveBtn = container.querySelector<HTMLButtonElement>("#cred-save")!;
 
-  for (const p of providers) {
+  for (const p of PROVIDERS) {
     providerSel.add(new Option(p.name, p.id));
   }
   if (stored?.provider) providerSel.value = stored.provider;
@@ -90,18 +89,21 @@ function openPicker(container: HTMLElement, cancellable: boolean): Promise<Crede
   function syncFields() {
     const p = providerById(providerSel.value);
     if (!p) return;
-    keyField.classList.toggle("hidden", !p.needs_key);
+    keyField.classList.toggle("hidden", !needsKey(p));
     // The Galaxy proxy picks its own model; everyone else names one, from the
     // suggestions where we bundle any and freely where the catalog is theirs.
-    modelField.classList.toggle("hidden", !p.takes_model);
+    modelField.classList.toggle("hidden", !takesModel(p));
     modelOptions.innerHTML = "";
-    for (const m of p.models) modelOptions.appendChild(new Option(m.id, m.id));
+    for (const m of p.models ?? []) modelOptions.appendChild(new Option(m.id, m.id));
     // What this provider was last used with, else its first suggestion: picking a
     // provider is enough to connect, and the suggestions are a starting point to edit.
     const remembered = stored?.provider === p.id ? stored.model : undefined;
-    modelInput.value = remembered || p.models[0]?.id || "";
-    endpointField.classList.toggle("hidden", !p.takes_model);
-    endpointInput.placeholder = p.base_url || "";
+    modelInput.value = remembered || p.models?.[0]?.id || "";
+    endpointField.classList.toggle("hidden", !takesModel(p));
+    endpointInput.placeholder = p.baseUrl || "";
+    void defaultEndpoint(p).then((url) => {
+      if (providerSel.value === p.id) endpointInput.placeholder = url || "";
+    });
     if (stored?.provider === p.id && stored.baseUrl) endpointInput.value = stored.baseUrl;
   }
   providerSel.addEventListener("change", syncFields);
@@ -135,11 +137,17 @@ function openPicker(container: HTMLElement, cancellable: boolean): Promise<Crede
         if (e.target === overlay) close(null);
       });
     }
+    // A key typed for one provider stays in the hidden box after switching to one that takes
+    // none; sending it would hand that provider's key to an endpoint it was never meant for.
+    const key = () => {
+      const p = providerById(providerSel.value);
+      return p && needsKey(p) ? keyInput.value.trim() || undefined : undefined;
+    };
     const submit = () => {
       const creds: Credentials = {
         provider: providerSel.value,
         model: modelInput.value.trim() || undefined,
-        apiKey: keyInput.value.trim() || undefined,
+        apiKey: key(),
         baseUrl: endpointInput.value.trim() || undefined,
       };
       const problem = credentialProblem(creds);
@@ -156,11 +164,11 @@ function openPicker(container: HTMLElement, cancellable: boolean): Promise<Crede
     // whose models we never listed becomes usable without typing an id from memory.
     discoverBtn.addEventListener("click", async () => {
       const p = providerById(providerSel.value);
-      const endpoint = endpointInput.value.trim() || p?.base_url;
-      if (!p || !endpoint) return;
+      const endpoint = endpointInput.value.trim() || p?.baseUrl;
+      if (!p) return;
       discoverBtn.disabled = true;
       discoverBtn.textContent = "Listing...";
-      const found = await discoverModels(fetch, p, endpoint, keyInput.value.trim() || undefined);
+      const found = await discoverModels(fetch, p, endpoint, key());
       discoverBtn.disabled = false;
       discoverBtn.textContent = "List models";
       errorEl.textContent = found.error || "";
@@ -187,18 +195,10 @@ function openPicker(container: HTMLElement, cancellable: boolean): Promise<Crede
   });
 }
 
-/**
- * Reopen the picker so the provider can be changed after boot. The worker takes
- * its config at initialize, so the new choice is applied by reloading rather than
- * re-initializing a live brain. Conversation history lives in IndexedDB and is
- * restored on the way back up, so switching models does not discard it.
- */
-export async function switchProvider(container: HTMLElement): Promise<void> {
+export async function switchProvider(container: HTMLElement): Promise<Credentials | undefined> {
   const before = JSON.stringify(loadCredentials());
   const picked = await openPicker(container, true);
-  // Dismissed, or re-picked the same thing: nothing to apply, so do not reload.
-  if (!picked || JSON.stringify(picked) === before) return;
-  window.location.reload();
+  return picked && JSON.stringify(picked) !== before ? picked : undefined;
 }
 
 /** First-run entry point. Not dismissible: there is nothing to fall back to. */

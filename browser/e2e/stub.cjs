@@ -23,11 +23,12 @@ const TYPES = {
 };
 
 let script = "confirm";     // confirm | slow | compact | ratelimit | plan | plan-after-graph
-let galaxyUp = true;        // /api/version answers, which is what the brain probes for reachability
+let galaxyUp = true;        // /api/version answers, which is what the agent probes for reachability
 let rateLimited = 0;
 let calls = 0;
-const seen = [];            // every Galaxy request the brain actually made
-const prompts = [];         // what the brain sent us, so compaction can be checked
+const seen = [];            // every Galaxy request the agent actually made
+const cookies = [];         // each Galaxy request's URL and the session cookie it carried
+const prompts = [];         // what the agent sent us, so compaction can be checked
 
 function json(res, code, body) {
     const text = JSON.stringify(body);
@@ -40,8 +41,19 @@ function json(res, code, body) {
     res.end(text);
 }
 
+// A completion as the server-sent events a streaming request reads.
+function sse(res, completion) {
+    const { message: m, finish_reason } = completion.choices[0];
+    const chunks = [];
+    if (m.content) chunks.push({ choices: [{ index: 0, delta: { content: m.content } }] });
+    (m.tool_calls || []).forEach((call, index) => chunks.push({ choices: [{ index: 0, delta: { tool_calls: [{ index, ...call }] } }] }));
+    chunks.push({ choices: [{ index: 0, delta: {}, finish_reason }], usage: completion.usage });
+    res.writeHead(200, { "Content-Type": "text/event-stream", "Access-Control-Allow-Origin": "*" });
+    res.end(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n");
+}
+
 // A realistic `usage` is what lets the compaction scenario trigger.
-const message = (content, tool_calls, promptTokens = 30000) => ({
+const message = (content, tool_calls, promptTokens = 50000) => ({
     choices: [{ finish_reason: tool_calls ? "tool_calls" : "stop", message: { role: "assistant", content, tool_calls } }],
     usage: { prompt_tokens: promptTokens, completion_tokens: 20, total_tokens: promptTokens + 20 },
 });
@@ -61,6 +73,46 @@ const RUN_PYTHON_CODE = [
     "f\"awaited:{r.status}:{'calls' in body}\"",
 ].join("\n");
 
+// What run_python can reach from its realm. Every request it makes is tagged, so the stub can
+// say whether Galaxy's session cookie came with it.
+const ISOLATION_PROBE = [
+    "import js, json",
+    "out = {'origin': str(js.self.origin)}",
+    "r = await pyfetch('http://127.0.0.1:8099/__public?from=python')",
+    "out['cors'] = r.status",
+    "for creds in ('same-origin', 'include'):",
+    "    try:",
+    "        r = await pyfetch(f'http://127.0.0.1:8099/api/users/current?from=python&credentials={creds}', credentials=creds)",
+    "        out[creds] = await r.string()",
+    "    except Exception:",
+    "        out[creds] = 'unreadable'",
+    "try:",
+    "    await pyfetch('http://127.0.0.1:8099/api/histories?from=python&credentials=post', method='POST', credentials='include', body='{}', headers={'content-type': 'text/plain'})",
+    "except Exception:",
+    "    pass",
+    "try:",
+    "    js.indexedDB.open('olit')",
+    "    out['storage'] = 'open'",
+    "except Exception:",
+    "    out['storage'] = 'blocked'",
+    "out['canary'] = bool(getattr(js.self, '__olitCanary', False))",
+    "names = js.Object.getOwnPropertyNames(js.self).to_py()",
+    "out['key'] = any('sk-e2e-canary' in str(getattr(js.self, n, '')) for n in names if n != 'out')",
+    "'probe:' + json.dumps(out)",
+].join("\n");
+
+const runIsolationProbe = [{
+    id: "call_1",
+    type: "function",
+    function: { name: "run_python", arguments: JSON.stringify({ code: ISOLATION_PROBE }) },
+}];
+
+const runForever = [{
+    id: "call_1",
+    type: "function",
+    function: { name: "run_python", arguments: JSON.stringify({ code: "while True: pass" }) },
+}];
+
 const runPython = [{
     id: "call_1",
     type: "function",
@@ -78,7 +130,7 @@ const delegatedOps = [
     { id: "call_5", type: "function", function: { name: "create_history", arguments: JSON.stringify({ history_name: "olit e2e ops" }) } },
 ];
 
-// A process: it reaches Galaxy through the openapi catalog, which this stub does not serve.
+// A process that fails here: the stub answers history contents with a history, not a list.
 const runAProcess = [{
     id: "call_1",
     type: "function",
@@ -131,10 +183,8 @@ function serveStatic(res, rel) {
         res.writeHead(404, { "Content-Type": "text/plain" });
         return res.end("not found");
     }
-    res.writeHead(200, {
-        "Content-Type": TYPES[path.extname(file)] || "application/octet-stream",
-        "Access-Control-Allow-Origin": "*",
-    });
+    // No CORS headers: Galaxy sends none on static files.
+    res.writeHead(200, { "Content-Type": TYPES[path.extname(file)] || "application/octet-stream" });
     return res.end(fs.readFileSync(file));
 }
 
@@ -176,11 +226,12 @@ const server = http.createServer(async (req, res) => {
         calls = 0;
         rateLimited = 0;
         seen.length = 0;
+        cookies.length = 0;
         return json(res, 200, { script });
     }
     // Drives that assert on what the model was sent need the record to start empty;
     // `/__script` deliberately keeps it, because a drive may switch scripts mid-turn.
-    // The brain probes /api/version once per session; a drive needs Galaxy down before it boots.
+    // The agent probes /api/version once per session; a drive needs Galaxy down before it boots.
     if (url.startsWith("/__galaxy")) {
         galaxyUp = new URL(url, "http://x").searchParams.get("up") !== "0";
         return json(res, 200, { galaxyUp });
@@ -189,11 +240,13 @@ const server = http.createServer(async (req, res) => {
         prompts.length = 0;
         return json(res, 200, { prompts: 0 });
     }
-    if (url.startsWith("/__seen")) return json(res, 200, { seen, calls, prompts });
+    if (url.startsWith("/__seen")) return json(res, 200, { seen, calls, prompts, cookies });
+    if (url.startsWith("/__public")) return json(res, 200, { public: true });
 
     if (url.startsWith(PLUGIN_HREF)) return serveStatic(res, url.slice(PLUGIN_HREF.length).split("?")[0]);
     if (url === "/" || url.startsWith(HOST_PAGE)) {
-        res.writeHead(200, { "Content-Type": "text/html" });
+        // Galaxy's session cookie, with no SameSite, as Galaxy sets it.
+        res.writeHead(200, { "Content-Type": "text/html", "Set-Cookie": "galaxysession=e2e-session; Path=/; HttpOnly" });
         return res.end(hostPage(url));
     }
 
@@ -215,11 +268,13 @@ const server = http.createServer(async (req, res) => {
             roles: (body.messages || []).map((m) => m.role),
             toolResults: (body.messages || []).filter((m) => m.role === "tool").map((m) => String(m.content)),
             text: JSON.stringify(body.messages || []).slice(0, 4000),
+            authorization: req.headers.authorization || null,
         });
+        const answer = (completion) => (body.stream ? sse(res, completion) : json(res, 200, completion));
         // A summarization request is the one with no tools, whatever the scenario.
         const isSummarization = !prompts[prompts.length - 1].hasTools;
         if (isSummarization) {
-            return json(res, 200, message("## Goal\nthe summarized goal"));
+            return answer(message("## Goal\nthe summarized goal"));
         }
         if (script === "ratelimit") {
             // First call 429s with a stated delay, as Gemini does; then succeed.
@@ -234,23 +289,22 @@ const server = http.createServer(async (req, res) => {
                     },
                 }]));
             }
-            return json(res, 200, message("recovered after the wait"));
+            return answer(message("recovered after the wait"));
         }
         if (script === "slow") {
             // Long enough that Stop lands while the request is in flight.
             await new Promise((r) => setTimeout(r, 60000));
-            return json(res, 200, message("too late"));
+            return answer(message("too late"));
         }
         if (script === "plan" || script === "plan-after-process") {
-            // A process is the only thing that loads the tool catalog, so a drive that needs
-            // the catalog asked for takes it before asking for a plan.
+            // A drive that needs a process to have failed takes it before asking for a plan.
             const msgs = body.messages || [];
             const asked = msgs.some((m) => m.role === "tool");
             if (script === "plan-after-process" && !asked) {
-                return json(res, 200, message("", runAProcess));
+                return answer(message("", runAProcess));
             }
             // A plan card, so the driver has an Approve button to click.
-            return json(res, 200, message(
+            return answer(message(
                 "```plan\n## Plan A: Stub Plan [galaxy]\n\n" +
                 "Draft used only to render an approvable card.\n\n### Steps\n\n" +
                 "- [ ] 1. **Concatenate the inputs** -- join the two datasets\n" +
@@ -259,19 +313,30 @@ const server = http.createServer(async (req, res) => {
             ));
         }
         if (script === "compact") {
-            return json(res, 200, message("ok"));
+            return answer(message("ok"));
         }
         if (script === "ops-bridge") {
             const msgs = body.messages || [];
             const tail = msgs[msgs.length - 1] || {};
-            return json(res, 200, tail.role === "tool"
+            return answer(tail.role === "tool"
                 ? message("operations answered")
                 : message("", delegatedOps));
+        }
+        if (script === "python-isolation") {
+            const msgs = body.messages || [];
+            const tail = msgs[msgs.length - 1] || {};
+            return answer(tail.role === "tool"
+                ? message(`python returned ${tail.content}`)
+                : message("", runIsolationProbe));
+        }
+        if (script === "python-forever") {
+            const tail = (body.messages || []).slice(-1)[0] || {};
+            return answer(tail.role === "tool" ? message(`python returned ${tail.content}`) : message("", runForever));
         }
         if (script === "python") {
             const msgs = body.messages || [];
             const tail = msgs[msgs.length - 1] || {};
-            return json(res, 200, tail.role === "tool"
+            return answer(tail.role === "tool"
                 ? message(`python returned ${tail.content}`)
                 : message("", runPython));
         }
@@ -280,24 +345,28 @@ const server = http.createServer(async (req, res) => {
         const last = messages[messages.length - 1] || {};
         if (script === "two-artifacts") {
             const turns = messages.filter((m) => m.role === "user").length;
-            return json(res, 200, last.role === "tool"
+            return answer(last.role === "tool"
                 ? message(`Chart ${turns} is open.`)
                 : message("", showTitled(turns < 2 ? "First Chart" : "Second Chart")));
         }
         if (script === "visualization") {
-            return json(res, 200, last.role === "tool"
+            return answer(last.role === "tool"
                 ? message("The structure is open in the viewer.")
                 : message("", createVisualization));
         }
-        return json(res, 200, last.role === "tool" ? message("Done.") : message("", deleteHistory));
+        return answer(last.role === "tool" ? message("Done.") : message("", deleteHistory));
     }
 
     // Everything else is Galaxy; record it so tests can assert on the PUT.
     seen.push(`${req.method} ${url}`);
+    cookies.push({ url: `${req.method} ${url}`, cookie: req.headers.cookie || null });
     if (!galaxyUp && url.includes("/api/")) return json(res, 503, { err_msg: "galaxy is down" });
     if (url.includes("/api/plugins/olit")) return json(res, 200, pluginDict());
     if (url.includes("/api/plugins")) return json(res, 200, [{ name: "ngl", settings: [], tracks: [] }]);
     if (url.includes("/api/datatypes/")) return json(res, 200, [{ visualization: "ngl" }]);
+    if (url.includes("/api/users/current")) {
+        return json(res, 200, /galaxysession=/.test(req.headers.cookie || "") ? { username: "e2e-user" } : {});
+    }
     if (url.includes("/api/datasets/")) {
         return json(res, 200, { id: "d1", name: "peptide.pdb", extension: "pdb" });
     }

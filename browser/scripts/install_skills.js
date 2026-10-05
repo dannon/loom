@@ -1,5 +1,5 @@
 /**
- * Vendor the galaxy-skills corpus into the brain package at build time.
+ * Vendor the galaxy-skills corpus into the agent at build time.
  *
  * Orbit fetches skills from GitHub on demand and caches them for 24h. olit ships
  * them instead: the browser has no writable cache to persist across sessions, and a
@@ -27,10 +27,10 @@
 
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 
 const REPO = process.env.GALAXY_SKILLS_REPO || "galaxyproject/galaxy-skills";
-const DEST = join(process.cwd(), "brain", "olit", "skills", "galaxy-skills");
+const DEST = join(process.cwd(), "src", "agent", "skills", "galaxy-skills");
 const STAMP = join(DEST, "VENDORED.json");
 const LOCK = join(process.cwd(), "skills.lock.json");
 
@@ -148,7 +148,7 @@ async function main() {
   for (const blob of blobs) {
     const target = join(DEST, localPath(blob.path));
     // A path escaping DEST would write anywhere on the build machine.
-    if (!target.startsWith(DEST)) {
+    if (!target.startsWith(DEST + sep)) {
       throw new Error(`refusing path outside the corpus dir: ${blob.path}`);
     }
     await mkdir(dirname(target), { recursive: true });

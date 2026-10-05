@@ -1,37 +1,44 @@
-/** Turning the brain's messages and errors into what the chat panel shows. */
+/** Turning the agent's messages and errors into what the chat panel shows. */
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { contentText } from "@earendil-works/pi-ai";
+
 import { ChatPanel } from "./orbit/chat/chat-panel";
-import type { Message } from "./pyodide-runner";
+
+const textOf = (content: unknown) => contentText(content as Parameters<typeof contentText>[0]);
 
 /** Render the turn's messages; returns whether any assistant prose was shown. */
 export function renderMessages(
   chat: ChatPanel,
-  messages: Message[],
+  messages: AgentMessage[],
   streamed: Set<string> = new Set(),
-  failed: Set<string> = new Set(),
+  textStreamed = false,
 ): boolean {
   let spoke = false;
   for (const m of messages) {
-    // `finish` puts the model's closing words in a tool argument, not in content.
-    if (m.role === "tool" && m.name === "finish" && m.content) {
-      spoke = true;
-      say(chat, m.content);
-      continue;
-    }
-    if (m.role === "assistant") {
-      if (m.content) {
+    if (m.role === "toolResult") {
+      const text = textOf(m.content);
+      // `finish` puts the model's closing words in a tool argument, not in content.
+      if (m.toolName === "finish" && !m.isError && text) {
         spoke = true;
-        say(chat, m.content);
+        say(chat, text);
+      } else if (!streamed.has(m.toolCallId)) {
+        chat.updateToolCard(m.toolCallId, m.isError ? "error" : "done", text);
       }
-      for (const tc of m.tool_calls || []) {
-        if (!streamed.has(tc.id)) {
-          chat.addToolCard(tc.id, tc.function?.name || "tool");
+    } else if (m.role === "assistant") {
+      const text = m.content
+        .filter((c) => c.type === "text")
+        .map((c) => (c as { text: string }).text)
+        .join("");
+      if (text) {
+        spoke = true;
+        if (!textStreamed) {
+          say(chat, text);
         }
       }
-    } else if (m.role === "tool" && m.tool_call_id) {
-      if (!streamed.has(m.tool_call_id)) {
-        // The recorded outcome, not a guess from the text.
-        const status = failed.has(m.tool_call_id) ? "error" : toolStatus(m.content || "");
-        chat.updateToolCard(m.tool_call_id, status, m.content || "");
+      for (const c of m.content) {
+        if (c.type === "toolCall" && !streamed.has(c.id)) {
+          chat.addToolCard(c.id, c.name || "tool");
+        }
       }
     }
   }
@@ -39,16 +46,15 @@ export function renderMessages(
 }
 
 /** Repaint a stored transcript into the panel; loom: session-replay.js on `--continue`. */
-export function replayMessages(
-  chat: ChatPanel,
-  messages: Message[],
-  failed: Set<string> = new Set(),
-) {
+export function replayMessages(chat: ChatPanel, messages: AgentMessage[]) {
   for (const m of messages) {
-    if (m.role === "user") {
-      chat.addUserMessage(m.content || "");
+    if (m.role === "compactionSummary") {
+      // Said the way it was said live, rather than shown as something the user wrote.
+      chat.addInfoMessage("Summarized the earlier conversation to make room.");
+    } else if (m.role === "user") {
+      chat.addUserMessage(textOf(m.content));
     } else if (m.role !== "system") {
-      renderMessages(chat, [m], new Set(), failed);
+      renderMessages(chat, [m]);
     }
   }
 }
@@ -66,28 +72,4 @@ export function lastLine(text: string): string {
     .map((l) => l.trim())
     .filter(Boolean);
   return lines[lines.length - 1] || text;
-}
-
-/** A provider failure in words, not a status code and a wall of JSON. */
-export function describeError(err: { message?: string; status_code?: number }): string {
-  const status = err.status_code;
-  if (status === 429) {
-    return "The model provider is out of quota for now. Wait, or switch provider with the Model button.";
-  }
-  if (status === 401 || status === 403) {
-    return "The model provider rejected the API key. Enter another with the Model button.";
-  }
-  return lastLine(err.message || "The turn failed.");
-}
-
-export function toolStatus(content: string): "done" | "error" {
-  try {
-    const parsed = JSON.parse(content);
-    if (parsed && parsed.ok === false) {
-      return "error";
-    }
-  } catch {
-    // non-JSON tool output (e.g. run_python) is a success
-  }
-  return "done";
 }

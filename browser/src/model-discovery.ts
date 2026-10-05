@@ -1,6 +1,6 @@
 /** Ask an endpoint which models it serves, so a catalog we cannot know is not guessed. */
 
-import type { ProviderInfo } from "./credentials";
+import { piProvider, type Provider } from "./agent/providers";
 
 export interface Discovery {
   models: string[];
@@ -12,14 +12,23 @@ export function modelsUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/models`;
 }
 
-/** Ids out of an OpenAI-shaped `{data:[{id}]}` body, sorted and deduplicated. */
+/**
+ * Ids out of a model list, sorted and deduplicated: OpenAI's `{data:[{id}]}`, or Gemini's
+ * native `{models:[{name:"models/<id>"}]}`.
+ */
 export function modelIds(body: unknown): string[] {
-  const data = (body as { data?: unknown })?.data;
-  if (!Array.isArray(data)) return [];
-  const ids = data
-    .map((m) => (m as { id?: unknown })?.id)
-    .filter((id): id is string => typeof id === "string" && id.length > 0);
-  return [...new Set(ids)].sort();
+  const { data, models } = (body ?? {}) as { data?: unknown; models?: unknown };
+  const ids = Array.isArray(data)
+    ? data.map((m) => (m as { id?: unknown })?.id)
+    : Array.isArray(models)
+      ? models.map((m) => {
+          const name = (m as { name?: unknown })?.name;
+          return typeof name === "string" ? name.replace(/^models\//, "") : undefined;
+        })
+      : [];
+  return [
+    ...new Set(ids.filter((id): id is string => typeof id === "string" && id.length > 0)),
+  ].sort();
 }
 
 /**
@@ -34,14 +43,22 @@ export function discoveryError(status: number): string {
   return `The endpoint answered ${status}.`;
 }
 
+/**
+ * The models a provider offers: pi's catalog for a provider pi defines and reaches at its own
+ * endpoint, otherwise what the endpoint lists.
+ */
 export async function discoverModels(
   fetchImpl: typeof fetch,
-  provider: ProviderInfo,
-  baseUrl: string,
+  provider: Provider,
+  baseUrl: string | undefined,
   apiKey?: string,
 ): Promise<Discovery> {
-  const headers: Record<string, string> = { ...(provider.headers || {}) };
-  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  if (!baseUrl) {
+    const pi = await piProvider(provider.id);
+    const ids = pi ? [...new Set(pi.getModels().map((m) => m.id))].sort() : [];
+    return ids.length ? { models: ids } : { models: [], error: "Type an endpoint to list from." };
+  }
+  const headers: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
   try {
     const res = await fetchImpl(modelsUrl(baseUrl), { headers });
     if (!res.ok) return { models: [], error: discoveryError(res.status) };

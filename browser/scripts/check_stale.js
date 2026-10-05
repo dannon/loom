@@ -35,7 +35,7 @@ async function skills() {
 }
 
 async function galaxyMcp() {
-  const pinned = read("brain/tests/data/galaxy-mcp-docs.json").version;
+  const pinned = read("src/agent/galaxy-mcp-docs.json").version;
   const res = await fetch("https://pypi.org/pypi/galaxy-mcp/json");
   if (!res.ok) throw new Error(`PyPI ${res.status}`);
   const latest = (await res.json()).info.version;
@@ -46,12 +46,12 @@ async function galaxyMcp() {
   if (/\d(a|b|rc|\.dev)/.test(pinned)) {
     return (
       `galaxy-mcp captured from ${pinned}, an unreleased build; PyPI publishes ${latest}\n` +
-      `           recapture from whichever galaxy-mcp olit is meant to follow: make galaxy-mcp-docs`
+      `           recapture from whichever galaxy-mcp olit is meant to follow: npm run galaxy-mcp-docs`
     );
   }
   return (
     `galaxy-mcp BEHIND: descriptions captured from ${pinned}, PyPI has ${latest}\n` +
-    `           update: make galaxy-mcp-docs, then read the parity test's diff`
+    `           update: npm run galaxy-mcp-docs, then read the parity test's diff`
   );
 }
 
@@ -61,16 +61,26 @@ async function npmLatest(pkg) {
   return (await res.json()).version;
 }
 
-// The pin is a fork tarball, so "latest" upstream is not what olit runs. The useful question is
-// whether upstream has absorbed enough of the fork delta for the fork to shrink.
+/** A pin to a release asset rather than a version: a temporary candidate build of galaxy-ops. */
+const ARTIFACT = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/releases\/download\/([^/]+)\//;
+
 async function galaxyOps() {
   const spec = read("package.json").dependencies["@galaxyproject/galaxy-ops"];
-  const tag = (spec.match(/ops-v([\w.\-]+)\//) || [])[1] || spec;
-  const upstream = await npmLatest("@galaxyproject/galaxy-ops");
-  return (
-    `galaxy-ops pinned to the fork ${tag}; upstream npm publishes ${upstream}\n` +
-    `           the fork delta is in galaxy-mcp fixes.000; compare before assuming it is still needed`
-  );
+  const latest = await npmLatest("@galaxyproject/galaxy-ops");
+  const artifact = ARTIFACT.exec(spec);
+  if (artifact) {
+    const built =
+      read("package-lock.json").packages["node_modules/@galaxyproject/galaxy-ops"].version;
+    return (
+      `galaxy-ops TEMPORARY: pinned to candidate ${built} (${artifact[1]} release ${artifact[2]}); npm has ${latest}\n` +
+      `           replace it with the first npm release that contains it: npm install @galaxyproject/galaxy-ops@<version>, then npm test`
+    );
+  }
+  const pinned = spec.replace(/^[\^~]/, "");
+  return pinned === latest
+    ? `galaxy-ops up to date at ${pinned}`
+    : `galaxy-ops BEHIND: package.json wants ${pinned}, npm has ${latest}\n` +
+        `           update: bump it and run npm test; ops.ts runs its operations directly`;
 }
 
 async function galaxyCharts() {
@@ -79,7 +89,7 @@ async function galaxyCharts() {
   return pinned === latest
     ? `charts     up to date at ${pinned}`
     : `charts     BEHIND: package.json wants ${pinned}, npm has ${latest}\n` +
-        `           update: bump it, then python3 scripts/check_vendored.py to re-read the input contract`;
+        `           update: bump it and run npm test; visualizations.ts imports its input contract directly`;
 }
 
 const results = await Promise.allSettled([skills(), galaxyMcp(), galaxyOps(), galaxyCharts()]);

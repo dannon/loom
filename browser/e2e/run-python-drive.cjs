@@ -1,5 +1,5 @@
-// run_python in real Pyodide: top-level await, and a cross-origin fetch the browser
-// actually performs. The Python suite runs in CPython, so only this proves the shipped path.
+// run_python in real Pyodide, in its isolated realm: top-level await, and a cross-origin fetch
+// the browser actually performs. python-isolation-drive proves what the realm cannot reach.
 const { chromium } = require("playwright");
 const OUT = process.env.OUT || "/tmp";
 const APP = process.env.APP_URL || "http://localhost:5173/";
@@ -31,7 +31,7 @@ const toolResults = async () =>
 
     await p.goto(APP, { waitUntil: "domcontentloaded" });
     const ready = await waitFor(p, () => /olit ready/i.test(document.body.innerText), 240000);
-    check("the brain is up", ready);
+    check("the agent is up", ready);
     if (!ready) {
         console.log(logs.slice(-20).join("\n"));
         await b.close();
@@ -53,6 +53,23 @@ const toolResults = async () =>
         !!answer && answer.includes("awaited:200:True"), (answer || "").slice(0, 200));
 
     await p.screenshot({ path: `${OUT}/p1-python.png` });
+
+    // ---- Stop ends Python that never returns, and the next run starts afresh ----
+    await fetch(`${STUB}/__script?name=python-forever`);
+    await p.fill("#input", "loop forever");
+    await p.click("#send-btn");
+    await p.waitForTimeout(5000);
+    await p.click("#abort-btn");
+    const stopped = await waitFor(p, () => !document.querySelector("#send-btn").classList.contains("hidden"), 30000);
+    check("Stop ends a Python run that never returns", stopped);
+
+    await fetch(`${STUB}/__script?name=python`);
+    await fetch(`${STUB}/__forget`);
+    await p.fill("#input", "run some python again");
+    await p.click("#send-btn");
+    await waitFor(p, () => !document.querySelector("#send-btn").classList.contains("hidden"), 180000);
+    const again = (await toolResults()).find((t) => t.includes("awaited:"));
+    check("Python runs again after the stop", !!again && again.includes("awaited:200:True"), (again || "").slice(0, 200));
     const failed = results.filter((r) => !r.ok);
     if (failed.length) console.log("\n" + logs.slice(-20).join("\n"));
     console.log(`\n${results.length - failed.length}/${results.length} checks passed`);

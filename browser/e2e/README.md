@@ -30,16 +30,20 @@ node e2e/run-python-drive.cjs
 it needs at the top.
 
 `LLM_PROVIDER` skips the credentials modal, which would otherwise block startup, and routes
-the brain through vite's `/llm` proxy.
+the agent through vite's `/llm` proxy.
 
 **Which tier a new driver belongs to: the dev tier for fast iteration on `src/`, the built
 tier for anything that has to hold in a deployment.** The dev tier bakes `LLM_PROVIDER` in
-and so never shows the credentials modal; the built tier shows it and reaches the brain
+and so never shows the credentials modal; the built tier shows it and reaches the agent
 through the same paths Galaxy uses.
 
-`run-python` is the only check that runs submitted Python in real Pyodide: the brain's own
-suite runs in CPython, where neither `eval_code_async` nor `pyfetch` exists. It asserts
-top-level `await` and a cross-origin `pyfetch` against the stub, so the CORS path is real.
+`run-python` runs submitted Python in real Pyodide, in its isolated realm, through the dev
+server: top-level `await` and a cross-origin `pyfetch` against the stub, so the CORS path is
+real. `python-isolation` (built tier) proves the realm's boundary from the Galaxy origin: Python
+still reads a CORS-enabled endpoint, and its requests carry no Galaxy session, it has no storage,
+and it cannot see the agent's worker or the model key. `run-all.sh` runs it in Chromium, Firefox
+and WebKit, because only the last two attach Galaxy's SameSite-less cookie where the realm's
+credential lock has to stop it. `src/agent/python-node.test.ts` covers the headless realm.
 
 **Anything about persistence needs `?history_id=`.** IndexedDB continuity is keyed by the
 session the history last pointed at, so without a history in the URL the dev page starts a
@@ -47,7 +51,7 @@ new conversation every load, where Galaxy supplies one in production. Saving to 
 Visualization is deliberate and independent of this.
 
 `LLM_KEEP_RECENT_TOKENS` must be small enough that the short test transcript has something
-older than the kept tail; at 500 the brain correctly reports "nothing older to summarize"
+older than the kept tail; at 500 the agent correctly reports "nothing older to summarize"
 and the compaction checks fail. Compaction checks are skipped entirely unless
 `LLM_CONTEXT_WINDOW` is set.
 
@@ -67,14 +71,15 @@ node e2e/credentials-drive.cjs
 node e2e/artifact-pane-drive.cjs
 node e2e/provider-switch-drive.cjs
 node e2e/galaxy-boot-drive.cjs
+node e2e/python-isolation-drive.cjs                   # BROWSER=firefox|webkit for the others
 ```
 
 `galaxy-boot` connects a self-hosted endpoint through the modal and drives a full turn, so
-a built app whose brain fails to start, whose Pyodide path 404s, or whose prompt does not
+a built app whose agent fails to start, whose Pyodide path 404s, or whose prompt does not
 come from the plugin XML fails here.
 
 Drivers that name a real provider call `offline.cjs` first, which aborts every request off
-127.0.0.1: the brain boots on this tier and would otherwise reach the provider for real.
+127.0.0.1: the agent boots on this tier and would otherwise reach the provider for real.
 
 ## The stub
 
