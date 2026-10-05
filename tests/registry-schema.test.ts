@@ -119,6 +119,7 @@ describe("parseRegistry", () => {
     ],
     ["a negative revision", (d) => (d.revision = -1)],
     ["a fractional revision", (d) => (d.revision = 1.5)],
+    ["a revision too large to keep incrementing", (d) => (d.revision = Number.MAX_SAFE_INTEGER)],
     [
       "duplicate exception ids",
       (d, id) => {

@@ -277,11 +277,25 @@ function bool(v: unknown, path: string): boolean {
   return v;
 }
 
+/**
+ * Ceiling on `registry.revision`. Every write adds one, so a file claiming a
+ * revision near MAX_SAFE_INTEGER would push the next write past it, and every
+ * write after that would fail validation -- a registry nobody can record into.
+ * 2^48 is far beyond any real session's writes.
+ */
+export const MAX_REGISTRY_REVISION = 2 ** 48;
+
 function count(v: unknown, path: string): number {
   if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0) {
     fail(path, "expected a non-negative integer");
   }
   return v;
+}
+
+function revisionCount(v: unknown): number {
+  const n = count(v, "registry.revision");
+  if (n > MAX_REGISTRY_REVISION) fail("registry.revision", "is too large to keep incrementing");
+  return n;
 }
 
 function oneOf<T extends string>(v: unknown, allowed: readonly T[], path: string): T {
@@ -636,7 +650,7 @@ export function parseRegistry(v: unknown): Registry {
   }
   const registry: Registry = {
     version: CURRENT_REGISTRY_VERSION,
-    revision: count(o.revision, "registry.revision"),
+    revision: revisionCount(o.revision),
     writer_token: str(o.writer_token, "registry.writer_token"),
     session_sig: str(o.session_sig, "registry.session_sig"),
     analysis_id: str(o.analysis_id, "registry.analysis_id"),
