@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import path from "path";
 import { evaluate } from "../evals/lib/assertions";
 import { filterScenarioDirs } from "../evals/lib/select";
 import { makeRunId, substituteRunId, uvCacheEnv } from "../evals/lib/runner";
@@ -122,13 +123,14 @@ describe("evals scenario selection", () => {
 
 describe("evals uv cache passthrough", () => {
   it("defaults to the real home's cache and honors explicit settings", () => {
+    // path.join, not literals: the runner builds these with the platform separator.
     expect(uvCacheEnv({}, "/home/u")).toEqual({
-      UV_CACHE_DIR: "/home/u/.cache/uv",
-      UV_PYTHON_INSTALL_DIR: "/home/u/.local/share/uv/python",
+      UV_CACHE_DIR: path.join("/home/u", ".cache", "uv"),
+      UV_PYTHON_INSTALL_DIR: path.join("/home/u", ".local", "share", "uv", "python"),
     });
     expect(uvCacheEnv({ UV_CACHE_DIR: "/c", XDG_DATA_HOME: "/d" }, "/home/u")).toEqual({
       UV_CACHE_DIR: "/c",
-      UV_PYTHON_INSTALL_DIR: "/d/uv/python",
+      UV_PYTHON_INSTALL_DIR: path.join("/d", "uv", "python"),
     });
   });
 });
