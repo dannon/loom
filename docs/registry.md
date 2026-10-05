@@ -157,12 +157,15 @@ supports fails closed:
 
 - `integrity: ok` needs a submission Galaxy has confirmed;
 - `conformant` needs a by-construction submission from a user approval;
-- `excepted` needs a user-recorded exception for this attempt and, when there is an
-  approval, its revision;
-- a `manual` predicate never passes;
-- `assertions_pass` needs every named assertion to have passed.
+- `excepted` conformity needs a user `submission_check` exception;
+- a `manual` predicate needs a user `manual_attestation` exception;
+- `assertions_pass` needs every named assertion to have passed, or to be `excepted` with a
+  user `evidence_gate` exception. A `fail` or `inconclusive` assertion is never excused.
 
-None of these can make an attempt eligible that the formula alone would not.
+Every exception has to be the user's (`by: user`, never `restored`), for this attempt, and,
+when there is an approval, for its revision. Each check has one scope that can relax it, so
+attesting a result doesn't also excuse how it was submitted. None of these can make an
+attempt eligible that the formula alone would not.
 
 ## Submitting through galaxy-ops
 
@@ -201,13 +204,16 @@ real import graph to hold that line.
 | `loom_submit`, reservation, `submission_unknown`, `/attribute`, ungated auto-registration | after that                               |
 | `trustedRecord` allowlist, desktop floors, evaluation writer, evidence gate, Page carrier | last                                     |
 
-## Open questions
+## Decisions
 
-- Under the formula, a Spec with a `manual` predicate can never be eligible: attestation makes
-  conformity `excepted` but never makes the predicate pass. Intended, with manual steps
-  handing off through an evidence-gate exception instead -- or should attestation satisfy it?
-- The import rule sets checks to `unchecked`, and only a by-construction check can be
-  `conformant`, so an attempt from an earlier session can become eligible again only through
-  a user exception, not through reconcile alone. Intended?
-- In an `assertions_pass` predicate, does an `excepted` assertion count as passed? Today it
-  does not.
+- **Manual predicates pass by attestation.** A manual predicate is the user's judgment, so
+  their `manual_attestation` exception is what passes it. Without one it is never eligible,
+  whatever an evaluation claims.
+- **Imported attempts return only through a user exception.** Consent is session-scoped:
+  reconcile can re-establish what ran on Galaxy, but never that this session's user approved
+  it. An attempt from an earlier session stays `unchecked` until the user records a
+  `submission_check` exception for it, which makes the hand-off a visible decision rather
+  than something a reload restores.
+- **An excepted assertion counts with an evidence-gate exception.** Accepting a failed check
+  is allowed but has to be on the record as the user's call. The assertion stays `excepted`,
+  not `pass`, so the notebook shows what was waived.

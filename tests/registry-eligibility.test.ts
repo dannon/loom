@@ -66,7 +66,7 @@ describe("computeHandoffEligible (v3 §7)", () => {
       expect(computeHandoffEligible(a, [userException(a)])).toBe(true);
     });
 
-    it("rejects a restored exception, one for another revision, and an evidence_gate one", () => {
+    it("rejects a restored exception, one for another revision, and other scopes", () => {
       const a = eligibleAttempt();
       a.evaluation!.conformity = "excepted";
       expect(computeHandoffEligible(a, [userException(a, { by: "restored" })])).toBe(false);
@@ -74,6 +74,10 @@ describe("computeHandoffEligible (v3 §7)", () => {
         false,
       );
       expect(computeHandoffEligible(a, [userException(a, { scope: "evidence_gate" })])).toBe(false);
+      // Attesting a result doesn't excuse how it was submitted.
+      expect(computeHandoffEligible(a, [userException(a, { scope: "manual_attestation" })])).toBe(
+        false,
+      );
     });
 
     it("lets a user exception make an ungated attempt eligible, and nothing else", () => {
@@ -92,17 +96,34 @@ describe("computeHandoffEligible (v3 §7)", () => {
   describe("a Spec with a manual predicate", () => {
     const spec = makeSpec({ predicate: { kind: "manual" } });
 
-    it("is never eligible, even if an evaluation claims the predicate passed", () => {
+    it("is not eligible on an evaluation's word that the predicate passed", () => {
       const a = eligibleAttempt({ spec });
       expect(computeHandoffEligible(a)).toBe(false);
     });
 
-    it("stays ineligible with a manual attestation: excepted, not pass", () => {
+    it("is eligible once the user attests the result", () => {
       const a = eligibleAttempt({ spec });
-      a.evaluation!.conformity = "excepted";
+      expect(computeHandoffEligible(a, [userException(a, { scope: "manual_attestation" })])).toBe(
+        true,
+      );
+    });
+
+    it("rejects a restored attestation, one for another revision, and other scopes", () => {
+      const a = eligibleAttempt({ spec });
+      const attest = (o: Parameters<typeof userException>[1]) =>
+        computeHandoffEligible(a, [userException(a, { scope: "manual_attestation", ...o })]);
+      expect(attest({ by: "restored" })).toBe(false);
+      expect(attest({ spec_revision: HEX("e") })).toBe(false);
+      expect(attest({ scope: "submission_check" })).toBe(false);
+      expect(attest({ scope: "evidence_gate" })).toBe(false);
+    });
+
+    it("still needs the predicate to have been marked passed", () => {
+      const a = eligibleAttempt({ spec });
       a.evaluation!.predicate_result = "unevaluable";
-      const ex = userException(a, { scope: "manual_attestation" });
-      expect(computeHandoffEligible(a, [ex])).toBe(false);
+      expect(computeHandoffEligible(a, [userException(a, { scope: "manual_attestation" })])).toBe(
+        false,
+      );
     });
   });
 
@@ -128,6 +149,28 @@ describe("computeHandoffEligible (v3 §7)", () => {
         expect(computeHandoffEligible(a)).toBe(false);
       });
     }
+
+    it("counts an excepted assertion only with the user's evidence-gate exception", () => {
+      const a = eligibleAttempt({ spec });
+      a.evaluation!.assertions = { build: "pass", population: "excepted" };
+      const gate = (o: Parameters<typeof userException>[1]) =>
+        computeHandoffEligible(a, [userException(a, { scope: "evidence_gate", ...o })]);
+      expect(gate({})).toBe(true);
+      expect(gate({ by: "restored" })).toBe(false);
+      expect(gate({ spec_revision: HEX("e") })).toBe(false);
+      expect(gate({ scope: "submission_check" })).toBe(false);
+      expect(gate({ scope: "manual_attestation" })).toBe(false);
+    });
+
+    it("never lets an exception excuse a failed or inconclusive assertion", () => {
+      for (const outcome of ["fail", "inconclusive"] as const) {
+        const a = eligibleAttempt({ spec });
+        a.evaluation!.assertions = { build: "pass", population: outcome };
+        expect(computeHandoffEligible(a, [userException(a, { scope: "evidence_gate" })])).toBe(
+          false,
+        );
+      }
+    });
 
     it("is false when an assertion never ran", () => {
       const a = eligibleAttempt({ spec });
