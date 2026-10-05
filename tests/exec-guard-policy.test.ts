@@ -850,3 +850,310 @@ describe.each(WORKSPACE_STATE_DIR_NAMES)("decide -- %s state dir", (D) => {
     ).toBe("ask");
   });
 });
+
+// The classifier used to judge each path as written, so a `cd` into Loom's own
+// state followed by a relative write or read carried no `.loom/` after the verb
+// and fell through to the trusted-workspace auto-allow.
+describe("decide -- a cd into Loom state carries the direct path's verdict", () => {
+  const trusted = { ...baseCfg, trustedWorkspaces: [CWD] };
+  const run = (command: string) => decide(req({ config: trusted, toolInput: { command } }), deps);
+
+  it("denies a relative write after cd into the lessons dir", () => {
+    const r = run("cd ~/.loom/lessons/galaxy-api && echo x > evil.md");
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("bash:catastrophic");
+  });
+  it("denies a relative cp after cd into the lessons dir", () => {
+    const r = run("cd ~/.loom/lessons && cp /tmp/x.md galaxy-api/evil.md");
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("bash:catastrophic");
+  });
+  it("denies reading config.json after cd into the config dir", () => {
+    const r = run("cd ~/.loom && cat config.json");
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("read:credential-store");
+  });
+
+  it.each([
+    // separators
+    "cd ~/.loom/lessons; echo x > evil.md",
+    "cd ~/.loom/lessons || echo x > evil.md",
+    "cd ~/.loom/lessons\necho x > evil.md",
+    // spellings of the directory
+    "cd $HOME/.loom && echo x >> config.json",
+    'cd "${HOME}/.orbit" && tee config.json < /tmp/x',
+    "cd ~/.ORBIT/lessons && cp /tmp/x .",
+    "cd /test-home/alice/.loom/lessons && echo x > evil.md",
+    "cd $LOOM_CONFIG_DIR && echo x > a",
+    "cd ~/.lo* && echo x > a",
+    // hops
+    "cd ~ && cd .loom && echo x > a",
+    "cd ~/.loom && cd /tmp && cd - && echo x > a",
+    "cd ~/.loom/analyses/proj && cd ../.. && echo x > config.json",
+    "cd ../.loom && echo x > a",
+    "pushd ~/.loom && echo x > a",
+    // grouping and nested shells
+    "(cd ~/.loom && echo x > a)",
+    "{ cd ~/.loom; echo x > a; }",
+    "bash -c 'cd ~/.loom && echo x > a'",
+    "eval 'cd ~/.loom'; echo x > a",
+    // every write verb the direct form knows
+    "cd ~/.loom && sed -i s/a/b/ config.json",
+    "cd ~/.loom && dd if=/tmp/x of=config.json",
+    "cd ~/.loom && mv /tmp/x lessons/a.md",
+    // walking back out of the analyses carve-out
+    "cd ~/.loom/analyses/proj && echo x > ../../config.json",
+  ])("denies a write: %j", (command) => {
+    const r = run(command);
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("bash:catastrophic");
+  });
+
+  it.each([
+    "cd ~ && cat .netrc",
+    "cd ~/.ssh && cat id_rsa",
+    "cd ~/.aws && grep key credentials",
+    "cd ~/.orbit && head -c 200 config.json",
+    "cd ~/.loom && cat < config.json",
+  ])("denies a credential-store read: %j", (command) => {
+    const r = run(command);
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("read:credential-store");
+  });
+
+  it.each([
+    "cd ~/.loom && python3 x.py",
+    "cd ~/.loom && touch lessons/x.md",
+    "cd ~/.loom && grep -r token .",
+    "cd ~/.ssh && echo k >> authorized_keys",
+    "cd ~/.loom/lessons && echo x > /tmp/elsewhere",
+  ])("asks instead of auto-allowing what it cannot judge in a guarded dir: %j", (command) => {
+    expect(run(command).decision).toBe("ask");
+  });
+
+  it.each([
+    "cd ~/work/x && echo > y",
+    "cd /tmp && echo x > y",
+    "cd sub && make",
+    "cd $BUILD_DIR && make",
+    'cd "$(git rev-parse --show-toplevel)" && echo x > y',
+    // a subshell's cd and a popped pushd do not outlive themselves
+    "(cd ~/.loom) && echo x > a",
+    "pushd ~/.loom && popd && echo x > a",
+    // a cd with nothing after it runs in a shell that exits straight away
+    "cd ~/.loom",
+    // a cd that is only data: a commit message, a grep pattern, a comment, a
+    // heredoc written to a file
+    "git log --grep='cd .loom'",
+    'git commit -m "fix: cd ~/.loom before writing"',
+    'echo "run: cd ~/.loom && ls"',
+    "cat > script.sh <<'EOF'\ncd ~/.loom\nEOF",
+    // arithmetic shifts are not heredocs
+    "echo $[1<<2]\ncd /tmp\necho x > y",
+    "cd ~/.loom/analyses/proj && echo x > out.txt",
+    "cd ~/.loom/analyses/proj && python3 run.py > out.txt",
+    "cd /tmp && cd - && echo x > a",
+  ])("leaves every other cd alone: %j", (command) => {
+    expect(run(command).decision).toBe("allow");
+  });
+
+  // Each of these got past an earlier version of the walker.
+  it.each([
+    // a cd that fails leaves the shell where it was
+    "cd ~/.loom; cd /etc/passwd; echo x > config.json",
+    "cd ~/.loom && cd /etc/passwd || echo x > config.json",
+    // a heredoc body is data, not a cd
+    "cd ~/.loom <<X\ncd /tmp\nX\necho x > config.json",
+    "cd ~/.loom/lessons <<X\ncd /tmp\nX\ncp /tmp/x.md galaxy-api/evil.md",
+    "cat <<X\n(\nX\ncd ~/.loom <<Y\n)\nY\necho x > config.json",
+    // ...unless a shell reads it
+    "bash <<X\ncd ~/.loom && echo x > config.json\nX",
+    // an unquoted substitution as the target, and hops it cannot resolve
+    "cd $(echo ~/.loom) && echo x > config.json",
+    'cd ~/.loom/lessons && cd "$PWD" && echo x > evil.md',
+    "cd ~/.loom && cd $(pwd) && echo x > config.json",
+    // nested execution
+    "echo `cd ~/.loom && echo x > config.json`",
+    'echo "$(cd ~/.loom && echo x > config.json)"',
+    "find . -maxdepth 0 -exec sh -c 'cd ~/.loom && echo x > config.json' \\;",
+    "xargs -I{} sh -c 'cd ~/.loom && echo x > config.json' <<< a",
+    "bash -c -- 'cd ~/.loom && echo x > config.json'",
+    "bash <<< 'cd ~/.loom && echo x > config.json'",
+    // variables that steer a later cd
+    "CDPATH=~/.loom cd lessons && echo x > evil.md",
+    "HOME=$HOME/.loom; cd; echo x > config.json",
+    "export CDPATH=/x; cd lessons; echo x > evil.md",
+    // a target held in a variable, when the line names the dir it holds
+    "D=~/.loom; cd $D && echo '{}' > config.json",
+    "D=~/.loom; cd \"$D\" && sed -i 's/a/b/' config.json",
+    'for d in ~/.loom; do cd "$d"; echo x > config.json; done',
+    'set -- ~/.loom; cd "$1" && echo x > config.json',
+    "echo ~/.loom | xargs -I{} sh -c 'cd {} && echo x > config.json'",
+    "find ~/.loom -maxdepth 0 -exec sh -c 'cd \"$1\" && echo x > config.json' _ {} \\;",
+    // quotes inside a double-quoted substitution
+    'echo "$(cd "$HOME/.loom" && echo x > config.json)"',
+    'echo "$(cd "$HOME/.lo""om" && echo x > config.json)"',
+    // arithmetic does not hide the lines after it
+    "echo $[1<<2]\ncd ~/.loom\necho x > config.json",
+    "((x = 1 << 2))\ncd ~/.loom\necho x > config.json",
+    "cd \"$(echo ~/.lo''om)\" && echo x > config.json",
+  ])("denies a write: %j", (command) => {
+    const r = run(command);
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("bash:catastrophic");
+  });
+
+  it.each([
+    "cd ~/.loom; cd /nonexistent-xyz; cat config.json",
+    "cd ~/.ssh; cd /etc/passwd; cat id_rsa",
+    "cd ~/.loom <<X\ncd /tmp\nX\ncat config.json",
+    "cd $(dirname ~/.loom/config.json) && cat config.json",
+    "cd $ORBIT_HOME && cat config.json",
+  ])("denies a credential-store read: %j", (command) => {
+    const r = run(command);
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("read:credential-store");
+  });
+
+  it.each([
+    "python3 -c \"import os; os.system('cd ~/.loom && echo x > config.json')\"",
+    "perl <<X\nsystem('cd ~/.loom && echo x > config.json')\nX",
+    "D=~/.ssh; cd $D && cat config",
+    "D=~/.aws; cd $D; grep -r aws_secret .",
+  ])("asks for what it cannot see into: %j", (command) => {
+    expect(run(command).decision).toBe("ask");
+  });
+
+  it("keeps the home directory out of the reason it logs", () => {
+    const r = run("cd ~/.loom && cat config.json");
+    expect(r.reason).toContain("~/.loom/config.json");
+    expect(r.reason).not.toContain(HOME);
+  });
+
+  it.each([
+    // ordinary work inside an Orbit analysis, cwd there
+    "cd data && cp ../raw.csv .",
+    "cd data && python3 run.py > ../results.txt",
+    "cd data && cp *.csv ../out/",
+    "cd scripts && sed -i 's/a/b/' *.py",
+    "cd build && cmake .. && make > ../log.txt",
+    "cd data && cat <<EOF > notes.md\ncd /tmp\nEOF",
+    'cd data && sort in.txt > "$OUT"',
+    'cd results && Rscript plot.R > "${name}.log"',
+    'cd data; for f in *.txt; do wc -l "$f" > "$f.count"; done',
+    "cd data && samtools sort in.bam -o out.bam",
+    "cd ../proj && make > build.log",
+    "pushd data && Rscript ../plot.R && popd",
+    "(cd data && gzip -d *.gz) && ls data",
+    "cd data && python3 ../scripts/run.py | tee run.log",
+  ])("leaves ordinary analysis work alone: %j", (command) => {
+    const analysis = `${HOME}/.loom/analyses/proj`;
+    const inAnalysis: PathResolver = {
+      contains: (p) => ({ resolved: p, inside: p.startsWith(analysis) }),
+    };
+    const r = decide(
+      req({
+        cwd: analysis,
+        config: { ...baseCfg, trustedWorkspaces: [analysis] },
+        toolInput: { command },
+      }),
+      { resolver: inAnalysis, home: HOME },
+    );
+    expect(r.decision).toBe("allow");
+  });
+
+  // A cross-family review ran these against the previous version; each was allowed.
+  it.each([
+    // a `)` in a comment, or inside nested quotes, does not close the substitution
+    'echo "$(printf x # )\ncd ~/.loom && \\cat config.json\n)"',
+    'echo "$(echo "$(printf ")")"; cd ~/.loom/lessons && echo x > a.md)"',
+    // an unquoted heredoc body is expanded whoever reads it
+    "printf '' <<EOF\n$(cd ~/.loom/lessons && echo x > a.md)\nEOF",
+    // an arithmetic command still runs its substitutions
+    "(( $(cd ~/.loom/lessons && echo x > a.md; echo 1) ))",
+    // a cd's own redirection opens in the directory the shell is in now
+    "cd ~/.loom/lessons && cd . > a.md",
+    // OLDPWD decides where cd - goes
+    "OLDPWD=~/.loom/lessons; cd - && echo x > a.md",
+    // a pipeline stage is a subshell; its cd does not move the parent
+    "cd ~/.loom/lessons && cd /tmp | cd /tmp && echo x > a.md",
+    "cd ~/.loom/lessons && cd /tmp |& cat && echo x > a.md",
+    "export OLDPWD=~/.loom/lessons; cd - && echo x > a.md",
+    "declare OLDPWD=~/.loom; cd - && cat config.json",
+  ])("denies: %j", (command) => {
+    expect(run(command).decision).toBe("deny");
+  });
+
+  it("a quoted heredoc body stays literal", () => {
+    expect(run("printf '' <<'EOF'\n$(cd ~/.loom/lessons && echo x > a.md)\nEOF").decision).toBe(
+      "allow",
+    );
+  });
+
+  it.each([
+    // text an inert command only prints
+    "echo bash -c 'cd ~/.loom && echo x > config.json'",
+    // a comment that names ~/.loom is not a reason to suspect the cd
+    "cd $OUT && python3 script.py > log # ~/.loom",
+    // a cd in a pipeline stage, and an OLDPWD that points somewhere ordinary
+    "cd ~/.loom/lessons |& cat; echo x > a.md",
+    "OLDPWD=/tmp; cd - && echo x > a.md",
+  ])("leaves alone: %j", (command) => {
+    expect(run(command).decision).toBe("allow");
+  });
+
+  it("does not make a command with no cd stricter than it was", () => {
+    // The quoted pattern is (still) split into read operands; before the cd
+    // tracker this asked on the basename `.env`, and it must not now deny.
+    const r = run(`grep '.env ${HOME}/.ssh/config' README.md`);
+    expect(r.decision).toBe("ask");
+    expect(r.category).toBe("read:sensitive");
+  });
+
+  // Forms the same review confirmed caught; kept so they stay caught.
+  it.each([
+    "cd ~/.{loom,x}/lessons && echo x > a.md",
+    "cd ~/.loom/{lessons,y} && echo x > a.md",
+    "cd -P ~/.loom/lessons && echo x > a.md",
+    "cd -L -- ~/.loom/lessons && echo x > a.md",
+    "command cd ~/.loom/lessons && echo x > a.md",
+    "builtin cd ~/.loom/lessons && echo x > a.md",
+    "cd ~/.loom/lessons && tee a.md < <(echo x)",
+    "cd ~/.loom && cat <(cat config.json)",
+  ])("still denies: %j", (command) => {
+    expect(run(command).decision).toBe("deny");
+  });
+
+  it("stays linear on a long run of successful cds", () => {
+    const t0 = performance.now();
+    expect(run("cd a&&".repeat(3333) + "echo ok").decision).toBe("allow");
+    expect(performance.now() - t0).toBeLessThan(500);
+  });
+
+  it("stays fast on a long script that cds back and forth", () => {
+    const lines = Array.from({ length: 60 }, (_, i) => `cd d${i}; make > log; cd ..`);
+    const t0 = Date.now();
+    expect(run(lines.join("\n")).decision).toBe("allow");
+    expect(run("cd a; ".repeat(2000) + "echo x > y").decision).toBe("allow");
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  it("realpaths a carved-out write target reached by cd", () => {
+    const link = `${HOME}/.loom/analyses/link`;
+    const symlinked: PathResolver = {
+      contains: (p) => ({
+        resolved: p.startsWith(link) ? `${HOME}/.loom` + p.slice(link.length) : p,
+        inside: p.startsWith(CWD),
+      }),
+    };
+    const r = decide(
+      req({
+        config: trusted,
+        toolInput: { command: "cd ~/.loom/analyses/link && echo x > config.json" },
+      }),
+      { resolver: symlinked, home: HOME },
+    );
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("bash:catastrophic");
+  });
+});
