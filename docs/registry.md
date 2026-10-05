@@ -31,10 +31,11 @@ Scientific correctness is not one of them. That is what the assertions are for.
   commands, and a script can write any file. On the desktop the registry is protected
   against the file tools, shell redirects and allowlisted MCP tools; raw galaxy-mcp
   submissions stay reachable there and are recorded as unchecked, never trusted.
-- **Two residuals no design closes.** A user-defined tool's definition can change on the
-  server between the harness's last check and Galaxy's own fetch at submission; and a
-  response lost after Galaxy accepted a submission cannot be made exactly-once. Both are
-  surfaced as explicit uncertainty, never as silent conformity.
+- **One residual no design closes.** A response lost after Galaxy accepted a submission
+  cannot be made exactly-once; the attempt becomes `submission_unknown` and only the user
+  can attribute it. (A user-defined tool can't change under the harness: Galaxy has no
+  route to update one, and every create mints a new UUID, so the UUID pins the definition.
+  The frozen `definition_digest` is still checked, in case that ever changes.)
 
 ## Files
 
