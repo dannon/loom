@@ -35,7 +35,7 @@
     ]
   },
   "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "^0.0.77",
+    "@anthropic-ai/sandbox-runtime": "^0.0.78",
     "@earendil-works/pi-coding-agent": "^1.0.3",
     "@earendil-works/pi-tui": "^1.0.3",
     "@sinclair/typebox": "^0.34.49",
