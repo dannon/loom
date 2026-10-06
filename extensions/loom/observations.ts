@@ -64,6 +64,7 @@ import { getConfigDir } from "./config.js";
 import { readLoomVersion } from "./feedback.js";
 import { loadProfiles } from "./profiles.js";
 import { isWsl } from "../../shared/wsl.js";
+import { galaxyMcpToolName } from "../../shared/galaxy-mcp-tools.js";
 import {
   GALAXY_BUILTIN_TOOL_IDS,
   GALAXY_DATATYPES,
@@ -162,9 +163,31 @@ export function isAdmissibleDatatype(v: string): boolean {
   return !DATATYPE_SENTINELS.has(v) && GALAXY_DATATYPES.has(v);
 }
 
-/** galaxy-mcp's real tool names. The proxy shape builds this from model text. */
+/**
+ * galaxy-mcp's real tool names, in wire spelling (`galaxy_run_tool`). Takes a
+ * name already through observationToolName; a pi spelling is refused here.
+ */
 export function isAdmissibleMcpTool(v: string | undefined): v is string {
   return typeof v === "string" && GALAXY_MCP_TOOLS.has(v);
+}
+
+/**
+ * The name the collector knows a Galaxy tool call by, or undefined when the
+ * call isn't one. pi registers galaxy-mcp's tools as `mcp__galaxy__<tool>`;
+ * the wire contract and the allowlist predate that and say `galaxy_<tool>`, and
+ * the deployed intake validates that spelling, so the rename stops here rather
+ * than reaching the payload. Loom's own `galaxy_*` tools pass through as-is.
+ */
+export function observationToolName(toolName: string | undefined): string | undefined {
+  const mcp = galaxyMcpToolName(toolName);
+  if (mcp !== undefined) {
+    // pi joins server and tool with `__`, so `mcp__galaxy__x__run_tool` is
+    // `run_tool` on a server named `galaxy__x`, not galaxy-mcp. galaxy-mcp
+    // has no tool with `__` in its name.
+    if (!mcp || mcp.includes("__")) return undefined;
+    return `galaxy_${mcp}`;
+  }
+  return toolName?.startsWith("galaxy_") ? toolName : undefined;
 }
 
 const TOOL_ID_KEYS = ["tool_id", "tool_ids"] as const;

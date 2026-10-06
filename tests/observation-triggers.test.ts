@@ -89,9 +89,9 @@ describe("decideToolResultObservation", () => {
 });
 
 describe("factsForToolResult", () => {
-  it("builds facts from a galaxy tool failure", () => {
+  it("reports galaxy-mcp's pi spelling in the wire spelling", () => {
     const facts = factsForToolResult(
-      "galaxy_run_tool",
+      "mcp__galaxy__run_tool",
       { tool_id: "Filter1", file_type: "tabular" },
       "ToolExecutionError: dataset 2a56fb8e4c1d9f70b3ac55e1d2f80911 failed",
     );
@@ -105,20 +105,33 @@ describe("factsForToolResult", () => {
     });
   });
 
-  it("normalises the mcp proxy call shape to the direct tool name", () => {
-    const facts = factsForToolResult(
-      "mcp",
-      { server: "galaxy", tool: "run_tool", args: { tool_id: "Filter1" } },
-      "boom",
-    );
-    expect(facts?.mcpTool).toBe("galaxy_run_tool");
-    expect(facts?.toolIds).toEqual(["Filter1"]);
+  it("passes Loom's own galaxy_* tools through unchanged", () => {
+    const facts = factsForToolResult("galaxy_upload_local_file", {}, "ENOSPC");
+    expect(facts?.mcpTool).toBe("galaxy_upload_local_file");
+  });
+
+  it("does not take another server's tools for galaxy-mcp's", () => {
+    // pi joins server and tool with `__`: this is run_tool on a server named galaxy__x.
+    expect(factsForToolResult("mcp__galaxy__x__run_tool", {}, "boom")).toBeNull();
+    // pi turns `-` into `_`, so a server named galaxy-x lands here.
+    expect(factsForToolResult("mcp__galaxy_x__run_tool", {}, "boom")).toBeNull();
+    expect(factsForToolResult("mcp__galaxy__", {}, "boom")).toBeNull();
+  });
+
+  it("no longer reads the pi-mcp-adapter proxy shape", () => {
+    expect(
+      factsForToolResult(
+        "mcp",
+        { server: "galaxy", tool: "run_tool", args: { tool_id: "Filter1" } },
+        "boom",
+      ),
+    ).toBeNull();
   });
 
   it("ignores a non-galaxy tool and an empty result", () => {
     expect(factsForToolResult("bash", { command: "ls" }, "No such file")).toBeNull();
-    expect(factsForToolResult("galaxy_run_tool", {}, "")).toBeNull();
-    expect(factsForToolResult("galaxy_run_tool", {}, "   ")).toBeNull();
+    expect(factsForToolResult("mcp__galaxy__run_tool", {}, "")).toBeNull();
+    expect(factsForToolResult("mcp__galaxy__run_tool", {}, "   ")).toBeNull();
   });
 });
 
@@ -356,12 +369,8 @@ describe("deliverObservation", () => {
   });
 
   it("hands the description prompt the built observation, never the raw facts", async () => {
-    const raw = factsForToolResult(
-      "mcp",
-      { server: "galaxy", tool: "alice@clinic.org", args: {} },
-      "Unknown tool",
-    )!;
-    expect(raw.mcpTool).toBe("galaxy_alice@clinic.org");
+    const raw = factsForToolResult("mcp__galaxy__alice_clinic_org", {}, "Unknown tool")!;
+    expect(raw.mcpTool).toBe("galaxy_alice_clinic_org");
     const describe = vi.fn().mockResolvedValue("");
     const d = deps({ mode: "ask", describe });
     await deliverObservation(raw, ctx, d);
@@ -589,7 +598,7 @@ describe("registerObservationTriggers", () => {
   }
 
   const failure = {
-    toolName: "galaxy_run_tool",
+    toolName: "mcp__galaxy__run_tool",
     input: { tool_id: "Filter1" },
     content: [{ type: "text", text: "ToolExecutionError: Job 12345 refused a header-only table" }],
     isError: true,
@@ -625,6 +634,50 @@ describe("registerObservationTriggers", () => {
     expect(pendingObservationCount()).toBe(0);
     const sent = JSON.parse(String(fetchMock.mock.calls[0][1].body));
     expect(sent.signature).toBe("ToolExecutionError: Job <n> refused a header-only table");
+    expect(sent.mcpTool).toBe("galaxy_run_tool");
+    expect(sent.stage).toBe("tool-parameterization");
+  });
+
+  it("counts a retry loop across galaxy-mcp's pi spelling", async () => {
+    const { registerObservationTriggers, pendingObservationCount } =
+      await import("../extensions/loom/observation-triggers.js");
+    const pi = fakePi();
+    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
+    await pi.emit("session_start", {}, {});
+    for (let i = 0; i < RETRY_LOOP_THRESHOLD; i++) await pi.emit("tool_result", failure, {});
+    // The first failure as a tool-error and the third as a retry-loop.
+    expect(pendingObservationCount()).toBe(2);
+  });
+
+  it("takes the Galaxy version from galaxy-mcp's connect under its pi spelling", async () => {
+    const { registerObservationTriggers } =
+      await import("../extensions/loom/observation-triggers.js");
+    const { getGalaxyVersion } = await import("../extensions/loom/observations.js");
+    const pi = fakePi();
+    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
+    await pi.emit("session_start", {}, {});
+    await pi.emit(
+      "tool_result",
+      {
+        toolName: "mcp__galaxy__connect",
+        input: {},
+        content: [{ type: "text", text: '{"success": true, "version": "26.1.1"}' }],
+        isError: false,
+        details: undefined,
+      },
+      {},
+    );
+    expect(getGalaxyVersion()).toBe("26.1.1");
+  });
+
+  it("raises nothing for a failure on a server named galaxy__x", async () => {
+    const { registerObservationTriggers, pendingObservationCount } =
+      await import("../extensions/loom/observation-triggers.js");
+    const pi = fakePi();
+    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
+    await pi.emit("session_start", {}, {});
+    await pi.emit("tool_result", { ...failure, toolName: "mcp__galaxy__x__run_tool" }, {});
+    expect(pendingObservationCount()).toBe(0);
   });
 
   it("raises one assertion-failed report per session however often the gate blocks", async () => {

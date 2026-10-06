@@ -9,7 +9,8 @@
  * over and the user is reading anyway.
  *
  * Three triggers, all deterministic, none of them a model judgement:
- *   - a galaxy_* tool result with isError
+ *   - a Galaxy tool result with isError (galaxy-mcp's `mcp__galaxy__*`, or
+ *     one of Loom's own `galaxy_*` tools)
  *   - the same tool and the same normalized signature RETRY_LOOP_THRESHOLD times
  *   - the evidence gate blocking a plan-step completion
  * A fourth, the user's own `/observe`, lives in observations-command.ts and
@@ -32,6 +33,7 @@ import {
   drainObservationOutbox,
   extractDatatypes,
   extractToolIds,
+  observationToolName,
   recordGalaxyVersionFromConnect,
   resetGalaxyVersion,
   saveRetractToken,
@@ -49,7 +51,6 @@ import type {
 import { getOrCreateInstallToken, resolveObservationsMode } from "./observations-config.js";
 import type { ObservationsMode } from "./observations-config.js";
 import { onEvidenceDecision } from "./evidence-gate.js";
-import { galaxyCall } from "./mcp-recovery.js";
 import { appendActivityEvent } from "./activity.js";
 import { getNotebookPath } from "./state.js";
 import { confirmObservation, describeObservation } from "./observation-ui.js";
@@ -142,24 +143,26 @@ export function pendingObservationCount(): number {
 // -----------------------------------------------------------------------------
 
 /**
- * galaxyCall normalises both surfaces -- a direct `galaxy_*` call and the
- * `mcp` proxy shape -- so a proxied failure is not silently invisible.
+ * `mcpTool` comes out in wire spelling (see observationToolName), so the retry
+ * key, the stage rules and the allowlist all see `galaxy_run_tool` whichever
+ * way pi spelled the call.
  */
 export function factsForToolResult(
   toolName: string,
   input: Record<string, unknown>,
   text: string,
 ): ObservationFacts | null {
-  const call = galaxyCall(toolName, input ?? {});
-  if (!call) return null;
+  const name = observationToolName(toolName);
+  if (!name) return null;
   const raw = String(text ?? "").trim();
   if (!raw) return null;
+  const args = input ?? {};
   return {
     kind: "tool-error",
     trigger: "tool_error",
-    mcpTool: call.name,
-    toolIds: extractToolIds(call.args),
-    datatypes: extractDatatypes(call.args),
+    mcpTool: name,
+    toolIds: extractToolIds(args),
+    datatypes: extractDatatypes(args),
     rawSignature: raw,
   };
 }
@@ -477,10 +480,7 @@ export function registerObservationTriggers(pi: ExtensionAPI): void {
     // Registered AFTER secret redaction in index.ts, so `content` here is the
     // already-scrubbed text the model sees. Reading the raw result would put
     // an API key one normalization away from the wire.
-    if (
-      galaxyCall(event.toolName, event.input ?? {})?.name === "galaxy_connect" &&
-      !event.isError
-    ) {
+    if (observationToolName(event.toolName) === "galaxy_connect" && !event.isError) {
       recordGalaxyVersionFromConnect(errorTextOf(event.content));
     }
     if (resolveObservationsMode() === "off") return;

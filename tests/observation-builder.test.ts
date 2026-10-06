@@ -136,14 +136,11 @@ describe("structured fields are admitted from allowlists, not shapes", () => {
 
   it("sends none of the reviewer's identifying words as structure", () => {
     const facts = factsForToolResult(
-      "mcp",
-      {
-        server: "galaxy",
-        tool: "alice_smith",
-        args: { tool_id: "Alice_Smith", file_type: "patient_17.fastq" },
-      },
+      "mcp__galaxy__alice_smith",
+      { tool_id: "Alice_Smith", file_type: "patient_17.fastq" },
       "Unknown tool",
     )!;
+    expect(facts.mcpTool).toBe("galaxy_alice_smith");
     const obs = buildObservation(facts, envelope, "structured");
     expect("mcpTool" in obs).toBe(false);
     expect(obs.tools).toEqual([]);
@@ -177,6 +174,9 @@ describe("structured fields are admitted from allowlists, not shapes", () => {
     expect(isAdmissibleMcpTool("galaxy_run_tool")).toBe(true);
     expect(isAdmissibleMcpTool("galaxy_get_job_details")).toBe(true);
     expect(isAdmissibleMcpTool("galaxy_alice_smith")).toBe(false);
+    // Admission takes the wire spelling only; the pi spelling is normalised first.
+    expect(isAdmissibleMcpTool("mcp__galaxy__run_tool")).toBe(false);
+    expect(isAdmissibleMcpTool("mcp__galaxy__alice_smith")).toBe(false);
     expect(extractDatatypes({ file_type: "BAM" })).toEqual(["bam"]);
     expect(extractDatatypes({ file_type: "fastqsanger.bz2" })).toEqual(["fastqsanger.bz2"]);
     expect(extractToolIds({ tool_id: "__MERGE_COLLECTION__" })).toEqual(["__MERGE_COLLECTION__"]);
