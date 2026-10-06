@@ -353,6 +353,19 @@ export async function deliverObservation(
     });
     return tokenLost ? "sent-unretractable" : "sent";
   }
+  if (res.status === 409) {
+    // The intake already holds this id from an attempt whose 202 was lost. It
+    // went; only the retract token is gone.
+    appendSentLog(sentLogEntryFor(obs, "sent"));
+    deps.state.delivered += 1;
+    deps.record("observation.sent", {
+      id: obs.id,
+      kind: obs.kind,
+      ...(obs.trigger === "explicit" ? {} : { signature: obs.signature }),
+      duplicate: true,
+    });
+    return "sent-unretractable";
+  }
   if (res.queueable) {
     if (!appendToObservationOutbox(obs)) {
       deps.record("observation.unsaved", {

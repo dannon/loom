@@ -561,11 +561,11 @@ export interface SubmitObservationResult {
   queueable: boolean;
 }
 
-// The intake route answers 500 when the id already exists (a primary-key
-// collision), which a resend of the same observation can never get past. So a
-// 500 gets a small bounded retry here, in case it was a blip, and then counts as
-// permanent -- queuing it would loop the outbox on a row that is already there
-// or never will be.
+// The intake route answers 409 when the id already exists: a resend after a
+// lost 202, which can never get past the primary key. The caller records that
+// as sent without a token. A 500 is still given one bounded retry in case it was
+// a blip, and then counts as permanent -- queuing it would loop the outbox on a
+// row that never will be accepted.
 const ATTEMPTS_ON_500 = 2;
 
 function queueableStatus(status: number): boolean {
@@ -1001,6 +1001,13 @@ export async function drainObservationOutbox(
         appendSentLog(sentLogEntryFor(obs, "sent"));
         settle(line, id);
         counts.sent += 1;
+      } else if (res.status === 409) {
+        // Already stored from an earlier attempt whose 202 never arrived: the
+        // row is there, the token is gone.
+        appendSentLog(sentLogEntryFor(obs, "sent"));
+        settle(line, id);
+        counts.sent += 1;
+        counts.unretractable = (counts.unretractable ?? 0) + 1;
       } else if (res.queueable) {
         if (res.status === undefined) unreachable = true;
       } else {

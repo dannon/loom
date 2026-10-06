@@ -132,6 +132,20 @@ describe("submitObservation", () => {
     expect(res.queueable).toBe(false);
   });
 
+  it("takes a 409 as already stored: no retry, not queueable", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ ok: false, error: "duplicate", id: obs.id }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const m = await load();
+    const res = await m.submitObservation(obs);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(409);
+    expect(res.queueable).toBe(false);
+  });
+
   it("takes a 500 followed by a 202 as sent", async () => {
     const fetchMock = vi
       .fn()
@@ -416,6 +430,20 @@ describe("drainObservationOutbox", () => {
       dropped: 1,
     });
     expect(JSON.parse(lines("observations-outbox.jsonl")[0]).id).toBe(obs.id);
+  });
+
+  it("settles a 409 as sent without a token instead of dropping it", async () => {
+    const m = await load();
+    m.appendToObservationOutbox(obs);
+    const submit = vi.fn().mockResolvedValueOnce({ ok: false, status: 409, queueable: false });
+    expect(await m.drainObservationOutbox(submit, () => true)).toEqual({
+      sent: 1,
+      kept: 0,
+      dropped: 0,
+      unretractable: 1,
+    });
+    expect(lines("observations-outbox.jsonl")).toEqual([]);
+    expect(m.readSentLog().map((r) => r.status)).toEqual(["sent"]);
   });
 
   it("re-validates every row and never sends one that was edited to leak", async () => {

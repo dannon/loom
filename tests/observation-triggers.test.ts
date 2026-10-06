@@ -509,6 +509,14 @@ describe("deliverObservation", () => {
     expect(d.state.delivered).toBe(1);
   });
 
+  it("counts a 409 as sent without a token: the intake already holds it", async () => {
+    const d = deps({ submit: async () => ({ ok: false, status: 409, queueable: false }) });
+    expect(await deliverObservation(facts, ctx, d)).toBe("sent-unretractable");
+    expect(d.state.delivered).toBe(1);
+    const sent = d.rows.find(([name]) => name === "observation.sent");
+    expect(sent?.[1]).toMatchObject({ duplicate: true });
+  });
+
   it("drops a permanent rejection instead of queuing it forever", async () => {
     const d = deps({
       submit: async () => ({
