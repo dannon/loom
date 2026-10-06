@@ -8,7 +8,12 @@
 // excluded would quietly become callable. Translate what pi can express and
 // disable what it can't.
 
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+
 const LEGACY_SERVER_NAMES = ["galaxy", "brc-analytics"];
+
+/** Sits beside mcp.json and holds the bytes the migration last rewrote or removed. */
+export const BACKUP_SUFFIX = ".loom-backup";
 
 // Present only on an entry written for pi's built-in MCP, which Loom never did:
 // a galaxy or brc-analytics entry carrying one is the user's own override.
@@ -115,19 +120,26 @@ function translateAdapterEntry(name, entry) {
  * Remove Loom's own servers and the adapter's settings from a parsed mcp.json,
  * and translate the user's remaining servers to pi's built-in MCP fields.
  * @param {Record<string, any>} config
- * @returns {{ changed: boolean, empty: boolean, removedGalaxy: boolean, notices: string[] }}
- *   `empty` when nothing is left worth keeping.
+ * @returns {{ changed: boolean, empty: boolean, removedGalaxy: boolean, notices: string[], shadowing: string[] }}
+ *   `empty` when nothing is left worth keeping. `shadowing` names the galaxy /
+ *   brc-analytics entries that stay because they carry pi's own fields: a file
+ *   entry beats the brain's registration, so each one pins whatever it says.
  */
 export function stripLegacyMcpEntries(config) {
   let changed = false;
   let removedGalaxy = false;
   /** @type {string[]} */
   const notices = [];
+  /** @type {string[]} */
+  const shadowing = [];
   const servers = isObject(config.mcpServers) ? config.mcpServers : null;
   if (servers) {
     for (const [name, entry] of Object.entries(servers)) {
       if (LEGACY_SERVER_NAMES.includes(name)) {
-        if (!isLoomWritten(entry)) continue;
+        if (!isLoomWritten(entry)) {
+          if (isObject(entry) && entry.enabled !== false) shadowing.push(name);
+          continue;
+        }
         delete servers[name];
         changed = true;
         if (name === "galaxy") removedGalaxy = true;
@@ -146,5 +158,102 @@ export function stripLegacyMcpEntries(config) {
   }
   const otherKeys = Object.keys(config).filter((k) => k !== "mcpServers");
   const empty = otherKeys.length === 0 && Object.keys(servers ?? {}).length === 0;
-  return { changed, empty, removedGalaxy, notices };
+  return { changed, empty, removedGalaxy, notices, shadowing };
+}
+
+/** @param {string} name @param {string} mcpConfigPath */
+function shadowingNotice(name, mcpConfigPath) {
+  const what =
+    name === "galaxy"
+      ? "the Galaxy server and key saved there, not the profile from /connect"
+      : "that BRC Analytics server, not the one Loom ships";
+  return (
+    `${mcpConfigPath} still has a "${name}" entry written for pi's built-in MCP. ` +
+    `A file entry wins over the brain's registration, so Loom will use ${what}. ` +
+    `Remove the entry if that is not what you want.`
+  );
+}
+
+/**
+ * Replace `dest` with `tmpPath`. Windows can refuse the rename for a moment
+ * while an indexer or antivirus has the file open, so try a few times before
+ * giving up.
+ * @param {string} tmpPath @param {string} dest
+ */
+function renameWithRetry(tmpPath, dest) {
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  for (let attempt = 1; ; attempt++) {
+    try {
+      renameSync(tmpPath, dest);
+      return;
+    } catch (err) {
+      if (attempt >= 3) throw err;
+      Atomics.wait(pause, 0, 0, 100 * attempt);
+    }
+  }
+}
+
+/**
+ * Migrate the mcp.json at `mcpConfigPath` in place. Before the file changes,
+ * its current bytes go to `<path>.loom-backup` (mode 0600; it may carry a key).
+ * Nothing here throws: a file that cannot be updated is left as it was and
+ * described in the returned notices, because refusing to start would leave the
+ * user with no way to fix it from inside Loom, and there is no restriction to
+ * lose when the file cannot be written at all.
+ * @param {string} mcpConfigPath
+ * @returns {{ notices: string[] }} messages for the launcher to print
+ */
+export function migrateLegacyMcpConfig(mcpConfigPath) {
+  /** @type {string[]} */
+  const notices = [];
+  if (!existsSync(mcpConfigPath)) return { notices };
+
+  let raw;
+  let mcpConfig;
+  try {
+    raw = readFileSync(mcpConfigPath, "utf-8");
+    mcpConfig = JSON.parse(raw);
+  } catch {
+    // An unparseable mcp.json is pi's to report, and pi loads none of it -- so
+    // no stale galaxy entry in it can shadow the brain's registration either.
+    return { notices };
+  }
+  if (!mcpConfig || typeof mcpConfig !== "object") return { notices };
+
+  const {
+    changed,
+    empty,
+    removedGalaxy,
+    notices: translated,
+    shadowing,
+  } = stripLegacyMcpEntries(mcpConfig);
+  for (const name of shadowing) notices.push(shadowingNotice(name, mcpConfigPath));
+  if (!changed) return { notices };
+
+  const backupPath = `${mcpConfigPath}${BACKUP_SUFFIX}`;
+  const tmpPath = `${mcpConfigPath}.${process.pid}.tmp`;
+  try {
+    writeFileSync(backupPath, raw, { mode: 0o600 });
+    if (empty) {
+      rmSync(mcpConfigPath);
+    } else {
+      writeFileSync(tmpPath, JSON.stringify(mcpConfig, null, 2) + "\n", { mode: 0o600 });
+      renameWithRetry(tmpPath, mcpConfigPath);
+    }
+    notices.push(...translated);
+    notices.push(`The previous ${mcpConfigPath} is saved as ${backupPath}.`);
+  } catch (err) {
+    rmSync(tmpPath, { force: true });
+    // Left as it is, the file is read the old way: an old galaxy entry wins
+    // over the brain's registration (pinning every session to that account and
+    // key), and the user's own servers lose the tool restrictions pi ignores.
+    const why = removedGalaxy
+      ? `Loom will keep using the Galaxy account saved there`
+      : `the servers Loom meant to migrate keep settings pi ignores, such as tool restrictions`;
+    notices.push(
+      `Could not update ${mcpConfigPath} (${err instanceof Error ? err.message : err}), ` +
+        `so ${why}. Fix the file's permissions, or remove those entries, and restart Loom.`,
+    );
+  }
+  return { notices };
 }
