@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { decide } from "../extensions/loom/exec-guard/policy";
 import type {
   GuardianConfig,
@@ -1158,5 +1158,67 @@ describe("decide -- a cd into Loom state carries the direct path's verdict", () 
     );
     expect(r.decision).toBe("deny");
     expect(r.category).toBe("bash:catastrophic");
+  });
+});
+
+describe("pi credential store (auth.json) is denied like ~/.loom/config.json", () => {
+  // piAgentDir() reads PI_CODING_AGENT_DIR, which is how the store relocates in
+  // a real run -- so point it at the fake HOME the rest of this file uses.
+  const AGENT_DIR = `${HOME}/.pi/agent`;
+  let saved: string | undefined;
+  beforeEach(() => {
+    saved = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = AGENT_DIR;
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = saved;
+  });
+
+  const AUTH = `${HOME}/.pi/agent/auth.json`;
+  const allInside = {
+    ...deps,
+    resolver: { contains: (p: string) => ({ resolved: p, inside: true }) },
+  };
+
+  it("denies read/grep of the OAuth store for ALL tiers", () => {
+    for (const tier of ["trusted", "weak"] as const)
+      for (const tool of ["read", "grep"])
+        expect(
+          decide(req({ toolName: tool, toolInput: { path: AUTH }, modelTier: tier }), deps)
+            .decision,
+          `${tool}/${tier}`,
+        ).toBe("deny");
+  });
+
+  it("denies `cat` of the OAuth store through bash, including inside a pipe", () => {
+    for (const cmd of [`cat ${AUTH}`, `cat ${AUTH} | head -c 40`])
+      expect(decide(req({ toolInput: { command: cmd } }), deps).decision, cmd).toBe("deny");
+  });
+
+  it("denies it after a cd into the agent dir, not just by direct path", () => {
+    const r = decide(
+      req({ toolInput: { command: `cd ${HOME}/.pi/agent && cat auth.json` } }),
+      deps,
+    );
+    expect(r.decision).toBe("deny");
+  });
+
+  it("denies it even when the workspace CONTAINS the pi dir", () => {
+    // The regression this fix exists for. The out-of-workspace prompt was the
+    // only thing standing in front of auth.json, and it does not fire when the
+    // agent's cwd is $HOME (plain `loom` in a home directory) -- the read was
+    // simply allowed, silently, and both OAuth tokens went into the transcript.
+    const r = decide(req({ toolName: "read", toolInput: { path: AUTH }, cwd: HOME }), allInside);
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("read:credential-store");
+  });
+
+  it("still allows the non-credential files in the same directory", () => {
+    const r = decide(
+      req({ toolName: "read", toolInput: { path: `${HOME}/.pi/agent/models.json` } }),
+      allInside,
+    );
+    expect(r.decision).toBe("allow");
   });
 });
