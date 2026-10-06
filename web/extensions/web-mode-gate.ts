@@ -40,12 +40,15 @@ const PATH_GATED_TOOLS = new Set(["edit", "write", "read"]);
 const ALLOWED_PREFIXES = ["mcp__galaxy__", "mcp__brc_analytics__", "galaxy_", "gtn_", "notebook_"];
 
 /**
- * A server named "galaxy_" or "galaxy-" gets pi's namespace mcp__galaxy_, so its
- * tools read mcp__galaxy___<tool> and would pass a plain startsWith.
+ * Another server's tools can pass a plain startsWith: "galaxy_" or "galaxy-"
+ * gives mcp__galaxy___<tool>, and "galaxy__x" gives mcp__galaxy__x__<tool>.
+ * The curated servers' own tool names never start with "_" or contain "__".
  */
 function hasToolPrefix(toolName: string, prefix: string): boolean {
   if (!toolName.startsWith(prefix)) return false;
-  return !prefix.startsWith("mcp__") || toolName.charAt(prefix.length) !== "_";
+  if (!prefix.startsWith("mcp__")) return true;
+  const tool = toolName.slice(prefix.length);
+  return !tool.startsWith("_") && !tool.includes("__");
 }
 
 // Allowed tool names that don't share one of the prefixes above.

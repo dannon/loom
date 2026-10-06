@@ -17,4 +17,9 @@ describe("galaxyMcpToolName", () => {
     expect(isGalaxyMcpTool("mcp__galaxy___run_tool")).toBe(false);
     expect(galaxyMcpToolName("mcp__galaxy__")).toBeUndefined();
   });
+
+  it("rejects a server named galaxy__<x>, whose tools come out as mcp__galaxy__<x>__<tool>", () => {
+    expect(galaxyMcpToolName("mcp__galaxy__x__run_shell")).toBeUndefined();
+    expect(isGalaxyMcpTool("mcp__galaxy__x__run")).toBe(false);
+  });
 });
