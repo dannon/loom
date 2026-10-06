@@ -10,7 +10,11 @@
 // Regenerate when Loom's Galaxy floor or galaxy-mcp pin moves; see the script
 // header for the command.
 
-/** galaxy-mcp's tool names, with the `galaxy_` prefix Loom gives them. */
+/**
+ * galaxy-mcp's tool names in the observation wire spelling, `galaxy_<name>`.
+ * pi calls them `mcp__galaxy__<name>`; the collector normalises to this
+ * spelling before it checks the list, so a pi spelling is never on it.
+ */
 export const GALAXY_MCP_TOOLS: ReadonlySet<string> = new Set([
   "galaxy_cancel_workflow_invocation",
   "galaxy_connect",
