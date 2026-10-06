@@ -48,6 +48,7 @@ const ADAPTER_ONLY_FIELDS = [
   "httpTransport",
   "inheritEnv",
   "literalEnv",
+  "literalArgs",
   "pluginDataDir",
 ];
 
@@ -92,6 +93,7 @@ const PI_ENV_NAME = /^[A-Za-z_]\w*$/;
 // leading "!" as a command, and read "!!" as a literal "!". pi also expands a
 // bare $NAME and runs "!!..." as a command, so each value is respelled to come
 // out the same: "$$" is pi's literal "$", and "$!" its literal "!".
+const ADAPTER_REF_ONLY = /\$\{\w+\}|\$env:\w+|\{env:\w+\}/;
 const ADAPTER_REF = /\$\{(\w+)\}|\$env:(\w+)|\{env:(\w+)\}|\$/g;
 
 /** @param {string} value */
@@ -180,19 +182,28 @@ function translateAdapterEntry(name, entry) {
   const hasAuthHeader = Object.keys(headers).some((h) => h.toLowerCase() === "authorization");
   let token = null;
   // The adapter sent a bearer token only when auth was "bearer".
+  // An explicit bearerToken won over bearerTokenEnv.
   if (entry.auth === "bearer") {
-    if (typeof entry.bearerTokenEnv === "string") {
-      if (!PI_ENV_NAME.test(entry.bearerTokenEnv)) unspellable.push(entry.bearerTokenEnv);
-      token = `\${${entry.bearerTokenEnv}}`;
-    } else if (typeof entry.bearerToken === "string") {
+    if (typeof entry.bearerToken === "string") {
       // A pi header runs a command only when the whole value is one, so
       // "Bearer <command output>" has no spelling there.
       if (entry.bearerToken.startsWith("!") && !entry.bearerToken.startsWith("!!")) {
         unsupported.push("a bearerToken command");
       } else token = adapterValueToPi(entry.bearerToken, false, unspellable);
+    } else if (typeof entry.bearerTokenEnv === "string") {
+      if (!PI_ENV_NAME.test(entry.bearerTokenEnv)) unspellable.push(entry.bearerTokenEnv);
+      token = `\${${entry.bearerTokenEnv}}`;
     }
   }
   if (token && !hasAuthHeader) entry.headers = { ...headers, Authorization: `Bearer ${token}` };
+  // The adapter also expanded references in the url and (unless literalArgs) the
+  // args; pi expands neither, so such a value would silently become literal.
+  if (typeof entry.url === "string" && ADAPTER_REF_ONLY.test(entry.url)) {
+    unsupported.push("env references in its url");
+  }
+  if (entry.literalArgs !== true && stringList(entry.args).some((a) => ADAPTER_REF_ONLY.test(a))) {
+    unsupported.push("env references in its args");
+  }
   if (unspellable.length > 0) {
     unsupported.push(`env references pi can't spell (${[...new Set(unspellable)].join(", ")})`);
   }

@@ -273,6 +273,42 @@ describe("stripLegacyMcpEntries", () => {
     expect(config.mcpServers.quiet).toEqual({ url: "https://q.example/mcp" });
   });
 
+  it("prefers bearerToken over bearerTokenEnv when both are set, as the adapter did", () => {
+    const config = {
+      mcpServers: {
+        both: {
+          url: "https://b.example/mcp",
+          auth: "bearer",
+          bearerToken: "direct",
+          bearerTokenEnv: "FROM_ENV",
+        },
+      },
+    };
+    stripLegacyMcpEntries(config);
+    expect(config.mcpServers.both.headers).toEqual({ Authorization: "Bearer direct" });
+  });
+
+  it("disables a server whose url or args used env references, which pi doesn't expand there", () => {
+    const config = {
+      mcpServers: {
+        host: { url: "https://${HOST}/mcp", directTools: true },
+        argv: { command: "srv", args: ["--token", "$env:TOK"], directTools: true },
+        literal: { command: "srv", args: ["${KEEP}"], literalArgs: true, directTools: true },
+      },
+    };
+    const { notices } = stripLegacyMcpEntries(config);
+    expect(config.mcpServers.host.enabled).toBe(false);
+    expect(config.mcpServers.argv.enabled).toBe(false);
+    expect(config.mcpServers.literal).toEqual({
+      command: "srv",
+      args: ["${KEEP}"],
+      exposure: "direct",
+    });
+    expect(notices).toHaveLength(2);
+    expect(notices[0]).toMatch(/"host".*url/);
+    expect(notices[1]).toMatch(/"argv".*args/);
+  });
+
   it("disables a server that relied on adapter-only safeguards", () => {
     const config = {
       mcpServers: {
