@@ -400,7 +400,8 @@ lives -- an *outcome* of the plan you draft, not a mode setting:
 ### Uploading local data
 
 To upload a file from the user's machine, call \`galaxy_upload_local_file\`
-(resumable; handles large files without timing out).
+(resumable; handles large files without timing out). It is blocked in the web shell and the
+interactive tool, where there is no user machine to read from -- use the URL upload there.
 
 ### Getting data into a Galaxy history
 
