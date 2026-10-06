@@ -3,7 +3,7 @@
 import { main } from "@earendil-works/pi-coding-agent";
 import { resolve, dirname, join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, renameSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { loadConfig as loadLoomConfig } from "../shared/loom-config.js";
 import { migrateStateDir } from "../shared/state-dir.js";
@@ -15,7 +15,7 @@ import { hasStoredCredential, isProviderUsable, pickSignedInFallback } from "./p
 import { SEED_OAUTH_ONLY_PROVIDERS } from "../shared/provider-auth-caps.js";
 import { EX_CONFIG } from "../shared/brain-exit.js";
 import { resolvePiExtensionDir } from "./pi-extension-path.js";
-import { stripLegacyMcpEntries } from "./legacy-mcp-config.js";
+import { migrateLegacyMcpConfig } from "./legacy-mcp-config.js";
 import { pickChannel } from "../shared/version-compare.js";
 import {
   isCustomProvider,
@@ -340,41 +340,11 @@ if (galaxyUrl && galaxyApiKey) {
 
 // The brain registers Loom's MCP servers itself (extensions/loom/mcp-servers.ts);
 // clear out what earlier versions left in mcp.json.
-const mcpConfigPath = join(agentDir, "mcp.json");
-if (!isInformationalCommand && existsSync(mcpConfigPath)) {
-  let mcpConfig;
-  try {
-    mcpConfig = JSON.parse(readFileSync(mcpConfigPath, "utf-8"));
-  } catch {
-    // An unparseable mcp.json is pi's to report, and pi loads none of it -- so
-    // no stale galaxy entry in it can shadow the brain's registration either.
-  }
-  if (mcpConfig && typeof mcpConfig === "object") {
-    const { changed, empty, removedGalaxy, notices } = stripLegacyMcpEntries(mcpConfig);
-    const tmpPath = `${mcpConfigPath}.${process.pid}.tmp`;
-    try {
-      if (changed && empty) {
-        rmSync(mcpConfigPath);
-      } else if (changed) {
-        writeFileSync(tmpPath, JSON.stringify(mcpConfig, null, 2) + "\n", { mode: 0o600 });
-        renameSync(tmpPath, mcpConfigPath);
-      }
-      for (const notice of notices) console.error(`[loom] ${notice}`);
-    } catch (err) {
-      rmSync(tmpPath, { force: true });
-      // Left as it is, the file is read the old way: an old galaxy entry wins
-      // over the brain's registration (pinning every session to that account and
-      // key), and the user's own servers lose the tool restrictions pi ignores.
-      const why = removedGalaxy
-        ? `Loom would keep using the Galaxy account saved there`
-        : `the servers Loom meant to migrate would keep settings pi ignores, such as tool restrictions`;
-      console.error(
-        `[loom] Could not update ${mcpConfigPath} (${err instanceof Error ? err.message : err}), ` +
-          `and ${why}. Fix the file's permissions, or remove those entries, and start again.`,
-      );
-      process.exit(EX_CONFIG);
-    }
-  }
+// A copy of the old file lands beside it first, and a file that cannot be
+// updated is reported rather than fatal (bin/legacy-mcp-config.js says why).
+if (!isInformationalCommand) {
+  const { notices } = migrateLegacyMcpConfig(join(agentDir, "mcp.json"));
+  for (const notice of notices) console.error(`[loom] ${notice}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
