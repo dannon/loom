@@ -143,6 +143,27 @@ export function pendingObservationCount(): number {
 // -----------------------------------------------------------------------------
 
 /**
+ * pi-mcp-adapter's `mcp({server, tool, args})` gateway. Loom no longer ships
+ * it, but a user who installs the adapter as a pi package gets it back, and a
+ * Galaxy failure through it should not be invisible. Resolved to pi's own
+ * spelling so it goes through the same check as a direct call.
+ */
+function proxiedGalaxyCall(
+  input: Record<string, unknown>,
+): { toolName: string; args: Record<string, unknown> } | undefined {
+  if (input.server !== undefined && input.server !== "galaxy") return;
+  const tool = typeof input.tool === "string" ? input.tool : "";
+  if (input.server !== "galaxy" && !/^(galaxy_|mcp__galaxy__)/.test(tool)) return;
+  try {
+    const args = typeof input.args === "string" ? JSON.parse(input.args) : (input.args ?? {});
+    if (!args || typeof args !== "object" || Array.isArray(args)) return;
+    return { toolName: `mcp__galaxy__${tool.replace(/^(?:galaxy_|mcp__galaxy__)/, "")}`, args };
+  } catch {
+    return;
+  }
+}
+
+/**
  * `mcpTool` comes out in wire spelling (see observationToolName), so the retry
  * key, the stage rules and the allowlist all see `galaxy_run_tool` whichever
  * way pi spelled the call.
@@ -152,11 +173,16 @@ export function factsForToolResult(
   input: Record<string, unknown>,
   text: string,
 ): ObservationFacts | null {
+  let args = input ?? {};
+  if (toolName === "mcp") {
+    const call = proxiedGalaxyCall(args);
+    if (!call) return null;
+    ({ toolName, args } = call);
+  }
   const name = observationToolName(toolName);
   if (!name) return null;
   const raw = String(text ?? "").trim();
   if (!raw) return null;
-  const args = input ?? {};
   return {
     kind: "tool-error",
     trigger: "tool_error",
@@ -480,7 +506,9 @@ export function registerObservationTriggers(pi: ExtensionAPI): void {
     // Registered AFTER secret redaction in index.ts, so `content` here is the
     // already-scrubbed text the model sees. Reading the raw result would put
     // an API key one normalization away from the wire.
-    if (observationToolName(event.toolName) === "galaxy_connect" && !event.isError) {
+    const called =
+      event.toolName === "mcp" ? proxiedGalaxyCall(event.input ?? {})?.toolName : event.toolName;
+    if (observationToolName(called) === "galaxy_connect" && !event.isError) {
       recordGalaxyVersionFromConnect(errorTextOf(event.content));
     }
     if (resolveObservationsMode() === "off") return;

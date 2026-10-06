@@ -234,6 +234,8 @@ describe("observation-redaction-hostile-result: the fixture against the real pip
       expect(checked.errors, entry.text).toEqual([]);
       expect(checked.leaks, entry.text).toEqual([]);
       expect(checked.obs.signature, entry.text).toBe(expected[i]);
+      // Whichever spelling the fixture line uses, the wire spelling goes out.
+      expect(checked.obs.mcpTool, entry.tool).toBe("galaxy_run_tool");
       expect(checked.withheld, entry.text).toEqual(i === 5 ? ["host-port"] : []);
     });
   });

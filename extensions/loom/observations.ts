@@ -181,14 +181,21 @@ export function isAdmissibleMcpTool(v: string | undefined): v is string {
 export function observationToolName(toolName: string | undefined): string | undefined {
   const mcp = galaxyMcpToolName(toolName);
   if (mcp !== undefined) {
-    // pi joins server and tool with `__`, so `mcp__galaxy__x__run_tool` is
-    // `run_tool` on a server named `galaxy__x`, not galaxy-mcp. galaxy-mcp
-    // has no tool with `__` in its name.
-    if (!mcp || mcp.includes("__")) return undefined;
+    // The prefix alone doesn't prove galaxy-mcp: pi joins server and tool with
+    // `__` and turns `-`/`.` into `_`, so servers named `galaxy__x`, `galaxy-`
+    // or `galaxy_` land here too, and a name over pi's limit is cut and
+    // hash-suffixed. galaxy-mcp's own names are plain snake_case, well short of
+    // the limit, so anything else is another server's.
+    if (!GALAXY_MCP_TOOL_SHAPE.test(mcp)) return undefined;
+    if (toolName!.length >= PI_TOOL_NAME_MAX && /_[0-9a-f]{8}$/.test(mcp)) return undefined;
     return `galaxy_${mcp}`;
   }
   return toolName?.startsWith("galaxy_") ? toolName : undefined;
 }
+
+const GALAXY_MCP_TOOL_SHAPE = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
+// pi's MAX_TOOL_NAME_LENGTH (extensions/mcp/tools.js), not exported.
+const PI_TOOL_NAME_MAX = 64;
 
 const TOOL_ID_KEYS = ["tool_id", "tool_ids"] as const;
 const DATATYPE_KEYS = ["file_type", "ext", "extension", "datatype"] as const;

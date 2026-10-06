@@ -113,18 +113,32 @@ describe("factsForToolResult", () => {
   it("does not take another server's tools for galaxy-mcp's", () => {
     // pi joins server and tool with `__`: this is run_tool on a server named galaxy__x.
     expect(factsForToolResult("mcp__galaxy__x__run_tool", {}, "boom")).toBeNull();
-    // pi turns `-` into `_`, so a server named galaxy-x lands here.
+    // pi turns `-` and `.` into `_`: servers named galaxy-x, galaxy-, galaxy. and galaxy_.
     expect(factsForToolResult("mcp__galaxy_x__run_tool", {}, "boom")).toBeNull();
+    expect(factsForToolResult("mcp__galaxy___run_tool", {}, "boom")).toBeNull();
     expect(factsForToolResult("mcp__galaxy__", {}, "boom")).toBeNull();
+    // A name over pi's 64 is cut and hash-suffixed, separator and all.
+    const cut = `mcp__galaxy__${"a".repeat(42)}_540bde53`;
+    expect(cut).toHaveLength(64);
+    expect(factsForToolResult(cut, {}, "boom")).toBeNull();
   });
 
-  it("no longer reads the pi-mcp-adapter proxy shape", () => {
+  it("still reads pi-mcp-adapter's proxy shape, for users who install it", () => {
+    const facts = factsForToolResult(
+      "mcp",
+      { server: "galaxy", tool: "run_tool", args: '{"tool_id":"Filter1"}' },
+      "boom",
+    );
+    expect(facts?.mcpTool).toBe("galaxy_run_tool");
+    expect(facts?.toolIds).toEqual(["Filter1"]);
+    expect(factsForToolResult("mcp", { tool: "mcp__galaxy__run_tool" }, "boom")?.mcpTool).toBe(
+      "galaxy_run_tool",
+    );
+    expect(factsForToolResult("mcp", { server: "other", tool: "run_tool" }, "boom")).toBeNull();
+    expect(factsForToolResult("mcp", { tool: "run_tool" }, "boom")).toBeNull();
+    // A model-written tool name that isn't a tool-name shape raises nothing.
     expect(
-      factsForToolResult(
-        "mcp",
-        { server: "galaxy", tool: "run_tool", args: { tool_id: "Filter1" } },
-        "boom",
-      ),
+      factsForToolResult("mcp", { server: "galaxy", tool: "alice@clinic.org" }, "boom"),
     ).toBeNull();
   });
 
@@ -639,14 +653,26 @@ describe("registerObservationTriggers", () => {
   });
 
   it("counts a retry loop across galaxy-mcp's pi spelling", async () => {
-    const { registerObservationTriggers, pendingObservationCount } =
+    const { registerObservationTriggers, pendingObservationCount, lastObservationFacts } =
       await import("../extensions/loom/observation-triggers.js");
     const pi = fakePi();
     registerObservationTriggers(pi.api as unknown as ExtensionAPI);
     await pi.emit("session_start", {}, {});
-    for (let i = 0; i < RETRY_LOOP_THRESHOLD; i++) await pi.emit("tool_result", failure, {});
+    // The proxy spelling of the same call must land on the same retry key.
+    const proxied = {
+      ...failure,
+      toolName: "mcp",
+      input: { server: "galaxy", tool: "run_tool", args: failure.input },
+    };
+    await pi.emit("tool_result", failure, {});
+    await pi.emit("tool_result", proxied, {});
+    await pi.emit("tool_result", failure, {});
     // The first failure as a tool-error and the third as a retry-loop.
     expect(pendingObservationCount()).toBe(2);
+    expect(lastObservationFacts()).toMatchObject({
+      kind: "retry-loop",
+      mcpTool: "galaxy_run_tool",
+    });
   });
 
   it("takes the Galaxy version from galaxy-mcp's connect under its pi spelling", async () => {
