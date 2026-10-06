@@ -60,6 +60,7 @@ import {
   writeNotebook,
   type InvocationYaml,
 } from "./notebook-writer";
+import { readMcpOutputFile } from "./mcp-output";
 import { getCurrentStepAnchor, getNotebookPath, setCurrentStepAnchor } from "./state";
 import { ulid } from "./ulid";
 
@@ -467,13 +468,18 @@ async function writeUdtDefinition(
  * submission -- precisely the one whose record matters most -- would log
  * `submission.unparsed`.
  */
-function rereadTruncated(resolved: ResolvedResult): ResolvedResult {
+// A big mapped-over submission is exactly the one whose record matters, so read
+// well past mcp_read_output's preview limit before giving up on it.
+const SUBMISSION_MAX_BYTES = 256 * 1024 * 1024;
+
+async function rereadTruncated(resolved: ResolvedResult): Promise<ResolvedResult> {
   if (!resolved.truncatedPath) return resolved;
   try {
+    // Same confinement mcp_read_output applies: only a file pi itself wrote.
     return {
       ...resolved,
       value: undefined,
-      text: fs.readFileSync(resolved.truncatedPath, "utf-8"),
+      text: await readMcpOutputFile(resolved.truncatedPath, SUBMISSION_MAX_BYTES),
     };
   } catch {
     return resolved;
@@ -513,7 +519,7 @@ export async function handleSubmissionResult(
     parseGalaxyResultEnvelope(resolved) === null &&
     toolName !== "galaxy_upload_local_file"
   ) {
-    resolved = rereadTruncated(resolved);
+    resolved = await rereadTruncated(resolved);
     outcome = parseSubmission(toolName, dispatch.args, resolved);
   }
 
