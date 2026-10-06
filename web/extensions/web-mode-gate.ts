@@ -43,6 +43,14 @@ const ALLOWED_PREFIXES = ["mcp__galaxy__", "mcp__brc_analytics__", "galaxy_", "g
 // The MCP output reader only inspects registered artifacts from this session.
 const ALLOWED_EXACT = new Set(["skills_fetch", "mcp_read_output"]);
 
+// Brain tools that share an allowed prefix but must not run remotely. The
+// local-file uploader resolves whatever absolute path it is handed and sends
+// the bytes to Galaxy, so in the web shell or the interactive tool it would
+// read the container's own files -- the Loom config with the operator's key
+// included -- past the notebook-only jail above. Remote users have no local
+// files to upload anyway; the URL upload covers that path.
+const DENIED_EXACT = new Set(["galaxy_upload_local_file"]);
+
 /**
  * Resolve an absolute path with symlink collapsing. Walks up until it finds
  * a component that exists, realpaths it, then rejoins the non-existent
@@ -104,6 +112,13 @@ export function shouldBlockTool(
     return {
       block: true,
       reason: `${toolName} is a destructive Galaxy operation; blocked in remote mode (no confirmation UI available)`,
+    };
+  }
+  // Denied by name before the prefix check, so an allowed prefix can't wave it through.
+  if (DENIED_EXACT.has(toolName)) {
+    return {
+      block: true,
+      reason: `${toolName} reads files on the Loom host; not available in remote mode (use the URL upload)`,
     };
   }
   // Curated remote surface -> allowed.
