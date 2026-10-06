@@ -15,8 +15,9 @@ const LEGACY_SERVER_NAMES = ["galaxy", "brc-analytics"];
 /** Sits beside mcp.json and holds the bytes the migration last rewrote or removed. */
 export const BACKUP_SUFFIX = ".loom-backup";
 
-// Present only on an entry written for pi's built-in MCP, which Loom never did:
-// a galaxy or brc-analytics entry carrying one is the user's own override.
+// Present on an entry written for pi's built-in MCP, which Loom never did: a
+// galaxy or brc-analytics entry carrying one and no adapter field is the user's
+// own override.
 const PI_NATIVE_FIELDS = ["exposure", "toolExposure", "enabled", "timeout", "auth"];
 
 // Adapter features with no pi equivalent. Keeping such a server on would drop a
@@ -55,9 +56,79 @@ const isObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 /** @param {unknown} v @returns {string[]} */
 const stringList = (v) => (Array.isArray(v) ? v.filter((s) => typeof s === "string") : []);
 
-/** @param {Record<string, any>} entry */
-function isLoomWritten(entry) {
-  return isObject(entry) && !PI_NATIVE_FIELDS.some((f) => f in entry);
+/** @param {string} name @param {Record<string, any>} entry */
+function pointsAtLoomServer(name, entry) {
+  if (name === "galaxy") {
+    return (
+      entry.command === "uvx" && stringList(entry.args).some((a) => a.startsWith("galaxy-mcp"))
+    );
+  }
+  return typeof entry.url === "string" && entry.url.includes("brc-analytics.org");
+}
+
+/**
+ * Loom wrote its entries for the adapter, pointing at its own galaxy-mcp or BRC
+ * server. One that also has a pi field had it added by hand afterwards -- still
+ * Loom's entry, holding the plaintext key and an exclude list pi ignores -- but
+ * an entry that turns the server off is a choice the brain's registration would
+ * undo if the entry went away, so it stays.
+ * @param {string} name @param {unknown} entry
+ */
+function isLoomWritten(name, entry) {
+  if (!isObject(entry)) return false;
+  if (entry.enabled === false || entry.exposure === "hidden") return false;
+  const adapterShaped = ADAPTER_ONLY_FIELDS.some((f) => f in entry);
+  if (!PI_NATIVE_FIELDS.some((f) => f in entry)) {
+    return adapterShaped || pointsAtLoomServer(name, entry);
+  }
+  return adapterShaped && pointsAtLoomServer(name, entry);
+}
+
+// pi only expands a name that starts with a letter or underscore; the adapter
+// took any word characters.
+const PI_ENV_NAME = /^[A-Za-z_]\w*$/;
+
+// The adapter expanded ${NAME}, $env:NAME and {env:NAME}, ran a value with one
+// leading "!" as a command, and read "!!" as a literal "!". pi also expands a
+// bare $NAME and runs "!!..." as a command, so each value is respelled to come
+// out the same: "$$" is pi's literal "$", and "$!" its literal "!".
+const ADAPTER_REF = /\$\{(\w+)\}|\$env:(\w+)|\{env:(\w+)\}|\$/g;
+
+/** @param {string} value */
+function piLiteral(value) {
+  const escaped = value.replace(/\$/g, () => "$$");
+  return escaped.startsWith("!") ? `$${escaped}` : escaped;
+}
+
+/**
+ * @param {string} value @param {boolean} literal
+ * @param {string[]} unspellable collects env names pi can't reference
+ */
+function adapterValueToPi(value, literal, unspellable) {
+  if (literal) return piLiteral(value);
+  if (value.startsWith("!") && !value.startsWith("!!")) return value;
+  const bang = value.startsWith("!!");
+  const body = (bang ? value.slice(2) : value).replace(ADAPTER_REF, (ref, a, b, c) => {
+    const name = a ?? b ?? c;
+    if (!name) return "$$";
+    if (!PI_ENV_NAME.test(name)) unspellable.push(name);
+    return `\${${name}}`;
+  });
+  return bang ? `$!${body}` : body;
+}
+
+/**
+ * @param {unknown} record @param {boolean} literal
+ * @param {string[]} unspellable
+ */
+function translateValues(record, literal, unspellable) {
+  if (!isObject(record)) return record;
+  return Object.fromEntries(
+    Object.entries(record).map(([k, v]) => [
+      k,
+      typeof v === "string" ? adapterValueToPi(v, literal, unspellable) : v,
+    ]),
+  );
 }
 
 /**
@@ -94,15 +165,37 @@ function translateAdapterEntry(name, entry) {
     entry.timeout = Math.ceil(entry.requestTimeoutMs / 1000);
   }
 
-  const headers = isObject(entry.headers) ? entry.headers : {};
+  // pi has no per-server switch for resources; its resource tools only skip a
+  // server whose exposure is hidden.
+  if (entry.exposeResources === false && entry.exposure !== "hidden") {
+    unsupported.push("exposeResources: false");
+  }
+
+  /** @type {string[]} */
+  const unspellable = [];
+  if ("env" in entry)
+    entry.env = translateValues(entry.env, entry.literalEnv === true, unspellable);
+  const headers = isObject(entry.headers) ? translateValues(entry.headers, false, unspellable) : {};
+  if ("headers" in entry) entry.headers = headers;
   const hasAuthHeader = Object.keys(headers).some((h) => h.toLowerCase() === "authorization");
-  const token =
-    typeof entry.bearerTokenEnv === "string"
-      ? `\${${entry.bearerTokenEnv}}`
-      : typeof entry.bearerToken === "string"
-        ? entry.bearerToken
-        : null;
+  let token = null;
+  // The adapter sent a bearer token only when auth was "bearer".
+  if (entry.auth === "bearer") {
+    if (typeof entry.bearerTokenEnv === "string") {
+      if (!PI_ENV_NAME.test(entry.bearerTokenEnv)) unspellable.push(entry.bearerTokenEnv);
+      token = `\${${entry.bearerTokenEnv}}`;
+    } else if (typeof entry.bearerToken === "string") {
+      // A pi header runs a command only when the whole value is one, so
+      // "Bearer <command output>" has no spelling there.
+      if (entry.bearerToken.startsWith("!") && !entry.bearerToken.startsWith("!!")) {
+        unsupported.push("a bearerToken command");
+      } else token = adapterValueToPi(entry.bearerToken, false, unspellable);
+    }
+  }
   if (token && !hasAuthHeader) entry.headers = { ...headers, Authorization: `Bearer ${token}` };
+  if (unspellable.length > 0) {
+    unsupported.push(`env references pi can't spell (${[...new Set(unspellable)].join(", ")})`);
+  }
 
   for (const f of ADAPTER_ONLY_FIELDS) delete entry[f];
   // The adapter's auth was a mode string; pi's is an object naming a provider.
@@ -136,7 +229,7 @@ export function stripLegacyMcpEntries(config) {
   if (servers) {
     for (const [name, entry] of Object.entries(servers)) {
       if (LEGACY_SERVER_NAMES.includes(name)) {
-        if (!isLoomWritten(entry)) {
+        if (!isLoomWritten(name, entry)) {
           if (isObject(entry) && entry.enabled !== false) shadowing.push(name);
           continue;
         }
