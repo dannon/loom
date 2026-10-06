@@ -279,7 +279,7 @@ export async function readMcpOutputFile(
       stat.size > maxBytes
     )
       throw new Error(
-        "MCP artifact is not a regular file within the 32 MB inspection limit; narrow the original read-only query.",
+        `MCP artifact is not a regular file within the ${Math.round(maxBytes / (1024 * 1024))} MB limit; narrow the original read-only query.`,
       );
     const bytes = Buffer.alloc(stat.size + 1);
     let length = 0;
