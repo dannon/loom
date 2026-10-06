@@ -18,9 +18,11 @@ export function galaxyMcpTool(tool) {
  * @param {string | undefined} toolName @returns {string | undefined}
  */
 export function galaxyMcpToolName(toolName) {
-  return toolName?.startsWith(GALAXY_MCP_PREFIX)
-    ? toolName.slice(GALAXY_MCP_PREFIX.length)
-    : undefined;
+  if (!toolName?.startsWith(GALAXY_MCP_PREFIX)) return undefined;
+  const tool = toolName.slice(GALAXY_MCP_PREFIX.length);
+  // A server named "galaxy_" or "galaxy-" shares the prefix: its tools come out
+  // as mcp__galaxy___<tool>. galaxy-mcp's own names never start with "_".
+  return tool && !tool.startsWith("_") ? tool : undefined;
 }
 
 /** @param {string | undefined} toolName @returns {boolean} */

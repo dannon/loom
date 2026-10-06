@@ -208,6 +208,9 @@ describe("shouldBlockTool", () => {
     "chat_search",
     "some_future_tool",
     "glob",
+    // A server named "galaxy_" or "galaxy-" shares the mcp__galaxy__ prefix.
+    "mcp__galaxy___run_tool",
+    "mcp__brc_analytics___get_genome",
   ])("denies non-surface tool %s by default", (toolName) => {
     const result = shouldBlockTool(toolName, { url: "http://169.254.169.254/" }, allowlist, cwd);
     expect(result).toEqual({ block: true, reason: expect.stringContaining(toolName) });
