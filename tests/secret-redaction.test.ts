@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import {
   collectSecretValues,
+  loadPiAuth,
   redactSecrets,
   redactContent,
   REDACTED,
@@ -89,5 +93,76 @@ describe("redactContent", () => {
   it("leaves non-text content (images) alone", () => {
     const content = [{ type: "image", data: "binarydata", mimeType: "image/png" }];
     expect(redactContent(content, [KEY])).toBeNull();
+  });
+});
+
+describe("pi auth.json (the credentials Loom cannot encrypt at rest)", () => {
+  it("collects both halves of an OAuth credential", () => {
+    const auth = {
+      "openai-codex": {
+        type: "oauth",
+        access: "eyJhbGciOiJSUzI1NiJ9.ACCESS-TOKEN-PAYLOAD",
+        refresh: "REFRESH-TOKEN-4444444444",
+        expires: 1789154768797,
+        accountId: "d29d5ca8-0000-0000-0000-00000000d1ce",
+      },
+    };
+    const secrets = collectSecretValues({} as never, {}, auth);
+    expect(secrets).toContain("eyJhbGciOiJSUzI1NiJ9.ACCESS-TOKEN-PAYLOAD");
+    // The refresh half matters more than the access half -- it mints new tokens
+    // long after the access JWT in the same file has expired.
+    expect(secrets).toContain("REFRESH-TOKEN-4444444444");
+  });
+
+  it("collects an api-key credential's key and its nested env values", () => {
+    const auth = {
+      cloudflare: {
+        type: "api_key",
+        key: "cf-key-5555555555",
+        env: { CLOUDFLARE_ACCOUNT_ID: "acct-6666666666" },
+      },
+    };
+    const secrets = collectSecretValues({} as never, {}, auth);
+    expect(secrets).toContain("cf-key-5555555555");
+    expect(secrets).toContain("acct-6666666666");
+  });
+
+  it("does not collect the type discriminator or the expiry", () => {
+    // Redacting "oauth" would scrub the word out of unrelated prose.
+    const auth = { p: { type: "api_key_long_enough", expires: "1789154768797" } };
+    expect(collectSecretValues({} as never, {}, auth)).toHaveLength(0);
+  });
+
+  it("scrubs a dumped auth.json end to end", () => {
+    const auth = {
+      "openai-codex": { type: "oauth", access: "ACCESS-7777777777", refresh: "REFRESH-8888888888" },
+    };
+    const secrets = collectSecretValues({} as never, {}, auth);
+    const out = redactSecrets(JSON.stringify(auth), secrets);
+    expect(out).not.toContain("ACCESS-7777777777");
+    expect(out).not.toContain("REFRESH-8888888888");
+    expect(out).toContain(REDACTED);
+  });
+
+  it("tolerates a missing, unreadable, or malformed store", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-auth-"));
+    expect(loadPiAuth(dir)).toBeNull();
+    fs.writeFileSync(path.join(dir, "auth.json"), "{ not json");
+    expect(loadPiAuth(dir)).toBeNull();
+    // A null store must not throw or poison the rest of the collection.
+    expect(collectSecretValues({} as never, { GALAXY_API_KEY: "gx-9999999999" }, null)).toContain(
+      "gx-9999999999",
+    );
+  });
+
+  it("reads a real store from PI_CODING_AGENT_DIR", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-auth-"));
+    fs.writeFileSync(
+      path.join(dir, "auth.json"),
+      JSON.stringify({ p: { type: "oauth", access: "DISK-ACCESS-0000000000" } }),
+    );
+    expect(collectSecretValues({} as never, {}, loadPiAuth(dir))).toContain(
+      "DISK-ACCESS-0000000000",
+    );
   });
 });
