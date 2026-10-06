@@ -2,17 +2,19 @@
 
 Engineer-facing design reference for the registry behind #476. The code lives in
 `extensions/loom/registry*.ts`; where this document and the code disagree, the code is
-right and this document is stale.
+right and this document is stale. Only the library exists so far -- nothing in the runtime
+uses it yet -- so most of what follows describes where it is going; the status table at the
+end says which parts are built.
 
 ## Why it exists
 
 "Plan, approve, execute" is prompt guidance today. Nothing in the harness sees the model
-decide to submit, and the notebook records whatever the model writes. The registry turns
-approval into a runtime property: the model proposes, the user approves a frozen
-specification, and the harness submits exactly that specification itself. What ran equals
-what was approved by construction, rather than by a comparison after the fact.
+decide to submit, and the notebook records whatever the model writes. Once wired in, the
+registry makes approval a runtime property: the model proposes, the user approves a frozen
+specification, and the harness submits exactly that specification itself. What ran will
+equal what was approved by construction, rather than by a comparison after the fact.
 
-It records three facts per attempt, each established by the harness rather than asserted by
+It records three facts per attempt, which the harness will establish rather than take from
 the model:
 
 - the specification the user approved in this session,
@@ -20,22 +22,26 @@ the model:
 - whether the attempt is eligible to hand off, derived from Galaxy's state, this attempt's
   own outputs, and acceptance conditions frozen at approval.
 
-Scientific correctness is not one of them. That is what the assertions are for.
+Scientific correctness is not one of them. The assertions are recorded checks the user
+chose; they say whether those checks held, not whether the science is right.
 
 ## What it does not promise
 
-- **Reconcile establishes execution facts, not consent.** Consent is trustworthy because the
-  registry is not writable by the model in the guaranteed profile and because consent is
-  session-scoped: a session vouches only for approvals it recorded itself.
-- **The desktop guarantee is scoped.** A trusted model in a trusted workspace can run shell
-  commands, and a script can write any file. On the desktop the registry is protected
-  against the file tools, shell redirects and allowlisted MCP tools; raw galaxy-mcp
-  submissions stay reachable there and are recorded as unchecked, never trusted.
+- **Reconcile establishes execution facts, not consent.** Consent is session-scoped -- a
+  session vouches only for approvals it recorded itself, which the session signature below
+  already enforces. It will also depend on the registry not being writable by the model in
+  the guaranteed profile; that is the `trustedRecord` floor, not built yet.
+- **The desktop guarantee will be scoped.** A trusted model in a trusted workspace can run
+  shell commands, and a script can write any file. The plan is for the desktop floors to
+  protect the registry against the file tools, shell redirects and allowlisted MCP tools,
+  with raw galaxy-mcp submissions still reachable and recorded as unchecked, never trusted.
+  None of that exists yet (see the status table).
 - **One residual no design closes.** A response lost after Galaxy accepted a submission
   cannot be made exactly-once; the attempt becomes `submission_unknown` and only the user
   can attribute it. (A user-defined tool can't change under the harness: Galaxy has no
   route to update one, and every create mints a new UUID, so the UUID pins the definition.
-  The frozen `definition_digest` is still checked, in case that ever changes.)
+  `loom_submit` will still re-check the frozen `definition_digest` at dispatch, in case that
+  ever changes.)
 
 ## Files
 
@@ -158,10 +164,16 @@ supports fails closed:
 
 - `integrity: ok` needs a submission Galaxy has confirmed;
 - `conformant` needs a by-construction submission from a user approval;
+- `conformant` also needs the approval to still be `live`: revoking it withdraws
+  eligibility, even for a run it already submitted;
 - `excepted` conformity needs a user `submission_check` exception;
+- an ungated attempt (no approval, so no frozen predicate to check the evaluation against)
+  also needs a user `manual_attestation` exception, so excusing how it was submitted never
+  excuses what came out;
 - a `manual` predicate needs a user `manual_attestation` exception;
 - `assertions_pass` needs every named assertion to have passed, or to be `excepted` with a
-  user `evidence_gate` exception. A `fail` or `inconclusive` assertion is never excused.
+  user `evidence_gate` exception naming that assertion (`assertion_id`) -- one exception per
+  waived assertion. A `fail` or `inconclusive` assertion is never excused.
 
 Every exception has to be the user's (`by: user`, never `restored`), for this attempt, and,
 when there is an approval, for its revision. Each check has one scope that can relax it, so
@@ -215,6 +227,11 @@ real import graph to hold that line.
   it. An attempt from an earlier session stays `unchecked` until the user records a
   `submission_check` exception for it, which makes the hand-off a visible decision rather
   than something a reload restores.
-- **An excepted assertion counts with an evidence-gate exception.** Accepting a failed check
-  is allowed but has to be on the record as the user's call. The assertion stays `excepted`,
-  not `pass`, so the notebook shows what was waived.
+- **An excepted assertion counts with an evidence-gate exception naming it.** Accepting a
+  failed check is allowed but has to be on the record as the user's call, one assertion at a
+  time. The assertion stays `excepted`, not `pass`, so the notebook shows what was waived.
+- **Revoking withdraws eligibility.** A revoked approval no longer makes a run conformant,
+  even one it already submitted. Handing that run off takes a fresh user exception.
+- **Ungated attempts need an attestation as well.** Without an approval there is no frozen
+  predicate to hold the evaluation to, so the user attests the result as well as excusing
+  the submission.

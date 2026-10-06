@@ -138,6 +138,8 @@ export interface Exception {
   attempt_id: AttemptId;
   spec_revision: string;
   scope: "submission_check" | "evidence_gate" | "manual_attestation";
+  /** evidence_gate only: the one assertion this waives. */
+  assertion_id?: string;
   by: "user" | "restored";
   at: string;
   reason: string;
@@ -588,7 +590,7 @@ function parseAttempt(v: unknown, path: string): Attempt {
 
 function parseException(v: unknown, path: string): Exception {
   const o = rec(v, path);
-  return {
+  const x: Exception = {
     id: str(o.id, `${path}.id`),
     attempt_id: attemptId(o.attempt_id, `${path}.attempt_id`),
     spec_revision: digest(o.spec_revision, `${path}.spec_revision`),
@@ -601,6 +603,12 @@ function parseException(v: unknown, path: string): Exception {
     at: str(o.at, `${path}.at`),
     reason: str(o.reason, `${path}.reason`),
   };
+  if (o.assertion_id !== undefined) {
+    if (x.scope !== "evidence_gate")
+      fail(`${path}.assertion_id`, "only an evidence_gate names one");
+    x.assertion_id = keyStr(o.assertion_id, `${path}.assertion_id`);
+  }
+  return x;
 }
 
 function parseAttemptMap(v: unknown, path: string, seen: Set<string>): Record<AttemptId, Attempt> {

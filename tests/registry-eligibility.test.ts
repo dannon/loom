@@ -80,16 +80,48 @@ describe("computeHandoffEligible (v3 §7)", () => {
       );
     });
 
-    it("lets a user exception make an ungated attempt eligible, and nothing else", () => {
+    it("rejects conformant on a revoked approval, even after it submitted", () => {
+      const a = eligibleAttempt();
+      a.approval!.status = "revoked";
+      expect(a.approval!.by).toBe("user");
+      expect(computeHandoffEligible(a)).toBe(false);
+    });
+  });
+
+  describe("an ungated attempt", () => {
+    function ungated() {
       const a = eligibleAttempt();
       delete a.approval;
       a.submission!.submitted_by = "agent";
       a.submission!.check.outcome = "unchecked";
+      a.evaluation!.conformity = "excepted";
+      return a;
+    }
+
+    it("needs the user to excuse the submission and attest the result", () => {
+      const a = ungated();
+      const check = userException(a);
+      const attest = userException(a, { id: "ex-2", scope: "manual_attestation" });
+      expect(computeHandoffEligible(a, [check, attest])).toBe(true);
+    });
+
+    it("isn't eligible on a submission exception alone, whatever the evaluation claims", () => {
+      const a = ungated();
+      expect(a.evaluation!.predicate_result).toBe("pass");
+      expect(computeHandoffEligible(a, [userException(a)])).toBe(false);
+    });
+
+    it("isn't eligible on an attestation alone", () => {
+      const a = ungated();
+      expect(computeHandoffEligible(a, [userException(a, { scope: "manual_attestation" })])).toBe(
+        false,
+      );
+    });
+
+    it("isn't eligible with no exceptions", () => {
+      const a = ungated();
       a.evaluation!.conformity = "unverified";
       expect(computeHandoffEligible(a)).toBe(false);
-      a.evaluation!.conformity = "excepted";
-      expect(computeHandoffEligible(a)).toBe(false);
-      expect(computeHandoffEligible(a, [userException(a)])).toBe(true);
     });
   });
 
@@ -150,25 +182,37 @@ describe("computeHandoffEligible (v3 §7)", () => {
       });
     }
 
-    it("counts an excepted assertion only with the user's evidence-gate exception", () => {
+    it("counts an excepted assertion only with an evidence-gate exception naming it", () => {
       const a = eligibleAttempt({ spec });
       a.evaluation!.assertions = { build: "pass", population: "excepted" };
       const gate = (o: Parameters<typeof userException>[1]) =>
-        computeHandoffEligible(a, [userException(a, { scope: "evidence_gate", ...o })]);
+        computeHandoffEligible(a, [
+          userException(a, { scope: "evidence_gate", assertion_id: "population", ...o }),
+        ]);
       expect(gate({})).toBe(true);
+      expect(gate({ assertion_id: undefined })).toBe(false);
+      expect(gate({ assertion_id: "build" })).toBe(false);
       expect(gate({ by: "restored" })).toBe(false);
       expect(gate({ spec_revision: HEX("e") })).toBe(false);
       expect(gate({ scope: "submission_check" })).toBe(false);
       expect(gate({ scope: "manual_attestation" })).toBe(false);
     });
 
+    it("needs one exception per excepted assertion", () => {
+      const a = eligibleAttempt({ spec });
+      a.evaluation!.assertions = { build: "excepted", population: "excepted" };
+      const waive = (id: string) =>
+        userException(a, { id: `ex-${id}`, scope: "evidence_gate", assertion_id: id });
+      expect(computeHandoffEligible(a, [waive("population")])).toBe(false);
+      expect(computeHandoffEligible(a, [waive("population"), waive("build")])).toBe(true);
+    });
+
     it("never lets an exception excuse a failed or inconclusive assertion", () => {
       for (const outcome of ["fail", "inconclusive"] as const) {
         const a = eligibleAttempt({ spec });
         a.evaluation!.assertions = { build: "pass", population: outcome };
-        expect(computeHandoffEligible(a, [userException(a, { scope: "evidence_gate" })])).toBe(
-          false,
-        );
+        const waiver = userException(a, { scope: "evidence_gate", assertion_id: "population" });
+        expect(computeHandoffEligible(a, [waiver])).toBe(false);
       }
     });
 

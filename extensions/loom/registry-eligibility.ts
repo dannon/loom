@@ -38,12 +38,13 @@ export function computeHandoffEligible(
   // can't also excuse how it was submitted. An ungated attempt has no approval to
   // match, which is why v3 §6 lets only an exception make it eligible.
   const revision = attempt.approval?.spec_revision;
-  const userExcepted = (scope: Exception["scope"]) =>
+  const userExcepted = (scope: Exception["scope"], assertionId?: string) =>
     exceptions.some(
       (x) =>
         x.attempt_id === attempt.attempt_id &&
         x.by === "user" &&
         x.scope === scope &&
+        x.assertion_id === assertionId &&
         (revision === undefined || x.spec_revision === revision),
     );
 
@@ -51,24 +52,30 @@ export function computeHandoffEligible(
     // Conformant means the harness built the request from a user approval.
     if (attempt.submission.check.outcome !== "conformant_by_construction") return false;
     if (attempt.approval?.by !== "user") return false;
+    // A revoked approval no longer vouches for the run, even one it already submitted.
+    if (attempt.approval.status !== "live") return false;
   } else if (!userExcepted("submission_check")) {
     return false;
   }
 
   const spec = attempt.approval?.spec_snapshot;
-  if (spec) {
-    const predicate = spec.predicate;
-    // A manual predicate is the user's judgment, so only their attestation passes it.
-    if (predicate.kind === "manual" && !userExcepted("manual_attestation")) return false;
-    if (predicate.kind === "assertions_pass") {
-      if (predicate.ids.length === 0) return false;
-      // An excepted assertion is a failure the user chose to accept; it counts
-      // only with their evidence-gate exception on record.
-      const accepted = (id: string) =>
-        ev.assertions[id] === "pass" ||
-        (ev.assertions[id] === "excepted" && userExcepted("evidence_gate"));
-      if (!predicate.ids.every(accepted)) return false;
-    }
+  if (!spec) {
+    // Ungated: there's no frozen predicate to hold the evaluation to, so the
+    // result needs the user's attestation too. Excusing how it was submitted
+    // doesn't excuse what came out.
+    return userExcepted("manual_attestation");
+  }
+  const predicate = spec.predicate;
+  // A manual predicate is the user's judgment, so only their attestation passes it.
+  if (predicate.kind === "manual" && !userExcepted("manual_attestation")) return false;
+  if (predicate.kind === "assertions_pass") {
+    if (predicate.ids.length === 0) return false;
+    // An excepted assertion is a failure the user chose to accept; it counts
+    // only with their evidence-gate exception naming that assertion.
+    const accepted = (id: string) =>
+      ev.assertions[id] === "pass" ||
+      (ev.assertions[id] === "excepted" && userExcepted("evidence_gate", id));
+    if (!predicate.ids.every(accepted)) return false;
   }
   return true;
 }
