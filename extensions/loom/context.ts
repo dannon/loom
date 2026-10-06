@@ -300,7 +300,9 @@ When it happens -- and before you ever tell the user Galaxy is disconnected:
 3. For timeouts, narrow read-only queries first. Before retrying a mutation,
    check whether Galaxy accepted it. Never blindly replay a submission.
 4. Only if your own reconnect fails, tell the user they can run
-   \`/mcp reconnect galaxy\` (no restart needed).
+   \`/mcp reconnect galaxy\` (no restart needed). That includes small read-only
+   requests that still time out after a re-bind: the server may be stuck, and
+   \`mcp__galaxy__connect()\` only re-binds the session -- it can't restart it.
 
 Never report "Galaxy is disconnected" as a final answer without attempting
 \`mcp__galaxy__connect()\` in the same turn.
