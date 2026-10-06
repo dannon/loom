@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { WORKSPACE_STATE_DIR_NAMES } from "../workspace-state-dir";
+import { piAgentDir } from "../agent-dir";
 
 // Directories under $HOME that hold credentials/secrets.
 const SENSITIVE_HOME_DIRS = [
@@ -35,6 +36,17 @@ const SENSITIVE_HOME_FILES = [
   ".pgpass",
   ".npmrc",
 ];
+// Files inside pi's agent dir that hold live credentials. auth.json is pi's
+// CredentialStore -- an api-key `key`, or an OAuth access+refresh pair; mcp.json
+// and galaxy-profiles.json carry Galaxy keys. These want the floor more than
+// the config.json entries above, not less: those are safeStorage blobs, but pi
+// reads these directly and refreshes auth.json in place (app/src/main/
+// oauth-handler.ts), so Orbit cannot encrypt them and this is the only
+// protection they get. Listed separately from SENSITIVE_HOME_FILES because the
+// whole directory relocates with PI_CODING_AGENT_DIR and is then not under
+// $HOME at all. models.json holds the env var NAME rather than the secret, and
+// models-store.json is a refreshed provider catalog, so both stay readable.
+const AGENT_DIR_CREDENTIAL_FILES = ["auth.json", "mcp.json", "galaxy-profiles.json"];
 // Basename / extension patterns sensitive anywhere.
 const SENSITIVE_BASENAME =
   /^(\.env(\..+)?|id_rsa|id_ed25519|id_ecdsa|.*\.pem|.*\.key|.*\.keychain(-db)?|credentials)$/i;
@@ -68,7 +80,14 @@ function withinFolded(abs: string, dir: string): boolean {
 // to an ask). This is the floor that closes #183 -- ~/.loom/config.json is a
 // store. The basename patterns (.env, *.pem, *.key, ...) are deliberately NOT
 // stores: those can be project fixtures, so they keep the ask/deny-by-tier path.
-export function isCredentialStore(absPath: string, home: string): boolean {
+// `agentDir` is injected so tests can relocate the store the same way
+// PI_CODING_AGENT_DIR does in a real run; the default resolves it exactly as
+// the rest of Loom does.
+export function isCredentialStore(
+  absPath: string,
+  home: string,
+  agentDir: string = piAgentDir(),
+): boolean {
   const norm = path.normalize(absPath);
   for (const d of SENSITIVE_HOME_DIRS) if (withinFolded(norm, path.join(home, d))) return true;
   // Also as realpaths: callers compare resolved targets, so a config.json that
@@ -76,6 +95,10 @@ export function isCredentialStore(absPath: string, home: string): boolean {
   // workspace file.
   for (const f of SENSITIVE_HOME_FILES) {
     const candidates = home ? withRealpath(path.join(home, f)) : [path.join(home, f)];
+    if (candidates.some((c) => norm.toLowerCase() === c.toLowerCase())) return true;
+  }
+  for (const f of AGENT_DIR_CREDENTIAL_FILES) {
+    const candidates = withRealpath(path.join(agentDir, f));
     if (candidates.some((c) => norm.toLowerCase() === c.toLowerCase())) return true;
   }
   return false;
@@ -97,8 +120,8 @@ function withRealpath(p: string): string[] {
   return out;
 }
 
-export function isSensitivePath(absPath: string, home: string): boolean {
-  if (isCredentialStore(absPath, home)) return true;
+export function isSensitivePath(absPath: string, home: string, agentDir?: string): boolean {
+  if (isCredentialStore(absPath, home, agentDir)) return true;
   if (SENSITIVE_BASENAME.test(path.basename(path.normalize(absPath)))) return true;
   return false;
 }

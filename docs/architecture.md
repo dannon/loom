@@ -85,7 +85,7 @@ The Loom brain is loaded as a Pi extension from [`extensions/loom/`](../extensio
 
 - boots Pi in RPC mode with `extensions/loom` loaded
 - loads `~/.loom/config.json` via `shared/loom-config.js`
-- registers (or strips) the Galaxy MCP server entry in `~/.pi/agent/mcp.json` based on credential availability
+- clears the Galaxy/BRC entries older versions left in `~/.pi/agent/mcp.json` (the brain now registers those servers with pi itself, Galaxy only when credentials are present), saving the old file as `mcp.json.loom-backup` first; a `galaxy` or `brc-analytics` entry the user wrote for pi's built-in MCP is left alone and reported, since a file entry wins over the registration
 - forwards `GALAXY_URL` / `GALAXY_API_KEY` into the agent's environment
 
 The CLI never owns analysis semantics. Slash commands behave the same as in Orbit; widget events collapse to text summaries in the terminal.
