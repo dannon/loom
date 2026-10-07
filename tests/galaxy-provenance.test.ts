@@ -52,6 +52,7 @@ describe("provenance records", () => {
   it("creates once; the first writer decides which ids the attempt owns", async () => {
     const id = ulid();
     const first = await ensureAttemptRecord(dir, {
+      origin: "submission",
       attemptId: id,
       kind: "jobs",
       galaxyServerUrl: "https://usegalaxy.org",
@@ -60,6 +61,7 @@ describe("provenance records", () => {
       ids: { job_ids: ["aa", "bb"] },
     });
     const second = await ensureAttemptRecord(dir, {
+      origin: "submission",
       attemptId: id,
       kind: "jobs",
       galaxyServerUrl: "https://usegalaxy.org",
@@ -77,6 +79,7 @@ describe("provenance records", () => {
   it("refuses to fold a job the attempt does not own", async () => {
     const id = ulid();
     await ensureAttemptRecord(dir, {
+      origin: "submission",
       attemptId: id,
       kind: "jobs",
       galaxyServerUrl: "",
@@ -108,6 +111,7 @@ describe("provenance records", () => {
   it("merges each job block of a mapped attempt into one file", async () => {
     const id = ulid();
     await ensureAttemptRecord(dir, {
+      origin: "submission",
       attemptId: id,
       kind: "jobs",
       galaxyServerUrl: "",
@@ -138,6 +142,7 @@ describe("provenance records", () => {
       fs.symlinkSync(elsewhere, path.join(dir, ".loom", "provenance"));
       await expect(
         ensureAttemptRecord(dir, {
+          origin: "submission",
           attemptId: ulid(),
           kind: "jobs",
           galaxyServerUrl: "",
@@ -168,6 +173,7 @@ describe("provenance records", () => {
     await expect(readAttemptRecord(dir, id)).rejects.toThrow(ProvenanceRefusal);
     await expect(
       ensureAttemptRecord(dir, {
+        origin: "submission",
         attemptId: id,
         kind: "jobs",
         galaxyServerUrl: "",

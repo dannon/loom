@@ -89,6 +89,13 @@ export interface AttemptRecord {
   created_at: string;
   /** The Galaxy ids this attempt owns. Set at creation and never widened. */
   ids: { invocation_id?: string; job_ids?: string[] };
+  /**
+   * Who decided `ids` and `submitted_by`. `submission` and `reconcile` read
+   * them out of Galaxy's own answers; `notebook` means the record was created
+   * late, from a block that predates these files, so both came from notebook
+   * text the agent can edit and are only as good as that text.
+   */
+  origin: "submission" | "reconcile" | "notebook";
   enrichment: {
     state: "pending" | "complete" | "unavailable";
     attempts: number;
@@ -246,6 +253,7 @@ export interface AttemptSeed {
   historyId?: string;
   submittedBy: AttemptRecord["submitted_by"];
   ids: AttemptRecord["ids"];
+  origin: AttemptRecord["origin"];
   createdAt?: string;
 }
 
@@ -276,6 +284,7 @@ export async function ensureAttemptRecord(
       submitted_by: seed.submittedBy,
       created_at: seed.createdAt ?? now,
       ids: normalizeIds(seed.ids),
+      origin: seed.origin,
       enrichment: { state: "pending", attempts: 0, updated_at: now },
       jobs: {},
     };

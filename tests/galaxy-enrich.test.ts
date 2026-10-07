@@ -263,6 +263,7 @@ describe("runEnrichmentPass", () => {
       }),
     );
     await ensureAttemptRecord(dir, {
+      origin: "submission",
       attemptId,
       kind: "jobs",
       galaxyServerUrl: SERVER,
@@ -314,6 +315,18 @@ describe("runEnrichmentPass", () => {
       job_count: 1,
       provenance: `.loom/provenance/${attemptId}.json`,
     });
+  });
+
+  it("a record created late from a block says its ownership came from the notebook", async () => {
+    const attemptId = ulid();
+    fs.writeFileSync(
+      nbPath,
+      upsertJobBlock("", jobBlock(), { attemptId, submittedBy: "harness", enrichment: "pending" }),
+    );
+    await runEnrichmentPass({ deps: deps() });
+    const record = await readAttemptRecord(dir, attemptId);
+    expect(record).toMatchObject({ origin: "notebook", ids: { job_ids: ["aa11"] } });
+    expect(theJob().enrichment).toBe("complete");
   });
 
   it("leaves running work alone", async () => {
@@ -381,6 +394,7 @@ describe("runEnrichmentPass", () => {
   it("refuses a block re-pointed at another attempt's record", async () => {
     const victim = ulid();
     await ensureAttemptRecord(dir, {
+      origin: "submission",
       attemptId: victim,
       kind: "jobs",
       galaxyServerUrl: SERVER,
@@ -413,6 +427,7 @@ describe("runEnrichmentPass", () => {
       upsertInvocationBlock("", inv, { attemptId, submittedBy: "harness", enrichment: "pending" }),
     );
     await ensureAttemptRecord(dir, {
+      origin: "submission",
       attemptId,
       kind: "invocation",
       galaxyServerUrl: SERVER,
@@ -470,6 +485,7 @@ describe("runEnrichmentPass", () => {
       }),
     );
     await ensureAttemptRecord(dir, {
+      origin: "submission",
       attemptId,
       kind: "jobs",
       galaxyServerUrl: SERVER,

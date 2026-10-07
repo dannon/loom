@@ -60,6 +60,7 @@ const flips = () => [parsePlanSteps(PLAN.replace("- [ ]", "- [x]")).get("#plan-a
 async function enrichedNotebook(over: HarnessBlockFields = {}): Promise<string> {
   const attemptId = ulid();
   await ensureAttemptRecord(dir, {
+    origin: "submission",
     attemptId,
     kind: "jobs",
     galaxyServerUrl: "https://usegalaxy.org",

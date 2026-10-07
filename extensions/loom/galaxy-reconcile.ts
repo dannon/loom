@@ -494,6 +494,7 @@ export async function reconcile(
         historyId,
         submittedBy: "unknown",
         ids: item.kind === "invocation" ? { invocation_id: id } : { job_ids: [id] },
+        origin: "reconcile",
       });
     } catch (err) {
       // Enrichment creates it later from the block; the run is recorded either way.

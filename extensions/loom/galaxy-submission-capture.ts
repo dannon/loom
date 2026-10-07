@@ -644,6 +644,7 @@ async function recordAttempt(
         kind === "invocation"
           ? { invocation_id: written.wroteInvocation }
           : { job_ids: written.wroteJobs },
+      origin: "submission",
       createdAt: dispatch.submittedAt,
     });
     return provenanceRelativePath(dispatch.attemptId);

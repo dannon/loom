@@ -633,6 +633,7 @@ async function attemptRecordFor(
               .filter((j) => j.attemptId === attemptId)
               .map((j) => j.jobId),
           },
+    origin: "notebook",
     createdAt: block.submittedAt || undefined,
   });
 }
