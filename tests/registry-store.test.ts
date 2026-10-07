@@ -454,3 +454,73 @@ describe("review follow-ups", () => {
     expect(store("s-c", 300).load().kind).toBe("rejected");
   });
 });
+
+describe("atomic write on Windows", () => {
+  function busyFs(failures: number, code = "EPERM") {
+    let left = failures;
+    const tmps: string[] = [];
+    const wrapped = {
+      ...fs,
+      writeFileSync: (p: string, d: string, o?: { flag?: string }) => {
+        if (p.endsWith(".tmp")) tmps.push(p);
+        fs.writeFileSync(p, d, o);
+      },
+      renameSync: (from: string, to: string) => {
+        if (from.endsWith(".tmp") && left > 0) {
+          left--;
+          throw Object.assign(new Error(`${code}: busy`), { code });
+        }
+        fs.renameSync(from, to);
+      },
+    };
+    return { fs: wrapped, tmps };
+  }
+
+  it("retries a busy rename on win32 and lands the write", () => {
+    const busy = busyFs(3);
+    const s = new RegistryStore({
+      analysisDir: dir,
+      serverUrl: SERVER,
+      sessionId: "s-a",
+      fs: busy.fs,
+      clock,
+      pid: 100,
+      platform: "win32",
+    });
+    s.open();
+    addAttempt(s);
+    expect(onDisk().revision).toBe(1);
+  });
+
+  it("does not retry off Windows, and cleans up its temp file", () => {
+    const busy = busyFs(1);
+    const s = new RegistryStore({
+      analysisDir: dir,
+      serverUrl: SERVER,
+      sessionId: "s-a",
+      fs: busy.fs,
+      clock,
+      pid: 100,
+      platform: "linux",
+    });
+    s.open();
+    expect(() => addAttempt(s)).toThrow(/EPERM/);
+    expect(busy.tmps.length).toBeGreaterThan(0);
+    for (const t of busy.tmps) expect(fs.existsSync(t)).toBe(false);
+  });
+
+  it("gives up on win32 when the error is not a transient one", () => {
+    const busy = busyFs(1, "ENOSPC");
+    const s = new RegistryStore({
+      analysisDir: dir,
+      serverUrl: SERVER,
+      sessionId: "s-a",
+      fs: busy.fs,
+      clock,
+      pid: 100,
+      platform: "win32",
+    });
+    s.open();
+    expect(() => addAttempt(s)).toThrow(/ENOSPC/);
+  });
+});

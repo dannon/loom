@@ -63,6 +63,8 @@ export interface RegistryStoreOptions {
   pid?: number;
   /** Used only when there is nothing to load. Defaults to a fresh ULID. */
   analysisId?: string;
+  /** Defaults to `process.platform`; decides whether a busy rename is retried. */
+  platform?: NodeJS.Platform;
 }
 
 export type LoadOutcome =
@@ -73,6 +75,11 @@ export type LoadOutcome =
   /** A foreign document arrived while this session holds its own signed state. */
   | { kind: "ignored"; reason: string }
   | { kind: "rejected"; reason: string };
+
+/** The store is synchronous end to end, so its retry backoff is too. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
 export class RegistryReadOnlyError extends Error {
   constructor(message: string) {
@@ -107,6 +114,7 @@ export class RegistryStore {
   readonly #fs: RegistryFs;
   readonly #clock: () => number;
   readonly #pid: number;
+  readonly #platform: NodeJS.Platform;
   readonly #lock: RegistryLock;
   #mode: "writer" | "read-only" = "read-only";
   #registry: Registry;
@@ -122,6 +130,7 @@ export class RegistryStore {
     this.#fs = opts.fs;
     this.#clock = opts.clock;
     this.#pid = opts.pid ?? process.pid;
+    this.#platform = opts.platform ?? process.platform;
     this.#lock = new RegistryLock(this.lockPath, opts.fs, opts.clock, this.#pid, opts.sessionId);
     this.#registry = this.emptyRegistry(opts.analysisId ?? ulid(opts.clock()));
   }
@@ -417,15 +426,27 @@ export class RegistryStore {
   private writeAtomic(file: string, text: string): void {
     const tmp = `${file}.${this.#pid}.${randomBytes(6).toString("hex")}.tmp`;
     this.#fs.writeFileSync(tmp, text, { flag: "wx" });
-    try {
-      this.#fs.renameSync(tmp, file);
-    } catch (err) {
+    for (let attempt = 0; ; attempt++) {
       try {
-        this.#fs.unlinkSync(tmp);
-      } catch {
-        // best effort
+        this.#fs.renameSync(tmp, file);
+        return;
+      } catch (err) {
+        // Windows refuses to replace a file a scanner or another rename is
+        // touching at that instant (EPERM/EACCES/EBUSY) where POSIX would just
+        // swap it in -- the notebook writer hit this (#504). A brief retry
+        // gets the same outcome POSIX gets.
+        const code = (err as NodeJS.ErrnoException).code;
+        const transient = code === "EPERM" || code === "EACCES" || code === "EBUSY";
+        if (this.#platform !== "win32" || !transient || attempt >= 10) {
+          try {
+            this.#fs.unlinkSync(tmp);
+          } catch {
+            // best effort
+          }
+          throw err;
+        }
+        sleepSync(10 * (attempt + 1));
       }
-      throw err;
     }
   }
 
