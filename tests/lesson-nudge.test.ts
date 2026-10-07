@@ -23,18 +23,24 @@ interface SentMessage {
   options?: { deliverAs?: string; triggerTurn?: boolean };
 }
 
-function harness() {
+function harness({ hasUI = true }: { hasUI?: boolean } = {}) {
   const sentMessages: SentMessage[] = [];
   const sentUser: string[] = [];
-  const handlers = new Map<string, () => Promise<void>>();
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<void>>();
   const pi = {
     sendMessage: (message: SentMessage["message"], options?: SentMessage["options"]) =>
       sentMessages.push({ message, options }),
     sendUserMessage: (text: string) => sentUser.push(text),
-    on: (event: string, handler: () => Promise<void>) => handlers.set(event, handler),
+    on: (event: string, handler: (event: unknown, ctx: unknown) => Promise<void>) =>
+      handlers.set(event, handler),
   };
   registerLessonNudge(pi as never);
-  return { sentMessages, sentUser, sessionStart: () => handlers.get("session_start")!() };
+  const sessionStart = (ctx: { hasUI: boolean } = { hasUI }) =>
+    handlers.get("session_start")!({}, ctx);
+  // pi fires session_start before anything a user can do; the handler sets
+  // its state synchronously, so nothing needs awaiting here.
+  void sessionStart();
+  return { sentMessages, sentUser, sessionStart };
 }
 
 /** What the observation collector records when the user files a correction with /observe. */
@@ -138,6 +144,27 @@ describe("with a correction recorded", () => {
     emit(CORRECTION);
     await settle();
     expect(h.sentMessages).toHaveLength(1);
+  });
+
+  it("stays quiet without a UI, where lesson_propose could never be approved", async () => {
+    const h = harness({ hasUI: false });
+    emit(CORRECTION);
+    await settle();
+    expect(h.sentMessages).toHaveLength(0);
+    expect(peekLessonProposalArming()).toBeNull();
+  });
+
+  it("stays quiet before any session has said whether there is a UI", async () => {
+    resetLessonNudge();
+    const sentMessages: unknown[] = [];
+    registerLessonNudge({
+      sendMessage: (m: unknown) => sentMessages.push(m),
+      sendUserMessage: () => {},
+      on: () => {},
+    } as never);
+    emit(CORRECTION);
+    await settle();
+    expect(sentMessages).toHaveLength(0);
   });
 
   it("nudges again in a new session", async () => {
