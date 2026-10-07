@@ -769,7 +769,14 @@ async function enrichOnce(options: {
       const persisted = await persistBlock(
         nbPath,
         candidate,
-        { enrichment: "unavailable", enrichmentAttempts: attempts, enrichmentError: error },
+        {
+          enrichment: "unavailable",
+          enrichmentAttempts: attempts,
+          enrichmentError: error,
+          // The job ids it did learn still go on the block: reconcile reads
+          // them to know those jobs belong to this run.
+          ...(jobs.length > 0 ? { jobs: summarizeJobs(jobs) } : {}),
+        },
         false,
       ).catch(() => ({ written: false }));
       if (!persisted.written) return;

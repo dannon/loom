@@ -21,6 +21,7 @@ import { recordGalaxyConnected } from "./galaxy-cred-drift";
 import { registerActivityHooks } from "./activity-hooks";
 import { registerSubmissionCapture } from "./galaxy-submission-capture";
 import { isSubmissionReplayEnabled, registerSubmissionReplay } from "./submission-replay";
+import { registerCaptureFollowThrough } from "./galaxy-reconcile";
 import { registerExecutionCommands } from "./execution-commands";
 import { registerDashboardTools } from "./dashboard-tools";
 import { registerDashboardCommands } from "./dashboard-commands";
@@ -129,6 +130,13 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   if (isSubmissionReplayEnabled()) {
     registerSubmissionReplay(pi);
   }
+  // ── Capture, part two (#473): reconcile + enrichment ──────────────────────
+  // Everything that happens to a recorded run after the submit: reconcile on
+  // session start, after galaxy_connect, every Nth poller tick and on
+  // /reconcile; per-job enrichment off the same queue. After the replay seam
+  // so a replayed session's blocks are on disk before the first reconcile.
+  registerCaptureFollowThrough(pi);
+  // ── end capture, part two ─────────────────────────────────────────────────
 
   registerPlanTools(pi);
   registerGalaxyUploadTool(pi);

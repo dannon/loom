@@ -409,3 +409,71 @@ export function readAttemptRecordSync(
     return null;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reconcile cursor
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Where reconcile keeps what it has already looked at: when the analysis
+ * started (the earliest work it will claim for this analysis) and, per
+ * server and history, the newest `create_time` it has seen. Beside the
+ * attempt records for the same reason they are here -- the window decides
+ * what gets written as unattributed work, and the agent must not be able to
+ * move it. Not a ULID name, so it can never collide with an attempt.
+ */
+const RECONCILE_STATE_FILE = "reconcile-state.json";
+
+export interface ReconcileState {
+  schema: number;
+  analysis_started_at: string;
+  histories: Record<string, { stamp: string }>;
+}
+
+export async function readReconcileState(analysisDir: string): Promise<ReconcileState | null> {
+  if (!(await ensureProvenanceDir(analysisDir, false))) return null;
+  const file = path.join(analysisDir, ...PROVENANCE_DIR_PARTS, RECONCILE_STATE_FILE);
+  try {
+    const stat = await fsp.lstat(file);
+    if (!stat.isFile()) return null;
+    const parsed = JSON.parse(await fsp.readFile(file, "utf-8")) as Partial<ReconcileState>;
+    if (
+      typeof parsed.analysis_started_at !== "string" ||
+      Number.isNaN(Date.parse(parsed.analysis_started_at))
+    ) {
+      return null;
+    }
+    return {
+      schema: PROVENANCE_SCHEMA_VERSION,
+      analysis_started_at: parsed.analysis_started_at,
+      histories: parsed.histories && typeof parsed.histories === "object" ? parsed.histories : {},
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function writeReconcileState(
+  analysisDir: string,
+  state: ReconcileState,
+): Promise<void> {
+  const dir = await ensureProvenanceDir(analysisDir);
+  if (!dir) return;
+  const file = path.join(dir, RECONCILE_STATE_FILE);
+  await withFileLock(file, async () => {
+    const temp = path.join(
+      dir,
+      `.${RECONCILE_STATE_FILE}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`,
+    );
+    await fsp.writeFile(temp, JSON.stringify(state, null, 2) + "\n", {
+      encoding: "utf-8",
+      flag: "wx",
+    });
+    try {
+      await fsp.rename(temp, file);
+    } catch (err) {
+      await fsp.rm(temp, { force: true });
+      throw err;
+    }
+  });
+}
