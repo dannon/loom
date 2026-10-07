@@ -49,10 +49,11 @@ export interface ObservationsModeState {
 }
 
 /**
- * `auto` only counts once the sample-payload confirm has been answered yes on
- * this install. Without that, a hand-edited, copied or restored config would
- * start sending with no one ever having seen what goes out, so it runs as
- * `ask` instead.
+ * `auto` only counts with a recorded yes to the sample-payload confirm.
+ * Without one, a hand-edited or restored config would start sending with no
+ * one ever having seen what goes out, so it runs as `ask` instead. The record
+ * is a timestamp in the same file, not proof of anything -- it stops an
+ * accidental `auto`, not a deliberate edit.
  */
 export function describeObservationsMode(): ObservationsModeState {
   if (isObservationsHardDisabled()) return { mode: "off", override: "hard-disabled" };
@@ -137,9 +138,12 @@ export function getOrCreateInstallToken(): string {
   return token;
 }
 
-// Only what markAutoAcknowledged writes counts; a stray `true` or "" doesn't.
+// Only the ISO timestamp markAutoAcknowledged writes counts. Date.parse alone
+// would take "1" or "no 1".
+const ACK_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+
 function isAcknowledgement(value: unknown): boolean {
-  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+  return typeof value === "string" && ACK_RE.test(value) && !Number.isNaN(Date.parse(value));
 }
 
 export function hasAcknowledgedAuto(): boolean {

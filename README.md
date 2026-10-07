@@ -509,9 +509,9 @@ for anything else -- an institutional mirror is never named. Rows are tied to a
 random per-install token, not to your account, and expire after 180 days.
 
 Switching to `auto` shows you a real sample payload first, and `auto` only
-takes effect once you have confirmed that sample on this install: a config that
-says `auto` without that recorded confirmation (hand-edited, or copied from
-another machine) runs as `ask`, and `/observations status` says so. For a managed
+takes effect once you have confirmed that sample: a config that says `auto`
+without the recorded confirmation (hand-edited, say) runs as `ask`, and
+`/observations status` says so. For a managed
 deployment, `ORBIT_OBSERVATIONS=off` (or `LOOM_OBSERVATIONS=off`) disables the
 whole thing and cannot be overridden from the app. For local development,
 `ORBIT_OBSERVATIONS_URL` points the client at another intake; it is honoured

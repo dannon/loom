@@ -128,7 +128,7 @@ describe("formatObservationsStatus", () => {
       counts: { sent: 0, queued: 0, retracted: 0, cancelled: 0 },
     });
     expect(text).toContain("mode: ask");
-    expect(text).toContain("The config says auto, but auto was never confirmed");
+    expect(text).toContain("The config says auto, but there is no recorded confirmation");
     expect(text).toContain("/observations mode auto");
   });
 
@@ -140,7 +140,7 @@ describe("formatObservationsStatus", () => {
       sentLogPath: "/x",
       counts: { sent: 0, queued: 0, retracted: 0, cancelled: 0 },
     });
-    expect(text).not.toContain("never confirmed");
+    expect(text).not.toContain("no recorded confirmation");
   });
 
   it("never prints the install token value", () => {
@@ -229,7 +229,7 @@ describe("/observations", () => {
     await commands.get("observations")!.handler("status", { hasUI: true, ui });
     const text = String(ui.notify.mock.calls[0][0]);
     expect(text).toContain("mode: ask");
-    expect(text).toContain("never confirmed on this install");
+    expect(text).toContain("no recorded confirmation of auto");
   });
 
   it("rejects an unknown subcommand with the usage", async () => {

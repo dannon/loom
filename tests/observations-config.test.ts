@@ -75,7 +75,7 @@ describe("resolveObservationsMode", () => {
   });
 
   it("does not count a junk acknowledgement", async () => {
-    for (const ack of [true, "", "yes", 1, null]) {
+    for (const ack of [true, "", "yes", 1, null, "1", "0", "12", "no 1", "2026-10-07"]) {
       vi.resetModules();
       writeConfig({ observations: { mode: "auto", autoAcknowledgedAt: ack } });
       const m = await load();

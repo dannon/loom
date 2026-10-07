@@ -67,9 +67,9 @@ export function formatObservationsStatus(info: {
   ];
   if (info.override === "auto-unacknowledged") {
     lines.push(
-      "  The config says auto, but auto was never confirmed on this install, so it runs as",
-      "  ask: every report is shown to you before it goes. /observations mode auto shows",
-      "  the sample payload and turns auto on once you confirm.",
+      "  The config says auto, but there is no recorded confirmation of auto, so it runs",
+      "  as ask: every report is shown to you before it goes. /observations mode auto",
+      "  shows the sample payload and turns auto on once you confirm.",
     );
   }
   if (info.hardDisabled) {
