@@ -98,20 +98,26 @@ export function isCredentialStore(
 
 interface CandidateSnapshot {
   candidates: Set<string>;
-  watched: Map<string, string>;
-  // False while any watched dir changed too recently for its mtime to have
-  // moved on; see RACY_WINDOW_MS.
+  watched: Map<string, DirSignature>;
+  // False while any watched dir changed too recently to trust; see
+  // RACY_WINDOW_MS.
   settled: boolean;
+}
+
+interface DirSignature {
+  key: string;
+  changedAt: number;
 }
 
 const candidateCache = new Map<string, CandidateSnapshot>();
 const CANDIDATE_CACHE_LIMIT = 16;
 
-// A modification in the same timestamp tick as the one a snapshot saw leaves
-// the mtime unchanged (Linux stamps from a coarse jiffy clock, HFS+ to the
-// second), so a snapshot taken within this long of a watched dir's mtime is
-// rebuilt on the next call instead of trusted. Same idea as git's racy-index
-// check.
+// A change in the same timestamp tick as one a snapshot already saw leaves the
+// stamps unchanged (Linux stamps from a coarse jiffy clock, HFS+ to the
+// second), so a snapshot taken within this long of a watched dir changing is
+// rebuilt on the next call instead of trusted. The same window catches a
+// change that lands in a resolved dir between resolving it and statting it.
+// Same idea as git's racy-index check.
 const RACY_WINDOW_MS = 1000;
 
 /**
@@ -120,15 +126,17 @@ const RACY_WINDOW_MS = 1000;
  * Every file read and every directory listing entry on the web surface comes
  * through here, and resolving each file costs one or two realpath walks --
  * slow enough on Windows to matter -- so the set is cached per (home,
- * agentDir). The cache is keyed on the stat of each candidate's parent
- * directory and of every directory between it and $HOME. What a candidate
- * resolves to can only change when an entry on that path is created, removed,
- * renamed or replaced, and each of those rewrites the containing directory and
- * so bumps its mtime -- on APFS, ext4 and NTFS alike. A symlink planted at
- * `~/.loom/config.json` therefore shows up on the very next call. A symlink's
- * target cannot be edited in place on POSIX; it has to be recreated, which is
- * again a directory change. The inode rides along in the signature so a
- * directory swapped for another with the same mtime still invalidates.
+ * agentDir). The cache is keyed on an lstat of every directory a candidate
+ * resolves through: each parent as written and as resolved, and all of their
+ * ancestors up to the root. What a candidate resolves to can only change when
+ * an entry on one of those paths is created, removed, renamed or replaced,
+ * and each of those rewrites the containing directory, which is in the set --
+ * so a symlink planted at `~/.loom/config.json` shows up on the very next
+ * call, as does a renamed ancestor relinked to its old name. lstat rather
+ * than stat so a symlinked dir signs as the link itself; its target's dirs are
+ * watched separately through the resolved parent. ctime is in the signature
+ * because mtime alone can be put back with `touch -r`, and no ordinary file call can
+ * set ctime.
  */
 function credentialFileCandidates(home: string, agentDir: string): Set<string> {
   // No home: the lexical relative paths, exactly as before, and nothing on
@@ -151,14 +159,10 @@ function credentialFileCandidates(home: string, agentDir: string): Set<string> {
     ...SENSITIVE_HOME_FILES.map((f) => path.join(home, f)),
     ...AGENT_DIR_CREDENTIAL_FILES.map((f) => path.join(agentDir, f)),
   ];
-  // Stat the watched dirs BEFORE resolving, so a change that lands mid-build
+  // Stat the lexical dirs BEFORE resolving, so a change that lands mid-build
   // leaves a stale signature behind and forces the next call to rebuild.
-  const watched = new Map<string, string>();
-  for (const f of files) {
-    for (const dir of dirsToWatch(path.dirname(f), home)) {
-      if (!watched.has(dir)) watched.set(dir, dirSignature(dir));
-    }
-  }
+  const watched = new Map<string, DirSignature>();
+  for (const f of files) watchWithAncestors(path.resolve(path.dirname(f)), watched);
   const resolvedParents = new Map<string, string | null>();
   const candidates = new Set<string>();
   let sawLink = false;
@@ -167,22 +171,15 @@ function credentialFileCandidates(home: string, agentDir: string): Set<string> {
     if (link) sawLink = true;
     for (const c of withRealpath(f, resolvedParents, link)) candidates.add(c.toLowerCase());
   }
-  // A parent that is itself a symlink resolves elsewhere; statSync above
-  // already follows it, but watch the resolved dir under its own name too so
-  // a later swap of the link is not hidden behind a cached signature.
-  for (const real of resolvedParents.values()) {
-    if (real && !watched.has(real)) watched.set(real, dirSignature(real));
-  }
-  // A credential file that is itself a symlink resolves through directories
-  // nobody is watching, and a dangling one starts resolving the moment its
-  // target is created, so that snapshot is never trusted: rare enough that
-  // paying the full walk on every call is fine.
+  // A parent that is (or sits under) a symlink resolves somewhere else, and
+  // that path's dirs decide the answer just as much.
+  for (const real of resolvedParents.values()) if (real) watchWithAncestors(real, watched);
+  // A credential file that is itself a symlink resolves through its target's
+  // dirs, and a dangling one starts resolving the moment its target is
+  // created, so that snapshot is never trusted: rare enough that paying the
+  // full walk on every call is fine.
   const settled =
-    !sawLink &&
-    [...watched.values()].every((sig) => {
-      const mtime = Number(sig.split(":")[0]);
-      return Number.isNaN(mtime) || mtime < builtAt - RACY_WINDOW_MS;
-    });
+    !sawLink && [...watched.values()].every((sig) => sig.changedAt < builtAt - RACY_WINDOW_MS);
 
   if (candidateCache.size >= CANDIDATE_CACHE_LIMIT && !candidateCache.has(key)) {
     candidateCache.clear();
@@ -191,24 +188,11 @@ function credentialFileCandidates(home: string, agentDir: string): Set<string> {
   return candidates;
 }
 
-// The parent itself, then each ancestor up to and including $HOME. Swapping
-// `~/.loom` for a symlink changes `~`, not `~/.loom`. A dir outside $HOME (a
-// relocated agent dir) gets itself and its own parent. Ancestors above $HOME
-// are not watched: replacing those needs rights over the home directory
-// itself, at which point nothing here holds anyway.
-function dirsToWatch(dir: string, home: string): string[] {
-  const out = [dir];
-  if (!within(dir, home)) {
-    out.push(path.dirname(dir));
-    return out;
+function watchWithAncestors(dir: string, watched: Map<string, DirSignature>): void {
+  for (let cur = dir; !watched.has(cur); cur = path.dirname(cur)) {
+    watched.set(cur, dirSignature(cur));
+    if (path.dirname(cur) === cur) break;
   }
-  // Compared with `within` rather than `===` so a home spelled with a
-  // trailing separator still stops the walk at $HOME.
-  for (let cur = dir; cur !== path.dirname(cur) && within(path.dirname(cur), home);) {
-    cur = path.dirname(cur);
-    out.push(cur);
-  }
-  return out;
 }
 
 function isSymlink(p: string): boolean {
@@ -219,17 +203,21 @@ function isSymlink(p: string): boolean {
   }
 }
 
-function dirSignature(dir: string): string {
+function dirSignature(dir: string): DirSignature {
   try {
-    const st = fs.statSync(dir);
-    return `${st.mtimeMs}:${st.ino}`;
+    const st = fs.lstatSync(dir);
+    return {
+      key: `${st.mtimeMs}:${st.ctimeMs}:${st.ino}`,
+      // max, so a future mtime set by hand keeps the snapshot untrusted too.
+      changedAt: Math.max(st.mtimeMs, st.ctimeMs),
+    };
   } catch {
-    return "absent";
+    return { key: "absent", changedAt: -Infinity };
   }
 }
 
-function signaturesMatch(watched: Map<string, string>): boolean {
-  for (const [dir, sig] of watched) if (dirSignature(dir) !== sig) return false;
+function signaturesMatch(watched: Map<string, DirSignature>): boolean {
+  for (const [dir, sig] of watched) if (dirSignature(dir).key !== sig.key) return false;
   return true;
 }
 

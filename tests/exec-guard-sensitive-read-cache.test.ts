@@ -20,21 +20,21 @@ import * as os from "os";
 import * as path from "path";
 import { isCredentialStore } from "../extensions/loom/exec-guard/sensitive-read";
 
-const CREDENTIAL_FILE_COUNT = 14; // SENSITIVE_HOME_FILES + AGENT_DIR_CREDENTIAL_FILES
+// One realpath per distinct parent: $HOME, ~/.loom, ~/.orbit and the agent
+// dir. Fewer than the fourteen credential files, which is the bound that matters.
+const DISTINCT_PARENTS = 4;
 
 let root: string;
 let home: string;
 let agentDir: string;
 let target: string;
 
-// Every dir the cache watches, pushed well outside the racy window, so the
-// snapshot is trusted and only a real change can invalidate it.
+// The cache won't trust a dir that changed within the last second, and every
+// dir here was just made. Back-dating them with utimes would also move ctime,
+// which the cache treats as a change, so move the clock instead.
 function settle(): void {
-  const old = new Date(Date.now() - 60_000);
-  for (const d of [home, path.join(home, ".loom"), path.join(home, ".orbit"), agentDir]) {
-    if (fs.existsSync(d)) fs.utimesSync(d, old, old);
-  }
-  fs.utimesSync(path.join(home, ".pi"), old, old);
+  const later = Date.now() + 60_000;
+  vi.spyOn(Date, "now").mockReturnValue(later);
 }
 
 beforeEach(() => {
@@ -53,6 +53,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -61,7 +62,7 @@ describe("isCredentialStore realpath cache", () => {
     settle();
     expect(isCredentialStore(target, home, agentDir)).toBe(false);
     expect(calls.realpath).toBeGreaterThan(0);
-    expect(calls.realpath).toBeLessThanOrEqual(CREDENTIAL_FILE_COUNT);
+    expect(calls.realpath).toBeLessThanOrEqual(DISTINCT_PARENTS);
 
     calls.realpath = 0;
     for (let i = 0; i < 5; i++) expect(isCredentialStore(target, home, agentDir)).toBe(false);
@@ -109,8 +110,6 @@ describe("isCredentialStore realpath cache", () => {
   it("sees a symlink planted at a relocated agent dir's credential file", () => {
     const outside = path.join(root, "agent-elsewhere");
     fs.mkdirSync(outside);
-    const old = new Date(Date.now() - 60_000);
-    fs.utimesSync(outside, old, old);
     settle();
     expect(isCredentialStore(target, home, outside)).toBe(false);
     expect(isCredentialStore(target, home, outside)).toBe(false);
@@ -119,20 +118,62 @@ describe("isCredentialStore realpath cache", () => {
   });
 
   it("does not trust a snapshot taken within a timestamp tick of a change", () => {
-    // Not settled: the dirs were written moments ago, so a second change in
-    // the same tick could leave the mtime where the snapshot saw it.
+    // Not settled: the dirs changed moments ago, and a second change in the
+    // same tick could leave every stamp where the snapshot saw it, so a
+    // repeat call has to resolve again rather than answer from the cache.
+    expect(isCredentialStore(target, home, agentDir)).toBe(false);
+    calls.realpath = 0;
+    expect(isCredentialStore(target, home, agentDir)).toBe(false);
+    expect(calls.realpath).toBeGreaterThan(0);
+  });
+
+  it("is not fooled by putting the dir's mtime back after planting a symlink", () => {
     const loomDir = path.join(home, ".loom");
     // A whole-millisecond stamp, so putting it back below is exact.
-    const before = new Date(Date.now());
-    fs.utimesSync(loomDir, before, before);
+    const stamp = new Date(Date.now() - 1);
+    fs.utimesSync(loomDir, stamp, stamp);
+    const seen = fs.statSync(loomDir).mtimeMs;
+    settle();
     expect(isCredentialStore(target, home, agentDir)).toBe(false);
-
+    expect(isCredentialStore(target, home, agentDir)).toBe(false);
     const cfg = path.join(loomDir, "config.json");
     fs.rmSync(cfg);
     fs.symlinkSync(target, cfg);
-    // Simulate that same-tick change by putting the mtime back.
-    fs.utimesSync(loomDir, before, before);
+    fs.utimesSync(loomDir, stamp, stamp);
+    expect(fs.statSync(loomDir).mtimeMs).toBe(seen);
     expect(isCredentialStore(target, home, agentDir)).toBe(true);
+  });
+
+  it("follows a renamed ancestor of a symlinked credential dir's target", () => {
+    // ~/.loom -> ws/a/b, then ws/a is renamed and relinked under its old name:
+    // ~/.loom, ~ and ws/a/b all stat exactly as before.
+    const ws = path.join(root, "ws");
+    fs.mkdirSync(path.join(ws, "a", "b"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "a", "b", "config.json"), "{}");
+    fs.rmSync(path.join(home, ".loom"), { recursive: true });
+    fs.symlinkSync(path.join(ws, "a", "b"), path.join(home, ".loom"));
+    settle();
+    expect(
+      isCredentialStore(fs.realpathSync(path.join(ws, "a", "b", "config.json")), home, agentDir),
+    ).toBe(true);
+    fs.renameSync(path.join(ws, "a"), path.join(ws, "c"));
+    fs.symlinkSync("c", path.join(ws, "a"));
+    const moved = fs.realpathSync(path.join(ws, "c", "b", "config.json"));
+    expect(isCredentialStore(moved, home, agentDir)).toBe(true);
+  });
+
+  it("follows a renamed ancestor of a relocated agent dir", () => {
+    const outside = path.join(root, "proj", "pi", "agent");
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(path.join(outside, "auth.json"), "{}");
+    settle();
+    expect(isCredentialStore(fs.realpathSync(path.join(outside, "auth.json")), home, outside)).toBe(
+      true,
+    );
+    fs.renameSync(path.join(root, "proj"), path.join(root, "proj2"));
+    fs.symlinkSync("proj2", path.join(root, "proj"));
+    const moved = fs.realpathSync(path.join(root, "proj2", "pi", "agent", "auth.json"));
+    expect(isCredentialStore(moved, home, outside)).toBe(true);
   });
 
   it("never trusts a snapshot where a credential file is itself a symlink", () => {
