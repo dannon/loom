@@ -321,6 +321,40 @@ describe("isCredentialStore realpath cache", () => {
     expect(isCredentialStore(fs.realpathSync(asConfig), home, agentDir)).toBe(true);
   });
 
+  it("keeps (home, agentDir) pairs apart even when joining them would collide", () => {
+    // Joined with a NUL, ("/a\0/b", "/c") and ("/a", "/b\0/c") made one key,
+    // so the second pair was answered from the first pair's snapshot. `a`'s
+    // parent is missing, so the walk stops there and the first pair settles.
+    const a = path.join(root, "missing", "a");
+    settle();
+    isCredentialStore(target, `${a}\0/b`, "/c");
+    expect(isCredentialStore(path.join(a, ".loom", "config.json"), a, "/b\0/c")).toBe(true);
+  });
+
+  it("resolves a relative agent dir against the cwd of each call", () => {
+    const first = path.join(root, "first");
+    const second = path.join(root, "second");
+    for (const d of [first, second]) {
+      fs.mkdirSync(d);
+      fs.writeFileSync(path.join(d, "auth.json"), "{}");
+    }
+    const cwd = vi.spyOn(process, "cwd").mockReturnValue(first);
+    settle();
+    expect(isCredentialStore(path.join(first, "auth.json"), home, ".")).toBe(true);
+    expect(isCredentialStore(path.join(first, "auth.json"), home, ".")).toBe(true);
+    cwd.mockReturnValue(second);
+    expect(isCredentialStore(path.join(second, "auth.json"), home, ".")).toBe(true);
+    expect(isCredentialStore(path.join(first, "auth.json"), home, ".")).toBe(false);
+  });
+
+  it("resolves the agent dir once, not once per file, when there is no home", () => {
+    isCredentialStore(target, "", agentDir);
+    expect(calls.realpath).toBe(1);
+    expect(isCredentialStore(fs.realpathSync(path.join(agentDir, "auth.json")), "", agentDir)).toBe(
+      true,
+    );
+  });
+
   it("never trusts a snapshot where a credential file is itself a symlink", () => {
     const cfg = path.join(home, ".loom", "config.json");
     const later = path.join(root, "ws", "later.json");

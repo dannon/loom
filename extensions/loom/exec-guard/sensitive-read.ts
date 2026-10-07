@@ -144,18 +144,23 @@ const RACY_WINDOW_MS = 1000;
  * guards against, and the racy window is only about time moving forward.
  */
 function credentialFileCandidates(home: string, agentDir: string): Set<string> {
-  // No home: the lexical relative paths, exactly as before, and nothing on
-  // disk worth caching against.
+  // No home: the lexical relative paths, exactly as before. They resolve
+  // against the cwd, so there's nothing stable to cache them under.
   if (!home) {
     const lexical = SENSITIVE_HOME_FILES.map((f) => path.join(home, f));
+    const resolvedParents = new Map<string, string | null>();
     for (const f of AGENT_DIR_CREDENTIAL_FILES) {
       const p = path.join(agentDir, f);
-      lexical.push(...withRealpath(p, new Map(), isSymlink(p)));
+      lexical.push(...withRealpath(p, resolvedParents, isSymlink(p)));
     }
     return new Set(lexical.map((c) => c.toLowerCase()));
   }
 
-  const key = `${home}\0${agentDir}`;
+  // Keyed on the absolute dirs: PI_CODING_AGENT_DIR may be relative, and a
+  // snapshot of a relative dir would outlive a chdir. The candidates keep the
+  // spellings as given too, since on Windows resolving a drive-less home
+  // prepends the cwd's drive and callers may still pass the drive-less form.
+  const key = JSON.stringify([path.resolve(home), path.resolve(agentDir)]);
   const cached = candidateCache.get(key);
   if (cached?.settled && signaturesMatch(cached.watched)) return cached.candidates;
 
@@ -179,6 +184,7 @@ function credentialFileCandidates(home: string, agentDir: string): Set<string> {
   for (const f of files) {
     const link = isSymlink(f);
     if (link) sawLink = true;
+    candidates.add(path.resolve(f).toLowerCase());
     for (const c of withRealpath(f, resolvedParents, link)) candidates.add(c.toLowerCase());
   }
   // realpath decides the spelling, since that's what callers compare against;
