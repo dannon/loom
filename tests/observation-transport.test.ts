@@ -55,7 +55,11 @@ async function load() {
 
 /** An outbox line as a hand edit would leave it: `sha256` defaults to the honest digest. */
 function outboxLine(o: unknown, mode: "ask" | "auto" = "ask", sha256?: string): string {
-  const digest = sha256 ?? createHash("sha256").update(JSON.stringify(o), "utf-8").digest("hex");
+  const digest =
+    sha256 ??
+    createHash("sha256")
+      .update(`${mode}\n${JSON.stringify(o)}`, "utf-8")
+      .digest("hex");
   return JSON.stringify({ consent: { mode, sha256: digest }, observation: o });
 }
 
@@ -220,6 +224,17 @@ describe("submitObservation", () => {
       .mockResolvedValue({ ok: true, status: 202, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
     process.env.ORBIT_OBSERVATIONS_URL = "http://localhost:8787";
+    const m = await load();
+    await m.submitObservation(obs);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://localhost:8787/observations");
+  });
+
+  it("fetches the parsed override, trailing slash and all normalized away", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, status: 202, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    process.env.ORBIT_OBSERVATIONS_URL = "  HTTP://LOCALHOST:8787/  ";
     const m = await load();
     await m.submitObservation(obs);
     expect(String(fetchMock.mock.calls[0][0])).toBe("http://localhost:8787/observations");
@@ -568,6 +583,39 @@ describe("drainObservationOutbox", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it("drops an auto row whose consent mode was edited to ask", async () => {
+    const m = await load();
+    m.appendToObservationOutbox(obs, m.consentFor(obs, "auto"));
+    const file = path.join(tmpHome, ".loom", "observations-outbox.jsonl");
+    const row = JSON.parse(fs.readFileSync(file, "utf-8"));
+    row.consent.mode = "ask";
+    fs.writeFileSync(file, JSON.stringify(row) + "\n");
+    const submit = vi.fn(ok);
+    expect((await m.drainObservationOutbox(submit, () => "ask" as const)).dropReasons).toEqual({
+      "changed-since-consent": 1,
+    });
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("refuses an honestly hashed but malformed row before touching its fields", async () => {
+    const m = await load();
+    const good = { ...obs, id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" };
+    fs.writeFileSync(
+      path.join(tmpHome, ".loom", "observations-outbox.jsonl"),
+      outboxLine({ id: "x" }, "auto") + "\n" + outboxLine(good, "ask") + "\n",
+    );
+    const submit = vi.fn(ok);
+    // In ask, so the malformed auto row would reach the consent-lapsed branch.
+    expect(await m.drainObservationOutbox(submit, () => "ask" as const)).toEqual({
+      sent: 1,
+      kept: 0,
+      dropped: 1,
+      dropReasons: { "refused-locally": 1 },
+    });
+    expect(lines("observations-outbox.jsonl")).toEqual([]);
+    expect(m.readSentLog().map((r) => r.id)).toEqual([good.id]);
+  });
+
   it("drops a row with no consent record, or a malformed one", async () => {
     const m = await load();
     const digest = m.consentFor(obs, "ask").sha256;
@@ -605,7 +653,7 @@ describe("drainObservationOutbox", () => {
       1,
     );
     const body = String(fetchMock.mock.calls[0][1].body);
-    expect(createHash("sha256").update(body, "utf-8").digest("hex")).toBe(
+    expect(createHash("sha256").update(`ask\n${body}`, "utf-8").digest("hex")).toBe(
       m.consentFor(obs, "ask").sha256,
     );
     // The consent record stays local.

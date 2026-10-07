@@ -400,7 +400,9 @@ describe("deliverObservation", () => {
       const row = JSON.parse(fs.readFileSync(file, "utf-8").trim());
       expect(row.consent.mode).toBe(mode);
       expect(row.consent.sha256).toBe(
-        createHash("sha256").update(JSON.stringify(row.observation), "utf-8").digest("hex"),
+        createHash("sha256")
+          .update(`${mode}\n${JSON.stringify(row.observation)}`, "utf-8")
+          .digest("hex"),
       );
       if (mode === "ask") expect(row.observation).toEqual(confirmed);
       else expect(confirmed).toBeUndefined();

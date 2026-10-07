@@ -589,7 +589,11 @@ let warnedOverride = false;
 function endpointBase(): string {
   const override = readEnv("OBSERVATIONS_URL")?.trim();
   if (!override) return OBSERVATIONS_ENDPOINT_URL;
-  if (isAllowedObservationsOverride(override)) return override;
+  if (isAllowedObservationsOverride(override)) {
+    // What was checked is what gets fetched: the parsed form, not the raw text.
+    const url = new URL(override);
+    return url.origin + url.pathname.replace(/\/+$/, "");
+  }
   if (!warnedOverride) {
     warnedOverride = true;
     const name =
@@ -954,7 +958,10 @@ export type ObservationConsentMode = "ask" | "auto";
 
 export interface ObservationConsent {
   mode: ObservationConsentMode;
-  /** SHA-256 of the exact request body that was consented to. */
+  /**
+   * SHA-256 over the consent mode and the exact request body that was
+   * consented to (consentDigest), so neither can be edited on its own.
+   */
   sha256: string;
 }
 
@@ -979,11 +986,13 @@ export function observationRequestBody(obs: Observation): string {
  * edit still looks harmless, not that it is what the user agreed to.
  */
 export function consentFor(obs: Observation, mode: ObservationConsentMode): ObservationConsent {
-  return { mode, sha256: sha256Hex(observationRequestBody(obs)) };
+  return { mode, sha256: consentDigest(mode, observationRequestBody(obs)) };
 }
 
-function sha256Hex(text: string): string {
-  return createHash("sha256").update(text, "utf-8").digest("hex");
+// The mode is inside the digest: otherwise flipping "auto" to "ask" in the
+// file would let an auto row drain in ask without touching the body.
+export function consentDigest(mode: ObservationConsentMode, body: string): string {
+  return createHash("sha256").update(`${mode}\n${body}`, "utf-8").digest("hex");
 }
 
 /**
@@ -1101,10 +1110,10 @@ function parseOutboxRow(line: string): OutboxRow | undefined {
 
 /**
  * Retry what the outbox holds, oldest first, at most OUTBOX_DRAIN_MAX per call.
- * A row goes only if it still hashes to the bytes that were consented to and
- * its consent still holds under the current mode (consentStillHolds). It is
- * then re-checked with the same rules the builder applies, as a second line
- * behind the hash -- anyone who can edit the file can recompute a digest.
+ * A row goes only if it still hashes to the bytes and mode that were consented
+ * to, passes the same rules the builder applies (a second line behind the hash
+ * -- anyone who can edit the file can recompute a digest), and its consent
+ * still holds under the current mode (consentStillHolds).
  * Anything that fails, or that the route now refuses for good, is dropped
  * rather than kept to fail forever. Only queueable failures stay.
  *
@@ -1163,25 +1172,27 @@ export async function drainObservationOutbox(
       // Re-serialized, because those are the bytes that would go. A row that
       // fails here is settled by its exact line, never by its id: the id is
       // part of what may have been edited.
-      if (sha256Hex(observationRequestBody(obs)) !== row.consent.sha256) {
+      if (consentDigest(row.consent.mode, observationRequestBody(obs)) !== row.consent.sha256) {
         settle(line, undefined);
         drop("changed-since-consent");
         continue;
       }
       const id = outboxRowId(line);
       if (id && doneIds.has(id)) continue;
+      // Before anything reads a field: a digest can be recomputed, so a
+      // matching one says nothing about the row's shape.
+      const problems = observationProblems(obs);
+      if (problems.errors.length > 0 || problems.leaks.length > 0) {
+        settle(line, id);
+        drop("refused-locally");
+        continue;
+      }
       if (!consentStillHolds(row.consent.mode, mode)) {
         // Dropped, not kept: the user stepped back from auto, so this was
         // never seen and is not going to be.
         if (id) appendSentLog(sentLogEntryFor(obs, "cancelled"));
         settle(line, id);
         drop("consent-lapsed");
-        continue;
-      }
-      const problems = observationProblems(obs);
-      if (problems.errors.length > 0 || problems.leaks.length > 0) {
-        settle(line, id);
-        drop("refused-locally");
         continue;
       }
       const res = await submit(obs);
