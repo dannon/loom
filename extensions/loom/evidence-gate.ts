@@ -92,6 +92,8 @@ import { loadConfig } from "./config";
 import { getNotebookPath } from "./state";
 import { appendActivityEvent } from "./activity";
 import { findInvocationBlocks, type InvocationYaml } from "./notebook-writer";
+import { findJobBlocks, type JobYaml } from "./galaxy-job-block";
+import { attemptOwns, readAttemptRecordSync } from "./galaxy-provenance";
 import { readEnv } from "../../shared/orbit-env.js";
 
 /** pi emits its built-in file tools lowercase; mirrors exec-guard's FILE_WRITE_TOOLS. */
@@ -499,6 +501,74 @@ export function decideNotebookWrite(
   };
 }
 
+export interface EnrichmentWarning {
+  step: string;
+  blockKind: "invocation" | "job";
+  id: string;
+  attemptId?: string;
+  reasons: string[];
+}
+
+/**
+ * Flips whose evidence run is not fully on the record yet: its enrichment is
+ * not `complete`, a job has no tool version, or the block says complete and
+ * the provenance file behind it is missing.
+ *
+ * Warn only, in every mode. The rate is the thing to learn before this can
+ * deny -- a built-in tool never has a version to give, a details fetch fails
+ * for reasons nobody can fix from a notebook -- and a gate that blocks a
+ * verified result over a metadata gap is the gate people switch off.
+ *
+ * Read from the pre-image, as `findContradictions` is. The provenance check is
+ * the one part the agent cannot write its way past: `enrichment: complete` is
+ * text in a block it can edit, the attempt file is not.
+ *
+ * Only completed runs are judged when the step has one: an old failed attempt
+ * whose details never came is not the evidence the flip rests on.
+ */
+export function findEnrichmentWarnings(
+  before: string,
+  flips: PlanStep[],
+  analysisDir: string,
+): EnrichmentWarning[] {
+  const blocks: ({ kind: "invocation"; b: InvocationYaml } | { kind: "job"; b: JobYaml })[] = [
+    ...findInvocationBlocks(before).map((b) => ({ kind: "invocation" as const, b })),
+    ...findJobBlocks(before).map((b) => ({ kind: "job" as const, b })),
+  ];
+  const out: EnrichmentWarning[] = [];
+  for (const step of flips) {
+    if (!step.anchor) continue;
+    const bound = blocks.filter((x) => x.b.notebookAnchor === step.anchor);
+    if (bound.length === 0) continue;
+    const completed = bound.filter((x) => x.b.status === "completed");
+    for (const x of completed.length > 0 ? completed : bound) {
+      const id = x.kind === "invocation" ? x.b.invocationId : x.b.jobId;
+      const reasons: string[] = [];
+      if (x.b.enrichment !== "complete") reasons.push(`enrichment_${x.b.enrichment ?? "absent"}`);
+      const jobs = x.b.jobs ?? [];
+      const versionMissing =
+        x.kind === "job"
+          ? !jobs.some((j) => j.jobId === id && j.toolVersion)
+          : jobs.length === 0 || jobs.some((j) => !j.toolVersion);
+      if (versionMissing) reasons.push("tool_version_missing");
+      if (x.b.enrichment === "complete") {
+        const record = x.b.attemptId ? readAttemptRecordSync(analysisDir, x.b.attemptId) : null;
+        if (!record || !attemptOwns(record, x.kind, id)) reasons.push("provenance_missing");
+      }
+      if (reasons.length > 0) {
+        out.push({
+          step: step.key,
+          blockKind: x.kind,
+          id,
+          ...(x.b.attemptId ? { attemptId: x.b.attemptId } : {}),
+          reasons,
+        });
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Session-scoped, user-granted clearances, keyed by plan-step key.
  *
@@ -714,6 +784,27 @@ export function registerEvidenceGate(pi: ExtensionAPI): void {
         outcome: adjudication.outcome,
       },
     });
+
+    const warnings = findEnrichmentWarnings(before, decision.completions, path.dirname(nbPath));
+    if (warnings.length > 0) {
+      appendActivityEvent(path.dirname(nbPath), {
+        timestamp: new Date().toISOString(),
+        kind: "evidence.enrichment_warning",
+        source: "evidence-gate",
+        payload: {
+          mode: decision.mode,
+          toolName: event.toolName,
+          decision: "warn",
+          warnings: warnings.map((w) => ({
+            step: w.step,
+            block_kind: w.blockKind,
+            id: w.id,
+            attempt_id: w.attemptId ?? null,
+            reasons: w.reasons,
+          })),
+        },
+      });
+    }
 
     if (!adjudication.block) return;
     return { block: true, reason: renderBlockReason(adjudication.unresolved) };
