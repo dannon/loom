@@ -204,16 +204,18 @@ function credentialFileCandidates(home: string, agentDir: string): Set<string> {
   // -- a race, or some platform quirk the walk doesn't model -- the watched
   // set may be the wrong one, so don't trust it.
   //
-  // The native realpath is not compared. The one place it lands somewhere
-  // else, a `..` in a link target, already leaves the walk incomplete, and off
-  // Windows it isn't even computed when the walk agrees. On Windows it also
-  // expands 8.3 short names (`RUNNER~1`) and subst or mapped drives that
-  // fs.realpathSync and the walk keep as given -- another spelling of the same
-  // dirs, which the candidates already carry -- and comparing it left every
-  // such home rebuilding on every call.
+  //
+  // The native one is compared too, except that an 8.3 short name the walk
+  // kept (`RUNNER~1`) may come back expanded: which long name it stands for is
+  // an entry in a dir the walk already signed, so it can't change unseen, and
+  // without this every home under a short-name tmpdir rebuilt on every call.
+  // A subst or mapped drive coming back as its target is still a mismatch,
+  // since the drive mapping is in no dir the walk can sign.
   let walksAgree = true;
   for (const [dir, w] of parents) {
-    if (!w.complete || w.real !== (resolvedParents.get(dir)?.js ?? null)) walksAgree = false;
+    const r = resolvedParents.get(dir);
+    if (!w.complete || w.real !== (r?.js ?? null)) walksAgree = false;
+    else if (!sameButShortNames(w.real, r?.native ?? null)) walksAgree = false;
   }
   // A credential file that is itself a symlink resolves through its target's
   // dirs, and a dangling one starts resolving the moment its target is
@@ -229,6 +231,20 @@ function credentialFileCandidates(home: string, agentDir: string): Set<string> {
   }
   candidateCache.set(key, { candidates, watched, links, settled });
   return candidates;
+}
+
+// Case-folded equality, letting a component the walk kept as an 8.3 short
+// name (`~` and a digit) stand for whatever long name sits in that position.
+function sameButShortNames(walked: string | null, native: string | null): boolean {
+  if (walked === null || native === null) return walked === native;
+  const a = walked.toLowerCase();
+  const b = native.toLowerCase();
+  if (a === b) return true;
+  if (process.platform !== "win32") return false;
+  const as = a.split(path.sep);
+  const bs = b.split(path.sep);
+  if (as.length !== bs.length || as[0] !== bs[0]) return false;
+  return as.every((c, i) => c === bs[i] || /~\d/.test(c));
 }
 
 function addFolded(set: Set<string>, dir: string, file: string): void {
@@ -361,7 +377,8 @@ function signaturesMatch(watched: Map<string, DirSignature>): boolean {
 
 // A dir resolved both ways: fs.realpathSync is what the exec-guard's jail
 // hands us, and the native one (what fs.promises.realpath gives the web files
-// surface) can differ from it -- a `..` in a link target is the known case.
+// surface) can differ from it: a `..` in a link target anywhere, and on
+// Windows an expanded 8.3 short name or a subst or mapped drive's target.
 interface ResolvedDir {
   js: string | null;
   native: string | null;

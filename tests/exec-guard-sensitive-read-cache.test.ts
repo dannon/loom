@@ -423,6 +423,25 @@ describe("isCredentialStore realpath cache", () => {
     expect(calls.native).toBe(0);
   });
 
+  it("never settles when the native realpath moves the dir somewhere the walk can't sign", () => {
+    // A subst or mapped drive comes back from the native realpath as its
+    // target, and the drive mapping lives in no directory. Re-mapping it later
+    // has to be seen without any watched dir changing.
+    const nativeRoot = fs.realpathSync.native(root);
+    let mapped = path.join(nativeRoot, "drive-a");
+    calls.nativeMap = (p) => p.split(nativeRoot).join(mapped);
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    const cfg = path.join(".loom", "config.json");
+    settle();
+    expect(isCredentialStore(path.join(mapped, "home", cfg), home, agentDir)).toBe(true);
+    calls.realpath = 0;
+    expect(isCredentialStore(target, home, agentDir)).toBe(false);
+    expect(calls.realpath).toBeGreaterThan(0);
+
+    mapped = path.join(nativeRoot, "drive-b");
+    expect(isCredentialStore(path.join(mapped, "home", cfg), home, agentDir)).toBe(true);
+  });
+
   it("keeps (home, agentDir) pairs apart even when joining them would collide", () => {
     // Joined with a NUL, ("/a\0/b", "/c") and ("/a", "/b\0/c") made one key,
     // so the second pair was answered from the first pair's snapshot. `a`'s
