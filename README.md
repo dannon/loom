@@ -610,6 +610,9 @@ Type `/` in the chat to open the autocomplete popup. Tab to accept; Enter still 
 | `/profiles`               | List saved Galaxy server profiles                                                  |
 | `/execute` (alias `/run`) | Tell the agent to advance the next pending step in the latest plan section         |
 | `/override <step> <why>`  | Clear the evidence gate for one plan step, once, with a recorded reason            |
+| `/pending`                | List Galaxy run proposals waiting for approval                                     |
+| `/approve <proposal-id>`  | Approve a proposed run: freeze it against Galaxy's template and record it          |
+| `/revoke <proposal-id>`   | Withdraw an approval                                                               |
 | `/help`                   | Show this list                                                                     |
 
 ## Tool reference
@@ -620,6 +623,7 @@ Loom registers a small set of extension tools. Plans, decisions, results, and in
 | ------------------------------ | ----------------------------------------------------------------------------------------- |
 | **GTN tutorials**              | `gtn_search`, `gtn_fetch`                                                                 |
 | **Galaxy invocations**         | `galaxy_invocation_record`, `galaxy_invocation_check_all`, `galaxy_invocation_check_one`  |
+| **Galaxy run proposals**       | `loom_propose` (you approve with `/approve`)                                              |
 | **Skills**                     | `skills_fetch` (SKILL.md / reference docs; `repo: "foundry"` reads bundled Foundry casts) |
 | **Multi-agent (experimental)** | `team_dispatch` (gated by `LOOM_TEAM_DISPATCH=1`)                                         |
 

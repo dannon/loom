@@ -80,6 +80,32 @@ explorations, summaries, ad-hoc edits — answer those directly. A plan
 is for multi-step pipeline orchestration the user explicitly wants
 driven (e.g. "draft a plan for variant calling on this data").
 
+## `loom-proposal` blocks
+
+`loom_propose` writes one per proposed Galaxy run, after checking it against
+the target's template. Don't write or edit these by hand to change a run:
+an edit after approval revokes the approval, and a new run is a new
+proposal.
+
+```loom-proposal
+proposal_id: prop-7k2m9x
+step_anchor: plan-a-step-2
+label: Trim reads
+target: {"kind":"tool","tool_id":"fastp","version":"unpinned"}
+server_url: https://usegalaxy.org
+history_id: 0a248a1f62a0cc04
+inputs: [{"slot":"reads","src":"hda","id":"4b6e2f1a9c3d5e70"}]
+overrides: [{"param":"threads","value":4,"rationale":"four cores"}]
+predicate: {"kind":"manual"}
+assertions: []
+template_digest: <sha256 of the template it was checked against>
+created_at: 2026-10-07T12:00:00.000Z
+spec_revision: <written after /approve; display only>
+```
+
+Whether a proposal is approved is recorded in the approval registry, not
+in the block; `spec_revision` here only echoes it.
+
 ## `loom-invocation` and `loom-job` blocks
 
 Every Galaxy submission gets a block. A workflow invocation gets
