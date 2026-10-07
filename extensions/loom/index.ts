@@ -21,6 +21,7 @@ import { recordGalaxyConnected } from "./galaxy-cred-drift";
 import { registerActivityHooks } from "./activity-hooks";
 import { registerSubmissionCapture } from "./galaxy-submission-capture";
 import { isSubmissionReplayEnabled, registerSubmissionReplay } from "./submission-replay";
+import { isObservationReplayEnabled, registerObservationReplay } from "./observation-replay";
 import { registerCaptureFollowThrough } from "./galaxy-reconcile";
 import { isGalaxyFixtureEnabled, registerGalaxyFixture } from "./galaxy-fixture";
 import { registerExecutionCommands } from "./execution-commands";
@@ -43,6 +44,8 @@ import { registerExecGuard } from "./exec-guard";
 import { registerSandbox } from "./sandbox";
 import { isLocalExecDisabled } from "./local-exec";
 import { registerSecretRedaction } from "./secret-redaction";
+import { registerObservationTriggers } from "./observation-triggers";
+import { registerObservationsCommand } from "./observations-command";
 import { registerMcpOutputRecovery } from "./mcp-output";
 import { registerLoomMcpServers } from "./mcp-servers";
 import { galaxyMcpToolName } from "../../shared/galaxy-mcp-tools.js";
@@ -113,6 +116,11 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerGalaxyPollGuard(pi);
   registerProgressUpdates(pi);
   registerSecretRedaction(pi);
+  // AFTER redaction, deliberately. pi runs tool_result handlers in
+  // registration order and each sees the previous one's rewrite, so the
+  // collector reads the content the model actually gets -- reading the raw
+  // result would put an API key one normalization away from the wire.
+  registerObservationTriggers(pi);
 
   registerLoomMcpServers(pi);
 
@@ -130,6 +138,12 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // unless LOOM_SUBMISSION_REPLAY names a file inside the session directory.
   if (isSubmissionReplayEnabled()) {
     registerSubmissionReplay(pi);
+  }
+  // Eval-only seam, same shape and the same containment rule as the submission
+  // replay above. Registered here rather than with the triggers because its
+  // session_start handler needs the notebook path the session lifecycle sets.
+  if (isObservationReplayEnabled()) {
+    registerObservationReplay(pi);
   }
   // ── Capture, part two (#473): reconcile + enrichment ──────────────────────
   // Everything that happens to a recorded run after the submit: reconcile on
@@ -154,6 +168,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerDashboardTools(pi);
   registerDashboardCommands(pi);
   registerFeedbackCommand(pi);
+  registerObservationsCommand(pi);
   registerLessonProposals(pi);
   registerTesterIdCommand(pi);
   registerInstructionsCommand(pi);
