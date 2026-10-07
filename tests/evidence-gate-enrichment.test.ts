@@ -15,7 +15,8 @@ import {
   resetEvidenceOverrides,
 } from "../extensions/loom/evidence-gate";
 import { upsertJobBlock, type JobYaml } from "../extensions/loom/galaxy-job-block";
-import { ensureAttemptRecord } from "../extensions/loom/galaxy-provenance";
+import { ensureAttemptRecord, writeEnrichment } from "../extensions/loom/galaxy-provenance";
+import { buildJobRecord } from "../extensions/loom/galaxy-enrich";
 import type { HarnessBlockFields } from "../extensions/loom/harness-block-fields";
 import { ulid } from "../extensions/loom/ulid";
 
@@ -67,6 +68,20 @@ async function enrichedNotebook(over: HarnessBlockFields = {}): Promise<string> 
     submittedBy: "harness",
     ids: { job_ids: ["aa11"] },
   });
+  await writeEnrichment(dir, attemptId, {
+    blockKind: "job",
+    blockId: "aa11",
+    state: "complete",
+    attempts: 1,
+    serverUrl: "https://usegalaxy.org",
+    jobs: [
+      buildJobRecord(
+        { id: "aa11", state: "ok", tool_id: "fastp" },
+        { tool_version: "0.24.0", tool_version_source: "submission" },
+        new Map(),
+      ),
+    ],
+  });
   return (
     PLAN +
     "\n" +
@@ -106,6 +121,45 @@ describe("findEnrichmentWarnings", () => {
     expect(findEnrichmentWarnings(content, flips(), dir)[0].reasons).toEqual([
       "provenance_missing",
     ]);
+  });
+
+  it("does not accept an owned but empty record, or one made from notebook text", async () => {
+    const shell = ulid();
+    await ensureAttemptRecord(dir, {
+      origin: "submission",
+      attemptId: shell,
+      kind: "jobs",
+      galaxyServerUrl: "https://usegalaxy.org",
+      submittedBy: "harness",
+      ids: { job_ids: ["aa11"] },
+    });
+    const forged =
+      PLAN +
+      "\n" +
+      upsertJobBlock("", job(), {
+        attemptId: shell,
+        enrichment: "complete",
+        jobs: [{ jobId: "aa11", toolVersion: "0.24.0" }],
+      });
+    expect(findEnrichmentWarnings(forged, flips(), dir)[0].reasons).toEqual([
+      "provenance_incomplete",
+      "tool_version_missing",
+    ]);
+
+    const late = ulid();
+    await ensureAttemptRecord(dir, {
+      origin: "notebook",
+      attemptId: late,
+      kind: "jobs",
+      galaxyServerUrl: "https://usegalaxy.org",
+      submittedBy: "harness",
+      ids: { job_ids: ["aa11"] },
+    });
+    const content =
+      PLAN + "\n" + upsertJobBlock("", job(), { attemptId: late, enrichment: "complete" });
+    expect(findEnrichmentWarnings(content, flips(), dir)[0].reasons).toContain(
+      "provenance_untrusted",
+    );
   });
 
   it("judges the completed run, not an earlier failed attempt", async () => {

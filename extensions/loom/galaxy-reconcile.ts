@@ -29,7 +29,6 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import * as fs from "fs";
 import * as path from "path";
 import { galaxyMcpToolName } from "../../shared/galaxy-mcp-tools.js";
 import { appendActivityEvent } from "./activity";
@@ -39,6 +38,7 @@ import {
   galaxyListHistoryJobs,
   getGalaxyConfig,
   isGalaxyEncodedId,
+  isGalaxyFetchOverridden,
   sameGalaxyServer,
   verifyGalaxyRun,
   type GalaxyJobListing,
@@ -57,8 +57,11 @@ import {
 import { findGalaxyPageBlocks } from "./galaxy-page-binding";
 import { pollGalaxyNow, setCaptureTickHook } from "./galaxy-poller";
 import {
+  UNKNOWN,
   ensureAttemptRecord,
+  listAttemptRecords,
   readReconcileState,
+  type AttemptRecord,
   writeReconcileState,
   type ReconcileState,
 } from "./galaxy-provenance";
@@ -105,7 +108,15 @@ export interface ReconcileDeps {
   listInvocations: (
     historyId: string,
     limit: number,
-  ) => Promise<{ id: string; create_time?: string; state?: string; workflow_id?: string }[]>;
+  ) => Promise<
+    {
+      id: string;
+      create_time?: string;
+      state?: string;
+      workflow_id?: string;
+      history_id?: string;
+    }[]
+  >;
   getInvocation: (id: string) => Promise<InvocationDetail>;
   verify: (kind: "invocation" | "job", id: string) => Promise<GalaxyRunVerification>;
   now: () => number;
@@ -138,51 +149,51 @@ function iso(ms: number): string {
 }
 
 /**
- * The history this analysis is bound to: the notebook's page binding for this
- * server, else the history the most recent recorded run named. Never the
- * account's most-recently-used history -- that is a guess, and a guess here
- * would write somebody's unrelated work into this analysis as its own.
+ * The history this analysis is bound to, and where that answer came from.
+ *
+ * First choice is the history the harness itself last submitted into, read
+ * from the protected attempt records -- notebook text can be edited to name
+ * any history the account can see, and reconcile would then write that
+ * history's work into this analysis. Only when the harness has submitted
+ * nothing yet does the notebook's page binding decide, and the row says so.
+ * Never the account's most-recently-used history: a guess here would pull
+ * somebody's unrelated work in as this analysis's own.
  */
-export function boundHistoryId(content: string, serverUrl: string): string | null {
+export function boundHistoryId(
+  content: string,
+  serverUrl: string,
+  records: readonly AttemptRecord[],
+): { historyId: string; source: "submission" | "page_binding" } | null {
+  const submitted = records
+    .filter((r) => r.origin === "submission" && !r.fixture)
+    .filter((r) => r.history_id !== UNKNOWN && isGalaxyEncodedId(r.history_id))
+    .filter((r) => sameGalaxyServer(r.galaxy_server_url, serverUrl))
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    .pop();
+  if (submitted) return { historyId: submitted.history_id, source: "submission" };
   const binding = findGalaxyPageBlocks(content)
     .filter((b) => sameGalaxyServer(b.galaxyServerUrl, serverUrl))
     .pop();
-  if (binding?.historyId && isGalaxyEncodedId(binding.historyId)) return binding.historyId;
-  const recorded = [...findInvocationBlocks(content), ...findJobBlocks(content)]
-    .filter((b) => b.historyId && isGalaxyEncodedId(b.historyId))
-    .filter((b) => b.submittedBy !== "unknown")
-    .filter((b) => sameGalaxyServer(b.galaxyServerUrl, serverUrl))
-    .sort((a, b) => a.submittedAt.localeCompare(b.submittedAt))
-    .pop();
-  return recorded?.historyId ?? null;
+  if (binding?.historyId && isGalaxyEncodedId(binding.historyId)) {
+    return { historyId: binding.historyId, source: "page_binding" };
+  }
+  return null;
 }
 
 /**
- * When this analysis started, for a first reconcile with no cursor yet: the
- * earliest of the first session's start and the earliest recorded run. Fixed
- * into the cursor the first time it is computed, so later edits to either
- * source cannot move it.
+ * When this analysis started, for a reconcile with no cursor yet. The cursor
+ * is written on the first session start, so in the normal course this only
+ * runs then and the answer is "now". An analysis that predates the cursor
+ * starts at its earliest protected submission record. Never from the notebook
+ * or the activity log: both are the agent's to edit, and an earlier start
+ * widens the window to work that was never this analysis's.
  */
-export function inferAnalysisStart(content: string, analysisDir: string, now: number): number {
+export function inferAnalysisStart(records: readonly AttemptRecord[], now: number): number {
   let earliest = now;
-  for (const block of [...findInvocationBlocks(content), ...findJobBlocks(content)]) {
-    const t = Date.parse(block.submittedAt);
+  for (const r of records) {
+    if (r.origin !== "submission") continue;
+    const t = Date.parse(r.created_at);
     if (Number.isFinite(t) && t < earliest) earliest = t;
-  }
-  try {
-    const raw = fs.readFileSync(path.join(analysisDir, "activity.jsonl"), "utf-8");
-    for (const line of raw.split("\n")) {
-      if (!line.includes('"session.started"')) continue;
-      try {
-        const row = JSON.parse(line) as { kind?: string; timestamp?: string };
-        const t = row.kind === "session.started" ? Date.parse(row.timestamp ?? "") : NaN;
-        if (Number.isFinite(t) && t < earliest) earliest = t;
-      } catch {
-        // A malformed row is skipped, as the activity log's own reader does.
-      }
-    }
-  } catch {
-    // No activity log yet: this session is the start.
   }
   return earliest;
 }
@@ -210,6 +221,8 @@ export interface ReconcileResult {
   adopted?: number;
   /** Why the listing half did not run, when it didn't. */
   skipped?: string;
+  /** Standalone jobs were held back; the cursor stays where it was. */
+  incomplete?: boolean;
   error?: string;
 }
 
@@ -220,16 +233,26 @@ export function resetReconcileState(): void {
   verifiedThisSession.clear();
 }
 
-function claimedIds(content: string): { invocations: Set<string>; jobs: Set<string> } {
+/**
+ * Ids already on the record: every block's own id, and every job an attempt's
+ * protected record names. Not the blocks' `jobs` summaries -- those are
+ * notebook text, and a planted summary would otherwise hide a real run from
+ * reconcile for good.
+ */
+function claimedIds(
+  content: string,
+  records: readonly AttemptRecord[],
+  serverUrl: string,
+): { invocations: Set<string>; jobs: Set<string> } {
   const invocations = new Set<string>();
   const jobs = new Set<string>();
-  for (const block of findInvocationBlocks(content)) {
-    invocations.add(block.invocationId);
-    for (const job of block.jobs ?? []) jobs.add(job.jobId);
-  }
-  for (const block of findJobBlocks(content)) {
-    jobs.add(block.jobId);
-    for (const job of block.jobs ?? []) jobs.add(job.jobId);
+  for (const block of findInvocationBlocks(content)) invocations.add(block.invocationId);
+  for (const block of findJobBlocks(content)) jobs.add(block.jobId);
+  for (const r of records) {
+    if (!sameGalaxyServer(r.galaxy_server_url, serverUrl)) continue;
+    if (r.ids.invocation_id) invocations.add(r.ids.invocation_id);
+    for (const id of r.ids.job_ids ?? []) jobs.add(id);
+    for (const id of Object.keys(r.jobs)) jobs.add(id);
   }
   return { invocations, jobs };
 }
@@ -244,6 +267,7 @@ export async function surveyHistory(
   historyId: string,
   sinceMs: number,
   deps: ReconcileDeps,
+  records: readonly AttemptRecord[] = [],
 ): Promise<{
   newInvocations: { id: string; create_time?: string; workflow_id?: string }[];
   newJobs: GalaxyJobListing[];
@@ -251,8 +275,13 @@ export async function surveyHistory(
   newestCreate: number;
   /** Set when step jobs could not be told apart from standalone ones. */
   jobsWithheld?: string;
+  /** Set when a listing may have been cut short; the cursor must not move past it. */
+  incomplete?: string;
 }> {
-  const claimed = claimedIds(content);
+  const claimed = claimedIds(content, records, serverUrl);
+  // A row Galaxy says belongs to another history is not this history's work,
+  // whatever list it arrived in.
+  const inHistory = (h: string | undefined) => !h || h === historyId;
   let newestCreate = NaN;
   const note = (t: string | undefined) => {
     const ms = parseGalaxyTime(t);
@@ -265,9 +294,13 @@ export async function surveyHistory(
     return !Number.isFinite(ms) || ms >= sinceMs;
   };
 
-  const listed = (await deps.listInvocations(historyId, INVOCATION_LISTING_LIMIT)).filter((i) =>
-    isGalaxyEncodedId(i.id),
-  );
+  const rawInvocations = await deps.listInvocations(historyId, INVOCATION_LISTING_LIMIT);
+  let incomplete: string | undefined;
+  // galaxy-ops' listing has no offset, so a full page may not be all of them.
+  if (rawInvocations.length >= INVOCATION_LISTING_LIMIT) {
+    incomplete = `the history has at least ${INVOCATION_LISTING_LIMIT} invocations; only the newest were listed`;
+  }
+  const listed = rawInvocations.filter((i) => isGalaxyEncodedId(i.id) && inHistory(i.history_id));
   const seenInvocations = new Map<string, string | undefined>();
   for (const inv of listed) {
     seenInvocations.set(inv.id, inv.state);
@@ -279,14 +312,18 @@ export async function surveyHistory(
 
   const jobs: GalaxyJobListing[] = [];
   const sinceDay = iso(sinceMs).slice(0, 10);
-  for (let page = 0; page < MAX_JOB_PAGES; page++) {
+  for (let page = 0; ; page++) {
+    if (page >= MAX_JOB_PAGES) {
+      incomplete = `more than ${MAX_JOB_PAGES * JOB_PAGE_SIZE} jobs since ${sinceDay}`;
+      break;
+    }
     const rows = await deps.listJobs({
       historyId,
       sinceDay,
       limit: JOB_PAGE_SIZE,
       offset: page * JOB_PAGE_SIZE,
     });
-    jobs.push(...rows);
+    jobs.push(...rows.filter((r) => inHistory(r.history_id)));
     if (rows.length < JOB_PAGE_SIZE) break;
   }
   const seenJobs = new Map<string, string | undefined>();
@@ -300,12 +337,16 @@ export async function surveyHistory(
   // invocation, not to a standalone block of their own. Every invocation that
   // could own a job in this window is walked: the new ones, the ones still
   // scheduling, and the recorded ones whose job list isn't on the block yet.
-  const recordedInvocations = findInvocationBlocks(content).filter(
-    (b) =>
-      sameGalaxyServer(b.galaxyServerUrl, serverUrl) &&
-      (!b.historyId || b.historyId === historyId) &&
-      (b.status === "in_progress" || !b.jobs || b.jobs.length === 0),
+  const knownJobs = new Map(
+    records.filter((r) => r.ids.invocation_id).map((r) => [r.ids.invocation_id!, r]),
   );
+  const recordedInvocations = findInvocationBlocks(content).filter((b) => {
+    if (!sameGalaxyServer(b.galaxyServerUrl, serverUrl)) return false;
+    if (b.status === "in_progress") return true;
+    // Its jobs are already claimed once its protected record lists them.
+    const r = knownJobs.get(b.invocationId);
+    return !r || Object.keys(r.jobs).length === 0;
+  });
   const toWalk = new Set<string>([
     ...newInvocations.map((i) => i.id),
     ...listed
@@ -318,6 +359,7 @@ export async function surveyHistory(
   for (const id of toWalk) {
     try {
       const inv = await deps.getInvocation(id);
+      if (!inv || inv.id !== id) throw new Error(`Galaxy answered for a different invocation`);
       for (const job of await walkInvocationJobs(inv, deps.getInvocation)) stepJobs.add(job.jobId);
     } catch (err) {
       // Without this invocation's jobs, a job in the listing could be one of
@@ -327,21 +369,25 @@ export async function surveyHistory(
     }
   }
 
-  const newJobs = jobsWithheld
-    ? []
-    : jobs.filter(
-        (j) =>
-          isGalaxyEncodedId(j.id) &&
-          inWindow(j.create_time) &&
-          !claimed.jobs.has(j.id) &&
-          !stepJobs.has(j.id),
-      );
+  // A cut-short listing means an invocation we did not see could own any of
+  // these, so none of them is written as standalone this run.
+  const newJobs =
+    jobsWithheld || incomplete
+      ? []
+      : jobs.filter(
+          (j) =>
+            isGalaxyEncodedId(j.id) &&
+            inWindow(j.create_time) &&
+            !claimed.jobs.has(j.id) &&
+            !stepJobs.has(j.id),
+        );
   return {
     newInvocations,
     newJobs,
     seen: { invocations: seenInvocations, jobs: seenJobs },
     newestCreate,
     ...(jobsWithheld ? { jobsWithheld } : {}),
+    ...(incomplete ? { incomplete } : {}),
   };
 }
 
@@ -379,7 +425,11 @@ async function casNotebook(nbPath: string, apply: (content: string) => string): 
 export async function reconcile(
   historyId: string,
   sinceMs: number,
-  options: { trigger: ReconcileTrigger; deps?: Partial<ReconcileDeps> },
+  options: {
+    trigger: ReconcileTrigger;
+    deps?: Partial<ReconcileDeps>;
+    historySource?: "submission" | "page_binding";
+  },
 ): Promise<ReconcileResult & { newestCreate: number }> {
   const deps: ReconcileDeps = { ...defaultDeps, ...options.deps };
   const nbPath = getNotebookPath();
@@ -397,8 +447,12 @@ export async function reconcile(
 
   result.adopted = await adoptRecordedBlocks(nbPath, server, options.trigger);
   const content = await readNotebook(nbPath);
-  const survey = await surveyHistory(content, server, historyId, sinceMs, deps);
+  const records = await listAttemptRecords(dir);
+  const survey = await surveyHistory(content, server, historyId, sinceMs, deps, records);
   result.newestCreate = survey.newestCreate;
+  // Blocks written from fixture answers make no claim a server never made,
+  // the same rule the submission replay seam follows.
+  const fromFixture = isGalaxyFetchOverridden();
 
   // What Galaxy says has ended for a block still in flight on disk goes to the
   // poller, which owns transitions.
@@ -443,7 +497,7 @@ export async function reconcile(
             submittedAt: Number.isFinite(created) ? iso(created) : iso(deps.now()),
             // Whether it has ended is the poller's call, not a listing's.
             status: "in_progress",
-            serverVerified: true,
+            ...(fromFixture ? {} : { serverVerified: true }),
           };
           next = upsertInvocationBlock(next, block, harness);
         } else {
@@ -464,7 +518,7 @@ export async function reconcile(
             ...(terminal
               ? { status: jobStatusFromGalaxyState(item.job.state), galaxyState: item.job.state }
               : { status: "in_progress" as const }),
-            serverVerified: true,
+            ...(fromFixture ? {} : { serverVerified: true }),
           };
           const version = idToken(item.job.tool_version);
           next = upsertJobBlock(next, block, {
@@ -495,6 +549,18 @@ export async function reconcile(
         submittedBy: "unknown",
         ids: item.kind === "invocation" ? { invocation_id: id } : { job_ids: [id] },
         origin: "reconcile",
+        ...(item.kind === "job"
+          ? {
+              seeds: {
+                [id]: {
+                  ...(idToken(item.job.tool_id) ? { tool_id: idToken(item.job.tool_id) } : {}),
+                  ...(idToken(item.job.tool_version)
+                    ? { tool_version: idToken(item.job.tool_version) }
+                    : {}),
+                },
+              },
+            }
+          : {}),
       });
     } catch (err) {
       // Enrichment creates it later from the block; the run is recorded either way.
@@ -506,6 +572,7 @@ export async function reconcile(
       id,
       attempt_id: item.attemptId,
       history_id: historyId,
+      history_source: options.historySource ?? null,
       trigger: options.trigger,
       ...(item.kind === "job"
         ? { tool_id: idToken(item.job.tool_id) ?? null, galaxy_state: item.job.state ?? null }
@@ -513,12 +580,13 @@ export async function reconcile(
     });
   }
 
-  if (survey.jobsWithheld) {
-    result.error = survey.jobsWithheld;
+  if (survey.jobsWithheld || survey.incomplete) {
+    result.error = survey.jobsWithheld ?? survey.incomplete;
+    result.incomplete = true;
     record(dir, "reconcile.incomplete", {
       history_id: historyId,
       trigger: options.trigger,
-      reason: survey.jobsWithheld,
+      reason: result.error,
     });
   }
 
@@ -673,13 +741,15 @@ export async function runReconcile(
   } catch {
     return { ...empty, skipped: "notebook unreadable" };
   }
-  const historyId = boundHistoryId(content, server);
+  const records = await listAttemptRecords(dir);
+  const bound = boundHistoryId(content, server, records);
+  const historyId = bound?.historyId ?? null;
 
   let state: ReconcileState | null = await readReconcileState(dir);
   if (!state) {
     state = {
       schema: 1,
-      analysis_started_at: iso(inferAnalysisStart(content, dir, now)),
+      analysis_started_at: iso(inferAnalysisStart(records, now)),
       histories: {},
     };
     try {
@@ -711,14 +781,18 @@ export async function runReconcile(
 
   let result: ReconcileResult & { newestCreate: number };
   try {
-    result = await reconcile(historyId, sinceMs, { trigger, deps });
+    result = await reconcile(historyId, sinceMs, {
+      trigger,
+      deps,
+      historySource: bound?.source,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     record(dir, "reconcile.failed", { history_id: historyId, trigger, error: message });
     return { ...empty, historyId, since: iso(sinceMs), error: message };
   }
 
-  if (Number.isFinite(result.newestCreate) && !result.error) {
+  if (Number.isFinite(result.newestCreate) && !result.error && !result.incomplete) {
     const prior = Number.isFinite(stamp) ? stamp : -Infinity;
     if (result.newestCreate > prior) {
       state.histories[key] = { stamp: iso(result.newestCreate) };

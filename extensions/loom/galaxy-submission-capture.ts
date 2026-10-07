@@ -645,6 +645,17 @@ async function recordAttempt(
           ? { invocation_id: written.wroteInvocation }
           : { job_ids: written.wroteJobs },
       origin: "submission",
+      seeds: Object.fromEntries(
+        (submission.jobs ?? [])
+          .filter((j) => written.wroteJobs.includes(j.jobId))
+          .map((j) => [
+            j.jobId,
+            {
+              ...(j.toolId ? { tool_id: j.toolId } : {}),
+              ...(j.toolVersion ? { tool_version: j.toolVersion } : {}),
+            },
+          ]),
+      ),
       createdAt: dispatch.submittedAt,
     });
     return provenanceRelativePath(dispatch.attemptId);

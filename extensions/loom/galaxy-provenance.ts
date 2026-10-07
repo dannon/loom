@@ -26,6 +26,7 @@ import * as fs from "fs";
 import * as fsp from "fs/promises";
 import * as path from "path";
 import { randomBytes } from "crypto";
+import { isGalaxyFetchOverridden, sameGalaxyServer } from "./galaxy-api";
 import { isUlid } from "./ulid";
 
 export const PROVENANCE_SCHEMA_VERSION = 1;
@@ -56,9 +57,13 @@ export interface ProvenanceJob {
   job_id: string;
   tool_id: Maybe<string>;
   tool_version: Maybe<string>;
-  /** Where `tool_version` came from, since job details never carry it. */
+  /**
+   * Where `tool_version` came from, since job details never carry it.
+   * `notebook` is the block's own summary, for an attempt recorded before
+   * these files existed -- editable text, and labelled as such.
+   */
   tool_version_source:
-    "submission" | "invocation_step" | "job_listing" | "tool_id" | typeof UNKNOWN;
+    "submission" | "invocation_step" | "job_listing" | "tool_id" | "notebook" | typeof UNKNOWN;
   state: Maybe<string>;
   exit_code: number | null | typeof UNKNOWN;
   create_time: Maybe<string>;
@@ -96,6 +101,15 @@ export interface AttemptRecord {
    * text the agent can edit and are only as good as that text.
    */
   origin: "submission" | "reconcile" | "notebook";
+  /**
+   * What Galaxy said about each job when the attempt was recorded -- the
+   * submission response is the only answer that carries `tool_version`, and
+   * keeping it here rather than reading it back off the block means a hand
+   * edit to the block's summary cannot become the recorded version.
+   */
+  seeds?: Record<string, { tool_id?: string; tool_version?: string }>;
+  /** Set when any of this record came from the Tier-1 fixture seam, not a server. */
+  fixture?: true;
   enrichment: {
     state: "pending" | "complete" | "unavailable";
     attempts: number;
@@ -254,6 +268,7 @@ export interface AttemptSeed {
   submittedBy: AttemptRecord["submitted_by"];
   ids: AttemptRecord["ids"];
   origin: AttemptRecord["origin"];
+  seeds?: AttemptRecord["seeds"];
   createdAt?: string;
 }
 
@@ -280,11 +295,18 @@ export async function ensureAttemptRecord(
       attempt_id: seed.attemptId,
       kind: seed.kind,
       galaxy_server_url: seed.galaxyServerUrl,
-      history_id: seed.historyId ?? UNKNOWN,
-      submitted_by: seed.submittedBy,
+      // A record made from notebook text takes nothing from that text it would
+      // then vouch for: who submitted it and which history it ran in are left
+      // unknown (enrichment fills the history from Galaxy's own answer).
+      history_id: seed.origin === "notebook" ? UNKNOWN : (seed.historyId ?? UNKNOWN),
+      submitted_by: seed.origin === "notebook" ? "unknown" : seed.submittedBy,
       created_at: seed.createdAt ?? now,
       ids: normalizeIds(seed.ids),
       origin: seed.origin,
+      ...(seed.origin !== "notebook" && seed.seeds && Object.keys(seed.seeds).length > 0
+        ? { seeds: seed.seeds }
+        : {}),
+      ...(isGalaxyFetchOverridden() ? { fixture: true as const } : {}),
       enrichment: { state: "pending", attempts: 0, updated_at: now },
       jobs: {},
     };
@@ -330,6 +352,10 @@ export interface EnrichmentWrite {
   error?: string;
   /** Job records to add or refresh. Keys outside what the attempt owns are refused. */
   jobs: ProvenanceJob[];
+  /** The server these answers came from; must be the one the attempt was recorded on. */
+  serverUrl: string;
+  /** The history Galaxy says these jobs ran in, when it said. Must match the attempt's. */
+  historyId?: string;
 }
 
 /**
@@ -354,6 +380,22 @@ export async function writeEnrichment(
         `${update.blockKind} ${update.blockId} is not part of attempt ${attemptId}`,
       );
     }
+    // Ids are only unique per server, so a record is bound to the server it was
+    // recorded on: another server's job with a colliding id is another job.
+    if (record.galaxy_server_url && !sameGalaxyServer(record.galaxy_server_url, update.serverUrl)) {
+      throw new ProvenanceRefusal(
+        `attempt ${attemptId} was recorded on ${record.galaxy_server_url}, not ${update.serverUrl}`,
+      );
+    }
+    if (
+      update.historyId &&
+      record.history_id !== UNKNOWN &&
+      record.history_id !== update.historyId
+    ) {
+      throw new ProvenanceRefusal(
+        `Galaxy says these jobs ran in history ${update.historyId}, not the attempt's ${record.history_id}`,
+      );
+    }
     if (update.blockKind === "job") {
       const owned = new Set(record.ids.job_ids ?? []);
       for (const job of update.jobs) {
@@ -366,6 +408,10 @@ export async function writeEnrichment(
     for (const job of update.jobs) jobs[job.job_id] = job;
     const next: AttemptRecord = {
       ...record,
+      ...(record.history_id === UNKNOWN && update.historyId
+        ? { history_id: update.historyId }
+        : {}),
+      ...(isGalaxyFetchOverridden() ? { fixture: true as const } : {}),
       jobs,
       enrichment: {
         state: attemptState(record, jobs, update.state),
@@ -485,4 +531,26 @@ export async function writeReconcileState(
       throw err;
     }
   });
+}
+
+/**
+ * Every attempt record in the analysis. Unreadable or planted files are
+ * skipped: this feeds decisions (which history is bound, which ids are
+ * claimed), and only a well-formed record named for its own attempt counts.
+ */
+export async function listAttemptRecords(analysisDir: string): Promise<AttemptRecord[]> {
+  const dir = await ensureProvenanceDir(analysisDir, false);
+  if (!dir) return [];
+  const out: AttemptRecord[] = [];
+  for (const name of await fsp.readdir(dir)) {
+    const id = name.endsWith(".json") ? name.slice(0, -5) : "";
+    if (!isUlid(id)) continue;
+    try {
+      const record = await readAttemptRecord(analysisDir, id);
+      if (record) out.push(record);
+    } catch {
+      // Not a record this module wrote.
+    }
+  }
+  return out;
 }

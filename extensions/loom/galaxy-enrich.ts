@@ -44,13 +44,20 @@ import {
   type GalaxyJobDetailsResponse,
   type InvocationDetail,
 } from "./galaxy-api";
-import { findJobBlocks, locateJobBlock, upsertJobBlock, type JobYaml } from "./galaxy-job-block";
+import {
+  findJobBlocks,
+  isTerminalJobState,
+  locateJobBlock,
+  upsertJobBlock,
+  type JobYaml,
+} from "./galaxy-job-block";
 import {
   ProvenanceRefusal,
   UNKNOWN,
   ensureAttemptRecord,
   provenanceRelativePath,
   readAttemptRecord,
+  readAttemptRecordSync,
   writeEnrichment,
   type AttemptRecord,
   type Maybe,
@@ -186,9 +193,19 @@ export async function walkInvocationJobs(
       });
     }
     const sub = s.subworkflow_invocation_id;
-    if (isGalaxyEncodedId(sub) && !seen.has(sub) && depth < MAX_SUBWORKFLOW_DEPTH) {
+    if (isGalaxyEncodedId(sub) && !seen.has(sub)) {
+      // Stopping quietly would leave the deeper jobs out of the list, and a
+      // caller filing jobs by this list would then treat them as standalone.
+      if (depth >= MAX_SUBWORKFLOW_DEPTH) {
+        throw new Error(`subworkflow ${sub} is nested deeper than ${MAX_SUBWORKFLOW_DEPTH} levels`);
+      }
       seen.add(sub);
       const child = await fetchInvocation(sub);
+      // Galaxy answering for some other invocation must not put that one's
+      // jobs under this run.
+      if (!child || child.id !== sub) {
+        throw new Error(`Galaxy answered for a different invocation than ${sub}`);
+      }
       out.push(...(await walkInvocationJobs(child, fetchInvocation, depth + 1, seen)));
     }
   }
@@ -361,9 +378,15 @@ export function computeDrift(
   anchor: string,
   attemptId: string,
   jobs: readonly BlockJobSummary[],
+  versionsOf?: (attemptId: string) => Map<string, string> | null,
 ): { against: string; drift: BlockDriftNote[] } | null {
   if (!anchor || anchor === "unattributed") return null;
   const attempts = attemptsOnAnchor(content, anchor);
+  if (versionsOf) {
+    // The blocks' summaries are notebook text; the baseline comes from the
+    // earlier attempt's protected record, or there is no baseline.
+    for (const a of attempts) a.versions = versionsOf(a.attemptId) ?? new Map();
+  }
   const self = attempts.find((a) => a.attemptId === attemptId);
   const prior = attempts
     .filter((a) => a.attemptId !== attemptId && a.completed)
@@ -382,6 +405,22 @@ export function computeDrift(
       drift.push({ toolId: lineage, from, to: job.toolVersion });
   }
   return { against: prior.attemptId, drift };
+}
+
+/**
+ * Tool versions an attempt's protected record holds, by lineage. Null for a
+ * record made from notebook text, whose versions are only as good as that text.
+ */
+function protectedVersions(dir: string, attemptId: string): Map<string, string> | null {
+  const record = readAttemptRecordSync(dir, attemptId);
+  if (!record || record.origin === "notebook") return null;
+  const versions = new Map<string, string>();
+  for (const job of Object.values(record.jobs)) {
+    if (job.tool_id === UNKNOWN || job.tool_version === UNKNOWN) continue;
+    const lineage = toolLineage(job.tool_id);
+    if (!versions.has(lineage)) versions.set(lineage, job.tool_version);
+  }
+  return versions;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -442,9 +481,20 @@ export function enrichmentCandidates(content: string, serverUrl: string): Candid
 
 /** What one attempt at one block came to. */
 type Outcome =
-  | { state: "complete"; jobs: ProvenanceJob[] }
-  | { state: "unavailable"; jobs: ProvenanceJob[]; reason: string; error: string }
-  | { state: "retry"; error: string };
+  | { state: "complete"; jobs: ProvenanceJob[]; historyId?: string }
+  | {
+      state: "unavailable";
+      jobs: ProvenanceJob[];
+      reason: string;
+      error: string;
+      historyId?: string;
+    }
+  | { state: "retry"; error: string }
+  /** Galaxy says the run has not ended. Not a failed attempt; ask again later. */
+  | { state: "not_ready" };
+
+/** Invocation states after which Galaxy hands out no more jobs. */
+const SCHEDULING_DONE: ReadonlySet<string> = new Set(["scheduled", "cancelled", "failed"]);
 
 function isNotFound(err: unknown): boolean {
   return err instanceof GalaxyApiError && (err.status === 404 || err.status === 400);
@@ -505,7 +555,41 @@ async function fetchDetails(deps: EnrichDeps, jobId: string): Promise<GalaxyJobD
   return details;
 }
 
-async function enrichJob(deps: EnrichDeps, block: JobYaml): Promise<Outcome> {
+/**
+ * The history Galaxy says a set of jobs ran in: the one value they agree on,
+ * or a refusal when they disagree. Undefined when none of them said.
+ */
+function historyOf(details: GalaxyJobDetailsResponse[]): string | undefined {
+  const seen = new Set(details.map((d) => str(d.history_id)).filter((h): h is string => !!h));
+  if (seen.size > 1)
+    throw new ProvenanceRefusal(`these jobs ran in ${seen.size} different histories`);
+  return [...seen][0];
+}
+
+/** Where a tool run's version comes from, given how its attempt was recorded. */
+function seededVersion(
+  record: AttemptRecord,
+  block: JobYaml,
+): { version?: string; source: ProvenanceJob["tool_version_source"] } {
+  if (record.origin === "notebook") {
+    // A record made late has no protected seed; the block's own summary is the
+    // only place a submission-time version survives, and it is labelled as such.
+    return {
+      version: block.jobs?.find((j) => j.jobId === block.jobId)?.toolVersion,
+      source: "notebook",
+    };
+  }
+  return {
+    version: record.seeds?.[block.jobId]?.tool_version,
+    source: record.origin === "reconcile" ? "job_listing" : "submission",
+  };
+}
+
+async function enrichJob(
+  deps: EnrichDeps,
+  block: JobYaml,
+  record: AttemptRecord,
+): Promise<Outcome> {
   let details: GalaxyJobDetailsResponse;
   try {
     details = await fetchDetails(deps, block.jobId);
@@ -520,33 +604,47 @@ async function enrichJob(deps: EnrichDeps, block: JobYaml): Promise<Outcome> {
     }
     return { state: "retry", error: errorText(err) };
   }
+  // The block's status is notebook text; whether the job has ended is
+  // Galaxy's to say. Details taken from a running job would be recorded as
+  // complete and never revisited.
+  if (!isTerminalJobState(details.state)) return { state: "not_ready" };
   let datasets: Map<string, Record<string, unknown> | null>;
   try {
     datasets = await new DatasetLookups(deps).load([details]);
   } catch (err) {
     return { state: "retry", error: errorText(err) };
   }
-  const seeded = block.jobs?.find((j) => j.jobId === block.jobId)?.toolVersion;
-  // A block reconcile found was seeded from Galaxy's job listing, not from a
-  // submission the harness watched.
-  const seedSource = block.submittedBy === "unknown" ? "job_listing" : "submission";
-  const version = resolveToolVersion(details.tool_id || block.toolId, seeded, seedSource);
-  return { state: "complete", jobs: [buildJobRecord(details, version, datasets)] };
+  const seed = seededVersion(record, block);
+  const version = resolveToolVersion(details.tool_id || block.toolId, seed.version, seed.source);
+  return {
+    state: "complete",
+    jobs: [buildJobRecord(details, version, datasets)],
+    historyId: historyOf([details]),
+  };
 }
 
 async function enrichInvocation(deps: EnrichDeps, block: InvocationYaml): Promise<Outcome> {
   let stepJobs: InvocationStepJob[];
+  let invocationState: string | undefined;
   try {
     const invocation = await deps.getInvocation(block.invocationId);
-    if (invocation.id !== block.invocationId) {
+    if (!invocation || invocation.id !== block.invocationId) {
       throw new GalaxyApiError(404, `Galaxy answered for a different invocation`, "");
     }
+    invocationState = invocation.state;
     stepJobs = await walkInvocationJobs(invocation, deps.getInvocation);
   } catch (err) {
     if (isNotFound(err)) {
       return { state: "unavailable", jobs: [], reason: "not_found", error: errorText(err) };
     }
     return { state: "retry", error: errorText(err) };
+  }
+  // Still scheduling, or a step still running: the job list is not final yet.
+  if (
+    !SCHEDULING_DONE.has(invocationState ?? "") ||
+    stepJobs.some((j) => !isTerminalJobState(j.state))
+  ) {
+    return { state: "not_ready" };
   }
 
   const fetched = new Map<string, GalaxyJobDetailsResponse>();
@@ -563,11 +661,19 @@ async function enrichInvocation(deps: EnrichDeps, block: InvocationYaml): Promis
   } catch (err) {
     return { state: "retry", error: errorText(err) };
   }
+  if ([...fetched.values()].some((d) => !isTerminalJobState(d.state)))
+    return { state: "not_ready" };
   let datasets: Map<string, Record<string, unknown> | null>;
   try {
     datasets = await new DatasetLookups(deps).load([...fetched.values()]);
   } catch (err) {
     return { state: "retry", error: errorText(err) };
+  }
+  let historyId: string | undefined;
+  try {
+    historyId = historyOf([...fetched.values()]);
+  } catch (err) {
+    return { state: "unavailable", jobs: [], reason: "attribution", error: errorText(err) };
   }
 
   const records = stepJobs.map((job) => {
@@ -597,9 +703,10 @@ async function enrichInvocation(deps: EnrichDeps, block: InvocationYaml): Promis
       jobs: records,
       reason: "not_found",
       error: `${missing.size} of ${stepJobs.length} job(s) not found on Galaxy`,
+      historyId,
     };
   }
-  return { state: "complete", jobs: records };
+  return { state: "complete", jobs: records, historyId };
 }
 
 /**
@@ -670,9 +777,12 @@ async function persistBlock(
           : locateJobBlock(content, candidate.id);
       const current = located.record;
       if (!current || current.attemptId !== candidate.block.attemptId) return { written: false };
+      const dir = path.dirname(nbPath);
       const drift =
         withDrift && fields.jobs
-          ? computeDrift(content, current.notebookAnchor, current.attemptId!, fields.jobs)
+          ? computeDrift(content, current.notebookAnchor, current.attemptId!, fields.jobs, (id) =>
+              protectedVersions(dir, id),
+            )
           : null;
       const harness: HarnessBlockFields = {
         ...fields,
@@ -750,7 +860,12 @@ async function enrichOnce(options: {
       step_anchor: block.notebookAnchor || null,
     };
 
-    const giveUp = async (reason: string, error: string, jobs: ProvenanceJob[] = []) => {
+    const giveUp = async (
+      reason: string,
+      error: string,
+      jobs: ProvenanceJob[] = [],
+      historyId?: string,
+    ) => {
       let provenance: string | null = null;
       if (jobs.length > 0 && block.attemptId && isUlid(block.attemptId)) {
         try {
@@ -761,6 +876,8 @@ async function enrichOnce(options: {
             attempts,
             error,
             jobs,
+            serverUrl: server,
+            historyId,
           });
           provenance = provenanceRelativePath(block.attemptId);
         } catch {
@@ -804,36 +921,23 @@ async function enrichOnce(options: {
       continue;
     }
 
-    try {
-      await attemptRecordFor(dir, candidate, content);
-    } catch (err) {
-      if (err instanceof ProvenanceRefusal) {
-        await giveUp("attribution", err.message);
-        continue;
-      }
-      // Disk trouble: try again later rather than declare the run unknowable.
-      nextAttemptAt.set(key, deps.now() + backoffMs(attempts));
-      result.retried.push(key);
-      continue;
-    }
-
-    const outcome =
-      candidate.kind === "invocation"
-        ? await enrichInvocation(deps, candidate.block)
-        : await enrichJob(deps, candidate.block);
-
-    if (outcome.state === "retry") {
+    /**
+     * A failure worth asking again about: counted on the block, logged, and
+     * backed off -- and turned into `unavailable` once the attempts run out,
+     * so a fault that never clears is never silently pending forever.
+     */
+    const retryLater = async (error: string) => {
       if (attempts >= MAX_ENRICHMENT_ATTEMPTS) {
-        await giveUp("attempts", outcome.error);
-        continue;
+        await giveUp("attempts", error);
+        return;
       }
       const persisted = await persistBlock(
         nbPath,
         candidate,
-        { enrichmentAttempts: attempts, enrichmentError: outcome.error },
+        { enrichmentAttempts: attempts, enrichmentError: error },
         false,
       ).catch(() => ({ written: false }));
-      if (!persisted.written) continue;
+      if (!persisted.written) return;
       const wait = backoffMs(attempts);
       nextAttemptAt.set(key, deps.now() + wait);
       result.retried.push(key);
@@ -841,13 +945,41 @@ async function enrichOnce(options: {
         ...rowBase,
         attempt: attempts,
         next_in_ms: wait,
-        error: flattenErrorText(outcome.error),
+        error: flattenErrorText(error),
       });
+    };
+
+    let attemptRecord: AttemptRecord;
+    try {
+      attemptRecord = await attemptRecordFor(dir, candidate, content);
+    } catch (err) {
+      if (err instanceof ProvenanceRefusal) {
+        await giveUp("attribution", err.message);
+        continue;
+      }
+      await retryLater(`could not open the provenance record: ${errorText(err)}`);
+      continue;
+    }
+
+    const outcome =
+      candidate.kind === "invocation"
+        ? await enrichInvocation(deps, candidate.block)
+        : await enrichJob(deps, candidate.block, attemptRecord);
+
+    if (outcome.state === "not_ready") {
+      // Galaxy says it is still going. Not an attempt; look again shortly.
+      nextAttemptAt.set(key, deps.now() + backoffMs(1));
+      result.skipped++;
+      continue;
+    }
+
+    if (outcome.state === "retry") {
+      await retryLater(outcome.error);
       continue;
     }
 
     if (outcome.state === "unavailable") {
-      await giveUp(outcome.reason, outcome.error, outcome.jobs);
+      await giveUp(outcome.reason, outcome.error, outcome.jobs, outcome.historyId);
       continue;
     }
 
@@ -858,14 +990,15 @@ async function enrichOnce(options: {
         state: "complete",
         attempts,
         jobs: outcome.jobs,
+        serverUrl: server,
+        historyId: outcome.historyId,
       });
     } catch (err) {
       if (err instanceof ProvenanceRefusal) {
         await giveUp("attribution", err.message);
         continue;
       }
-      nextAttemptAt.set(key, deps.now() + backoffMs(attempts));
-      result.retried.push(key);
+      await retryLater(`could not write the provenance record: ${errorText(err)}`);
       continue;
     }
 

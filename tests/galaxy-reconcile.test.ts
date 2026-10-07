@@ -15,7 +15,12 @@ import type { GalaxyJobListing, InvocationDetail } from "../extensions/loom/gala
 import { findJobBlocks, upsertJobBlock, type JobYaml } from "../extensions/loom/galaxy-job-block";
 import { findInvocationBlocks, upsertInvocationBlock } from "../extensions/loom/notebook-writer";
 import { renderGalaxyPageBlock } from "../extensions/loom/galaxy-page-binding";
-import { readAttemptRecord, readReconcileState } from "../extensions/loom/galaxy-provenance";
+import {
+  readAttemptRecord,
+  readReconcileState,
+  type AttemptRecord,
+} from "../extensions/loom/galaxy-provenance";
+import { setGalaxyFetchOverride } from "../extensions/loom/galaxy-api";
 import { resetState, setNotebookPath } from "../extensions/loom/state";
 import { isUlid, ulid } from "../extensions/loom/ulid";
 
@@ -56,44 +61,67 @@ describe("reconcile helpers", () => {
     expect(parseGalaxyTime("soon")).toBeNaN();
   });
 
-  it("binds to the page binding for this server, else the latest recorded run's history", () => {
-    expect(boundHistoryId(binding(), SERVER)).toBe(HISTORY);
-    expect(boundHistoryId(binding(HISTORY, "https://other.org"), SERVER)).toBeNull();
+  const rec = (over: Partial<AttemptRecord>): AttemptRecord => ({
+    schema: 1,
+    attempt_id: ulid(),
+    kind: "jobs",
+    galaxy_server_url: SERVER,
+    history_id: "bbbb000000000002",
+    submitted_by: "harness",
+    created_at: "2026-10-07T10:00:00.000Z",
+    ids: { job_ids: ["aa11"] },
+    origin: "submission",
+    enrichment: { state: "pending", attempts: 0, updated_at: "" },
+    jobs: {},
+    ...over,
+  });
+
+  it("binds to the history the harness last submitted into, over a page binding", () => {
+    const records = [
+      rec({ created_at: "2026-10-07T09:00:00Z", history_id: "cccc000000000003" }),
+      rec({}),
+    ];
+    // A page binding names another history: notebook text loses to the record.
+    expect(boundHistoryId(binding(), SERVER, records)).toEqual({
+      historyId: "bbbb000000000002",
+      source: "submission",
+    });
+  });
+
+  it("falls back to the page binding only when the harness has submitted nothing here", () => {
+    expect(boundHistoryId(binding(), SERVER, [])).toEqual({
+      historyId: HISTORY,
+      source: "page_binding",
+    });
+    expect(boundHistoryId(binding(HISTORY, "https://other.org"), SERVER, [])).toBeNull();
+    // Records made by reconcile, from a fixture, or on another server don't count.
+    expect(
+      boundHistoryId("", SERVER, [
+        rec({ origin: "reconcile" }),
+        rec({ fixture: true }),
+        rec({ galaxy_server_url: "https://other.org" }),
+      ]),
+    ).toBeNull();
+    // A recorded block's history_id is notebook text, not a binding.
     const recorded = upsertJobBlock("", job(), {
       historyId: "bbbb000000000002",
       submittedBy: "harness",
     });
-    expect(boundHistoryId(recorded, SERVER)).toBe("bbbb000000000002");
-    // A run reconcile itself found does not get to choose the history.
-    const found = upsertJobBlock("", job(), {
-      historyId: "bbbb000000000002",
-      submittedBy: "unknown",
-    });
-    expect(boundHistoryId(found, SERVER)).toBeNull();
-    expect(boundHistoryId("", SERVER)).toBeNull();
+    expect(boundHistoryId(recorded, SERVER, [])).toBeNull();
   });
 
-  it("dates the analysis from its first session or its first run, whichever is earlier", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-start-"));
-    try {
-      fs.writeFileSync(
-        path.join(dir, "activity.jsonl"),
-        JSON.stringify({
-          timestamp: "2026-10-05T08:00:00Z",
-          kind: "session.started",
-          source: "x",
-          payload: {},
-        }) +
-          "\n" +
-          "not json\n",
-      );
-      const content = upsertJobBlock("", job({ submittedAt: "2026-10-06T00:00:00Z" }));
-      expect(inferAnalysisStart(content, dir, Date.parse("2026-10-07T00:00:00Z"))).toBe(
-        Date.parse("2026-10-05T08:00:00Z"),
-      );
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+  it("dates the analysis from its earliest protected submission, never from editable text", () => {
+    const now = Date.parse("2026-10-07T12:00:00Z");
+    expect(inferAnalysisStart([], now)).toBe(now);
+    expect(
+      inferAnalysisStart(
+        [
+          rec({ created_at: "2026-10-05T08:00:00Z" }),
+          rec({ origin: "reconcile", created_at: "2026-01-01T00:00:00Z" }),
+        ],
+        now,
+      ),
+    ).toBe(Date.parse("2026-10-05T08:00:00Z"));
   });
 });
 
@@ -341,5 +369,67 @@ describe("reconcile", () => {
     const blocks = findJobBlocks(read()).filter((b) => b.jobId === "cc33");
     expect(blocks).toHaveLength(1);
     expect(blocks[0].submittedBy).toBe("harness");
+  });
+
+  it("skips rows Galaxy says belong to another history", async () => {
+    write(binding());
+    jobs = [
+      {
+        id: "cc33",
+        state: "ok",
+        history_id: "ffff000000000000",
+        create_time: "2026-10-07T10:00:00",
+      },
+    ];
+    invocations = [
+      {
+        id: "dd44",
+        state: "scheduled",
+        history_id: "ffff000000000000",
+        create_time: "2026-10-07T10:00:00",
+      },
+    ];
+    const result = await reconcile(HISTORY, SINCE, { trigger: "command", deps: deps() });
+    expect(result.unattributed).toEqual([]);
+  });
+
+  it("holds standalone jobs and the cursor back when the invocation listing may be cut short", async () => {
+    write(binding());
+    invocations = Array.from({ length: 500 }, (_, i) => ({
+      id: (0xa000 + i).toString(16).padStart(16, "0"),
+      state: "scheduled",
+      create_time: "2026-10-06T00:00:00",
+    }));
+    for (const inv of invocations) {
+      invocationDetails[inv.id] = { id: inv.id, steps: [] } as unknown as InvocationDetail;
+    }
+    jobs = [{ id: "cc33", state: "ok", create_time: "2026-10-07T10:00:00" }];
+    const result = await runReconcile("command", deps());
+    expect(result.unattributed.filter((u) => u.kind === "job")).toEqual([]);
+    expect(result.incomplete).toBe(true);
+    expect((await readReconcileState(dir))!.histories).toEqual({});
+  });
+
+  it("a planted jobs summary does not hide a real run from reconcile", async () => {
+    write(
+      binding() + "\n" + upsertJobBlock("", job({ jobId: "aa11" }), { jobs: [{ jobId: "cc33" }] }),
+    );
+    jobs = [{ id: "cc33", state: "ok", create_time: "2026-10-07T10:00:00" }];
+    const result = await reconcile(HISTORY, SINCE, { trigger: "command", deps: deps() });
+    expect(result.unattributed.map((u) => u.id)).toEqual(["cc33"]);
+  });
+
+  it("blocks written from fixture answers claim no server verification", async () => {
+    write(binding());
+    jobs = [{ id: "cc33", state: "ok", create_time: "2026-10-07T10:00:00" }];
+    setGalaxyFetchOverride(async () => new Response("{}"));
+    try {
+      await reconcile(HISTORY, SINCE, { trigger: "command", deps: deps() });
+    } finally {
+      setGalaxyFetchOverride(null);
+    }
+    const [block] = findJobBlocks(read());
+    expect(block.serverVerified).toBeUndefined();
+    expect((await readAttemptRecord(dir, block.attemptId!))!.fixture).toBe(true);
   });
 });

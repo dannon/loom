@@ -26,6 +26,7 @@ import {
 import {
   ensureAttemptRecord,
   readAttemptRecord,
+  writeEnrichment,
   UNKNOWN,
 } from "../extensions/loom/galaxy-provenance";
 import { resetState, setNotebookPath } from "../extensions/loom/state";
@@ -110,6 +111,26 @@ describe("enrichment parsers", () => {
         outputs: [{ id: "d2" }],
       },
     ]);
+  });
+
+  it("refuses a subworkflow answer for a different invocation, and nesting past the limit", async () => {
+    const parent = {
+      id: "p1",
+      steps: [{ order_index: 0, jobs: [], subworkflow_invocation_id: "c1" }],
+    } as unknown as InvocationDetail;
+    await expect(
+      walkInvocationJobs(
+        parent,
+        async () => ({ id: "zz", steps: [] }) as unknown as InvocationDetail,
+      ),
+    ).rejects.toThrow(/different invocation/);
+    let n = 0;
+    const deep = async (id: string) =>
+      ({
+        id,
+        steps: [{ order_index: 0, jobs: [], subworkflow_invocation_id: `d${++n}` }],
+      }) as unknown as InvocationDetail;
+    await expect(walkInvocationJobs(parent, deep)).rejects.toThrow(/nested deeper/);
   });
 
   it("walks every job of a mapped step and follows subworkflows once", async () => {
@@ -248,7 +269,11 @@ describe("runEnrichmentPass", () => {
     };
   }
 
-  async function seedJob(over: Partial<JobYaml> = {}, harness: Record<string, unknown> = {}) {
+  async function seedJob(
+    over: Partial<JobYaml> = {},
+    harness: Record<string, unknown> = {},
+    recordOver: Record<string, unknown> = {},
+  ) {
     const attemptId = ulid();
     const block = jobBlock(over);
     fs.writeFileSync(
@@ -269,6 +294,8 @@ describe("runEnrichmentPass", () => {
       galaxyServerUrl: SERVER,
       submittedBy: "harness",
       ids: { job_ids: [block.jobId] },
+      seeds: { [block.jobId]: { tool_id: "fastp", tool_version: "0.24.0" } },
+      ...recordOver,
     });
     return attemptId;
   }
@@ -327,6 +354,65 @@ describe("runEnrichmentPass", () => {
     const record = await readAttemptRecord(dir, attemptId);
     expect(record).toMatchObject({ origin: "notebook", ids: { job_ids: ["aa11"] } });
     expect(theJob().enrichment).toBe("complete");
+  });
+
+  it("takes the version from the protected record, not the block's editable summary", async () => {
+    const attemptId = await seedJob(
+      {},
+      { jobs: [{ jobId: "aa11", toolId: "fastp", toolVersion: "999" }] },
+    );
+    await runEnrichmentPass({ deps: deps() });
+    expect((await readAttemptRecord(dir, attemptId))!.jobs.aa11.tool_version).toBe("0.24.0");
+  });
+
+  it("waits, without spending an attempt, while Galaxy says the job is still running", async () => {
+    await seedJob();
+    const result = await runEnrichmentPass({
+      deps: deps({ getJob: async (id) => ({ ...details(id), state: "running" }) }),
+    });
+    expect(result.skipped).toBe(1);
+    expect(theJob()).toMatchObject({ enrichment: "pending" });
+    expect(theJob().enrichmentAttempts).toBe(0);
+  });
+
+  it("refuses answers from a server other than the one the attempt was recorded on", async () => {
+    await seedJob({}, {}, { galaxyServerUrl: "https://usegalaxy.eu" });
+    await runEnrichmentPass({ deps: deps() });
+    expect(theJob().enrichment).toBe("unavailable");
+    expect(rows("enrichment.unavailable")[0].payload).toMatchObject({ reason: "attribution" });
+  });
+
+  it("refuses a job Galaxy says ran in a different history than the attempt's", async () => {
+    const attemptId = await seedJob({}, {}, { historyId: "0a248a1f62a0cc04" });
+    await runEnrichmentPass({
+      deps: deps({ getJob: async (id) => ({ ...details(id), history_id: "ffff000000000000" }) }),
+    });
+    expect(theJob().enrichment).toBe("unavailable");
+    expect((await readAttemptRecord(dir, attemptId))!.jobs).toEqual({});
+  });
+
+  it("a late record takes no submitter or history from the notebook, and labels a notebook version", async () => {
+    const attemptId = ulid();
+    fs.writeFileSync(
+      nbPath,
+      upsertJobBlock("", jobBlock(), {
+        attemptId,
+        submittedBy: "harness",
+        historyId: "0a248a1f62a0cc04",
+        enrichment: "pending",
+        jobs: [{ jobId: "aa11", toolId: "fastp", toolVersion: "0.24.0" }],
+      }),
+    );
+    await runEnrichmentPass({
+      deps: deps({ getJob: async (id) => ({ ...details(id), history_id: "bbbb000000000002" }) }),
+    });
+    const record = await readAttemptRecord(dir, attemptId);
+    expect(record).toMatchObject({
+      origin: "notebook",
+      submitted_by: "unknown",
+      history_id: "bbbb000000000002",
+    });
+    expect(record!.jobs.aa11.tool_version_source).toBe("notebook");
   });
 
   it("leaves running work alone", async () => {
@@ -439,6 +525,7 @@ describe("runEnrichmentPass", () => {
         getInvocation: async (id) =>
           ({
             id,
+            state: "scheduled",
             steps: [
               {
                 order_index: 1,
@@ -474,6 +561,28 @@ describe("runEnrichmentPass", () => {
         jobs: [{ jobId: "0ld0", toolId: `${FASTP}/0.23.4`, toolVersion: "0.23.4" }],
       },
     );
+    await ensureAttemptRecord(dir, {
+      origin: "submission",
+      attemptId: earlier,
+      kind: "jobs",
+      galaxyServerUrl: SERVER,
+      submittedBy: "harness",
+      ids: { job_ids: ["0ld0"] },
+    });
+    await writeEnrichment(dir, earlier, {
+      blockKind: "job",
+      blockId: "0ld0",
+      state: "complete",
+      attempts: 1,
+      serverUrl: SERVER,
+      jobs: [
+        buildJobRecord(
+          { id: "0ld0", state: "ok", tool_id: `${FASTP}/0.23.4` },
+          { tool_version: "0.23.4", tool_version_source: "submission" },
+          new Map(),
+        ),
+      ],
+    });
     const attemptId = ulid();
     fs.writeFileSync(
       nbPath,
@@ -491,6 +600,7 @@ describe("runEnrichmentPass", () => {
       galaxyServerUrl: SERVER,
       submittedBy: "harness",
       ids: { job_ids: ["aa11"] },
+      seeds: { aa11: { tool_id: `${FASTP}/0.24.0`, tool_version: "0.24.0" } },
     });
     await runEnrichmentPass({
       deps: deps({ getJob: async (id) => details(id, `${FASTP}/0.24.0`) }),

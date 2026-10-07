@@ -114,6 +114,11 @@ export function setGalaxyFetchOverride(fetchImpl: GalaxyFetch | null): void {
   fetchOverride = fetchImpl;
 }
 
+/** Whether Galaxy answers are coming from an override rather than a server. */
+export function isGalaxyFetchOverridden(): boolean {
+  return fetchOverride !== null;
+}
+
 function galaxyFetch(url: string, init: RequestInit): Promise<Response> {
   if (fetchOverride) return fetchOverride(url, init);
   return fetchSameOriginOnly(url, init, GALAXY_REDIRECT_LABELS);
@@ -458,7 +463,9 @@ export async function galaxyListHistoryInvocations(
   historyId: string,
   limit: number,
   signal?: AbortSignal,
-): Promise<{ id: string; create_time?: string; state?: string; workflow_id?: string }[]> {
+): Promise<
+  { id: string; create_time?: string; state?: string; workflow_id?: string; history_id?: string }[]
+> {
   const ctx = galaxyOpsContext(signal);
   if (!ctx) throw new Error("Galaxy credentials not configured (GALAXY_URL, GALAXY_API_KEY)");
   let result;
@@ -477,6 +484,7 @@ export async function galaxyListHistoryInvocations(
         ...(typeof row.create_time === "string" ? { create_time: row.create_time } : {}),
         ...(typeof row.state === "string" ? { state: row.state } : {}),
         ...(typeof row.workflow_id === "string" ? { workflow_id: row.workflow_id } : {}),
+        ...(typeof row.history_id === "string" ? { history_id: row.history_id } : {}),
       };
     });
 }

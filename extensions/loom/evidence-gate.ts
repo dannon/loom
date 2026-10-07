@@ -545,16 +545,32 @@ export function findEnrichmentWarnings(
       const id = x.kind === "invocation" ? x.b.invocationId : x.b.jobId;
       const reasons: string[] = [];
       if (x.b.enrichment !== "complete") reasons.push(`enrichment_${x.b.enrichment ?? "absent"}`);
-      const jobs = x.b.jobs ?? [];
-      const versionMissing =
-        x.kind === "job"
-          ? !jobs.some((j) => j.jobId === id && j.toolVersion)
-          : jobs.length === 0 || jobs.some((j) => !j.toolVersion);
-      if (versionMissing) reasons.push("tool_version_missing");
+      // The block's word is notebook text; the protected record is what the
+      // check rests on whenever the block claims to be complete.
+      const record = x.b.attemptId ? readAttemptRecordSync(analysisDir, x.b.attemptId) : null;
+      const owned = record && attemptOwns(record, x.kind, id) ? record : null;
+      const recordJobs = owned
+        ? x.kind === "job"
+          ? [owned.jobs[id]].filter(Boolean)
+          : Object.values(owned.jobs)
+        : [];
       if (x.b.enrichment === "complete") {
-        const record = x.b.attemptId ? readAttemptRecordSync(analysisDir, x.b.attemptId) : null;
-        if (!record || !attemptOwns(record, x.kind, id)) reasons.push("provenance_missing");
+        if (!owned) reasons.push("provenance_missing");
+        else {
+          if (owned.origin === "notebook") reasons.push("provenance_untrusted");
+          const incomplete =
+            recordJobs.length === 0 ||
+            recordJobs.some((j) => j.unavailable) ||
+            (x.kind === "invocation" && owned.enrichment.state !== "complete");
+          if (incomplete) reasons.push("provenance_incomplete");
+        }
       }
+      const versionMissing = owned
+        ? recordJobs.length === 0 || recordJobs.some((j) => j.tool_version === "unknown")
+        : x.kind === "job"
+          ? !(x.b.jobs ?? []).some((j) => j.jobId === id && j.toolVersion)
+          : !x.b.jobs || x.b.jobs.length === 0 || x.b.jobs.some((j) => !j.toolVersion);
+      if (versionMissing) reasons.push("tool_version_missing");
       if (reasons.length > 0) {
         out.push({
           step: step.key,
