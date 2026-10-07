@@ -1,0 +1,44 @@
+{
+  "name": "reconcile records a job no block claims as unattributed",
+  "description": "A job started from Galaxy's own UI is in the bound history but in no notebook block. Reconcile has to write it with submitted_by: unknown and notebook_anchor: unattributed rather than guessing a step, leave the run the harness recorded alone, and say so in a reconcile.unattributed row.",
+  "tier": 1,
+  "inputs": ["/reconcile"],
+  "env": {
+    "ANTHROPIC_API_KEY": "fake-eval-key",
+    "GALAXY_URL": "https://usegalaxy.org",
+    "GALAXY_API_KEY": "fake-eval-galaxy-key",
+    "LOOM_GALAXY_FIXTURE": "galaxy-fixture.json"
+  },
+  "timeoutMs": 20000,
+  "assertions": {
+    "events": {
+      "mustNotInclude": ["agent_start", "tool_execution_start", "turn_start"]
+    },
+    "activity": {
+      "mustNotIncludeKinds": ["reconcile.failed", "reconcile.incomplete"],
+      "mustInclude": [
+        {
+          "kind": "galaxy.fixture",
+          "source": "galaxy-fixture"
+        },
+        {
+          "kind": "reconcile.unattributed",
+          "source": "galaxy-reconcile",
+          "payloadContains": {
+            "block_kind": "job",
+            "id": "bb00000000000002",
+            "history_id": "0a248a1f62a0cc04"
+          }
+        }
+      ]
+    },
+    "notebook": {
+      "contains": [
+        "job_id: bb00000000000002",
+        "notebook_anchor: unattributed",
+        "submitted_by: unknown",
+        "label: \"cat1 (found on Galaxy)\""
+      ]
+    }
+  }
+}

@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 /**
  * The Orbit Activity panel parses `loom-invocation` blocks itself rather than
  * importing the brain's parser (renderer/main boundary), so the two parsers
@@ -11,7 +12,14 @@ import {
   renderInvocationYaml,
   type InvocationYaml,
 } from "../extensions/loom/notebook-writer";
-import { parseInvocationBlocks } from "../app/src/renderer/galaxy-invocations.js";
+import {
+  describeToolVersions,
+  parseInvocationBlocks,
+  parseUnattributedJobBlocks,
+  refreshGalaxyInvocations,
+} from "../app/src/renderer/galaxy-invocations.js";
+import { upsertJobBlock, type JobYaml } from "../extensions/loom/galaxy-job-block";
+import { upsertInvocationBlock } from "../extensions/loom/notebook-writer";
 
 function invocation(overrides: Partial<InvocationYaml> = {}): InvocationYaml {
   return {
@@ -92,5 +100,103 @@ describe("the two parsers agree on what a block needs", () => {
     ].join("\n");
     expect(findInvocationBlocks(content)).toHaveLength(0);
     expect(parseInvocationBlocks(content)).toHaveLength(0);
+  });
+});
+
+describe("tool versions, enrichment and unattributed runs", () => {
+  const strayJob: JobYaml = {
+    jobId: "cc33000000000003",
+    galaxyServerUrl: "https://usegalaxy.org",
+    notebookAnchor: "unattributed",
+    label: "fastp (found on Galaxy)",
+    toolId: "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+    submittedAt: "2026-10-07T10:00:00.000Z",
+    status: "completed",
+    serverVerified: true,
+  };
+
+  it("reads an unattributed tool run as the brain's reconcile writes it, and skips bound ones", () => {
+    const content =
+      upsertJobBlock("", strayJob, {
+        submittedBy: "unknown",
+        enrichment: "pending",
+        enrichmentAttempts: 2,
+        enrichmentError: 'Galaxy API 502: "bad gateway"',
+        jobs: [{ jobId: strayJob.jobId, toolId: strayJob.toolId, toolVersion: "0.24.0" }],
+      }) +
+      "\n" +
+      upsertJobBlock("", {
+        ...strayJob,
+        jobId: "dd44000000000004",
+        notebookAnchor: "plan-a-step-1",
+      });
+    const jobs = parseUnattributedJobBlocks(content);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({
+      jobId: "cc33000000000003",
+      label: "fastp (found on Galaxy)",
+      submittedBy: "unknown",
+      enrichment: "pending",
+      enrichmentAttempts: 2,
+      enrichmentError: 'Galaxy API 502: "bad gateway"',
+    });
+  });
+
+  it("describes versions per tool, and counts the unknown ones", () => {
+    expect(
+      describeToolVersions([
+        {
+          job_id: "a",
+          tool_id: "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+          tool_version: "0.24.0",
+        },
+        {
+          job_id: "b",
+          tool_id: "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+          tool_version: "0.24.0",
+        },
+        { job_id: "c", tool_id: "cat1" },
+      ]),
+    ).toBe("fastp 0.24.0 · 1 version unknown");
+    expect(describeToolVersions(undefined)).toBe("");
+  });
+
+  it("draws versions and enrichment on workflow rows, and lists unattributed tool runs", async () => {
+    document.body.innerHTML = `
+      <div id="activity-galaxy-section" class="hidden">
+        <span id="galaxy-invocations-count"></span>
+        <div id="galaxy-invocations-body"></div>
+      </div>`;
+    const notebook =
+      upsertInvocationBlock(
+        "",
+        invocation({ status: "completed", notebookAnchor: "unattributed" }),
+        {
+          submittedBy: "unknown",
+          enrichment: "complete",
+          jobs: [{ jobId: "j1", toolId: "bwa_mem", toolVersion: "0.7.17" }],
+          drift: [{ toolId: "bwa_mem", from: "0.7.16", to: "0.7.17" }],
+        },
+      ) +
+      "\n" +
+      upsertJobBlock(
+        "",
+        { ...strayJob, label: "<b>x</b>" },
+        { submittedBy: "unknown", enrichment: "unavailable" },
+      );
+    await refreshGalaxyInvocations({
+      readFile: async () => ({ ok: true, bytes: new TextEncoder().encode(notebook) }),
+    });
+    const body = document.getElementById("galaxy-invocations-body")!;
+    const text = body.textContent!.replace(/\s+/g, " ");
+    expect(text).toContain("found on Galaxy · unattributed · details recorded · 1 version drift");
+    expect(text).toContain("bwa_mem 0.7.17");
+    expect(body.querySelectorAll(".galaxy-unattributed-job")).toHaveLength(1);
+    expect(text).toContain("details unavailable");
+    // Galaxy-supplied text is escaped, not rendered.
+    expect(body.querySelector(".galaxy-unattributed-job b")).toBeNull();
+    expect(document.getElementById("activity-galaxy-section")!.classList.contains("hidden")).toBe(
+      false,
+    );
   });
 });

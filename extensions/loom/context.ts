@@ -464,6 +464,9 @@ invocationId, notebookAnchor, label })\` and tool runs with
 \`galaxy_job_record({ jobId, notebookAnchor, label })\`. The call sets the
 label and anchor on the block Loom already wrote, and writes a new block only
 if nothing in the notebook carries that id. Use the IDs returned by Galaxy.
+Runs Loom finds in the history that no block recorded are written with
+\`notebook_anchor: unattributed\`; bind them the same way, and the user can run
+\`/reconcile\` to re-check the history against the notebook.
 
 - If the submission result or a current check already shows terminal state,
   inspect the outputs now. A quick merge or metadata operation can finish

@@ -1,0 +1,59 @@
+{
+  "routes": [
+    {
+      "path": "/api/version",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "version_major": "26.0",
+            "version_minor": "0"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/invocations",
+      "query": {
+        "history_id": "0a248a1f62a0cc04"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "body": []
+        }
+      ]
+    },
+    {
+      "path": "/api/jobs",
+      "query": {
+        "history_id": "0a248a1f62a0cc04"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "body": [
+            {
+              "id": "dd00000000000004",
+              "state": "ok",
+              "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+              "create_time": "2026-10-07T10:00:00"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/api/jobs/dd00000000000004",
+      "query": {
+        "full": "true"
+      },
+      "responses": [
+        {
+          "status": 500,
+          "body": "Internal Server Error"
+        }
+      ]
+    }
+  ]
+}

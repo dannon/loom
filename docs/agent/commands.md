@@ -75,6 +75,7 @@ Saving a large response is normal output handling, not a model context failure.
 | `/connect [name]`         | Connect to Galaxy (prompts for credentials, or switches profile)                                                                                  |
 | `/profiles`               | List saved Galaxy server profiles                                                                                                                 |
 | `/execute` (alias `/run`) | Tell the agent to run the next pending step in the latest plan section                                                                            |
+| `/reconcile`              | Check the bound Galaxy history against the notebook: record runs no block claims as unattributed, and fetch details for finished runs now         |
 | `/override <step> <why>`  | User-only. Clear the evidence gate for one plan step, once, with the reason recorded                                                              |
 | `/observations [sub]`     | User-only. Show or change Galaxy-failure reporting: `status`, `mode <off\|ask\|auto>`, `sent`, `retract <id>`                                     |
 | `/observe [note]`         | User-only. Report something that went wrong, as one generic line. The payload is shown before it is sent                                          |

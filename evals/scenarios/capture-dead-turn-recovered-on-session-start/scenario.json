@@ -1,0 +1,39 @@
+{
+  "name": "a submission from a turn that died is recovered on the next session start",
+  "description": "The previous session's activity log shows a run_tool call that started and never finished -- the turn died between the submit and the result, so the capture hook never saw an id. Galaxy has the job. The next session's start-up reconcile (not a command, not a model) has to put it in the notebook as unattributed.",
+  "tier": 1,
+  "inputs": ["/reconcile"],
+  "env": {
+    "ANTHROPIC_API_KEY": "fake-eval-key",
+    "GALAXY_URL": "https://usegalaxy.org",
+    "GALAXY_API_KEY": "fake-eval-galaxy-key",
+    "LOOM_GALAXY_FIXTURE": "galaxy-fixture.json"
+  },
+  "timeoutMs": 20000,
+  "assertions": {
+    "events": {
+      "mustNotInclude": ["agent_start", "tool_execution_start", "turn_start"]
+    },
+    "activity": {
+      "mustNotIncludeKinds": ["reconcile.failed"],
+      "mustInclude": [
+        {
+          "kind": "reconcile.unattributed",
+          "source": "galaxy-reconcile",
+          "payloadContains": {
+            "id": "a700000000000006",
+            "trigger": "session_start",
+            "block_kind": "job"
+          }
+        }
+      ]
+    },
+    "notebook": {
+      "contains": [
+        "job_id: a700000000000006",
+        "notebook_anchor: unattributed",
+        "submitted_by: unknown"
+      ]
+    }
+  }
+}

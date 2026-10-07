@@ -95,6 +95,22 @@ export function getPollTickHook(): PollTickHook | null {
 }
 
 /**
+ * Capture's per-tick work: enrichment of finished runs, and a reconcile every
+ * few ticks (galaxy-reconcile.ts). Separate from `tickHook` because it has a
+ * different place in the tick -- it runs after this tick's transitions have
+ * landed, so a run that just finished is enriched on the same tick -- and
+ * because the live panel already owns that slot. Not awaited, for the same
+ * reason the panel hook isn't: a slow details fetch must not hold up polling.
+ */
+type CaptureTickHook = (tickNumber: number) => Promise<void>;
+let captureHook: CaptureTickHook | null = null;
+let tickCount = 0;
+
+export function setCaptureTickHook(hook: CaptureTickHook | null): void {
+  captureHook = hook;
+}
+
+/**
  * Hand a finished run back to the agent as a queued follow-up, so it verifies
  * outputs itself instead of the toast asking the user to relay. Null when
  * auto-resume is explicitly disabled.
@@ -638,6 +654,16 @@ async function runTick(): Promise<void> {
         deliver(buildResumePrompt(followUps));
       } catch (err) {
         console.error("[galaxy-poller] auto-resume send failed:", err);
+      }
+    }
+    tickCount++;
+    if (captureHook) {
+      try {
+        void captureHook(tickCount).catch((err) => {
+          console.error("[galaxy-poller] capture hook failed:", err);
+        });
+      } catch (err) {
+        console.error("[galaxy-poller] capture hook threw:", err);
       }
     }
   }

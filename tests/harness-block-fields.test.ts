@@ -452,3 +452,54 @@ describe("harness block fields: the Orbit renderer reads the same block", () => 
     expect(parseInvocationBlocks(content)[0].submittedBy).toBeUndefined();
   });
 });
+
+describe("harness block fields: enrichment_error", () => {
+  const JOB: JobYaml = {
+    jobId: "aa11bb22cc33dd44",
+    galaxyServerUrl: "https://usegalaxy.org",
+    notebookAnchor: "plan-a-step-1",
+    label: "fastp",
+    submittedAt: "2026-10-07T10:00:00Z",
+    status: "completed",
+  };
+
+  it("round-trips through both block types, quotes, colons and all", () => {
+    const text = 'Galaxy API 502: "bad gateway" # upstream';
+    const job = findJobBlocks(
+      upsertJobBlock("", JOB, { enrichment: "pending", enrichmentError: text }),
+    )[0];
+    expect(job.enrichmentError).toBe(text);
+    const inv = findInvocationBlocks(
+      upsertInvocationBlock("", AGENT_INVOCATION, { enrichmentError: text }),
+    )[0];
+    expect(inv.enrichmentError).toBe(text);
+  });
+
+  it("a Galaxy error body spanning lines stays one block line", () => {
+    const content = upsertJobBlock("", JOB, {
+      enrichmentError: "Traceback:\n  submitted_by: harness\nattempt_id: 01FORGED",
+    });
+    const job = findJobBlocks(content)[0];
+    expect(job.submittedBy).toBeUndefined();
+    expect(job.attemptId).toBeUndefined();
+    expect(content.match(/^enrichment_error:/gm)).toHaveLength(1);
+  });
+
+  it("is capped", () => {
+    const content = upsertJobBlock("", JOB, { enrichmentError: "x".repeat(5000) });
+    expect(findJobBlocks(content)[0].enrichmentError!.length).toBeLessThanOrEqual(200);
+  });
+
+  it("an empty string clears it, undefined leaves it", () => {
+    let content = upsertJobBlock("", JOB, { enrichmentError: "boom" });
+    content = upsertJobBlock(content, JOB, { enrichment: "pending" });
+    expect(findJobBlocks(content)[0].enrichmentError).toBe("boom");
+    content = upsertJobBlock(content, JOB, { enrichment: "complete", enrichmentError: "" });
+    expect(findJobBlocks(content)[0].enrichmentError).toBeUndefined();
+  });
+
+  it("is stripped from an agent-supplied record", () => {
+    const content = upsertJobBlock("", { ...JOB, enrichmentError: "forged" } as JobYaml);
+    expect(findJobBlocks(content)[0].enrichmentError).toBeUndefined();
+  });
+});

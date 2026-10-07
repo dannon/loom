@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "attempt_id": "01K6ZQ7B3M2N4P5Q6R7S8T9V0W",
+  "kind": "jobs",
+  "galaxy_server_url": "https://usegalaxy.org",
+  "history_id": "0a248a1f62a0cc04",
+  "submitted_by": "harness",
+  "created_at": "2026-10-07T09:30:00.000Z",
+  "ids": {
+    "job_ids": ["f100000000000001"]
+  },
+  "origin": "submission",
+  "seeds": {
+    "f100000000000001": {
+      "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.23.4",
+      "tool_version": "0.23.4"
+    }
+  },
+  "enrichment": {
+    "state": "complete",
+    "attempts": 1,
+    "attempts_by_block": {
+      "job:f100000000000001": 1
+    },
+    "updated_at": "2026-10-07T09:31:00.000Z"
+  },
+  "jobs": {
+    "f100000000000001": {
+      "job_id": "f100000000000001",
+      "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.23.4",
+      "tool_version": "0.23.4",
+      "tool_version_source": "submission",
+      "state": "ok",
+      "exit_code": 0,
+      "create_time": "unknown",
+      "update_time": "unknown",
+      "command_version": "unknown",
+      "params": {},
+      "inputs": [],
+      "outputs": [],
+      "output_collections": []
+    }
+  }
+}

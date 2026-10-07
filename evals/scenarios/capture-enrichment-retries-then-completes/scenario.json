@@ -1,0 +1,48 @@
+{
+  "name": "enrichment survives a failed details fetch and completes on the retry",
+  "description": "The first GET /api/jobs/{id}?full=true answers 502. The block must stay enrichment: pending with the attempt counted and the error kept, not be dropped or marked unavailable, and /reconcile's retry must complete it.",
+  "tier": 1,
+  "inputs": ["/reconcile"],
+  "env": {
+    "ANTHROPIC_API_KEY": "fake-eval-key",
+    "GALAXY_URL": "https://usegalaxy.org",
+    "GALAXY_API_KEY": "fake-eval-galaxy-key",
+    "LOOM_GALAXY_FIXTURE": "galaxy-fixture.json"
+  },
+  "timeoutMs": 20000,
+  "assertions": {
+    "events": {
+      "mustNotInclude": ["agent_start", "tool_execution_start", "turn_start"]
+    },
+    "activity": {
+      "mustNotIncludeKinds": ["enrichment.unavailable"],
+      "mustInclude": [
+        {
+          "kind": "enrichment.retry",
+          "source": "galaxy-enrich",
+          "payloadContains": {
+            "id": "cc00000000000003",
+            "attempt": "1"
+          }
+        },
+        {
+          "kind": "enrichment.complete",
+          "source": "galaxy-enrich",
+          "payloadContains": {
+            "id": "cc00000000000003",
+            "attempts": "2",
+            "job_count": "1"
+          }
+        }
+      ]
+    },
+    "notebook": {
+      "contains": [
+        "enrichment: complete",
+        "enrichment_attempts: 2",
+        "\"tool_version\":\"0.24.0\"",
+        "\"ext\":\"fastqsanger\""
+      ]
+    }
+  }
+}

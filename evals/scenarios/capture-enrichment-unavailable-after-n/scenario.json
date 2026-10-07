@@ -1,0 +1,35 @@
+{
+  "name": "enrichment goes unavailable after the last allowed attempt, and says so",
+  "description": "A block whose attempt record already counts four failed details fetches fails a fifth. It must become enrichment: unavailable with the reason recorded -- never silently dropped, never retried forever.",
+  "tier": 1,
+  "inputs": ["/reconcile"],
+  "env": {
+    "ANTHROPIC_API_KEY": "fake-eval-key",
+    "GALAXY_URL": "https://usegalaxy.org",
+    "GALAXY_API_KEY": "fake-eval-galaxy-key",
+    "LOOM_GALAXY_FIXTURE": "galaxy-fixture.json"
+  },
+  "timeoutMs": 20000,
+  "assertions": {
+    "events": {
+      "mustNotInclude": ["agent_start", "tool_execution_start", "turn_start"]
+    },
+    "activity": {
+      "mustNotIncludeKinds": ["enrichment.complete"],
+      "mustInclude": [
+        {
+          "kind": "enrichment.unavailable",
+          "source": "galaxy-enrich",
+          "payloadContains": {
+            "id": "dd00000000000004",
+            "reason": "attempts",
+            "attempts": "5"
+          }
+        }
+      ]
+    },
+    "notebook": {
+      "contains": ["enrichment: unavailable", "enrichment_attempts: 5", "enrichment_error:"]
+    }
+  }
+}
