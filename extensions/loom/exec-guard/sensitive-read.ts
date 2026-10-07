@@ -200,14 +200,20 @@ function credentialFileCandidates(home: string, agentDir: string): Set<string> {
     }
   }
   // realpath decides the spellings, since that's what callers compare against;
-  // the walk only decides what to watch. If it disagrees with either realpath
+  // the walk only decides what to watch. If it disagrees with fs.realpathSync
   // -- a race, or some platform quirk the walk doesn't model -- the watched
   // set may be the wrong one, so don't trust it.
+  //
+  // The native realpath is not compared. The one place it lands somewhere
+  // else, a `..` in a link target, already leaves the walk incomplete, and off
+  // Windows it isn't even computed when the walk agrees. On Windows it also
+  // expands 8.3 short names (`RUNNER~1`) and subst or mapped drives that
+  // fs.realpathSync and the walk keep as given -- another spelling of the same
+  // dirs, which the candidates already carry -- and comparing it left every
+  // such home rebuilding on every call.
   let walksAgree = true;
   for (const [dir, w] of parents) {
-    const r = resolvedParents.get(dir);
-    if (!w.complete || w.real !== (r?.js ?? null)) walksAgree = false;
-    else if (w.real?.toLowerCase() !== r?.native?.toLowerCase()) walksAgree = false;
+    if (!w.complete || w.real !== (resolvedParents.get(dir)?.js ?? null)) walksAgree = false;
   }
   // A credential file that is itself a symlink resolves through its target's
   // dirs, and a dangling one starts resolving the moment its target is
@@ -396,8 +402,9 @@ function withRealpath(
  * Both realpaths of `p`. A completed walk that agrees with fs.realpathSync has
  * just done what the kernel does -- it only completes when no link target has
  * a `..` in it, the one place the two part ways -- so off Windows the native
- * call is skipped then. On Windows the native one can still differ (a subst
- * or mapped drive comes back as its target), so it always runs there.
+ * call is skipped then. On Windows the native one can still differ (an 8.3
+ * short name comes back expanded, a subst or mapped drive as its target), and
+ * callers that resolved natively hand us that spelling, so it always runs there.
  */
 function resolveBothWays(p: string, walk?: Walk): ResolvedDir {
   const attempt = (resolve: (p: string) => string): string | null => {

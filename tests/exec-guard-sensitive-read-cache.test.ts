@@ -11,6 +11,9 @@ const calls = vi.hoisted(() => ({
   native: 0,
   lstat: 0,
   pinned: new Map<string, unknown>(),
+  // Rewrites what the native realpath returns, to stand in for Windows
+  // expanding a short name the JS one keeps.
+  nativeMap: null as ((p: string) => string) | null,
 }));
 vi.mock("fs", async (importOriginal) => {
   const real = await importOriginal<typeof import("fs")>();
@@ -22,7 +25,8 @@ vi.mock("fs", async (importOriginal) => {
     {
       native: (...args: Parameters<typeof real.realpathSync.native>) => {
         calls.native++;
-        return real.realpathSync.native(...args);
+        const out = real.realpathSync.native(...args);
+        return calls.nativeMap ? calls.nativeMap(String(out)) : out;
       },
     },
   );
@@ -68,7 +72,8 @@ function settle(): void {
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-read-cache-"));
   calls.pinned.clear();
-  for (const start of [path.dirname(root), path.dirname(fs.realpathSync(root))]) {
+  const spellings = [root, fs.realpathSync(root), fs.realpathSync.native(root)];
+  for (const start of spellings.map((r) => path.dirname(r))) {
     for (let d = start; ; d = path.dirname(d)) {
       calls.pinned.set(d, null);
       if (path.dirname(d) === d) break;
@@ -89,8 +94,12 @@ beforeEach(() => {
   calls.lstat = 0;
 });
 
+const realPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
+
 afterEach(() => {
   vi.restoreAllMocks();
+  calls.nativeMap = null;
+  Object.defineProperty(process, "platform", realPlatform);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -109,6 +118,9 @@ describe("isCredentialStore realpath cache", () => {
   it("still matches the stores themselves from a cached snapshot", () => {
     const realHome = fs.realpathSync(home);
     const realAuth = fs.realpathSync(path.join(agentDir, "auth.json"));
+    // What fs.promises.realpath hands the web files surface: on Windows the
+    // long-name spelling of a short-name tmpdir.
+    const nativeCfg = fs.realpathSync.native(path.join(home, ".loom", "config.json"));
     settle();
     isCredentialStore(target, home, agentDir);
     calls.realpath = 0;
@@ -117,6 +129,7 @@ describe("isCredentialStore realpath cache", () => {
     );
     expect(isCredentialStore(path.join(home, ".orbit", "config.json"), home, agentDir)).toBe(true);
     expect(isCredentialStore(realAuth, home, agentDir)).toBe(true);
+    expect(isCredentialStore(nativeCfg, home, agentDir)).toBe(true);
     expect(calls.realpath).toBe(0);
   });
 
@@ -377,6 +390,37 @@ describe("isCredentialStore realpath cache", () => {
     calls.realpath = 0;
     expect(isCredentialStore(opened, home, agentDir)).toBe(true);
     expect(calls.realpath).toBeGreaterThan(0);
+  });
+
+  it("settles when the native realpath expands a short name the walk keeps", () => {
+    // Windows' native realpath turns C:\Users\RUNNER~1 into the long name;
+    // fs.realpathSync and the walk keep the 8.3 spelling they were given. A
+    // dir literally named RUNNER~1 plus a rewritten native result reproduces
+    // that anywhere, and win32 makes the module compute the native spelling
+    // on every build the way it does there. Built on the native spelling of
+    // root, so on a real Windows runner the tmpdir's own short name is already
+    // expanded and the rewrite still lines up.
+    const nativeRoot = fs.realpathSync.native(root);
+    const shortRoot = path.join(nativeRoot, "RUNNER~1");
+    const longRoot = path.join(nativeRoot, "runneradmin");
+    const shortHome = path.join(shortRoot, "home");
+    fs.mkdirSync(path.join(shortHome, ".loom"), { recursive: true });
+    fs.writeFileSync(path.join(shortHome, ".loom", "config.json"), "{}");
+    calls.nativeMap = (p) => p.split(shortRoot).join(longRoot);
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    const shortCfg = path.join(shortHome, ".loom", "config.json");
+    const longCfg = path.join(longRoot, "home", ".loom", "config.json");
+    settle();
+    expect(isCredentialStore(target, shortHome, agentDir)).toBe(false);
+    expect(calls.native).toBeGreaterThan(0);
+
+    calls.realpath = 0;
+    calls.native = 0;
+    expect(isCredentialStore(shortCfg, shortHome, agentDir)).toBe(true);
+    expect(isCredentialStore(longCfg, shortHome, agentDir)).toBe(true);
+    expect(isCredentialStore(target, shortHome, agentDir)).toBe(false);
+    expect(calls.realpath).toBe(0);
+    expect(calls.native).toBe(0);
   });
 
   it("keeps (home, agentDir) pairs apart even when joining them would collide", () => {
