@@ -338,7 +338,12 @@ interface AttemptVersions {
   attemptId: string;
   submittedAt: string;
   completed: boolean;
-  versions: Map<string, string>;
+  /**
+   * Version per tool lineage, `unknown` where the tool is known but its
+   * version is not. Null when the attempt has no record we trust at all --
+   * its baseline is unknown for every tool.
+   */
+  versions: Map<string, string> | null;
 }
 
 /** Every attempt bound to `anchor`, with the tool versions its blocks name. */
@@ -359,9 +364,9 @@ function attemptsOnAnchor(content: string, anchor: string): AttemptVersions[] {
     if (block.status === "completed") entry.completed = true;
     if (block.submittedAt < entry.submittedAt) entry.submittedAt = block.submittedAt;
     for (const job of block.jobs ?? []) {
-      if (!job.toolId || !job.toolVersion) continue;
+      if (!job.toolId || !entry.versions) continue;
       const lineage = toolLineage(job.toolId);
-      if (!entry.versions.has(lineage)) entry.versions.set(lineage, job.toolVersion);
+      if (!entry.versions.has(lineage)) entry.versions.set(lineage, job.toolVersion ?? UNKNOWN);
     }
     byAttempt.set(block.attemptId, entry);
   }
@@ -371,8 +376,12 @@ function attemptsOnAnchor(content: string, anchor: string): AttemptVersions[] {
 /**
  * Versions that moved between the latest earlier completed attempt on this
  * step and this one. Versions only: the parameter diff is the registry's.
- * An unknown version on either side is not drift -- it is a gap, and the
- * evidence gate already warns about it.
+ *
+ * An unknown version on either side is written as drift with `unknown` in
+ * place of the version, not left out: "nothing moved" and "we can't tell"
+ * are different claims, and a re-run whose baseline nobody recorded is
+ * exactly the case a reader has to be told about. A tool the earlier attempt
+ * did not run at all is not drift.
  */
 export function computeDrift(
   content: string,
@@ -386,7 +395,7 @@ export function computeDrift(
   if (versionsOf) {
     // The blocks' summaries are notebook text; the baseline comes from the
     // earlier attempt's protected record, or there is no baseline.
-    for (const a of attempts) a.versions = versionsOf(a.attemptId) ?? new Map();
+    for (const a of attempts) a.versions = versionsOf(a.attemptId);
   }
   const self = attempts.find((a) => a.attemptId === attemptId);
   const prior = attempts
@@ -397,13 +406,16 @@ export function computeDrift(
   const drift: BlockDriftNote[] = [];
   const seen = new Set<string>();
   for (const job of jobs) {
-    if (!job.toolId || !job.toolVersion) continue;
+    if (!job.toolId) continue;
     const lineage = toolLineage(job.toolId);
     if (seen.has(lineage)) continue;
     seen.add(lineage);
-    const from = prior.versions.get(lineage);
-    if (from && from !== job.toolVersion)
-      drift.push({ toolId: lineage, from, to: job.toolVersion });
+    const to = job.toolVersion ?? UNKNOWN;
+    const from = prior.versions ? prior.versions.get(lineage) : UNKNOWN;
+    if (from === undefined) continue;
+    if (from === UNKNOWN || to === UNKNOWN || from !== to) {
+      drift.push({ toolId: lineage, from, to });
+    }
   }
   return { against: prior.attemptId, drift };
 }
@@ -417,7 +429,7 @@ function protectedVersions(dir: string, attemptId: string): Map<string, string> 
   if (!record || record.origin === "notebook") return null;
   const versions = new Map<string, string>();
   for (const job of Object.values(record.jobs)) {
-    if (job.tool_id === UNKNOWN || job.tool_version === UNKNOWN) continue;
+    if (job.tool_id === UNKNOWN) continue;
     const lineage = toolLineage(job.tool_id);
     if (!versions.has(lineage)) versions.set(lineage, job.tool_version);
   }
@@ -446,10 +458,21 @@ const defaultDeps: EnrichDeps = {
 const nextAttemptAt = new Map<string, number>();
 /** Drift rows already written this session, so each attempt reports once. */
 const driftReported = new Set<string>();
+/**
+ * Failures counted this session, per block. The durable count is in the
+ * attempt record (mirrored on the block), but when the record cannot be read
+ * and the block cannot be written either, neither count moves -- without
+ * this, such a block would be retried on every backoff forever.
+ */
+const sessionFailures = new Map<string, number>();
+/** Blocks given up on this session whose unavailable state could not be written down. */
+const exhausted = new Set<string>();
 
 export function resetEnrichmentState(): void {
   nextAttemptAt.clear();
   driftReported.clear();
+  sessionFailures.clear();
+  exhausted.clear();
 }
 
 export function backoffMs(attempts: number): number {
@@ -731,8 +754,9 @@ async function attemptRecordFor(
     attemptId,
     kind: candidate.kind === "invocation" ? "invocation" : "jobs",
     galaxyServerUrl: block.galaxyServerUrl,
-    historyId: block.historyId,
-    submittedBy: block.submittedBy ?? "unknown",
+    // Nothing the block says about who submitted it or where it ran goes into
+    // a protected record: the history is filled in from Galaxy's own answer.
+    submittedBy: "unknown",
     ids:
       candidate.kind === "invocation"
         ? { invocation_id: candidate.id }
@@ -848,6 +872,10 @@ async function enrichOnce(options: {
 
   for (const candidate of enrichmentCandidates(content, server)) {
     const key = `${candidate.kind}:${candidate.id}`;
+    if (exhausted.has(key)) {
+      result.skipped++;
+      continue;
+    }
     if (!options.force && (nextAttemptAt.get(key) ?? 0) > deps.now()) {
       result.skipped++;
       continue;
@@ -901,7 +929,9 @@ async function enrichOnce(options: {
         },
         false,
       ).catch(() => ({ written: false }));
-      if (!persisted.written) return;
+      // A block that cannot take the verdict is still not retried again this
+      // session; the row says the notebook does not show it yet.
+      if (!persisted.written) exhausted.add(key);
       nextAttemptAt.delete(key);
       result.unavailable.push(key);
       record(dir, "enrichment.unavailable", {
@@ -910,6 +940,7 @@ async function enrichOnce(options: {
         attempts,
         error: flattenErrorText(error),
         ...(provenance ? { provenance } : {}),
+        ...(persisted.written ? {} : { block_written: false }),
       });
     };
 
@@ -931,6 +962,8 @@ async function enrichOnce(options: {
      * so a fault that never clears is never silently pending forever.
      */
     const retryLater = async (error: string) => {
+      attempts = Math.max(attempts, (sessionFailures.get(key) ?? 0) + 1);
+      sessionFailures.set(key, attempts);
       if (attempts >= MAX_ENRICHMENT_ATTEMPTS) {
         await giveUp("attempts", error);
         return;
@@ -1052,11 +1085,23 @@ async function enrichOnce(options: {
     const drift = persisted.drift;
     if (drift && drift.drift.length > 0 && !driftReported.has(block.attemptId)) {
       driftReported.add(block.attemptId);
-      record(dir, "drift.detected", {
-        ...rowBase,
-        against_attempt_id: drift.against,
-        drift: drift.drift.map((d) => ({ tool_id: d.toolId, from: d.from, to: d.to })),
-      });
+      const wire = (d: BlockDriftNote) => ({ tool_id: d.toolId, from: d.from, to: d.to });
+      const moved = drift.drift.filter((d) => d.from !== UNKNOWN && d.to !== UNKNOWN);
+      const unknown = drift.drift.filter((d) => d.from === UNKNOWN || d.to === UNKNOWN);
+      if (moved.length > 0) {
+        record(dir, "drift.detected", {
+          ...rowBase,
+          against_attempt_id: drift.against,
+          drift: moved.map(wire),
+        });
+      }
+      if (unknown.length > 0) {
+        record(dir, "drift.unknown", {
+          ...rowBase,
+          against_attempt_id: drift.against,
+          drift: unknown.map(wire),
+        });
+      }
     }
   }
   return result;

@@ -206,12 +206,32 @@ describe("computeDrift", () => {
     });
   });
 
-  it("says nothing for unattributed work, unknown versions, or a step with no earlier run", () => {
+  it("says nothing for unattributed work, a step with no earlier run, or a tool not run before", () => {
     expect(computeDrift(content, "unattributed", a2, newJobs)).toBeNull();
+    expect(computeDrift(content, "plan-b-step-9", a2, newJobs)).toBeNull();
+    expect(
+      computeDrift(content, "plan-a-step-1", a2, [
+        { jobId: "bb22", toolId: "cat1", toolVersion: "1" },
+      ])!.drift,
+    ).toEqual([]);
+  });
+
+  it("writes an unknown version as drift unknown, not as no drift", () => {
+    // The new attempt's version is unknown.
     expect(
       computeDrift(content, "plan-a-step-1", a2, [{ jobId: "bb22", toolId: FASTP }])!.drift,
-    ).toEqual([]);
-    expect(computeDrift(content, "plan-b-step-9", a2, newJobs)).toBeNull();
+    ).toEqual([{ toolId: FASTP, from: "0.23.4", to: "unknown" }]);
+    // The baseline's version is unknown.
+    const unknownBaseline = new Map([[FASTP, "unknown"]]);
+    expect(
+      computeDrift(content, "plan-a-step-1", a2, newJobs, (id) =>
+        id === a1 ? unknownBaseline : null,
+      )!.drift,
+    ).toEqual([{ toolId: FASTP, from: "unknown", to: "0.24.0" }]);
+    // No trusted record for the earlier attempt at all.
+    expect(computeDrift(content, "plan-a-step-1", a2, newJobs, () => null)!.drift).toEqual([
+      { toolId: FASTP, from: "unknown", to: "0.24.0" },
+    ]);
   });
 
   it("does not count an attempt that never completed", () => {
