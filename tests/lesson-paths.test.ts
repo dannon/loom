@@ -227,6 +227,17 @@ describe("symlinked directories", () => {
     expect(fs.readdirSync(elsewhere)).toEqual([]);
   });
 
+  it("refuses a dangling link where a namespace directory should be", () => {
+    fs.mkdirSync(lessonsDir(), { recursive: true });
+    fs.symlinkSync(path.join(tmp, "not-there"), path.join(lessonsDir(), "stats"));
+    expect(writeNoClobber(lessonFilePath("stats", "x"), "text")).toEqual({
+      ok: false,
+      reason: "error",
+      detail: "symlinked directory",
+    });
+    expect(fs.existsSync(path.join(tmp, "not-there"))).toBe(false);
+  });
+
   it("refuses to stage a draft through a symlinked drafts directory", () => {
     const elsewhere = path.join(tmp, "elsewhere");
     fs.mkdirSync(elsewhere, { recursive: true });

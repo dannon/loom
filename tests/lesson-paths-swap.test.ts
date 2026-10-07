@@ -4,17 +4,18 @@ import path from "node:path";
 
 // The swap has to happen inside writeNoClobber, between its checks and the
 // link, so the fs that paths.ts imports is wrapped here and armed per test.
-let onWrite: (() => void) | undefined;
+// It fires after closeSync: Windows will not rename a directory holding an
+// open file.
+let onClose: (() => void) | undefined;
 vi.mock("fs", async (importOriginal) => {
   const real = await importOriginal<typeof import("fs")>();
-  const writeSync = ((...args: unknown[]) => {
-    const n = (real.writeSync as (...a: unknown[]) => number)(...args);
-    const hook = onWrite;
-    onWrite = undefined;
+  const closeSync = ((fd: number) => {
+    real.closeSync(fd);
+    const hook = onClose;
+    onClose = undefined;
     hook?.();
-    return n;
-  }) as typeof real.writeSync;
-  return { ...real, default: { ...real, writeSync }, writeSync };
+  }) as typeof real.closeSync;
+  return { ...real, default: { ...real, closeSync }, closeSync };
 });
 
 const fs = await vi.importActual<typeof import("fs")>("fs");
@@ -28,7 +29,7 @@ beforeEach(() => {
   vi.spyOn(os, "homedir").mockReturnValue(tmp);
 });
 afterEach(() => {
-  onWrite = undefined;
+  onClose = undefined;
   vi.restoreAllMocks();
   fs.rmSync(tmp, { recursive: true, force: true });
 });
@@ -40,7 +41,7 @@ describe("writeNoClobber against a directory swapped mid-write", () => {
     fs.mkdirSync(statsDir, { recursive: true });
     // After the checks and the temp write, before the link: move the real
     // directory out and leave a link to it in its place.
-    onWrite = () => {
+    onClose = () => {
       fs.renameSync(statsDir, elsewhere);
       fs.symlinkSync(elsewhere, statsDir);
     };
@@ -49,7 +50,7 @@ describe("writeNoClobber against a directory swapped mid-write", () => {
       reason: "error",
       detail: "symlinked directory",
     });
-    expect(onWrite).toBeUndefined();
+    expect(onClose).toBeUndefined();
     expect(fs.readdirSync(elsewhere)).toEqual([]);
   });
 
