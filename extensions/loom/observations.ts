@@ -58,6 +58,8 @@ import {
   writeFileSync,
   writeSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
+import type { ObservationsMode } from "./observations-config.js";
 import { join } from "node:path";
 import { release } from "node:os";
 import { getConfigDir } from "./config.js";
@@ -615,7 +617,7 @@ export async function submitObservation(obs: Observation): Promise<SubmitObserva
       res = await fetch(endpointBase() + OBSERVATIONS_ROUTE, {
         method: "POST",
         headers,
-        body: JSON.stringify(obs),
+        body: observationRequestBody(obs),
         signal: AbortSignal.timeout(TIMEOUT_MS),
         // A redirect would replay the body and the shared key to wherever it
         // points. The route never redirects, so one is a refusal, not a hop.
@@ -843,7 +845,8 @@ function readOutboxLines(): string[] {
 
 function outboxRowId(line: string): string | undefined {
   try {
-    const id = (JSON.parse(line) as { id?: unknown }).id;
+    const row = JSON.parse(line) as { observation?: { id?: unknown } } | null;
+    const id = row?.observation?.id;
     return typeof id === "string" ? id : undefined;
   } catch {
     return undefined;
@@ -907,17 +910,63 @@ function releaseDrainLock(): void {
 }
 
 /**
- * Durability backstop: a POST that could succeed later is kept for the next
- * drain. Returns the file path, or null when it could not be written -- the
- * caller has to say so, because the user was about to be told it was saved.
+ * How a queued observation was agreed to. `ask` is an explicit yes to exactly
+ * these bytes; `auto` is the standing consent that only holds while `auto` is
+ * in effect.
  */
-export function appendToObservationOutbox(obs: Observation): string | null {
+export type ObservationConsentMode = "ask" | "auto";
+
+export interface ObservationConsent {
+  mode: ObservationConsentMode;
+  /** SHA-256 of the exact request body that was consented to. */
+  sha256: string;
+}
+
+/**
+ * One outbox line. The consent record sits beside the observation, never in
+ * it, so the Worker only ever sees the observation.
+ */
+interface OutboxRow {
+  consent: ObservationConsent;
+  observation: Observation;
+}
+
+/** The bytes submitObservation POSTs for `obs`. */
+export function observationRequestBody(obs: Observation): string {
+  return JSON.stringify(obs);
+}
+
+/**
+ * Taken at the moment of consent -- the ask confirm, or the auto build -- and
+ * checked again right before a queued row goes. The outbox is a local file
+ * anyone with the account can edit, and a pattern revalidation only proves an
+ * edit still looks harmless, not that it is what the user agreed to.
+ */
+export function consentFor(obs: Observation, mode: ObservationConsentMode): ObservationConsent {
+  return { mode, sha256: sha256Hex(observationRequestBody(obs)) };
+}
+
+function sha256Hex(text: string): string {
+  return createHash("sha256").update(text, "utf-8").digest("hex");
+}
+
+/**
+ * Durability backstop: a POST that could succeed later is kept for the next
+ * drain, with the consent it was given. Returns the file path, or null when it
+ * could not be written -- the caller has to say so, because the user was about
+ * to be told it was saved.
+ */
+export function appendToObservationOutbox(
+  obs: Observation,
+  consent: ObservationConsent,
+): string | null {
+  const row: OutboxRow = { consent, observation: obs };
   try {
     const done = withFileLock(outboxLockPath(), () => {
       const file = outboxPath();
       // 0600: this file carries the install token, which is the thing that
       // ties rows together. Nothing else in it is sensitive, but that is enough.
-      appendFileSync(file, JSON.stringify(obs) + "\n", { encoding: "utf-8", mode: 0o600 });
+      appendFileSync(file, JSON.stringify(row) + "\n", { encoding: "utf-8", mode: 0o600 });
       try {
         chmodSync(file, 0o600);
       } catch {
@@ -955,21 +1004,73 @@ export function removeFromObservationOutbox(id: string): OutboxRemoval {
 
 export const OUTBOX_DRAIN_MAX = 10;
 
+/**
+ * Why a queued row was dropped instead of sent. Reasons only: a dropped row's
+ * content is exactly what may have been tampered with, so it is never logged.
+ */
+export type OutboxDropReason =
+  /** Not JSON, or not a consent-carrying row. */
+  | "unreadable"
+  /** The observation no longer hashes to what was consented to. */
+  | "changed-since-consent"
+  /** Queued under auto, and auto is no longer in effect. */
+  | "consent-lapsed"
+  /** Fails the builder's own admission rules. */
+  | "refused-locally"
+  /** The route refused it for good. */
+  | "refused-by-service";
+
 export interface OutboxDrainCounts {
   sent: number;
   kept: number;
   dropped: number;
+  /** Per-reason breakdown of `dropped`, present when anything was dropped. */
+  dropReasons?: Partial<Record<OutboxDropReason, number>>;
   /** Present when a row went but its retract token could not be saved. */
   unretractable?: number;
 }
 
 /**
+ * Whether consent given under `consented` still covers sending now, under
+ * `current`. An explicit yes holds in ask and auto; auto's standing consent
+ * holds only while auto is in effect; off sends nothing.
+ */
+export function consentStillHolds(
+  consented: ObservationConsentMode,
+  current: ObservationsMode,
+): boolean {
+  if (current === "off") return false;
+  return consented === "ask" || current === "auto";
+}
+
+function parseOutboxRow(line: string): OutboxRow | undefined {
+  let row: unknown;
+  try {
+    row = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (!row || typeof row !== "object") return undefined;
+  const { consent, observation } = row as Partial<OutboxRow>;
+  if (!consent || typeof consent !== "object") return undefined;
+  if (consent.mode !== "ask" && consent.mode !== "auto") return undefined;
+  if (typeof consent.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(consent.sha256)) {
+    return undefined;
+  }
+  if (!observation || typeof observation !== "object" || Array.isArray(observation)) {
+    return undefined;
+  }
+  return { consent, observation };
+}
+
+/**
  * Retry what the outbox holds, oldest first, at most OUTBOX_DRAIN_MAX per call.
- * Each row is re-checked before it goes, with the same rules the builder
- * applies -- the file is local, could have been edited, and its rows go
- * without a fresh confirm -- and anything that fails, or that the route now
- * refuses for good, is dropped rather than kept to fail forever. Only
- * queueable failures stay.
+ * A row goes only if it still hashes to the bytes that were consented to and
+ * its consent still holds under the current mode (consentStillHolds). It is
+ * then re-checked with the same rules the builder applies, as a second line
+ * behind the hash -- anyone who can edit the file can recompute a digest.
+ * Anything that fails, or that the route now refuses for good, is dropped
+ * rather than kept to fail forever. Only queueable failures stay.
  *
  * The rewrite removes rows by id, never by position, so a row appended or
  * removed by someone else while the POSTs were in flight is left as it is. If
@@ -980,11 +1081,18 @@ export async function drainObservationOutbox(
   submit: (obs: Observation) => Promise<SubmitObservationResult>,
   /**
    * Asked again before every row, not once per drain: a drain can run for
-   * minutes on a slow network, and collection may be turned off meanwhile.
+   * minutes on a slow network, and the mode may change meanwhile.
    */
-  stillCollecting: () => boolean,
+  currentMode: () => ObservationsMode,
 ): Promise<OutboxDrainCounts> {
   const counts: OutboxDrainCounts = { sent: 0, kept: 0, dropped: 0 };
+  const drop = (reason: OutboxDropReason): void => {
+    counts.dropped += 1;
+    counts.dropReasons = {
+      ...counts.dropReasons,
+      [reason]: (counts.dropReasons?.[reason] ?? 0) + 1,
+    };
+  };
   if (!existsSync(outboxPath())) return counts;
   if (!acquireDrainLock()) return counts;
   try {
@@ -1006,21 +1114,38 @@ export async function drainObservationOutbox(
       // round, or once collection has been turned off, the rest just wait: on
       // a black-holed network each try costs the full timeout, and this runs
       // before the turn's own prompts appear.
-      if (i >= OUTBOX_DRAIN_MAX || unreachable || !stillCollecting()) break;
+      if (i >= OUTBOX_DRAIN_MAX || unreachable) break;
+      const mode = currentMode();
+      if (mode === "off") break;
+      const row = parseOutboxRow(line);
+      if (!row) {
+        settle(line, undefined);
+        drop("unreadable");
+        continue;
+      }
+      const obs = row.observation;
+      // Re-serialized, because those are the bytes that would go. A row that
+      // fails here is settled by its exact line, never by its id: the id is
+      // part of what may have been edited.
+      if (sha256Hex(observationRequestBody(obs)) !== row.consent.sha256) {
+        settle(line, undefined);
+        drop("changed-since-consent");
+        continue;
+      }
       const id = outboxRowId(line);
       if (id && doneIds.has(id)) continue;
-      let obs: Observation;
-      try {
-        obs = JSON.parse(line) as Observation;
-      } catch {
-        settle(line, undefined);
-        counts.dropped += 1;
+      if (!consentStillHolds(row.consent.mode, mode)) {
+        // Dropped, not kept: the user stepped back from auto, so this was
+        // never seen and is not going to be.
+        if (id) appendSentLog(sentLogEntryFor(obs, "cancelled"));
+        settle(line, id);
+        drop("consent-lapsed");
         continue;
       }
       const problems = observationProblems(obs);
       if (problems.errors.length > 0 || problems.leaks.length > 0) {
         settle(line, id);
-        counts.dropped += 1;
+        drop("refused-locally");
         continue;
       }
       const res = await submit(obs);
@@ -1042,7 +1167,7 @@ export async function drainObservationOutbox(
         if (res.status === undefined) unreachable = true;
       } else {
         settle(line, id);
-        counts.dropped += 1;
+        drop("refused-by-service");
       }
     }
 

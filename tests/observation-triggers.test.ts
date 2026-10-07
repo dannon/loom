@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { createHash } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   RETRY_LOOP_THRESHOLD,
@@ -381,6 +382,30 @@ describe("deliverObservation", () => {
     expect(d.rows.map(([k]) => k)).toEqual(["observation.built", "observation.unsaved"]);
     expect(d.state.delivered).toBe(0);
   });
+
+  for (const mode of ["ask", "auto"] as const) {
+    it(`queues a ${mode} delivery with its consent mode and a digest of the confirmed bytes`, async () => {
+      let confirmed: Observation | undefined;
+      const d = deps({
+        mode,
+        currentMode: () => mode,
+        confirm: async (o: Observation) => {
+          confirmed = structuredClone(o);
+          return true;
+        },
+        submit: async () => ({ ok: false, status: 503, error: "unconfigured", queueable: true }),
+      });
+      expect(await deliverObservation(facts, ctx, d)).toBe("queued");
+      const file = path.join(tmpHome, ".loom", "observations-outbox.jsonl");
+      const row = JSON.parse(fs.readFileSync(file, "utf-8").trim());
+      expect(row.consent.mode).toBe(mode);
+      expect(row.consent.sha256).toBe(
+        createHash("sha256").update(JSON.stringify(row.observation), "utf-8").digest("hex"),
+      );
+      if (mode === "ask") expect(row.observation).toEqual(confirmed);
+      else expect(confirmed).toBeUndefined();
+    });
+  }
 
   it("hands the description prompt the built observation, never the raw facts", async () => {
     const raw = factsForToolResult("mcp__galaxy__alice_clinic_org", {}, "Unknown tool")!;

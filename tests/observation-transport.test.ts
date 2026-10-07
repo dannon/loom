@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { createHash } from "node:crypto";
 import type { Observation } from "../shared/observation-contract.js";
 
 let tmpHome: string;
@@ -50,6 +51,12 @@ afterEach(() => {
 
 async function load() {
   return await import("../extensions/loom/observations.js");
+}
+
+/** An outbox line as a hand edit would leave it: `sha256` defaults to the honest digest. */
+function outboxLine(o: unknown, mode: "ask" | "auto" = "ask", sha256?: string): string {
+  const digest = sha256 ?? createHash("sha256").update(JSON.stringify(o), "utf-8").digest("hex");
+  return JSON.stringify({ consent: { mode, sha256: digest }, observation: o });
 }
 
 function lines(file: string): string[] {
@@ -263,9 +270,9 @@ describe("retractObservation", () => {
 describe("local logs", () => {
   it("appends to the outbox and reads back", async () => {
     const m = await load();
-    const written = m.appendToObservationOutbox(obs);
+    const written = m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"));
     expect(written).toBe(path.join(tmpHome, ".loom", "observations-outbox.jsonl"));
-    expect(JSON.parse(lines("observations-outbox.jsonl")[0]).id).toBe(obs.id);
+    expect(JSON.parse(lines("observations-outbox.jsonl")[0]).observation.id).toBe(obs.id);
   });
 
   it("builds a sent-log entry with no retract token and no install token in it", async () => {
@@ -302,7 +309,7 @@ describe("local logs", () => {
 
   it("writes the outbox and the sent log at 0600", async () => {
     const m = await load();
-    m.appendToObservationOutbox(obs);
+    m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"));
     m.appendSentLog(m.sentLogEntryFor(obs, "sent"));
     for (const name of ["observations-outbox.jsonl", "observations-sent.jsonl"]) {
       // chmod is a no-op on Windows, so the mode there is whatever the runner reports.
@@ -315,7 +322,7 @@ describe("local logs", () => {
   it("creates the state dir if it is missing", async () => {
     fs.rmSync(path.join(tmpHome, ".loom"), { recursive: true, force: true });
     const m = await load();
-    expect(m.appendToObservationOutbox(obs)).not.toBeNull();
+    expect(m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"))).not.toBeNull();
   });
 });
 
@@ -323,16 +330,18 @@ describe("cancelling a queued observation", () => {
   it("removes the row by id and leaves the others", async () => {
     const m = await load();
     const other = { ...obs, id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" };
-    m.appendToObservationOutbox(obs);
-    m.appendToObservationOutbox(other);
+    m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"));
+    m.appendToObservationOutbox(other, m.consentFor(other, "ask"));
     expect(m.removeFromObservationOutbox(obs.id)).toBe("removed");
-    expect(lines("observations-outbox.jsonl").map((l) => JSON.parse(l).id)).toEqual([other.id]);
+    expect(lines("observations-outbox.jsonl").map((l) => JSON.parse(l).observation.id)).toEqual([
+      other.id,
+    ]);
     expect(m.removeFromObservationOutbox(obs.id)).toBe("absent");
   });
 
   it("refuses while a drain may be sending that very row", async () => {
     const m = await load();
-    m.appendToObservationOutbox(obs);
+    m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"));
     let release!: () => void;
     const blocked = new Promise<void>((r) => (release = r));
     const drain = m.drainObservationOutbox(
@@ -340,7 +349,7 @@ describe("cancelling a queued observation", () => {
         await blocked;
         return { ok: true, status: 202, queueable: false };
       },
-      () => true,
+      () => "ask" as const,
     );
     expect(m.removeFromObservationOutbox(obs.id)).toBe("busy");
     release();
@@ -355,7 +364,7 @@ describe("a local write that fails", () => {
     fs.writeFileSync(path.join(tmpHome, ".loom"), "not a directory");
     fs.writeFileSync(path.join(tmpHome, ".orbit"), "not a directory");
     const m = await load();
-    expect(m.appendToObservationOutbox(obs)).toBeNull();
+    expect(m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"))).toBeNull();
     expect(m.saveRetractToken(obs.id, "b".repeat(32))).toBe(false);
   });
 });
@@ -401,9 +410,9 @@ describe("drainObservationOutbox", () => {
 
   it("sends what the outbox holds, logs it as sent and empties the file", async () => {
     const m = await load();
-    m.appendToObservationOutbox(obs);
+    m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"));
     const submit = vi.fn(ok);
-    expect(await m.drainObservationOutbox(submit, () => true)).toEqual({
+    expect(await m.drainObservationOutbox(submit, () => "ask" as const)).toEqual({
       sent: 1,
       kept: 0,
       dropped: 0,
@@ -418,25 +427,29 @@ describe("drainObservationOutbox", () => {
 
   it("keeps a row that is still queueable and drops one refused for good", async () => {
     const m = await load();
-    m.appendToObservationOutbox(obs);
-    m.appendToObservationOutbox({ ...obs, id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" });
+    m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"));
+    m.appendToObservationOutbox(
+      { ...obs, id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" },
+      m.consentFor({ ...obs, id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" }, "ask"),
+    );
     const submit = vi
       .fn()
       .mockResolvedValueOnce({ ok: false, status: 503, queueable: true })
       .mockResolvedValueOnce({ ok: false, status: 500, queueable: false });
-    expect(await m.drainObservationOutbox(submit, () => true)).toEqual({
+    expect(await m.drainObservationOutbox(submit, () => "ask" as const)).toEqual({
       sent: 0,
       kept: 1,
       dropped: 1,
+      dropReasons: { "refused-by-service": 1 },
     });
-    expect(JSON.parse(lines("observations-outbox.jsonl")[0]).id).toBe(obs.id);
+    expect(JSON.parse(lines("observations-outbox.jsonl")[0]).observation.id).toBe(obs.id);
   });
 
   it("settles a 409 as sent without a token instead of dropping it", async () => {
     const m = await load();
-    m.appendToObservationOutbox(obs);
+    m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"));
     const submit = vi.fn().mockResolvedValueOnce({ ok: false, status: 409, queueable: false });
-    expect(await m.drainObservationOutbox(submit, () => true)).toEqual({
+    expect(await m.drainObservationOutbox(submit, () => "ask" as const)).toEqual({
       sent: 1,
       kept: 0,
       dropped: 0,
@@ -448,36 +461,125 @@ describe("drainObservationOutbox", () => {
 
   it("re-validates every row and never sends one that was edited to leak", async () => {
     const m = await load();
+    // The digest recomputed to match, as a deliberate edit could: the pattern
+    // revalidation is still there behind the hash.
     fs.writeFileSync(
       path.join(tmpHome, ".loom", "observations-outbox.jsonl"),
-      JSON.stringify({ ...obs, signature: "failed on 10.12.4.7" }) + "\n{ broken\n",
+      outboxLine({ ...obs, signature: "failed on 10.12.4.7" }) + "\n{ broken\n",
     );
     const submit = vi.fn(ok);
-    expect(await m.drainObservationOutbox(submit, () => true)).toEqual({
+    expect(await m.drainObservationOutbox(submit, () => "ask" as const)).toEqual({
       sent: 0,
       kept: 0,
       dropped: 2,
+      dropReasons: { "refused-locally": 1, unreadable: 1 },
     });
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it("drops a row edited after consent even when the edit passes every pattern", async () => {
+    const m = await load();
+    m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"));
+    const file = path.join(tmpHome, ".loom", "observations-outbox.jsonl");
+    const row = JSON.parse(fs.readFileSync(file, "utf-8"));
+    // Clean by every rule there is -- just not what the user agreed to send.
+    row.observation.description = "A sorting step ran out of memory on a large table.";
+    row.observation.datatypes = ["bam"];
+    fs.writeFileSync(file, JSON.stringify(row) + "\n");
+    const edited = row.observation as Observation;
+    expect(m.observationProblems(edited)).toEqual({ errors: [], leaks: [] });
+
+    const submit = vi.fn(ok);
+    expect(await m.drainObservationOutbox(submit, () => "ask" as const)).toEqual({
+      sent: 0,
+      kept: 0,
+      dropped: 1,
+      dropReasons: { "changed-since-consent": 1 },
+    });
+    expect(submit).not.toHaveBeenCalled();
+    expect(lines("observations-outbox.jsonl")).toEqual([]);
+  });
+
+  it("drops a re-ordered row too: the check is on the bytes, not the meaning", async () => {
+    const m = await load();
+    const { description, ...rest } = obs;
+    const reordered = { description, ...rest };
+    fs.writeFileSync(
+      path.join(tmpHome, ".loom", "observations-outbox.jsonl"),
+      outboxLine(reordered, "ask", m.consentFor(obs, "ask").sha256) + "\n",
+    );
+    const submit = vi.fn(ok);
+    expect((await m.drainObservationOutbox(submit, () => "ask" as const)).dropReasons).toEqual({
+      "changed-since-consent": 1,
+    });
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("drops a row with no consent record, or a malformed one", async () => {
+    const m = await load();
+    const digest = m.consentFor(obs, "ask").sha256;
+    fs.writeFileSync(
+      path.join(tmpHome, ".loom", "observations-outbox.jsonl"),
+      [
+        JSON.stringify(obs),
+        JSON.stringify({ observation: obs }),
+        JSON.stringify({ consent: { mode: "yes", sha256: digest }, observation: obs }),
+        JSON.stringify({ consent: { mode: "ask", sha256: "abc" }, observation: obs }),
+        JSON.stringify({ consent: { mode: "ask", sha256: digest }, observation: [obs] }),
+        "null",
+      ].join("\n") + "\n",
+    );
+    const submit = vi.fn(ok);
+    expect(await m.drainObservationOutbox(submit, () => "auto" as const)).toEqual({
+      sent: 0,
+      kept: 0,
+      dropped: 6,
+      dropReasons: { unreadable: 6 },
+    });
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("POSTs exactly the bytes that were consented to", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      json: async () => ({ ok: true, id: obs.id }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const m = await load();
+    m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"));
+    expect((await m.drainObservationOutbox(m.submitObservation, () => "ask" as const)).sent).toBe(
+      1,
+    );
+    const body = String(fetchMock.mock.calls[0][1].body);
+    expect(createHash("sha256").update(body, "utf-8").digest("hex")).toBe(
+      m.consentFor(obs, "ask").sha256,
+    );
+    // The consent record stays local.
+    expect(body).not.toContain("consent");
+    expect(body).not.toContain("sha256");
+    vi.unstubAllGlobals();
+  });
+
   it("keeps rows appended while the sends were in flight", async () => {
     const m = await load();
-    m.appendToObservationOutbox(obs);
+    m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"));
     const late = { ...obs, id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" };
     const submit = vi.fn(async () => {
-      m.appendToObservationOutbox(late);
+      m.appendToObservationOutbox(late, m.consentFor(late, "ask"));
       return { ok: true, status: 202, queueable: false };
     });
-    expect((await m.drainObservationOutbox(submit, () => true)).sent).toBe(1);
-    expect(lines("observations-outbox.jsonl").map((l) => JSON.parse(l).id)).toEqual([late.id]);
+    expect((await m.drainObservationOutbox(submit, () => "ask" as const)).sent).toBe(1);
+    expect(lines("observations-outbox.jsonl").map((l) => JSON.parse(l).observation.id)).toEqual([
+      late.id,
+    ]);
   });
 
   it("stops trying once the route is unreachable this round", async () => {
     const m = await load();
-    for (let i = 0; i < 3; i++) m.appendToObservationOutbox(obs);
+    for (let i = 0; i < 3; i++) m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"));
     const submit = vi.fn().mockResolvedValue({ ok: false, error: "offline", queueable: true });
-    expect(await m.drainObservationOutbox(submit, () => true)).toEqual({
+    expect(await m.drainObservationOutbox(submit, () => "ask" as const)).toEqual({
       sent: 0,
       kept: 3,
       dropped: 0,
@@ -487,14 +589,17 @@ describe("drainObservationOutbox", () => {
 
   it("stops sending as soon as collection is turned off mid-drain", async () => {
     const m = await load();
-    m.appendToObservationOutbox(obs);
-    m.appendToObservationOutbox({ ...obs, id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" });
+    m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"));
+    m.appendToObservationOutbox(
+      { ...obs, id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" },
+      m.consentFor({ ...obs, id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" }, "ask"),
+    );
     let collecting = true;
     const submit = vi.fn(async () => {
       collecting = false;
       return { ok: true, status: 202, queueable: false };
     });
-    expect(await m.drainObservationOutbox(submit, () => collecting)).toEqual({
+    expect(await m.drainObservationOutbox(submit, () => (collecting ? "ask" : "off"))).toEqual({
       sent: 1,
       kept: 1,
       dropped: 0,
@@ -508,7 +613,7 @@ describe("drainObservationOutbox", () => {
     // the old scan, but nothing the builder would ever have produced.
     fs.writeFileSync(
       path.join(tmpHome, ".loom", "observations-outbox.jsonl"),
-      JSON.stringify({
+      outboxLine({
         ...obs,
         tools: [{ id: "/srv/Alice_Smith", version: "alice@localhost" }],
         mcpTool: "galaxy.internal",
@@ -517,10 +622,11 @@ describe("drainObservationOutbox", () => {
       }) + "\n",
     );
     const submit = vi.fn(ok);
-    expect(await m.drainObservationOutbox(submit, () => true)).toEqual({
+    expect(await m.drainObservationOutbox(submit, () => "ask" as const)).toEqual({
       sent: 0,
       kept: 0,
       dropped: 1,
+      dropReasons: { "refused-locally": 1 },
     });
     expect(submit).not.toHaveBeenCalled();
     // Each structured field is refused on its own, not just by the leak scan.
@@ -545,37 +651,39 @@ describe("drainObservationOutbox", () => {
     const m = await load();
     const a = obs;
     const b = { ...obs, id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" };
-    m.appendToObservationOutbox(a);
+    m.appendToObservationOutbox(a, m.consentFor(a, "ask"));
     let release!: () => void;
     const blocked = new Promise<void>((r) => (release = r));
     const first = m.drainObservationOutbox(
       async () => {
-        m.appendToObservationOutbox(b);
+        m.appendToObservationOutbox(b, m.consentFor(b, "ask"));
         await blocked;
         return { ok: true, status: 202, queueable: false };
       },
-      () => true,
+      () => "ask" as const,
     );
     const secondSubmit = vi.fn().mockResolvedValue({ ok: false, status: 503, queueable: true });
-    const second = await m.drainObservationOutbox(secondSubmit, () => true);
+    const second = await m.drainObservationOutbox(secondSubmit, () => "ask" as const);
     // The second drain stood aside rather than sending A a second time.
     expect(second).toEqual({ sent: 0, kept: 0, dropped: 0 });
     expect(secondSubmit).not.toHaveBeenCalled();
     release();
     expect((await first).sent).toBe(1);
-    expect(lines("observations-outbox.jsonl").map((l) => JSON.parse(l).id)).toEqual([b.id]);
+    expect(lines("observations-outbox.jsonl").map((l) => JSON.parse(l).observation.id)).toEqual([
+      b.id,
+    ]);
   });
 
   it("stands aside while another live process holds the drain lock", async () => {
     const m = await load();
-    m.appendToObservationOutbox(obs);
+    m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"));
     // The parent process is alive and is not this one.
     fs.writeFileSync(
       path.join(tmpHome, ".loom", "observations-outbox.jsonl.drain"),
       String(process.ppid),
     );
     const submit = vi.fn(ok);
-    expect(await m.drainObservationOutbox(submit, () => true)).toEqual({
+    expect(await m.drainObservationOutbox(submit, () => "ask" as const)).toEqual({
       sent: 0,
       kept: 0,
       dropped: 0,
@@ -585,10 +693,10 @@ describe("drainObservationOutbox", () => {
 
   it("does not take a fresh lock that has no pid in it yet", async () => {
     const m = await load();
-    m.appendToObservationOutbox(obs);
+    m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"));
     fs.writeFileSync(path.join(tmpHome, ".loom", "observations-outbox.jsonl.drain"), "");
     const submit = vi.fn(ok);
-    expect((await m.drainObservationOutbox(submit, () => true)).sent).toBe(0);
+    expect((await m.drainObservationOutbox(submit, () => "ask" as const)).sent).toBe(0);
     expect(submit).not.toHaveBeenCalled();
     expect(fs.existsSync(path.join(tmpHome, ".loom", "observations-outbox.jsonl.drain"))).toBe(
       true,
@@ -597,9 +705,9 @@ describe("drainObservationOutbox", () => {
 
   it("counts a row that went but whose retract token could not be saved", async () => {
     const m = await load();
-    m.appendToObservationOutbox(obs);
+    m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"));
     fs.mkdirSync(path.join(tmpHome, ".loom", "observations-tokens.json"));
-    expect(await m.drainObservationOutbox(vi.fn(ok), () => true)).toEqual({
+    expect(await m.drainObservationOutbox(vi.fn(ok), () => "ask" as const)).toEqual({
       sent: 1,
       kept: 0,
       dropped: 0,
@@ -609,15 +717,62 @@ describe("drainObservationOutbox", () => {
 
   it("takes over a drain lock its holder died with", async () => {
     const m = await load();
-    m.appendToObservationOutbox(obs);
+    m.appendToObservationOutbox(obs, m.consentFor(obs, "ask"));
     // Far past any real pid; kill(pid, 0) says it does not exist.
     fs.writeFileSync(path.join(tmpHome, ".loom", "observations-outbox.jsonl.drain"), "99999999");
-    expect((await m.drainObservationOutbox(vi.fn(ok), () => true)).sent).toBe(1);
+    expect((await m.drainObservationOutbox(vi.fn(ok), () => "ask" as const)).sent).toBe(1);
+  });
+
+  describe("which consent drains under which mode", () => {
+    const cells: Array<["ask" | "auto", "off" | "ask" | "auto", "sent" | "dropped" | "kept"]> = [
+      ["ask", "ask", "sent"],
+      ["ask", "auto", "sent"],
+      ["ask", "off", "kept"],
+      ["auto", "auto", "sent"],
+      ["auto", "ask", "dropped"],
+      ["auto", "off", "kept"],
+    ];
+    for (const [consented, current, expected] of cells) {
+      it(`a row queued under ${consented}, drained in ${current}: ${expected}`, async () => {
+        const m = await load();
+        m.appendToObservationOutbox(obs, m.consentFor(obs, consented));
+        const submit = vi.fn(ok);
+        const counts = await m.drainObservationOutbox(submit, () => current);
+        expect(submit).toHaveBeenCalledTimes(expected === "sent" ? 1 : 0);
+        expect(counts.sent).toBe(expected === "sent" ? 1 : 0);
+        expect(counts.kept).toBe(expected === "kept" ? 1 : 0);
+        expect(counts.dropped).toBe(expected === "dropped" ? 1 : 0);
+        if (expected === "dropped") {
+          expect(counts.dropReasons).toEqual({ "consent-lapsed": 1 });
+          // Shown as cancelled, not left looking queued forever.
+          expect(m.readSentLog().map((r) => [r.id, r.status])).toEqual([[obs.id, "cancelled"]]);
+        }
+      });
+    }
+
+    it("re-reads the mode per row, so a switch to ask mid-drain drops the next auto row", async () => {
+      const m = await load();
+      const second = { ...obs, id: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" };
+      m.appendToObservationOutbox(obs, m.consentFor(obs, "auto"));
+      m.appendToObservationOutbox(second, m.consentFor(second, "auto"));
+      let mode: "ask" | "auto" = "auto";
+      const submit = vi.fn(async () => {
+        mode = "ask";
+        return { ok: true, status: 202, queueable: false };
+      });
+      expect(await m.drainObservationOutbox(submit, () => mode)).toEqual({
+        sent: 1,
+        kept: 0,
+        dropped: 1,
+        dropReasons: { "consent-lapsed": 1 },
+      });
+      expect(submit).toHaveBeenCalledOnce();
+    });
   });
 
   it("is a no-op with no outbox", async () => {
     const m = await load();
-    expect(await m.drainObservationOutbox(vi.fn(), () => true)).toEqual({
+    expect(await m.drainObservationOutbox(vi.fn(), () => "ask" as const)).toEqual({
       sent: 0,
       kept: 0,
       dropped: 0,

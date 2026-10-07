@@ -30,6 +30,7 @@ import {
   appendToObservationOutbox,
   buildCheckedObservation,
   collectObservationEnvelope,
+  consentFor,
   drainObservationOutbox,
   extractDatatypes,
   extractToolIds,
@@ -366,6 +367,8 @@ export async function deliverObservation(
     deps.record("observation.skipped", { reason: "mode-changed" });
     return "skipped";
   }
+  // Pinned to these exact bytes now, so a queued copy can be held to them.
+  const consent = consentFor(obs, deps.mode === "auto" ? "auto" : "ask");
 
   const res = await deps.submit(obs);
   if (res.ok) {
@@ -396,7 +399,7 @@ export async function deliverObservation(
     return "sent-unretractable";
   }
   if (res.queueable) {
-    if (!appendToObservationOutbox(obs)) {
+    if (!appendToObservationOutbox(obs, consent)) {
       deps.record("observation.unsaved", {
         id: obs.id,
         kind: obs.kind,
@@ -550,13 +553,11 @@ export function registerObservationTriggers(pi: ExtensionAPI): void {
   pi.on("agent_settled", async (_event, ctx) => {
     // Earlier sends that hit a transport failure, a 429 or a 5xx. They were
     // already consented to (confirmed, or sent in auto), so they go without a
-    // prompt -- but never while collection is off.
+    // prompt -- but only unchanged, never while collection is off, and an
+    // auto row only while auto is still in effect.
     if (resolveObservationsMode() !== "off") {
       try {
-        const drained = await drainObservationOutbox(
-          submitObservation,
-          () => resolveObservationsMode() !== "off",
-        );
+        const drained = await drainObservationOutbox(submitObservation, resolveObservationsMode);
         if (drained.sent + drained.dropped > 0) {
           recordObservationActivity("observation.outbox", { ...drained });
         }
