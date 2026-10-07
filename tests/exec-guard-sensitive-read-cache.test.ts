@@ -2,7 +2,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // The module namespace for "fs" can't be spied on under ESM, so count through
 // a pass-through mock instead.
-const calls = vi.hoisted(() => ({ realpath: 0 }));
+// Every test home sits under the OS tmpdir, which the cache watches like any
+// other ancestor and which other test files keep adding entries to. Its stats
+// (and its ancestors') are pinned per test so a busy machine doesn't read as a
+// change to the dirs under test.
+const calls = vi.hoisted(() => ({
+  realpath: 0,
+  lstat: 0,
+  pinned: new Map<string, unknown>(),
+}));
 vi.mock("fs", async (importOriginal) => {
   const real = await importOriginal<typeof import("fs")>();
   const realpathSync = Object.assign(
@@ -12,7 +20,21 @@ vi.mock("fs", async (importOriginal) => {
     },
     { native: real.realpathSync.native },
   );
-  return { ...real, default: { ...real, realpathSync }, realpathSync };
+  const lstatSync = ((...args: Parameters<typeof real.lstatSync>) => {
+    calls.lstat++;
+    const key = String(args[0]);
+    if (calls.pinned.has(key)) {
+      if (calls.pinned.get(key) === null) calls.pinned.set(key, real.lstatSync(...args));
+      return calls.pinned.get(key);
+    }
+    return real.lstatSync(...args);
+  }) as typeof real.lstatSync;
+  return {
+    ...real,
+    default: { ...real, realpathSync, lstatSync },
+    realpathSync,
+    lstatSync,
+  };
 });
 
 import * as fs from "fs";
@@ -39,6 +61,13 @@ function settle(): void {
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-read-cache-"));
+  calls.pinned.clear();
+  for (const start of [path.dirname(root), path.dirname(fs.realpathSync(root))]) {
+    for (let d = start; ; d = path.dirname(d)) {
+      calls.pinned.set(d, null);
+      if (path.dirname(d) === d) break;
+    }
+  }
   home = path.join(root, "home");
   agentDir = path.join(home, ".pi", "agent");
   fs.mkdirSync(path.join(home, ".loom"), { recursive: true });
@@ -50,6 +79,7 @@ beforeEach(() => {
   fs.writeFileSync(path.join(ws, "x.json"), "{}");
   target = fs.realpathSync(path.join(ws, "x.json"));
   calls.realpath = 0;
+  calls.lstat = 0;
 });
 
 afterEach(() => {
@@ -174,6 +204,121 @@ describe("isCredentialStore realpath cache", () => {
     fs.symlinkSync("proj2", path.join(root, "proj"));
     const moved = fs.realpathSync(path.join(root, "proj2", "pi", "agent", "auth.json"));
     expect(isCredentialStore(moved, home, outside)).toBe(true);
+  });
+
+  it("follows a re-pointed symlink in the middle of a credential dir's chain", () => {
+    // ~/.loom -> u/link -> b. Re-pointing u/link at c rewrites only u, which
+    // neither the lexical nor the resolved chain passes through.
+    const u = path.join(root, "u");
+    const b = path.join(root, "b");
+    const c = path.join(root, "c");
+    for (const d of [u, b, c]) fs.mkdirSync(d);
+    fs.writeFileSync(path.join(b, "config.json"), "{}");
+    fs.writeFileSync(path.join(c, "config.json"), "{}");
+    fs.symlinkSync(b, path.join(u, "link"));
+    fs.rmSync(path.join(home, ".loom"), { recursive: true });
+    fs.symlinkSync(path.join(u, "link"), path.join(home, ".loom"));
+    const inB = fs.realpathSync(path.join(b, "config.json"));
+    const inC = fs.realpathSync(path.join(c, "config.json"));
+    settle();
+    expect(isCredentialStore(inB, home, agentDir)).toBe(true);
+    expect(isCredentialStore(inC, home, agentDir)).toBe(false);
+
+    fs.rmSync(path.join(u, "link"));
+    fs.symlinkSync(c, path.join(u, "link"));
+    expect(isCredentialStore(inC, home, agentDir)).toBe(true);
+    expect(isCredentialStore(inB, home, agentDir)).toBe(false);
+  });
+
+  it("follows a three-hop chain when its middle hop is re-pointed", () => {
+    // ~/.loom -> h1/l -> h2/l -> h3/l -> b, then h2/l is re-pointed at c.
+    const hops = [1, 2, 3].map((i) => path.join(root, `h${i}`));
+    const b = path.join(root, "b");
+    const c = path.join(root, "c");
+    for (const d of [...hops, b, c]) fs.mkdirSync(d);
+    fs.writeFileSync(path.join(b, "config.json"), "{}");
+    fs.writeFileSync(path.join(c, "config.json"), "{}");
+    fs.symlinkSync(path.join(hops[1], "l"), path.join(hops[0], "l"));
+    fs.symlinkSync(path.join(hops[2], "l"), path.join(hops[1], "l"));
+    fs.symlinkSync(b, path.join(hops[2], "l"));
+    fs.rmSync(path.join(home, ".loom"), { recursive: true });
+    fs.symlinkSync(path.join(hops[0], "l"), path.join(home, ".loom"));
+    const inB = fs.realpathSync(path.join(b, "config.json"));
+    const inC = fs.realpathSync(path.join(c, "config.json"));
+    settle();
+    expect(isCredentialStore(inB, home, agentDir)).toBe(true);
+    expect(isCredentialStore(inB, home, agentDir)).toBe(true);
+
+    fs.rmSync(path.join(hops[1], "l"));
+    fs.symlinkSync(c, path.join(hops[1], "l"));
+    expect(isCredentialStore(inC, home, agentDir)).toBe(true);
+    expect(isCredentialStore(inB, home, agentDir)).toBe(false);
+  });
+
+  it("sees the target of a dangling credential-dir link once it is created", () => {
+    // ~/.loom -> u/target with u/target absent; creating it rewrites only u.
+    const u = path.join(root, "u");
+    fs.mkdirSync(u);
+    fs.rmSync(path.join(home, ".loom"), { recursive: true });
+    fs.symlinkSync(path.join(u, "target"), path.join(home, ".loom"));
+    settle();
+    expect(isCredentialStore(target, home, agentDir)).toBe(false);
+    expect(isCredentialStore(target, home, agentDir)).toBe(false);
+
+    fs.mkdirSync(path.join(u, "target"));
+    fs.writeFileSync(path.join(u, "target", "config.json"), "{}");
+    const planted = fs.realpathSync(path.join(u, "target", "config.json"));
+    expect(isCredentialStore(planted, home, agentDir)).toBe(true);
+  });
+
+  it("settles a plain home to no realpaths and one lstat per watched dir", () => {
+    // Every dir the walk signs is a component of one of the resolved parents;
+    // the agent dir's chain is the longest and shares the rest, plus ~/.loom
+    // beside it.
+    const realAgent = fs.realpathSync(agentDir);
+    const bound = realAgent.split(path.sep).length + 1;
+    settle();
+    isCredentialStore(target, home, agentDir);
+    calls.realpath = 0;
+    calls.lstat = 0;
+    for (let i = 0; i < 5; i++) expect(isCredentialStore(target, home, agentDir)).toBe(false);
+    expect(calls.realpath).toBe(0);
+    expect(calls.lstat).toBeGreaterThan(0);
+    expect(calls.lstat).toBeLessThanOrEqual(5 * bound);
+  });
+
+  it("settles a dangling credential-dir link, since the dir its target would land in is watched", () => {
+    const u = path.join(root, "u");
+    fs.mkdirSync(u);
+    fs.rmSync(path.join(home, ".loom"), { recursive: true });
+    fs.symlinkSync(path.join(u, "target"), path.join(home, ".loom"));
+    settle();
+    isCredentialStore(target, home, agentDir);
+    calls.realpath = 0;
+    isCredentialStore(target, home, agentDir);
+    expect(calls.realpath).toBe(0);
+  });
+
+  it("never trusts a snapshot whose chain can't be followed", () => {
+    // ~/.loom -> u/l -> ~/.loom: realpath gives up with ELOOP, and so does the
+    // walk, so nothing about which dirs matter is known.
+    const u = path.join(root, "u");
+    fs.mkdirSync(u);
+    fs.rmSync(path.join(home, ".loom"), { recursive: true });
+    fs.symlinkSync(path.join(home, ".loom"), path.join(u, "l"));
+    fs.symlinkSync(path.join(u, "l"), path.join(home, ".loom"));
+    settle();
+    isCredentialStore(target, home, agentDir);
+    calls.realpath = 0;
+    isCredentialStore(target, home, agentDir);
+    expect(calls.realpath).toBeGreaterThan(0);
+
+    // And once it can be followed, the next call sees where it goes.
+    fs.rmSync(path.join(u, "l"));
+    fs.symlinkSync(path.dirname(target), path.join(u, "l"));
+    const asConfig = path.join(path.dirname(target), "config.json");
+    fs.writeFileSync(asConfig, "{}");
+    expect(isCredentialStore(fs.realpathSync(asConfig), home, agentDir)).toBe(true);
   });
 
   it("never trusts a snapshot where a credential file is itself a symlink", () => {

@@ -126,17 +126,22 @@ const RACY_WINDOW_MS = 1000;
  * Every file read and every directory listing entry on the web surface comes
  * through here, and resolving each file costs one or two realpath walks --
  * slow enough on Windows to matter -- so the set is cached per (home,
- * agentDir). The cache is keyed on an lstat of every directory a candidate
- * resolves through: each parent as written and as resolved, and all of their
- * ancestors up to the root. What a candidate resolves to can only change when
- * an entry on one of those paths is created, removed, renamed or replaced,
- * and each of those rewrites the containing directory, which is in the set --
- * so a symlink planted at `~/.loom/config.json` shows up on the very next
- * call, as does a renamed ancestor relinked to its old name. lstat rather
- * than stat so a symlinked dir signs as the link itself; its target's dirs are
- * watched separately through the resolved parent. ctime is in the signature
- * because mtime alone can be put back with `touch -r`, and no ordinary file call can
- * set ctime.
+ * agentDir). The cache is keyed on an lstat of every directory whose entries
+ * the resolution depended on: each one a candidate's parent is walked through
+ * component by component, including the dir that holds each symlink along the
+ * way and every dir that link's target passes through in turn (see
+ * watchResolution). What a candidate resolves to can only change when an
+ * entry in one of those dirs is created, removed, renamed or replaced, and
+ * each of those rewrites that dir -- so a symlink planted at
+ * `~/.loom/config.json`, a renamed ancestor relinked to its old name, or a
+ * link halfway down the chain re-pointed somewhere else all show up on the
+ * very next call. ctime is in the signature because mtime alone can be put
+ * back with `touch -r`, and no ordinary file call can set ctime.
+ *
+ * A settled snapshot never re-checks its own age, so a clock set backwards
+ * far enough to reproduce an old mtime:ctime:ino tuple would go unnoticed.
+ * That's accepted: whoever can roll back the clock is outside what this
+ * guards against, and the racy window is only about time moving forward.
  */
 function credentialFileCandidates(home: string, agentDir: string): Set<string> {
   // No home: the lexical relative paths, exactly as before, and nothing on
@@ -159,10 +164,15 @@ function credentialFileCandidates(home: string, agentDir: string): Set<string> {
     ...SENSITIVE_HOME_FILES.map((f) => path.join(home, f)),
     ...AGENT_DIR_CREDENTIAL_FILES.map((f) => path.join(agentDir, f)),
   ];
-  // Stat the lexical dirs BEFORE resolving, so a change that lands mid-build
-  // leaves a stale signature behind and forces the next call to rebuild.
+  // Walk (and so sign) every dir BEFORE realpath resolves it, so a change
+  // that lands mid-build leaves a stale signature behind and forces the next
+  // call to rebuild.
   const watched = new Map<string, DirSignature>();
-  for (const f of files) watchWithAncestors(path.resolve(path.dirname(f)), watched);
+  const walked = new Map<string, Walk>();
+  for (const f of files) {
+    const dir = path.dirname(f);
+    if (!walked.has(dir)) walked.set(dir, watchResolution(dir, watched));
+  }
   const resolvedParents = new Map<string, string | null>();
   const candidates = new Set<string>();
   let sawLink = false;
@@ -171,15 +181,22 @@ function credentialFileCandidates(home: string, agentDir: string): Set<string> {
     if (link) sawLink = true;
     for (const c of withRealpath(f, resolvedParents, link)) candidates.add(c.toLowerCase());
   }
-  // A parent that is (or sits under) a symlink resolves somewhere else, and
-  // that path's dirs decide the answer just as much.
-  for (const real of resolvedParents.values()) if (real) watchWithAncestors(real, watched);
+  // realpath decides the spelling, since that's what callers compare against;
+  // the walk only decides what to watch. If they disagree -- a race, or some
+  // platform quirk the walk doesn't model -- the watched set may be the wrong
+  // one, so don't trust it.
+  let walksAgree = true;
+  for (const [dir, w] of walked) {
+    if (!w.complete || w.real !== (resolvedParents.get(dir) ?? null)) walksAgree = false;
+  }
   // A credential file that is itself a symlink resolves through its target's
   // dirs, and a dangling one starts resolving the moment its target is
   // created, so that snapshot is never trusted: rare enough that paying the
   // full walk on every call is fine.
   const settled =
-    !sawLink && [...watched.values()].every((sig) => sig.changedAt < builtAt - RACY_WINDOW_MS);
+    walksAgree &&
+    !sawLink &&
+    [...watched.values()].every((sig) => sig.changedAt < builtAt - RACY_WINDOW_MS);
 
   if (candidateCache.size >= CANDIDATE_CACHE_LIMIT && !candidateCache.has(key)) {
     candidateCache.clear();
@@ -188,11 +205,67 @@ function credentialFileCandidates(home: string, agentDir: string): Set<string> {
   return candidates;
 }
 
-function watchWithAncestors(dir: string, watched: Map<string, DirSignature>): void {
-  for (let cur = dir; !watched.has(cur); cur = path.dirname(cur)) {
-    watched.set(cur, dirSignature(cur));
-    if (path.dirname(cur) === cur) break;
+interface Walk {
+  // False when the walk hit something it can't promise to notice changing.
+  complete: boolean;
+  // Where the dir resolved to, or null when it doesn't exist (yet).
+  real: string | null;
+}
+
+// Same bound as the kernel's ELOOP for a single lookup.
+const MAX_LINK_HOPS = 40;
+
+/**
+ * Resolve `dir` the way fs.realpathSync does -- lexically normalize, then lstat
+ * one component at a time, restarting from the root on each symlink -- and
+ * sign every directory whose entries that depended on: every dir walked
+ * through, which includes the one holding each link and every dir the link's
+ * target passes through. A missing component is fine wherever it turns up --
+ * in the path as written or in a dangling link's target: the walk stops in the
+ * dir it would appear in, that dir is already signed, and creating the entry
+ * rewrites it. Anything else that stops the walk (an unreadable dir or link, a
+ * file where a dir should be, too many hops) means the dirs a later resolution
+ * would depend on aren't known, so the walk reports itself incomplete and the
+ * snapshot is rebuilt on every call.
+ */
+function watchResolution(dir: string, watched: Map<string, DirSignature>): Walk {
+  let rest = path.resolve(dir);
+  let cur = path.parse(rest).root;
+  let pending = rest.slice(cur.length).split(path.sep).filter(Boolean);
+  if (!watched.has(cur)) watched.set(cur, dirSignature(cur));
+  let hops = 0;
+  while (pending.length > 0) {
+    const next = path.join(cur, pending.shift()!);
+    // Only dirs go in `watched`, so one already there needs no second lstat.
+    if (watched.has(next)) {
+      cur = next;
+      continue;
+    }
+    let st: fs.Stats;
+    try {
+      st = fs.lstatSync(next);
+    } catch (err) {
+      return { complete: (err as NodeJS.ErrnoException).code === "ENOENT", real: null };
+    }
+    if (st.isSymbolicLink()) {
+      if (++hops > MAX_LINK_HOPS) return { complete: false, real: null };
+      let target: string;
+      try {
+        target = fs.readlinkSync(next);
+      } catch {
+        return { complete: false, real: null };
+      }
+      rest = path.resolve(cur, target, ...pending);
+      cur = path.parse(rest).root;
+      pending = rest.slice(cur.length).split(path.sep).filter(Boolean);
+      if (!watched.has(cur)) watched.set(cur, dirSignature(cur));
+      continue;
+    }
+    if (!st.isDirectory()) return { complete: false, real: null };
+    watched.set(next, signatureOf(st));
+    cur = next;
   }
+  return { complete: true, real: cur };
 }
 
 function isSymlink(p: string): boolean {
@@ -205,15 +278,18 @@ function isSymlink(p: string): boolean {
 
 function dirSignature(dir: string): DirSignature {
   try {
-    const st = fs.lstatSync(dir);
-    return {
-      key: `${st.mtimeMs}:${st.ctimeMs}:${st.ino}`,
-      // max, so a future mtime set by hand keeps the snapshot untrusted too.
-      changedAt: Math.max(st.mtimeMs, st.ctimeMs),
-    };
+    return signatureOf(fs.lstatSync(dir));
   } catch {
     return { key: "absent", changedAt: -Infinity };
   }
+}
+
+function signatureOf(st: fs.Stats): DirSignature {
+  return {
+    key: `${st.mtimeMs}:${st.ctimeMs}:${st.ino}`,
+    // max, so a future mtime set by hand keeps the snapshot untrusted too.
+    changedAt: Math.max(st.mtimeMs, st.ctimeMs),
+  };
 }
 
 function signaturesMatch(watched: Map<string, DirSignature>): boolean {
