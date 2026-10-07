@@ -27,3 +27,7 @@ extensions/loom/vendor/skills/
 lessons/snapshot.json
 lessons/*/*.md
 tests/fixtures/lessons/
+
+# Registry state in eval fixtures is canonical JSON whose bytes are hashed
+# (template files are named by their sha256), so reformatting would corrupt it.
+evals/scenarios/*/cwd/.loom/

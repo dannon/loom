@@ -1,0 +1,89 @@
+{
+  "tool:toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.23.4+galaxy0": {
+    "body": {
+      "id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.23.4+galaxy0",
+      "name": "fastp",
+      "version": "0.23.4+galaxy0",
+      "inputs": [
+        {
+          "name": "single_paired",
+          "type": "conditional",
+          "test_param": {
+            "name": "single_paired_selector",
+            "type": "select"
+          },
+          "cases": [
+            {
+              "value": "single",
+              "inputs": [
+                {
+                  "name": "in1",
+                  "type": "data",
+                  "label": "Input 1"
+                }
+              ]
+            },
+            {
+              "value": "paired",
+              "inputs": [
+                {
+                  "name": "in1",
+                  "type": "data"
+                },
+                {
+                  "name": "in2",
+                  "type": "data"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "reads",
+          "type": "data",
+          "label": "Reads",
+          "optional": false
+        },
+        {
+          "name": "adapters",
+          "type": "data",
+          "optional": true
+        },
+        {
+          "name": "pool",
+          "type": "data_collection",
+          "optional": true
+        },
+        {
+          "name": "filter_options",
+          "type": "section",
+          "inputs": [
+            {
+              "name": "length_required",
+              "type": "integer"
+            }
+          ]
+        },
+        {
+          "name": "queries",
+          "type": "repeat",
+          "inputs": [
+            {
+              "name": "extra",
+              "type": "data"
+            },
+            {
+              "name": "tag",
+              "type": "text"
+            }
+          ]
+        },
+        {
+          "name": "threads",
+          "type": "integer"
+        }
+      ]
+    },
+    "version": "0.23.4+galaxy0"
+  }
+}
