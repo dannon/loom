@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // change to the dirs under test.
 const calls = vi.hoisted(() => ({
   realpath: 0,
+  native: 0,
   lstat: 0,
   pinned: new Map<string, unknown>(),
 }));
@@ -18,7 +19,12 @@ vi.mock("fs", async (importOriginal) => {
       calls.realpath++;
       return real.realpathSync(...args);
     },
-    { native: real.realpathSync.native },
+    {
+      native: (...args: Parameters<typeof real.realpathSync.native>) => {
+        calls.native++;
+        return real.realpathSync.native(...args);
+      },
+    },
   );
   const lstatSync = ((...args: Parameters<typeof real.lstatSync>) => {
     calls.lstat++;
@@ -79,6 +85,7 @@ beforeEach(() => {
   fs.writeFileSync(path.join(ws, "x.json"), "{}");
   target = fs.realpathSync(path.join(ws, "x.json"));
   calls.realpath = 0;
+  calls.native = 0;
   calls.lstat = 0;
 });
 
@@ -274,15 +281,21 @@ describe("isCredentialStore realpath cache", () => {
   it("settles a plain home to no realpaths and one lstat per watched dir", () => {
     // Every dir the walk signs is a component of one of the resolved parents;
     // the agent dir's chain is the longest and shares the rest, plus ~/.loom
-    // beside it.
+    // beside it. Each link on the way (macOS's /var) is signed too.
     const realAgent = fs.realpathSync(agentDir);
-    const bound = realAgent.split(path.sep).length + 1;
+    let linksOnTheWay = 0;
+    for (let d = agentDir; path.dirname(d) !== d; d = path.dirname(d)) {
+      if (fs.lstatSync(d).isSymbolicLink()) linksOnTheWay++;
+    }
+    const bound = realAgent.split(path.sep).length + 1 + linksOnTheWay;
     settle();
     isCredentialStore(target, home, agentDir);
     calls.realpath = 0;
+    calls.native = 0;
     calls.lstat = 0;
     for (let i = 0; i < 5; i++) expect(isCredentialStore(target, home, agentDir)).toBe(false);
     expect(calls.realpath).toBe(0);
+    expect(calls.native).toBe(0);
     expect(calls.lstat).toBeGreaterThan(0);
     expect(calls.lstat).toBeLessThanOrEqual(5 * bound);
   });
@@ -319,6 +332,44 @@ describe("isCredentialStore realpath cache", () => {
     const asConfig = path.join(path.dirname(target), "config.json");
     fs.writeFileSync(asConfig, "{}");
     expect(isCredentialStore(fs.realpathSync(asConfig), home, agentDir)).toBe(true);
+  });
+
+  it("survives a chain of links with long targets, and still finds the end of it", () => {
+    // Each link points at the next one plus a long tail of dirs, so one walk
+    // visits thousands of components; a recursive walk ran out of stack here.
+    const r = path.join(root, "r");
+    fs.mkdirSync(r);
+    const tail = Array(450).fill("a").join("/");
+    for (let k = 0; k < 10; k++) {
+      fs.symlinkSync(path.join(r, `l${k + 1}`, tail), path.join(r, `l${k}`));
+    }
+    fs.rmSync(path.join(home, ".loom"), { recursive: true });
+    fs.symlinkSync(path.join(r, "l0"), path.join(home, ".loom"));
+    settle();
+    expect(() => isCredentialStore(target, home, agentDir)).not.toThrow();
+    expect(isCredentialStore(target, home, agentDir)).toBe(false);
+  });
+
+  it("flags where the kernel puts a `..` after a link, not where string math does", () => {
+    // ~/s -> x/y and ~/.loom -> s/../real. Opening ~/.loom/config.json goes
+    // to x/real, which is where fs.promises.realpath says it is too;
+    // fs.realpathSync collapses the `..` first and says ~/real.
+    const x = path.join(root, "x");
+    fs.mkdirSync(path.join(x, "y"), { recursive: true });
+    fs.mkdirSync(path.join(x, "real"));
+    fs.writeFileSync(path.join(x, "real", "config.json"), "{}");
+    fs.mkdirSync(path.join(home, "real"));
+    fs.symlinkSync(path.join(x, "y"), path.join(home, "s"));
+    fs.rmSync(path.join(home, ".loom"), { recursive: true });
+    fs.symlinkSync("s/../real", path.join(home, ".loom"));
+    const opened = fs.realpathSync.native(path.join(home, ".loom", "config.json"));
+    expect(opened).toBe(fs.realpathSync(path.join(x, "real", "config.json")));
+    settle();
+    expect(isCredentialStore(opened, home, agentDir)).toBe(true);
+    // Which dirs decide each answer differ, so neither is cached.
+    calls.realpath = 0;
+    expect(isCredentialStore(opened, home, agentDir)).toBe(true);
+    expect(calls.realpath).toBeGreaterThan(0);
   });
 
   it("keeps (home, agentDir) pairs apart even when joining them would collide", () => {
