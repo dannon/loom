@@ -5,6 +5,8 @@
 // mouseup / selectionchange events and the button's own click flow. The
 // document selection and client rects are stubbed (happy-dom has no layout),
 // which is exactly the seam the production code reads through.
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatPanel } from "../app/src/renderer/chat/chat-panel.js";
 
@@ -287,5 +289,70 @@ describe("copy button dismissal after clicking it (#377)", () => {
     currentSelection = COLLAPSED;
     btn.click();
     expect(btn.hidden).toBe(true);
+  });
+});
+
+describe("copy button dismissal on keyboard copy (#534)", () => {
+  function keyboardCopy(container: HTMLElement): { setData: ReturnType<typeof vi.fn> } {
+    const setData = vi.fn();
+    const e = new Event("copy", { bubbles: true, cancelable: true });
+    Object.defineProperty(e, "clipboardData", { value: { setData } });
+    container.dispatchEvent(e);
+    return { setData };
+  }
+
+  it("hides the button on Cmd/Ctrl+C but keeps the selection", () => {
+    const { container, btn } = setup();
+    const sel = (currentSelection = makeSelection(container, "copy me"));
+    selectionchange();
+    expect(btn.hidden).toBe(false);
+
+    const { setData } = keyboardCopy(container);
+    expect(setData).toHaveBeenCalledWith("text/plain", "copy me");
+    expect(btn.hidden).toBe(true);
+    expect(sel.removeAllRanges).not.toHaveBeenCalled();
+
+    // The copied selection survives, and later re-validation must not bring
+    // the button back for it.
+    selectionchange();
+    fire(document.body, "mouseup");
+    container.dispatchEvent(new Event("scroll"));
+    expect(btn.hidden).toBe(true);
+  });
+
+  it("re-shows once the selection actually changes after a keyboard copy", () => {
+    const { container, btn } = setup();
+    currentSelection = makeSelection(container, "first");
+    selectionchange();
+    keyboardCopy(container);
+    expect(btn.hidden).toBe(true);
+
+    currentSelection = makeSelection(container, "first and more");
+    selectionchange();
+    expect(btn.hidden).toBe(false);
+  });
+});
+
+describe("copy button stylesheet (#534)", () => {
+  // .chat-copy-btn sets display:inline-flex, an author rule that beats the UA
+  // [hidden] { display: none }. Without an explicit override every
+  // `btn.hidden = true` above is invisible in the real app, so check the
+  // computed style against the stylesheet the app actually loads.
+  it("really hides the button, not just its hidden property", () => {
+    const style = document.createElement("style");
+    style.textContent = readFileSync(resolve(process.cwd(), "app/src/renderer/styles.css"), "utf8");
+    document.head.append(style);
+    try {
+      const { container, btn } = setup();
+      expect(btn.hidden).toBe(true);
+      expect(getComputedStyle(btn).display).toBe("none");
+
+      currentSelection = makeSelection(container, "visible");
+      selectionchange();
+      expect(btn.hidden).toBe(false);
+      expect(getComputedStyle(btn).display).toBe("inline-flex");
+    } finally {
+      style.remove();
+    }
   });
 });

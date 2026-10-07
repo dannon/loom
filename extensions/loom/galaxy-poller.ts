@@ -42,10 +42,9 @@ import {
 import { checkInvocations, isInvocationLive } from "./tools.js";
 import {
   getGalaxyConfig,
-  galaxyGet,
+  galaxyGetInvocation,
   galaxyGetJobDetails,
   sameGalaxyServer,
-  type GalaxyInvocationResponse,
 } from "./galaxy-api.js";
 import { buildResumePrompt, isResumableOutcome, type GalaxyFollowUp } from "./auto-resume.js";
 import {
@@ -223,7 +222,7 @@ function trackActiveBlocks(content: string): void {
 /** Ask Galaxy whether a run whose block has vanished is still going. */
 async function isStillLive(block: TrackedBlock): Promise<{ live: boolean; state?: string }> {
   if (block.kind === "invocation") {
-    const inv = await galaxyGet<GalaxyInvocationResponse>(`/invocations/${block.id}`);
+    const inv = await galaxyGetInvocation(block.id);
     return { live: isInvocationLive(inv), state: inv.state };
   }
   const details = await galaxyGetJobDetails(block.id);

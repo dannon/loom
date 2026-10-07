@@ -11,6 +11,7 @@ import { WORKSPACE_STATE_DIR_NAMES } from "../extensions/loom/workspace-state-di
 // check realpaths files under HOME, so every lookup there costs ~20ms and the
 // slower CI runners time out.
 const HOME = "/test-home/alice";
+const AGENT_DIR = "/test-home/alice/.pi/agent";
 describe("isSensitivePath", () => {
   it("flags ssh, aws, gcloud, netrc, env, loom config", () => {
     for (const p of [
@@ -231,5 +232,69 @@ describe("isLoomStatePath -- a home that is itself under a state dir", () => {
     for (const odd of ["/srv/.loom/alice", "/srv/.orbit/alice"]) {
       expect(isLoomStatePath(`${odd}/${D}/analyses/p/out.txt`, odd), odd).toBe(true);
     }
+  });
+});
+
+describe("observation state is a credential store", () => {
+  it("hard-denies the token store, the outbox and the sent log under both state dirs", () => {
+    for (const dir of [".loom", ".orbit"]) {
+      for (const name of [
+        "observations-tokens.json",
+        "observations-outbox.jsonl",
+        "observations-sent.jsonl",
+      ]) {
+        const p = `/test-home/alice/${dir}/${name}`;
+        expect(isCredentialStore(p, HOME), p).toBe(true);
+        expect(isSensitivePath(p, HOME), p).toBe(true);
+      }
+    }
+  });
+
+  it("still protects every one of them from a write", () => {
+    for (const name of [
+      "observations-tokens.json",
+      "observations-outbox.jsonl",
+      "observations-sent.jsonl",
+    ]) {
+      expect(isProtectedWritePath(`/test-home/alice/.loom/${name}`, HOME), name).toBe(true);
+    }
+  });
+});
+
+describe("pi agent-dir credential stores", () => {
+  it("treats pi's own credential-bearing files as stores, denied for every tier", () => {
+    for (const f of ["auth.json", "mcp.json", "galaxy-profiles.json"]) {
+      const p = `${AGENT_DIR}/${f}`;
+      expect(isCredentialStore(p, HOME, AGENT_DIR), p).toBe(true);
+      expect(isSensitivePath(p, HOME, AGENT_DIR), p).toBe(true);
+    }
+  });
+
+  it("leaves the non-credential files in the same dir readable", () => {
+    // models.json carries the env var NAME, not the secret (shared/custom-provider.js);
+    // models-store.json is a refreshed provider catalog. Denying these would block
+    // ordinary "what models do I have" work for no gain.
+    for (const f of ["models.json", "models-store.json", "settings.json", "sessions/x.jsonl"]) {
+      const p = `${AGENT_DIR}/${f}`;
+      expect(isCredentialStore(p, HOME, AGENT_DIR), p).toBe(false);
+    }
+  });
+
+  it("follows PI_CODING_AGENT_DIR rather than assuming ~/.pi/agent", () => {
+    // The whole store relocates with that env var, so a $HOME-relative rule --
+    // which is why these are not in SENSITIVE_HOME_FILES -- would silently stop
+    // protecting it.
+    const relocated = "/test-opt/pidir";
+    expect(isCredentialStore(`${relocated}/auth.json`, HOME, relocated)).toBe(true);
+    expect(isCredentialStore(`${AGENT_DIR}/auth.json`, HOME, relocated)).toBe(false);
+  });
+
+  it("is case-folded, so macOS cannot dodge it by spelling", () => {
+    expect(isCredentialStore(`${AGENT_DIR}/AUTH.JSON`, HOME, AGENT_DIR)).toBe(true);
+    expect(isCredentialStore("/test-home/alice/.PI/agent/auth.json", HOME, AGENT_DIR)).toBe(true);
+  });
+
+  it("resolves . and .. segments before matching", () => {
+    expect(isCredentialStore(`${AGENT_DIR}/skills/../auth.json`, HOME, AGENT_DIR)).toBe(true);
   });
 });

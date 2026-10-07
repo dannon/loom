@@ -32,7 +32,7 @@ vi.mock("../extensions/loom/galaxy-api.js", async (importOriginal) => {
   return {
     ...actual,
     getGalaxyConfig: vi.fn(() => ({ url: "https://galaxy.test", apiKey: "k" })),
-    galaxyGet: vi.fn(),
+    galaxyGetInvocation: vi.fn(),
     galaxyGetJobDetails: vi.fn(),
   };
 });
@@ -40,7 +40,7 @@ vi.mock("../extensions/loom/galaxy-api.js", async (importOriginal) => {
 import { resetState, setNotebookPath } from "../extensions/loom/state";
 import { renderInvocationYaml, type InvocationYaml } from "../extensions/loom/notebook-writer";
 import { renderJobYaml, type JobYaml } from "../extensions/loom/galaxy-job-block";
-import { galaxyGet, galaxyGetJobDetails } from "../extensions/loom/galaxy-api.js";
+import { galaxyGetInvocation, galaxyGetJobDetails } from "../extensions/loom/galaxy-api.js";
 import { checkInvocations } from "../extensions/loom/tools.js";
 import {
   pollGalaxyNow,
@@ -48,7 +48,7 @@ import {
   stopGalaxyPoller,
 } from "../extensions/loom/galaxy-poller";
 
-const mockGalaxyGet = vi.mocked(galaxyGet);
+const mockGalaxyGet = vi.mocked(galaxyGetInvocation);
 const mockJobDetails = vi.mocked(galaxyGetJobDetails);
 const mockCheck = vi.mocked(checkInvocations);
 

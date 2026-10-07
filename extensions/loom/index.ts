@@ -21,10 +21,12 @@ import { recordGalaxyConnected } from "./galaxy-cred-drift";
 import { registerActivityHooks } from "./activity-hooks";
 import { registerSubmissionCapture } from "./galaxy-submission-capture";
 import { isSubmissionReplayEnabled, registerSubmissionReplay } from "./submission-replay";
+import { isObservationReplayEnabled, registerObservationReplay } from "./observation-replay";
 import { registerExecutionCommands } from "./execution-commands";
 import { registerDashboardTools } from "./dashboard-tools";
 import { registerDashboardCommands } from "./dashboard-commands";
 import { registerFeedbackCommand } from "./feedback-command";
+import { registerLessonProposals } from "./lesson-command";
 import { registerTesterIdCommand } from "./tester-id-command";
 import { registerInstructionsCommand } from "./instructions-command";
 import { registerTeamTools } from "./teams/tool";
@@ -44,7 +46,11 @@ import { registerLessonHint } from "./lesson-hint";
 import { withoutLessonHints } from "../../shared/lesson-hint-marker.js";
 import { registerLessonsSearchTool } from "./lessons/search-tool";
 import { isLessonReplayEnabled, registerLessonReplay } from "./lessons/replay";
+import { registerObservationTriggers } from "./observation-triggers";
+import { registerObservationsCommand } from "./observations-command";
 import { registerMcpOutputRecovery } from "./mcp-output";
+import { registerLoomMcpServers } from "./mcp-servers";
+import { galaxyMcpToolName } from "../../shared/galaxy-mcp-tools.js";
 import { galaxyCall, registerMcpRecovery } from "./mcp-recovery";
 import { registerGalaxyPollGuard } from "./galaxy-poll-guard";
 import { registerProgressUpdates } from "./progress-updates";
@@ -70,6 +76,12 @@ import {
   normalizeGalaxyUrl,
 } from "./profiles";
 import { LoomWidgetKey, encodeMarkdownWidget } from "../../shared/loom-shell-contract.js";
+
+/** Status-bar label for a Galaxy tool -- galaxy-mcp's or Loom's own -- else undefined. */
+function galaxyToolLabel(toolName: string | undefined): string | undefined {
+  const bare = galaxyMcpToolName(toolName) ?? toolName?.match(/^galaxy_(.+)/)?.[1];
+  return bare?.replace(/_/g, " ");
+}
 
 export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // Before anything registers a command, so every one of them counts as user
@@ -106,6 +118,11 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerGalaxyPollGuard(pi);
   registerProgressUpdates(pi);
   registerSecretRedaction(pi);
+  // AFTER redaction, deliberately. pi runs tool_result handlers in
+  // registration order and each sees the previous one's rewrite, so the
+  // collector reads the content the model actually gets -- reading the raw
+  // result would put an API key one normalization away from the wire.
+  registerObservationTriggers(pi);
   // AFTER redaction, and it must also stay after the observation triggers once
   // they are registered here. pi feeds each tool_result handler the previous
   // one's content, so anything registered after the hint reads it as part of
@@ -114,6 +131,8 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // it needs nothing from the redactor. After the oversized-output recovery,
   // so it lands after the preview the model actually reads.
   registerLessonHint(pi);
+
+  registerLoomMcpServers(pi);
 
   setupUIBridge(pi);
   registerSessionLifecycle(pi);
@@ -135,6 +154,12 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   if (isLessonReplayEnabled()) {
     registerLessonReplay(pi);
   }
+  // Eval-only seam, same shape and the same containment rule as the submission
+  // replay above. Registered here rather than with the triggers because its
+  // session_start handler needs the notebook path the session lifecycle sets.
+  if (isObservationReplayEnabled()) {
+    registerObservationReplay(pi);
+  }
 
   registerPlanTools(pi);
   registerGalaxyUploadTool(pi);
@@ -146,6 +171,8 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerLessonsSearchTool(pi);
   registerDashboardCommands(pi);
   registerFeedbackCommand(pi);
+  registerObservationsCommand(pi);
+  registerLessonProposals(pi);
   registerTesterIdCommand(pi);
   registerInstructionsCommand(pi);
   registerSkillTriggers(pi);
@@ -441,8 +468,8 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   let uvxNudgeArmed = true;
 
   pi.on("tool_execution_start", async (event, ctx) => {
-    if (event.toolName?.startsWith("galaxy_")) {
-      const label = event.toolName.replace(/^galaxy_/, "").replace(/_/g, " ");
+    const label = galaxyToolLabel(event.toolName);
+    if (label) {
       toolStartTimes.set(event.toolName, Date.now());
       ctx.ui.setStatus("galaxy-tool", `🔧 Running ${label}...`);
     }
@@ -456,21 +483,29 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
     // emits on a real change and is a no-op otherwise. #253
     reemitNotebookIfChanged();
 
-    if (event.toolName?.startsWith("galaxy_")) {
+    const label = galaxyToolLabel(event.toolName);
+    if (label) {
       const startTime = toolStartTimes.get(event.toolName);
       if (startTime) {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        const label = event.toolName.replace(/^galaxy_/, "").replace(/_/g, " ");
         ctx.ui.setStatus("galaxy-tool", `✓ ${label} (${elapsed}s)`);
         toolStartTimes.delete(event.toolName);
-        setTimeout(() => ctx.ui.setStatus("galaxy-tool", ""), 3000);
+        setTimeout(() => {
+          // pi throws on a ctx captured before a reload or session switch (/connect,
+          // /new); uncaught, that takes the whole brain down three seconds later.
+          try {
+            ctx.ui.setStatus("galaxy-tool", "");
+          } catch {
+            // The session that showed the label is gone, and its status with it.
+          }
+        }, 3000);
       } else {
         ctx.ui.setStatus("galaxy-tool", "");
       }
     }
 
-    if (event.toolName === "galaxy_connect" && !event.isError) {
-      // A non-error galaxy_connect means we're now bound to the current env
+    if (event.toolName === "mcp__galaxy__connect" && !event.isError) {
+      // A non-error mcp__galaxy__connect means we're now bound to the current env
       // creds (galaxy-mcp raises on failure -> isError), so advance the
       // credential-drift baseline. Keyed off isError, not the loose success
       // string below, which both false-matches ("unsuccessful") and would miss
@@ -488,7 +523,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
       }
     }
 
-    if (event.toolName === "galaxy_create_history" && !event.isError) {
+    if (event.toolName === "mcp__galaxy__create_history" && !event.isError) {
       try {
         const resultText =
           typeof event.result === "string" ? event.result : JSON.stringify(event.result);
@@ -536,7 +571,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
       /* stale/headless context -- a dropped reconnect hint is fine */
     }
 
-    if (event.toolName === "galaxy_connect") {
+    if (event.toolName === "mcp__galaxy__connect") {
       try {
         const firstContent = event.content?.[0];
         const resultText = firstContent && "text" in firstContent ? firstContent.text : undefined;
@@ -549,7 +584,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
       }
     }
 
-    if (event.toolName === "galaxy_create_history") {
+    if (event.toolName === "mcp__galaxy__create_history") {
       try {
         const firstContent = event.content?.[0];
         const resultText = firstContent && "text" in firstContent ? firstContent.text : undefined;

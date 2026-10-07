@@ -1,3 +1,4 @@
+import { getEventListeners } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -1023,24 +1024,42 @@ describe("GalaxyLiveTicker cadence", () => {
     // that source lives and Node never takes it off again, so hanging one per
     // tick off the session's signal grows a list nothing empties -- measured at
     // one retained entry per call. Each tick owns its signal and releases it.
-    const h = tickerHarness();
+    // The snapshot listens on what it is handed, as fetch does: newer Node only
+    // registers a composite on its sources once something listens to it.
+    const snapshot = vi.fn(async (_id: string, opts: { signal?: AbortSignal }) => {
+      opts.signal?.addEventListener("abort", () => {});
+      return { payload: historyPayload("t1"), unchanged: false, aborted: false };
+    });
+    const h = tickerHarness({
+      snapshot: snapshot as unknown as GalaxyLiveTickerDeps["snapshot"],
+    });
     const sessionSignal = (h.ticker as unknown as { abort: AbortController }).abort.signal;
-    const listenerCount = (): number => {
-      const sizes = Object.getOwnPropertySymbols(sessionSignal)
-        .map((k) => (sessionSignal as unknown as Record<symbol, { size?: number }>)[k]?.size)
-        .filter((n): n is number => typeof n === "number");
-      // Guard against the test going vacuous if Node renames its internals: if
-      // nothing here has a size, this is measuring nothing and should say so.
-      expect(sizes.length).toBeGreaterThan(0);
-      return sizes.reduce((a, b) => a + b, 0);
+    // Plain listeners have a public count. What `any` hangs on its sources does
+    // not, so that half reads Node's private dependant set by name; Node
+    // allocates these lazily, so an absent one is an empty one.
+    const retained = (signal: AbortSignal): number => {
+      const dependants = Object.getOwnPropertySymbols(signal)
+        .filter((k) => k.description === "kDependantSignals")
+        .map(
+          (k) => (signal as unknown as Record<symbol, { size?: number } | undefined>)[k]?.size ?? 0,
+        );
+      return getEventListeners(signal, "abort").length + dependants.reduce((a, b) => a + b, 0);
     };
+    // Prove the probe still sees a composite's registration on this Node, so a
+    // renamed internal fails loudly here instead of turning the check vacuous.
+    const control = new AbortController();
+    expect(retained(control.signal)).toBe(0);
+    const composite = AbortSignal.any([control.signal]);
+    composite.addEventListener("abort", () => {});
+    expect(retained(control.signal)).toBeGreaterThan(0);
+    const listenerCount = (): number => retained(sessionSignal);
 
     expect(listenerCount()).toBe(0);
     for (let i = 0; i < 50; i++) {
       h.advance(120_000);
       await h.ticker.tick(bound);
     }
-    expect(h.snapshot.mock.calls.length).toBeGreaterThan(10);
+    expect(snapshot.mock.calls.length).toBeGreaterThan(10);
     expect(listenerCount()).toBe(0);
   });
 

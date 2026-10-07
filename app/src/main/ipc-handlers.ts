@@ -53,6 +53,7 @@ import {
 import { isLocalShellAvailable } from "./local-shell.js";
 import { readEnv } from "../../../shared/orbit-env.js";
 import { resolveStateDir } from "../../../shared/state-dir.js";
+import { agentPromptPayload } from "../../../shared/agent-prompt.js";
 
 /** Where "report an issue" files go. One place to flip when the repo is renamed. */
 const ISSUE_REPO = "galaxyproject/loom";
@@ -232,15 +233,6 @@ interface AgentPromptOptions {
   streamingBehavior?: "steer" | "followUp";
 }
 
-function promptPayload(message: string, options?: AgentPromptOptions): Record<string, unknown> {
-  const payload: Record<string, unknown> = { type: "prompt", message };
-  const streamingBehavior = options?.streamingBehavior;
-  if (streamingBehavior === "steer" || streamingBehavior === "followUp") {
-    payload.streamingBehavior = streamingBehavior;
-  }
-  return payload;
-}
-
 /**
  * Ask the user to confirm that switching analysis directories will start
  * a fresh agent session and clear the current chat/plan/notebook view.
@@ -273,7 +265,9 @@ export function registerIpcHandlers(agent: AgentManager): void {
 
   ipc.handle("agent:prompt", async (_e, message: string, options?: AgentPromptOptions) => {
     log("prompt:", message.slice(0, 80));
-    agent.send(promptPayload(message, options));
+    // Wait for Pi's preflight response. A rejected prompt must reach the
+    // renderer rather than leaving a user message stuck on "thinking".
+    await agent.sendCommand(agentPromptPayload(message, options));
   });
 
   ipc.handle("agent:abort", async () => {

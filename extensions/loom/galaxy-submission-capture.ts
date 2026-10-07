@@ -33,7 +33,6 @@ import * as path from "path";
 import { stringify as stringifyYaml } from "yaml";
 import { appendActivityEvent } from "./activity";
 import { getGalaxyConfig } from "./galaxy-api";
-import { galaxyCall } from "./mcp-recovery";
 import {
   isTerminalJobState,
   jobStatusFromGalaxyState,
@@ -61,6 +60,7 @@ import {
   writeNotebook,
   type InvocationYaml,
 } from "./notebook-writer";
+import { readMcpOutputFile } from "./mcp-output";
 import { getCurrentStepAnchor, getNotebookPath, setCurrentStepAnchor } from "./state";
 import { ulid } from "./ulid";
 
@@ -461,20 +461,25 @@ async function writeUdtDefinition(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Re-read a result the MCP adapter truncated.
+ * Re-read a result pi's MCP support truncated.
  *
- * Over 50 KiB (or 2000 lines) pi-mcp-adapter replaces the text with a preview
- * plus a notice and spills the full copy to a temp file. The preview is not
- * valid JSON, so without this a big mapped-over submission -- precisely the
- * one whose record matters most -- would log `submission.unparsed`.
+ * Past 20 KB pi cuts the middle out of the text and saves the full copy to a
+ * temp file. What's left is not valid JSON, so without this a big mapped-over
+ * submission -- precisely the one whose record matters most -- would log
+ * `submission.unparsed`.
  */
-function rereadTruncated(resolved: ResolvedResult): ResolvedResult {
+// A big mapped-over submission is exactly the one whose record matters, so read
+// well past mcp_read_output's preview limit before giving up on it.
+const SUBMISSION_MAX_BYTES = 256 * 1024 * 1024;
+
+async function rereadTruncated(resolved: ResolvedResult): Promise<ResolvedResult> {
   if (!resolved.truncatedPath) return resolved;
   try {
+    // Same confinement mcp_read_output applies: only a file pi itself wrote.
     return {
       ...resolved,
       value: undefined,
-      text: fs.readFileSync(resolved.truncatedPath, "utf-8"),
+      text: await readMcpOutputFile(resolved.truncatedPath, SUBMISSION_MAX_BYTES),
     };
   } catch {
     return resolved;
@@ -503,10 +508,10 @@ export async function handleSubmissionResult(
 
   let resolved = resolveResultPayload(result);
   let outcome = parseSubmission(toolName, dispatch.args, resolved);
-  // Re-read the adapter's spill file ONLY when the inline payload was never a
+  // Re-read the full-output file ONLY when the inline payload was never a
   // readable envelope -- that is the truncation case this exists for. If the
   // envelope parsed and the tool-specific parse still said no, we understood
-  // the answer and it was "nothing to record"; going to the spill file then
+  // the answer and it was "nothing to record"; going to the full-output file then
   // would let a different payload overturn a verdict we already reached.
   if (
     !outcome.ok &&
@@ -514,7 +519,7 @@ export async function handleSubmissionResult(
     parseGalaxyResultEnvelope(resolved) === null &&
     toolName !== "galaxy_upload_local_file"
   ) {
-    resolved = rereadTruncated(resolved);
+    resolved = await rereadTruncated(resolved);
     outcome = parseSubmission(toolName, dispatch.args, resolved);
   }
 
@@ -608,22 +613,16 @@ export async function handleSubmissionResult(
 
 export function registerSubmissionCapture(pi: ExtensionAPI): void {
   pi.on("tool_execution_start", async (event) => {
-    // The same submission can arrive as `galaxy_run_tool`, as
-    // `mcp__galaxy__run_tool`, or through pi's `mcp` proxy tool with the real
-    // name and args nested inside -- the proxy is what the reconnect guidance
-    // steers the model to. Record it under its real name either way.
-    const call = galaxyCall(
-      event.toolName,
-      (event.args && typeof event.args === "object" ? event.args : {}) as Record<string, unknown>,
-    );
-    if (!call || !isSubmissionTool(call.name)) return;
-    rememberDispatch(event.toolCallId, call.name, call.args);
+    if (!isSubmissionTool(event.toolName)) return;
+    const args = (event.args && typeof event.args === "object" ? event.args : {}) as Record<
+      string,
+      unknown
+    >;
+    rememberDispatch(event.toolCallId, event.toolName, args);
   });
 
   pi.on("tool_execution_end", async (event) => {
-    // The end event has no args, so a proxied call is only recognisable by the
-    // dispatch its start left behind.
-    const toolName = inFlight.get(event.toolCallId)?.toolName ?? event.toolName;
+    const toolName = event.toolName;
     if (!isSubmissionTool(toolName)) return;
     try {
       await handleSubmissionResult(

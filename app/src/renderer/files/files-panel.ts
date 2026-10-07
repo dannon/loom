@@ -7,6 +7,7 @@
  */
 
 import type { FileNode } from "../../preload/preload.js";
+import { ORBIT_FILE_PATH_TYPE, absoluteFilePath } from "../file-drop.js";
 
 export class FilesPanel {
   private readonly container: HTMLElement;
@@ -15,6 +16,7 @@ export class FilesPanel {
   private selectedPath: string | null = null;
   private showHidden = false;
   private loading = false;
+  private cwd = "";
 
   constructor(container: HTMLElement, onFileOpen: (relPath: string) => void) {
     this.container = container;
@@ -35,6 +37,7 @@ export class FilesPanel {
   reset(): void {
     this.expanded.clear();
     this.selectedPath = null;
+    this.cwd = "";
     this.container.innerHTML = "";
   }
 
@@ -60,6 +63,7 @@ export class FilesPanel {
         this.container.appendChild(err);
         return;
       }
+      this.cwd = res.cwd;
       this.render(res.root);
     } finally {
       this.loading = false;
@@ -147,6 +151,14 @@ export class FilesPanel {
     } else {
       icon.textContent = iconFor(node.name);
       row.title = node.name;
+      row.draggable = true;
+      row.addEventListener("dragstart", (event) => {
+        if (!event.dataTransfer || !this.cwd) return;
+        const path = absoluteFilePath(this.cwd, node.relPath);
+        event.dataTransfer.setData(ORBIT_FILE_PATH_TYPE, path);
+        event.dataTransfer.setData("text/plain", path);
+        event.dataTransfer.effectAllowed = "copy";
+      });
 
       if (typeof node.size === "number") {
         const size = document.createElement("span");

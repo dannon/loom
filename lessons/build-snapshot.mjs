@@ -39,6 +39,18 @@ export function isStale(staleAfter, nowMs) {
   return Number.isFinite(end) && end < nowMs;
 }
 
+/**
+ * The exact shape `Date.prototype.toISOString` writes. Anything looser and a
+ * hand-edited `built_at` parses to NaN, which silently turns the staleness
+ * comparison off.
+ */
+export function isIsoTimestamp(value) {
+  if (typeof value !== "string") return false;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) && new Date(ms).toISOString() === value;
+}
+
 function dedupe(values) {
   return [...new Set(values)];
 }
@@ -106,6 +118,9 @@ export function toSnapshotLesson(rel, frontmatter, sections) {
  * later `--check` of the same bytes agree.
  */
 export function buildSnapshot({ dir = LESSONS_DIR, builtAt, commit, nowMs } = {}) {
+  if (!isIsoTimestamp(builtAt)) {
+    throw new Error(`built_at must be an ISO timestamp (got ${JSON.stringify(builtAt)})`);
+  }
   const asOf = nowMs ?? Date.parse(builtAt);
   const lessons = [];
   const skipped = [];
@@ -226,7 +241,16 @@ export function checkSnapshot({
       failure: [`check:lessons FAILED -- lessons/snapshot.json is not valid JSON: ${message}`],
     };
   }
-  const builtAt = typeof committed?.built_at === "string" ? committed.built_at : "";
+  const builtAt = committed?.built_at;
+  if (!isIsoTimestamp(builtAt)) {
+    return {
+      ok: false,
+      failure: [
+        `check:lessons FAILED -- lessons/snapshot.json built_at is not an ISO timestamp (got ${JSON.stringify(builtAt)})`,
+        "\nRun `npm run build:lessons` and commit lessons/snapshot.json.",
+      ],
+    };
+  }
   const commit = typeof committed?.source?.commit === "string" ? committed.source.commit : "";
   const { snapshot } = buildSnapshot({ dir, builtAt, commit });
   const rebuilt = serializeSnapshot(snapshot);

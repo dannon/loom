@@ -1,4 +1,4 @@
-/** Read adapter spill files without putting megabytes back into model context. */
+/** Read saved MCP output without putting megabytes back into model context. */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { constants } from "node:fs";
@@ -240,15 +240,29 @@ export function inspectOutput(text: string, args: OutputQuery): Recordish {
   };
 }
 
-/** Only adapter-created artifacts registered by tool-result metadata are readable. */
-async function readArtifact(path: string): Promise<string> {
+/** Whether `path` (parent already resolved) is a file pi's MCP support saved its full output to. */
+function isMcpOutputFile(root: string, parent: string, name: string): boolean {
+  if (parent === root) return /^pi-mcp-[a-f0-9]{16}\.txt$/.test(name);
+  // pi-mcp-adapter's spill files, still named by tool results in older sessions.
+  return (
+    dirname(parent) === root &&
+    /^pi-mcp-output-[\w-]+$/.test(basename(parent)) &&
+    /^(?:output|mcp-result)-[a-f0-9]+\.txt$/.test(name)
+  );
+}
+
+/**
+ * Only MCP output files registered by tool-result metadata are readable.
+ * `maxBytes` defaults to the inspection limit; a caller that needs the whole
+ * file regardless of size, like submission capture, raises it.
+ */
+export async function readMcpOutputFile(
+  path: string,
+  maxBytes: number = MAX_FILE_BYTES,
+): Promise<string> {
   const root = await realpath(tmpdir());
   const parent = await realpath(dirname(path));
-  if (
-    dirname(parent) !== root ||
-    !/^pi-mcp-output-[\w-]+$/.test(basename(parent)) ||
-    !/^(?:output|mcp-result)-[a-f0-9]+\.txt$/.test(basename(path))
-  ) {
+  if (!isMcpOutputFile(root, parent, basename(path))) {
     throw new Error("Not an MCP output artifact.");
   }
   const resolved = join(parent, basename(path));
@@ -262,10 +276,10 @@ async function readArtifact(path: string): Promise<string> {
       stat.nlink !== 1 ||
       stat.dev !== before.dev ||
       stat.ino !== before.ino ||
-      stat.size > MAX_FILE_BYTES
+      stat.size > maxBytes
     )
       throw new Error(
-        "MCP artifact is not a regular file within the 32 MB inspection limit; narrow the original read-only query.",
+        `MCP artifact is not a regular file within the ${Math.round(maxBytes / (1024 * 1024))} MB limit; narrow the original read-only query.`,
       );
     const bytes = Buffer.alloc(stat.size + 1);
     let length = 0;
@@ -285,11 +299,16 @@ async function readArtifact(path: string): Promise<string> {
 export function registerMcpOutputRecovery(pi: ExtensionAPI): void {
   const artifacts = new Map<string, string>();
   function remember(id: string, details: unknown): string | undefined {
-    const guard = record(record(details)?.outputGuard);
+    const d = record(details);
+    const guard = record(d?.outputGuard);
+    // pi's MCP tools report {server, tool, fullOutputPath} once they truncate;
+    // outputGuard is how pi-mcp-adapter reported it, in older sessions.
     const path =
-      guard?.truncated === true && typeof guard.fullOutputPath === "string"
-        ? guard.fullOutputPath
-        : undefined;
+      typeof d?.server === "string" && typeof d.fullOutputPath === "string"
+        ? d.fullOutputPath
+        : guard?.truncated === true && typeof guard.fullOutputPath === "string"
+          ? guard.fullOutputPath
+          : undefined;
     if (path) artifacts.set(id, path);
     return path;
   }
@@ -326,7 +345,7 @@ export function registerMcpOutputRecovery(pi: ExtensionAPI): void {
           throw new Error(
             "Unknown MCP outputId for this session. Use the ID from its recovery notice.",
           );
-        const text = await readArtifact(path);
+        const text = await readMcpOutputFile(path);
         signal?.throwIfAborted();
         return {
           content: [{ type: "text", text: JSON.stringify(inspectOutput(text, args)) }],
@@ -353,7 +372,7 @@ export function registerMcpOutputRecovery(pi: ExtensionAPI): void {
     let next =
       "Select a JSON Pointer from the preview, or use query to find relevant records. A partial preview does not establish that omitted records are absent.";
     try {
-      const page = inspectOutput(await readArtifact(path), {
+      const page = inspectOutput(await readMcpOutputFile(path), {
         outputId: event.toolCallId,
         limit: 20,
       });
