@@ -40,12 +40,20 @@ import {
   withNotebookLock,
   type ProposalBlock,
 } from "./notebook-writer";
-import { canonicalJson, normalizeServerUrl, sha256Hex } from "./registry";
+import {
+  canonicalJson,
+  normalizeServerUrl,
+  sha256Hex,
+  type Registry,
+  type RegistryStore,
+} from "./registry";
 import {
   approveProposal,
   canonicalizeProposal,
   describePredicate,
+  findDrift,
   liveApproval,
+  revokeAttempts,
   newProposalId,
   parseInputs,
   parseOverrides,
@@ -53,7 +61,6 @@ import {
   parseTarget,
   pendingProposals,
   renderProposalTable,
-  revokeDrifted,
   revokeProposal,
   templateShape,
   validateProposal,
@@ -137,7 +144,7 @@ function cannotWrite(session: SessionRegistry | null): string | null {
  */
 export function checkProposalDrift(deps: ProposalDeps, content?: string): Drift[] {
   const session = deps.registry();
-  if (!session || session.store.mode !== "writer") return [];
+  if (!session) return [];
   const nb = deps.notebookPath();
   let text = content ?? (nb ? readNotebookSync(nb) : null);
   // A notebook that's gone takes its proposals with it. One that exists but
@@ -149,25 +156,69 @@ export function checkProposalDrift(deps: ProposalDeps, content?: string): Drift[
     const r = resolveNotebookAnchor(notebook, anchor);
     return r.kind === "resolved" && r.anchor === anchor;
   };
-  let drift: Drift[];
-  try {
-    drift = revokeDrifted(session.store, proposalSightings(notebook), stepExists);
-  } catch {
-    return [];
-  }
-  for (const d of drift) {
+
+  // Drift is computed whatever the store's mode. A session that approved
+  // something and then lost the lock (or whose revocation write failed) still
+  // holds that approval as live in memory, and every reader has to stop
+  // treating it as live the moment the notebook stops backing it.
+  const { store } = session;
+  const held = heldRevocations(store);
+  const fresh = findDrift(store.snapshot(), proposalSightings(notebook), stepExists).filter(
+    (d) => !held.has(d.attemptId),
+  );
+  for (const d of fresh) held.set(d.attemptId, d);
+  const written = flushHeldRevocations(store);
+  for (const d of fresh) {
     activity(deps, "proposal.revoked", "harness", {
       proposal_id: d.proposalId,
       attempt_id: d.attemptId,
       reason: d.reason,
+      ...(written.has(d.attemptId) ? {} : { recorded: "in memory; registry not writable" }),
     });
   }
-  if (drift.length > 0 && nb)
+  if (fresh.length > 0 && nb)
     void clearEchoes(
       nb,
-      drift.map((d) => d.proposalId),
+      fresh.map((d) => d.proposalId),
     );
-  return drift;
+  return fresh;
+}
+
+/**
+ * Revocations decided but not yet written to the registry, per store. Readers
+ * go through `sessionView`, which applies them, so an approval stops counting
+ * the moment it's revoked even if the write has to wait.
+ */
+const heldByStore = new WeakMap<RegistryStore, Map<string, Drift>>();
+
+function heldRevocations(store: RegistryStore): Map<string, Drift> {
+  let held = heldByStore.get(store);
+  if (!held) heldByStore.set(store, (held = new Map()));
+  return held;
+}
+
+/** Write what's held when the store can take it. Returns the ids written. */
+function flushHeldRevocations(store: RegistryStore): Set<string> {
+  const held = heldRevocations(store);
+  if (held.size === 0 || store.mode !== "writer") return new Set();
+  const ids = [...held.keys()];
+  try {
+    revokeAttempts(store, ids);
+  } catch {
+    return new Set();
+  }
+  for (const id of ids) held.delete(id);
+  return new Set(ids);
+}
+
+/** The registry as this session must read it: held revocations applied. */
+export function sessionView(session: SessionRegistry): Registry {
+  const view = session.store.snapshot();
+  for (const id of heldRevocations(session.store).keys()) {
+    const approval = view.attempts[id]?.approval;
+    if (approval?.status === "live") approval.status = "revoked";
+  }
+  return view;
 }
 
 async function clearEchoes(nb: string, ids: string[]): Promise<void> {
@@ -549,7 +600,7 @@ export function pendingCommand(deps: ProposalDeps): CommandReply {
     return { level: "info", message: "No proposals: the notebook is empty or missing." };
   checkProposalDrift(deps, content);
   const blocks = findProposalBlocks(content);
-  const registry = session?.store.snapshot();
+  const registry = session ? sessionView(session) : undefined;
   const pending = registry
     ? pendingProposals(registry, proposalSightings(content))
     : proposalSightings(content).map((s) => ({ sighting: s, state: "unapproved" as const }));
@@ -616,7 +667,7 @@ export function noteProposalBinding(
   const session = deps.registry();
   if (!session) return { bound: false, reason: "the approval registry isn't open in this session" };
   checkProposalDrift(deps);
-  const live = liveApproval(session.store.snapshot(), args.proposalId);
+  const live = liveApproval(sessionView(session), args.proposalId);
   if (!live) {
     return { bound: false, reason: `${args.proposalId} has no live approval in this session` };
   }

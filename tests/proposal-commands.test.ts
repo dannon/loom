@@ -1,10 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   approveCommand,
   checkProposalDrift,
   noteProposalBinding,
+  sessionView,
   pendingCommand,
   propose,
   registerProposalCommands,
@@ -522,5 +523,66 @@ describe("review follow-ups", () => {
       },
     });
     expect(shown).toContain("END");
+  });
+});
+
+describe("drift when the registry can't be written", () => {
+  it("a session that lost the lock stops treating an edited proposal as live", async () => {
+    const id = await proposed();
+    await approveCommand(deps(), `${id} --yes`);
+    const attempt = liveApproval(session!.store.snapshot(), id)!.attempt_id;
+    // Lose the lock with nothing on disk to reload: the approval stays live
+    // in this store's memory, now read-only.
+    fs.rmSync(session!.store.registryPath);
+    fs.writeFileSync(
+      session!.store.lockPath,
+      JSON.stringify({
+        pid: 999,
+        session_id: "s-thief",
+        writer_token: "f".repeat(32),
+        heartbeat: new Date().toISOString(),
+      }),
+    );
+    expect(session!.store.heartbeat()).toBe(false);
+    expect(session!.store.mode).toBe("read-only");
+    expect(liveApproval(session!.store.snapshot(), id)).toBeDefined();
+
+    const edited = notebook().replace('"value":4', '"value":64');
+    fs.writeFileSync(nb, edited);
+    expect(checkProposalDrift(deps(), edited)).toEqual([
+      { attemptId: attempt, proposalId: id, reason: "edited" },
+    ]);
+    expect(activity().at(-1)).toMatchObject({
+      kind: "proposal.revoked",
+      payload: { attempt_id: attempt, recorded: "in memory; registry not writable" },
+    });
+    expect(liveApproval(sessionView(session!), id)).toBeUndefined();
+    expect(
+      noteProposalBinding(deps(), {
+        proposalId: id,
+        notebookAnchor: "plan-a-step-1",
+        run: { kind: "job", id: "j1" },
+      }),
+    ).toMatchObject({ bound: false });
+    expect(pendingCommand(deps()).message).toMatch(new RegExp(`${id} -- approval revoked`));
+    // Reported once, not on every later look.
+    expect(checkProposalDrift(deps(), edited)).toEqual([]);
+  });
+
+  it("a writer whose revocation write fails holds it, then writes it on the next look", async () => {
+    const id = await proposed();
+    await approveCommand(deps(), `${id} --yes`);
+    const attempt = liveApproval(session!.store.snapshot(), id)!.attempt_id;
+    const spy = vi.spyOn(session!.store, "update").mockImplementationOnce(() => {
+      throw Object.assign(new Error("EPERM: busy"), { code: "EPERM" });
+    });
+    const edited = notebook().replace('"value":4', '"value":64');
+    fs.writeFileSync(nb, edited);
+    expect(checkProposalDrift(deps(), edited)).toHaveLength(1);
+    expect(session!.store.snapshot().attempts[attempt].approval?.status).toBe("live");
+    expect(liveApproval(sessionView(session!), id)).toBeUndefined();
+    spy.mockRestore();
+    expect(checkProposalDrift(deps(), edited)).toEqual([]);
+    expect(session!.store.snapshot().attempts[attempt].approval?.status).toBe("revoked");
   });
 });

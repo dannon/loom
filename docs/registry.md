@@ -147,6 +147,13 @@ isn't signed with this session's key -- and the write fails without touching the
 A filesystem gives no compare-and-swap, so the check and the rename after it are two steps.
 That window is one synchronous rename against a two-minute staleness limit.
 
+Taking over a stale lock has a window of its own. Two sessions that both find the lock stale
+can each write their takeover and each read back its own token before the other's rename
+lands, so for a moment both believe they are the writer. The fencing token bounds it: the
+next write from the one whose token is no longer on disk finds that out, drops to
+read-only, and fails without touching the file. This is a known window, not a guarantee
+the lock gives.
+
 ## Handoff eligibility
 
 ```
@@ -210,7 +217,10 @@ can't be opened or locked comes up read-only with one notice and never blocks th
   and before each command, the Spec is rebuilt from the block as it reads now against what
   was frozen, and a different `spec_revision` revokes the approval (`proposal.revoked`). A
   removed, duplicated or unreadable block revokes too; a label edit doesn't, since the label
-  isn't part of what runs. `/revoke` does the same on request.
+  isn't part of what runs. `/revoke` does the same on request. Drift is computed whatever
+  the store's mode: a session that approved and then lost the lock, or whose revocation
+  write failed, holds the revocation in memory, every reader in the session applies it, and
+  it is written as soon as the store can take it.
 - **`/pending`** lists proposals without a live approval and why: never approved, revoked,
   restored from an earlier session, or unreadable.
 

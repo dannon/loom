@@ -831,7 +831,8 @@ function liveOf(registry: Registry, pick: (a: Attempt) => boolean): AttemptId[] 
     .map((a) => a.attempt_id);
 }
 
-function revokeAttempts(store: RegistryStore, ids: AttemptId[]): AttemptId[] {
+/** Revoke these attempts' live approvals. Returns the ids it was asked to revoke. */
+export function revokeAttempts(store: RegistryStore, ids: AttemptId[]): AttemptId[] {
   if (ids.length === 0) return [];
   store.update((draft) => {
     for (const id of ids) {
