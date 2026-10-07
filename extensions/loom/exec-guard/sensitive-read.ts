@@ -93,30 +93,176 @@ export function isCredentialStore(
   // Also as realpaths: callers compare resolved targets, so a config.json that
   // is itself a symlink into the workspace would otherwise read as a plain
   // workspace file.
-  for (const f of SENSITIVE_HOME_FILES) {
-    const candidates = home ? withRealpath(path.join(home, f)) : [path.join(home, f)];
-    if (candidates.some((c) => norm.toLowerCase() === c.toLowerCase())) return true;
-  }
-  for (const f of AGENT_DIR_CREDENTIAL_FILES) {
-    const candidates = withRealpath(path.join(agentDir, f));
-    if (candidates.some((c) => norm.toLowerCase() === c.toLowerCase())) return true;
-  }
-  return false;
+  return credentialFileCandidates(home, agentDir).has(norm.toLowerCase());
 }
 
-// A path both as written and as resolved, since callers hand us realpaths. A
-// file that doesn't exist yet resolves through its parent.
-function withRealpath(p: string): string[] {
-  const out = [p];
+interface CandidateSnapshot {
+  candidates: Set<string>;
+  watched: Map<string, string>;
+  // False while any watched dir changed too recently for its mtime to have
+  // moved on; see RACY_WINDOW_MS.
+  settled: boolean;
+}
+
+const candidateCache = new Map<string, CandidateSnapshot>();
+const CANDIDATE_CACHE_LIMIT = 16;
+
+// A modification in the same timestamp tick as the one a snapshot saw leaves
+// the mtime unchanged (Linux stamps from a coarse jiffy clock, HFS+ to the
+// second), so a snapshot taken within this long of a watched dir's mtime is
+// rebuilt on the next call instead of trusted. Same idea as git's racy-index
+// check.
+const RACY_WINDOW_MS = 1000;
+
+/**
+ * Every spelling of every credential file, lexical and resolved, lowercased.
+ *
+ * Every file read and every directory listing entry on the web surface comes
+ * through here, and resolving each file costs one or two realpath walks --
+ * slow enough on Windows to matter -- so the set is cached per (home,
+ * agentDir). The cache is keyed on the stat of each candidate's parent
+ * directory and of every directory between it and $HOME. What a candidate
+ * resolves to can only change when an entry on that path is created, removed,
+ * renamed or replaced, and each of those rewrites the containing directory and
+ * so bumps its mtime -- on APFS, ext4 and NTFS alike. A symlink planted at
+ * `~/.loom/config.json` therefore shows up on the very next call. A symlink's
+ * target cannot be edited in place on POSIX; it has to be recreated, which is
+ * again a directory change. The inode rides along in the signature so a
+ * directory swapped for another with the same mtime still invalidates.
+ */
+function credentialFileCandidates(home: string, agentDir: string): Set<string> {
+  // No home: the lexical relative paths, exactly as before, and nothing on
+  // disk worth caching against.
+  if (!home) {
+    const lexical = SENSITIVE_HOME_FILES.map((f) => path.join(home, f));
+    for (const f of AGENT_DIR_CREDENTIAL_FILES) {
+      const p = path.join(agentDir, f);
+      lexical.push(...withRealpath(p, new Map(), isSymlink(p)));
+    }
+    return new Set(lexical.map((c) => c.toLowerCase()));
+  }
+
+  const key = `${home}\0${agentDir}`;
+  const cached = candidateCache.get(key);
+  if (cached?.settled && signaturesMatch(cached.watched)) return cached.candidates;
+
+  const builtAt = Date.now();
+  const files = [
+    ...SENSITIVE_HOME_FILES.map((f) => path.join(home, f)),
+    ...AGENT_DIR_CREDENTIAL_FILES.map((f) => path.join(agentDir, f)),
+  ];
+  // Stat the watched dirs BEFORE resolving, so a change that lands mid-build
+  // leaves a stale signature behind and forces the next call to rebuild.
+  const watched = new Map<string, string>();
+  for (const f of files) {
+    for (const dir of dirsToWatch(path.dirname(f), home)) {
+      if (!watched.has(dir)) watched.set(dir, dirSignature(dir));
+    }
+  }
+  const resolvedParents = new Map<string, string | null>();
+  const candidates = new Set<string>();
+  let sawLink = false;
+  for (const f of files) {
+    const link = isSymlink(f);
+    if (link) sawLink = true;
+    for (const c of withRealpath(f, resolvedParents, link)) candidates.add(c.toLowerCase());
+  }
+  // A parent that is itself a symlink resolves elsewhere; statSync above
+  // already follows it, but watch the resolved dir under its own name too so
+  // a later swap of the link is not hidden behind a cached signature.
+  for (const real of resolvedParents.values()) {
+    if (real && !watched.has(real)) watched.set(real, dirSignature(real));
+  }
+  // A credential file that is itself a symlink resolves through directories
+  // nobody is watching, and a dangling one starts resolving the moment its
+  // target is created, so that snapshot is never trusted: rare enough that
+  // paying the full walk on every call is fine.
+  const settled =
+    !sawLink &&
+    [...watched.values()].every((sig) => {
+      const mtime = Number(sig.split(":")[0]);
+      return Number.isNaN(mtime) || mtime < builtAt - RACY_WINDOW_MS;
+    });
+
+  if (candidateCache.size >= CANDIDATE_CACHE_LIMIT && !candidateCache.has(key)) {
+    candidateCache.clear();
+  }
+  candidateCache.set(key, { candidates, watched, settled });
+  return candidates;
+}
+
+// The parent itself, then each ancestor up to and including $HOME. Swapping
+// `~/.loom` for a symlink changes `~`, not `~/.loom`. A dir outside $HOME (a
+// relocated agent dir) gets itself and its own parent. Ancestors above $HOME
+// are not watched: replacing those needs rights over the home directory
+// itself, at which point nothing here holds anyway.
+function dirsToWatch(dir: string, home: string): string[] {
+  const out = [dir];
+  if (!within(dir, home)) {
+    out.push(path.dirname(dir));
+    return out;
+  }
+  // Compared with `within` rather than `===` so a home spelled with a
+  // trailing separator still stops the walk at $HOME.
+  for (let cur = dir; cur !== path.dirname(cur) && within(path.dirname(cur), home);) {
+    cur = path.dirname(cur);
+    out.push(cur);
+  }
+  return out;
+}
+
+function isSymlink(p: string): boolean {
   try {
-    out.push(fs.realpathSync(p));
+    return fs.lstatSync(p).isSymbolicLink();
   } catch {
+    return false;
+  }
+}
+
+function dirSignature(dir: string): string {
+  try {
+    const st = fs.statSync(dir);
+    return `${st.mtimeMs}:${st.ino}`;
+  } catch {
+    return "absent";
+  }
+}
+
+function signaturesMatch(watched: Map<string, string>): boolean {
+  for (const [dir, sig] of watched) if (dirSignature(dir) !== sig) return false;
+  return true;
+}
+
+// A path both as written and as resolved, since callers hand us realpaths. Only
+// a file that is itself a symlink needs its own realpath; anything else
+// resolves through its parent, which is resolved once per directory and shared
+// through `resolvedParents`. That also covers a file that doesn't exist yet.
+function withRealpath(
+  p: string,
+  resolvedParents: Map<string, string | null>,
+  isLink: boolean,
+): string[] {
+  const out = [p];
+  if (isLink) {
     try {
-      out.push(path.join(fs.realpathSync(path.dirname(p)), path.basename(p)));
+      out.push(fs.realpathSync(p));
+      return out;
+    } catch {
+      /* dangling -- the parent-resolved spelling is still worth having */
+    }
+  }
+  const dir = path.dirname(p);
+  if (!resolvedParents.has(dir)) {
+    let real: string | null = null;
+    try {
+      real = fs.realpathSync(dir);
     } catch {
       /* nothing on disk yet -- the lexical path is all there is */
     }
+    resolvedParents.set(dir, real);
   }
+  const realDir = resolvedParents.get(dir);
+  if (realDir) out.push(path.join(realDir, path.basename(p)));
   return out;
 }
 
