@@ -543,6 +543,52 @@ export function pendingCommand(deps: ProposalDeps): CommandReply {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Binding a recorded run to its proposal
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type BindResult = { bound: true; attemptId: string } | { bound: false; reason: string };
+
+/**
+ * Note that the agent says a run it recorded carries out an approved proposal.
+ * Until `loom_submit` exists the agent submits with the ordinary tools, so this
+ * is the agent's claim and is recorded as one: a `proposal.bound` activity row
+ * naming the approval's attempt id. It changes nothing in the registry and
+ * writes no harness field on the block -- a claim the harness didn't witness
+ * must never read as a submission it did.
+ */
+export function noteProposalBinding(
+  deps: ProposalDeps,
+  args: {
+    proposalId: string;
+    notebookAnchor: string;
+    run: { kind: "job" | "invocation"; id: string };
+  },
+): BindResult {
+  const session = deps.registry();
+  if (!session) return { bound: false, reason: "the approval registry isn't open in this session" };
+  checkProposalDrift(deps);
+  const live = liveApproval(session.store.snapshot(), args.proposalId);
+  if (!live) {
+    return { bound: false, reason: `${args.proposalId} has no live approval in this session` };
+  }
+  if (live.binding.step_anchor !== args.notebookAnchor) {
+    return {
+      bound: false,
+      reason: `${args.proposalId} was approved for ${live.binding.step_anchor}, not ${args.notebookAnchor}`,
+    };
+  }
+  activity(deps, "proposal.bound", "record-tool", {
+    proposal_id: args.proposalId,
+    attempt_id: live.attempt_id,
+    step_anchor: args.notebookAnchor,
+    run_kind: args.run.kind,
+    run_id: args.run.id,
+    declared_by: "agent",
+  });
+  return { bound: true, attemptId: live.attempt_id };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Registration
 // ─────────────────────────────────────────────────────────────────────────────
 

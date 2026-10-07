@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   approveCommand,
   checkProposalDrift,
+  noteProposalBinding,
   pendingCommand,
   propose,
   registerProposalCommands,
@@ -377,5 +378,41 @@ describe("the model has no way to approve", () => {
     expect(commands.sort()).toEqual(["approve", "pending", "revoke"]);
     await proposed();
     expect(Object.keys(session!.store.snapshot().attempts)).toEqual([]);
+  });
+});
+
+describe("record tools binding a run to its proposal", () => {
+  const run = { kind: "job" as const, id: "j1" };
+
+  it("logs the agent's claim against the live approval's attempt, and touches nothing else", async () => {
+    const id = await proposed();
+    await approveCommand(deps(), id);
+    const before = JSON.stringify(session!.store.snapshot());
+    const nbBefore = notebook();
+    const r = noteProposalBinding(deps(), { proposalId: id, notebookAnchor: "plan-a-step-1", run });
+    const attempt = liveApproval(session!.store.snapshot(), id)!.attempt_id;
+    expect(r).toEqual({ bound: true, attemptId: attempt });
+    expect(activity().at(-1)).toMatchObject({
+      kind: "proposal.bound",
+      source: "record-tool",
+      payload: { proposal_id: id, attempt_id: attempt, run_id: "j1", declared_by: "agent" },
+    });
+    expect(JSON.stringify(session!.store.snapshot())).toBe(before);
+    expect(notebook()).toBe(nbBefore);
+  });
+
+  it("won't bind to a proposal that isn't approved, or to another step", async () => {
+    const id = await proposed();
+    expect(
+      noteProposalBinding(deps(), { proposalId: id, notebookAnchor: "plan-a-step-1", run }),
+    ).toEqual({
+      bound: false,
+      reason: `${id} has no live approval in this session`,
+    });
+    await approveCommand(deps(), id);
+    expect(
+      noteProposalBinding(deps(), { proposalId: id, notebookAnchor: "plan-a-step-2", run }),
+    ).toMatchObject({ bound: false, reason: expect.stringMatching(/approved for plan-a-step-1/) });
+    expect(activity().some((e) => e.kind === "proposal.bound")).toBe(false);
   });
 });
