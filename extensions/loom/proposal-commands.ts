@@ -410,7 +410,7 @@ export async function approveCommand(
     };
   }
 
-  const table = renderProposalTable(proposal, { resolvedVersion: snapshot.version });
+  const table = renderProposalTable(proposal, { resolvedVersion: snapshot.version, plain: true });
   if (opts.confirm) {
     const yes = await opts.confirm(`Approve ${id}?`, `${table}\n\nThis freezes exactly the above.`);
     if (!yes) return { level: "info", message: `Not approved; ${id} is still pending.` };
@@ -475,6 +475,7 @@ export async function approveCommand(
       renderProposalTable(proposal, {
         resolvedVersion: result.spec.target.version,
         specRevision: result.specRevision,
+        plain: true,
       }) +
       `\n\nEditing the proposal from here revokes this approval.`,
   };
@@ -543,12 +544,12 @@ export function pendingCommand(deps: ProposalDeps): CommandReply {
     invalid: "can't be read",
   } as const;
   const sections = pending.map(({ sighting, state }) => {
-    const head = `**${sighting.proposalId}** -- ${why[state]}`;
+    const head = `${sighting.proposalId} -- ${why[state]}`;
     if (!sighting.proposal) {
       const block = blocks.find((b) => b.proposalId === sighting.proposalId);
       return `${head}: ${block?.errors.join("; ") ?? "unreadable"}`;
     }
-    return `${head}\n\n${renderProposalTable(sighting.proposal, { compact: true })}`;
+    return `${head}\n\n${renderProposalTable(sighting.proposal, { compact: true, plain: true })}`;
   });
   const tail =
     registry && session?.store.mode === "writer"

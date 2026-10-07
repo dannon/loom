@@ -212,7 +212,7 @@ describe("/approve", () => {
         return false;
       },
     });
-    expect(shown).toContain("| param threads | 4 -- the queue gives four cores |");
+    expect(shown).toMatch(/param threads +4 -- the queue gives four cores/);
     expect(reply.message).toMatch(/Not approved/);
     expect(liveApproval(session!.store.snapshot(), id)).toBeUndefined();
   });
@@ -246,7 +246,7 @@ describe("/approve", () => {
       NOTEBOOK + "\n" + renderProposalBlock(toolProposal(), { specRevision: "f".repeat(64) }),
     );
     expect(liveApproval(session!.store.snapshot(), "prop-abc123")).toBeUndefined();
-    expect(pendingCommand(deps()).message).toMatch(/prop-abc123\*\* -- not approved/);
+    expect(pendingCommand(deps()).message).toMatch(/prop-abc123 -- not approved/);
   });
 
   it("refuses an unknown id, a duplicated id, and an unreadable block", async () => {
@@ -313,7 +313,7 @@ describe("edit after approve revokes, on the next read", () => {
       source: "harness",
       payload: { proposal_id: id, attempt_id: attempt, reason: "edited" },
     });
-    expect(pendingCommand(deps()).message).toMatch(new RegExp(`${id}\\*\\* -- approval revoked`));
+    expect(pendingCommand(deps()).message).toMatch(new RegExp(`${id} -- approval revoked`));
   });
 
   it("an edit to the label alone leaves the approval live", async () => {

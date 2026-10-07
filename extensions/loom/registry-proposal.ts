@@ -966,7 +966,12 @@ export function renderProposalTable(
    * `compact` shortens long values, for listings. Anything shown to someone
    * about to approve must leave it off: the table is what they consent to.
    */
-  opts: { resolvedVersion?: string; specRevision?: string; compact?: boolean } = {},
+  opts: {
+    resolvedVersion?: string;
+    specRevision?: string;
+    compact?: boolean;
+    plain?: boolean;
+  } = {},
 ): string {
   const t = proposal.target;
   const version =
@@ -989,5 +994,11 @@ export function renderProposalTable(
   }
   rows.push(["Done when", describePredicate(proposal.predicate)]);
   if (opts.specRevision) rows.push(["spec_revision", opts.specRevision.slice(0, 12)]);
+  if (opts.plain) {
+    // For notices and dialogs, which show text as-is: aligned columns read
+    // better there than markdown pipes.
+    const width = Math.max(...rows.map(([k]) => k.length));
+    return rows.map(([k, v]) => `${k.padEnd(width)}  ${v.replace(/[\r\n]+/g, " ")}`).join("\n");
+  }
   return ["| | |", "|---|---|", ...rows.map(([k, v]) => `| ${cell(k)} | ${cell(v)} |`)].join("\n");
 }

@@ -563,3 +563,12 @@ describe("review follow-ups", () => {
     ]);
   });
 });
+
+describe("plain rendering for notices", () => {
+  it("lines the columns up and drops the markdown", () => {
+    const out = renderProposalTable(toolProposal(), { plain: true });
+    expect(out).not.toContain("|");
+    expect(out.split("\n")[0]).toMatch(/^Proposal +prop-abc123$/);
+    expect(out).toMatch(/^param threads +4 -- the queue gives four cores$/m);
+  });
+});
