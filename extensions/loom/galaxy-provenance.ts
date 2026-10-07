@@ -1,0 +1,392 @@
+/**
+ * Per-attempt provenance files: `<analysis>/.loom/provenance/<attempt_id>.json`.
+ *
+ * The notebook block carries a compact summary of each recorded run; this is
+ * the full record behind it -- every job's tool, version, effective params,
+ * inputs and outputs, as Galaxy reported them. Written only by the harness,
+ * into the `.loom/` tree the write jail already protects from the agent's file
+ * tools and bash redirects, so it is the half of the record the model cannot
+ * edit after the fact.
+ *
+ * The file is created when the attempt is first recorded (by the submission
+ * hook, or by reconcile for a run nobody recorded), and that first write names
+ * the Galaxy ids the attempt owns. Enrichment only ever adds job records to a
+ * file whose owned ids include the block asking. That matters because the
+ * notebook is not protected: `attempt_id` sits in a block the agent can edit,
+ * and without the ownership check a block re-pointed at another attempt's id
+ * would merge its own jobs into that attempt's record -- a forged attribution
+ * written by the harness itself.
+ *
+ * Writes are atomic (a sibling temp file renamed over the target), refuse to
+ * go through a symlink at any level below the analysis directory, and are
+ * serialised per file inside this process.
+ */
+
+import * as fs from "fs";
+import * as fsp from "fs/promises";
+import * as path from "path";
+import { randomBytes } from "crypto";
+import { isUlid } from "./ulid";
+
+export const PROVENANCE_SCHEMA_VERSION = 1;
+
+/** Relative to the analysis directory. Same tree the UDT definitions use. */
+export const PROVENANCE_DIR_PARTS = [".loom", "provenance"] as const;
+
+/** What a field is when Galaxy did not say. Never inferred from anything else. */
+export const UNKNOWN = "unknown";
+export type Maybe<T> = T | typeof UNKNOWN;
+
+export type AttemptKind = "invocation" | "jobs";
+
+/** One input or output dataset of a job. */
+export interface ProvenanceDataset {
+  /** The tool's own name for the input/output slot. */
+  name: string;
+  id: string;
+  src: Maybe<string>;
+  dataset_name: Maybe<string>;
+  ext: Maybe<string>;
+  dbkey: Maybe<string>;
+  create_time: Maybe<string>;
+  state: Maybe<string>;
+}
+
+export interface ProvenanceJob {
+  job_id: string;
+  tool_id: Maybe<string>;
+  tool_version: Maybe<string>;
+  /** Where `tool_version` came from, since job details never carry it. */
+  tool_version_source: "submission" | "invocation_step" | "job_listing" | typeof UNKNOWN;
+  state: Maybe<string>;
+  exit_code: number | null | typeof UNKNOWN;
+  create_time: Maybe<string>;
+  update_time: Maybe<string>;
+  command_version: Maybe<string>;
+  params: Record<string, unknown> | typeof UNKNOWN;
+  inputs: ProvenanceDataset[] | typeof UNKNOWN;
+  outputs: ProvenanceDataset[] | typeof UNKNOWN;
+  output_collections: { name: string; id: string; src: Maybe<string> }[] | typeof UNKNOWN;
+  /** For a workflow step job: which step produced it. */
+  step?: {
+    order_index: number | typeof UNKNOWN;
+    label: Maybe<string>;
+    subworkflow_invocation_id?: string;
+  };
+  /** Set when this job's details could not be fetched; the fields above are then `unknown`. */
+  unavailable?: string;
+}
+
+export interface AttemptRecord {
+  schema: number;
+  attempt_id: string;
+  kind: AttemptKind;
+  galaxy_server_url: string;
+  history_id: Maybe<string>;
+  /** Who made the submission, as far as the harness knows. Mirrors the block. */
+  submitted_by: "harness" | "agent" | "unknown" | "replay";
+  created_at: string;
+  /** The Galaxy ids this attempt owns. Set at creation and never widened. */
+  ids: { invocation_id?: string; job_ids?: string[] };
+  enrichment: {
+    state: "pending" | "complete" | "unavailable";
+    attempts: number;
+    error?: string;
+    updated_at: string;
+  };
+  jobs: Record<string, ProvenanceJob>;
+}
+
+export class ProvenanceRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProvenanceRefusal";
+  }
+}
+
+/** Analysis-relative POSIX path of an attempt's file, for activity rows. */
+export function provenanceRelativePath(attemptId: string): string {
+  return [...PROVENANCE_DIR_PARTS, `${attemptId}.json`].join("/");
+}
+
+/**
+ * The absolute path for an attempt, or a refusal. The id is a ULID or nothing:
+ * it reaches here from a notebook block, so it is agent-editable text, and a
+ * filename built from it must not be able to name anything but one file in one
+ * directory.
+ */
+export function provenancePath(analysisDir: string, attemptId: string): string {
+  if (!isUlid(attemptId)) {
+    throw new ProvenanceRefusal(`"${attemptId}" is not an attempt id`);
+  }
+  return path.join(analysisDir, ...PROVENANCE_DIR_PARTS, `${attemptId}.json`);
+}
+
+/**
+ * Make sure every directory from the analysis dir down to the provenance dir
+ * is a real directory. A symlinked `.loom` or `provenance` would carry the
+ * write somewhere the jail never looked at.
+ */
+async function ensureProvenanceDir(analysisDir: string, create = true): Promise<string | null> {
+  let current = analysisDir;
+  for (const part of PROVENANCE_DIR_PARTS) {
+    current = path.join(current, part);
+    let stat: fs.Stats | null = null;
+    try {
+      stat = await fsp.lstat(current);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
+    }
+    if (!stat && !create) return null;
+    if (!stat) {
+      try {
+        await fsp.mkdir(current);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code !== "EEXIST") throw err;
+      }
+      stat = await fsp.lstat(current);
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      throw new ProvenanceRefusal(`${current} is not a plain directory`);
+    }
+  }
+  return current;
+}
+
+/** Per-file promise chain, so two enrichment passes never interleave a read-modify-write. */
+const fileLocks = new Map<string, Promise<unknown>>();
+
+function withFileLock<T>(file: string, work: () => Promise<T>): Promise<T> {
+  const prior = fileLocks.get(file) ?? Promise.resolve();
+  const next = prior.catch(() => undefined).then(work);
+  const settled = next.catch(() => undefined);
+  fileLocks.set(file, settled);
+  void settled.then(() => {
+    if (fileLocks.get(file) === settled) fileLocks.delete(file);
+  });
+  return next;
+}
+
+/**
+ * Read an attempt's record. Null when there is none. A file that is there but
+ * is not a record -- a symlink, unparseable, or naming a different attempt --
+ * is a refusal rather than a null, so a caller never mistakes a planted file
+ * for permission to start a fresh one over it.
+ */
+export async function readAttemptRecord(
+  analysisDir: string,
+  attemptId: string,
+): Promise<AttemptRecord | null> {
+  const file = provenancePath(analysisDir, attemptId);
+  // The directories are checked on the way in too: reading through a
+  // symlinked `.loom` would hand back a record planted somewhere else.
+  if (!(await ensureProvenanceDir(analysisDir, false))) return null;
+  let stat: fs.Stats;
+  try {
+    stat = await fsp.lstat(file);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+    throw err;
+  }
+  if (!stat.isFile()) throw new ProvenanceRefusal(`${file} is not a plain file`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await fsp.readFile(file, "utf-8"));
+  } catch {
+    throw new ProvenanceRefusal(`${file} is not a readable provenance record`);
+  }
+  if (!isAttemptRecord(parsed) || parsed.attempt_id !== attemptId) {
+    throw new ProvenanceRefusal(`${file} does not hold the record for ${attemptId}`);
+  }
+  return parsed;
+}
+
+function isAttemptRecord(value: unknown): value is AttemptRecord {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Partial<AttemptRecord>;
+  return (
+    typeof v.attempt_id === "string" &&
+    (v.kind === "invocation" || v.kind === "jobs") &&
+    !!v.ids &&
+    typeof v.ids === "object" &&
+    !!v.jobs &&
+    typeof v.jobs === "object" &&
+    !!v.enrichment &&
+    typeof v.enrichment === "object"
+  );
+}
+
+async function writeAtomically(file: string, record: AttemptRecord): Promise<void> {
+  const dir = path.dirname(file);
+  const temp = path.join(
+    dir,
+    `.${path.basename(file)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`,
+  );
+  // `wx`: a planted file or symlink at the temp name fails the open instead of
+  // being written through.
+  await fsp.writeFile(temp, JSON.stringify(record, null, 2) + "\n", {
+    encoding: "utf-8",
+    flag: "wx",
+  });
+  try {
+    // rename() replaces a symlink at the target rather than following it, and
+    // readers see the old record or the new one, never half of either.
+    await fsp.rename(temp, file);
+  } catch (err) {
+    await fsp.rm(temp, { force: true });
+    throw err;
+  }
+}
+
+export interface AttemptSeed {
+  attemptId: string;
+  kind: AttemptKind;
+  galaxyServerUrl: string;
+  historyId?: string;
+  submittedBy: AttemptRecord["submitted_by"];
+  ids: AttemptRecord["ids"];
+  createdAt?: string;
+}
+
+/**
+ * Create the attempt's record if there is none, and return whatever is there.
+ *
+ * Creation is exclusive and first-writer-wins: the ids an attempt owns are
+ * decided once, by whoever recorded it first, and later callers get the
+ * existing record back to check themselves against rather than a chance to
+ * restate it.
+ */
+export async function ensureAttemptRecord(
+  analysisDir: string,
+  seed: AttemptSeed,
+): Promise<AttemptRecord> {
+  const file = provenancePath(analysisDir, seed.attemptId);
+  return withFileLock(file, async () => {
+    const existing = await readAttemptRecord(analysisDir, seed.attemptId);
+    if (existing) return existing;
+    await ensureProvenanceDir(analysisDir);
+    const now = new Date().toISOString();
+    const record: AttemptRecord = {
+      schema: PROVENANCE_SCHEMA_VERSION,
+      attempt_id: seed.attemptId,
+      kind: seed.kind,
+      galaxy_server_url: seed.galaxyServerUrl,
+      history_id: seed.historyId ?? UNKNOWN,
+      submitted_by: seed.submittedBy,
+      created_at: seed.createdAt ?? now,
+      ids: normalizeIds(seed.ids),
+      enrichment: { state: "pending", attempts: 0, updated_at: now },
+      jobs: {},
+    };
+    try {
+      await fsp.writeFile(file, JSON.stringify(record, null, 2) + "\n", {
+        encoding: "utf-8",
+        flag: "wx",
+      });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== "EEXIST") throw err;
+      const raced = await readAttemptRecord(analysisDir, seed.attemptId);
+      if (raced) return raced;
+      throw err;
+    }
+    return record;
+  });
+}
+
+function normalizeIds(ids: AttemptRecord["ids"]): AttemptRecord["ids"] {
+  return {
+    ...(ids.invocation_id ? { invocation_id: ids.invocation_id } : {}),
+    ...(ids.job_ids && ids.job_ids.length > 0 ? { job_ids: [...new Set(ids.job_ids)] } : {}),
+  };
+}
+
+/** Whether this record was created for the block asking about it. */
+export function attemptOwns(
+  record: AttemptRecord,
+  blockKind: "invocation" | "job",
+  id: string,
+): boolean {
+  if (blockKind === "invocation") {
+    return record.kind === "invocation" && record.ids.invocation_id === id;
+  }
+  return record.kind === "jobs" && (record.ids.job_ids ?? []).includes(id);
+}
+
+export interface EnrichmentWrite {
+  blockKind: "invocation" | "job";
+  blockId: string;
+  state: AttemptRecord["enrichment"]["state"];
+  attempts: number;
+  error?: string;
+  /** Job records to add or refresh. Keys outside what the attempt owns are refused. */
+  jobs: ProvenanceJob[];
+}
+
+/**
+ * Fold one enrichment result into an existing attempt record.
+ *
+ * Refuses unless the record was created for this block -- see the module
+ * note. For a tool-run attempt each job record must be one of the job ids the
+ * attempt owns; for an invocation, the step jobs are whatever Galaxy says the
+ * invocation ran, which the ownership of the invocation id already vouches for.
+ */
+export async function writeEnrichment(
+  analysisDir: string,
+  attemptId: string,
+  update: EnrichmentWrite,
+): Promise<AttemptRecord> {
+  const file = provenancePath(analysisDir, attemptId);
+  return withFileLock(file, async () => {
+    const record = await readAttemptRecord(analysisDir, attemptId);
+    if (!record) throw new ProvenanceRefusal(`no provenance record for ${attemptId}`);
+    if (!attemptOwns(record, update.blockKind, update.blockId)) {
+      throw new ProvenanceRefusal(
+        `${update.blockKind} ${update.blockId} is not part of attempt ${attemptId}`,
+      );
+    }
+    if (update.blockKind === "job") {
+      const owned = new Set(record.ids.job_ids ?? []);
+      for (const job of update.jobs) {
+        if (!owned.has(job.job_id)) {
+          throw new ProvenanceRefusal(`job ${job.job_id} is not part of attempt ${attemptId}`);
+        }
+      }
+    }
+    const jobs = { ...record.jobs };
+    for (const job of update.jobs) jobs[job.job_id] = job;
+    const next: AttemptRecord = {
+      ...record,
+      jobs,
+      enrichment: {
+        state: update.state,
+        attempts: update.attempts,
+        ...(update.error ? { error: update.error } : {}),
+        updated_at: new Date().toISOString(),
+      },
+    };
+    await ensureProvenanceDir(analysisDir);
+    await writeAtomically(file, next);
+    return next;
+  });
+}
+
+/** Synchronous existence check, for the evidence gate's tool_call hook. */
+export function readAttemptRecordSync(
+  analysisDir: string,
+  attemptId: string,
+): AttemptRecord | null {
+  try {
+    const file = provenancePath(analysisDir, attemptId);
+    let dir = analysisDir;
+    for (const part of PROVENANCE_DIR_PARTS) {
+      dir = path.join(dir, part);
+      if (!fs.lstatSync(dir).isDirectory()) return null;
+    }
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile()) return null;
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf-8"));
+    return isAttemptRecord(parsed) && parsed.attempt_id === attemptId ? parsed : null;
+  } catch {
+    return null;
+  }
+}

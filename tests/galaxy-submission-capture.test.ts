@@ -21,6 +21,7 @@ import {
   setNotebookPath,
 } from "../extensions/loom/state";
 import { isUlid } from "../extensions/loom/ulid";
+import { readAttemptRecord } from "../extensions/loom/galaxy-provenance";
 
 // Hook run right after the notebook writer reads a file, so a test can land a
 // competing write inside the read-then-rename window deterministically.
@@ -198,6 +199,23 @@ describe("submission capture: registration", () => {
 
     const [row] = activity().filter((r) => r.kind === "submission.registered");
     expect(row.payload.job_ids).toEqual(["job000000000001", "job000000000002", "job000000000003"]);
+  });
+
+  it("creates the attempt's provenance record naming exactly the ids Galaxy answered with", async () => {
+    await submit("mcp__galaxy__run_tool", { tool_id: "fastp" }, mcpResult(THREE_JOBS));
+    const [block] = findJobBlocks(notebook());
+    const record = await readAttemptRecord(tmpDir, block.attemptId!);
+    expect(record).toMatchObject({
+      attempt_id: block.attemptId,
+      kind: "jobs",
+      submitted_by: "harness",
+      galaxy_server_url: "https://usegalaxy.org",
+      ids: { job_ids: ["job000000000001", "job000000000002", "job000000000003"] },
+      enrichment: { state: "pending", attempts: 0 },
+      jobs: {},
+    });
+    const [row] = activity().filter((r) => r.kind === "submission.registered");
+    expect(row.payload.provenance).toBe(`.loom/provenance/${block.attemptId}.json`);
   });
 
   it("marks work with no plan step as unattributed rather than guessing", async () => {

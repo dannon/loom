@@ -61,6 +61,7 @@ import {
   type InvocationYaml,
 } from "./notebook-writer";
 import { readMcpOutputFile } from "./mcp-output";
+import { ensureAttemptRecord, provenanceRelativePath } from "./galaxy-provenance";
 import { getCurrentStepAnchor, getNotebookPath, setCurrentStepAnchor } from "./state";
 import { ulid } from "./ulid";
 
@@ -589,6 +590,14 @@ export async function handleSubmissionResult(
     setCurrentStepAnchor(null);
   }
 
+  // The provenance record is created now, while the ids this attempt owns are
+  // the ones Galaxy just answered with. Enrichment only ever adds to a record
+  // whose owned ids include the block asking, and the block's attempt_id is
+  // agent-editable text -- so this is the write that pins which runs the
+  // attempt is about. A failure here costs enrichment a fallback, not the
+  // registration: the block is already written.
+  const provenance = await recordAttempt(notebookPath, submission, dispatch, written);
+
   record("submission.registered", {
     tool: toolName,
     attempt_id: dispatch.attemptId,
@@ -608,7 +617,40 @@ export async function handleSubmissionResult(
     // meant to write, so the row can't claim a definition that never landed.
     ...(written.udtDefinition ? { definition: written.udtDefinition } : {}),
     ...(submission.partial ? { partial: true } : {}),
+    ...(provenance ? { provenance } : {}),
   });
+}
+
+async function recordAttempt(
+  notebookPath: string,
+  submission: ParsedSubmission,
+  dispatch: Dispatch,
+  written: WriteOutcome,
+): Promise<string | null> {
+  const kind = written.wroteInvocation
+    ? "invocation"
+    : written.wroteJobs.length > 0
+      ? "jobs"
+      : null;
+  if (!kind) return null;
+  try {
+    await ensureAttemptRecord(path.dirname(notebookPath), {
+      attemptId: dispatch.attemptId,
+      kind,
+      galaxyServerUrl: getGalaxyConfig()?.url ?? "",
+      historyId: submission.historyId ?? submission.jobs?.find((j) => j.historyId)?.historyId,
+      submittedBy: dispatch.replayed ? "replay" : "harness",
+      ids:
+        kind === "invocation"
+          ? { invocation_id: written.wroteInvocation }
+          : { job_ids: written.wroteJobs },
+      createdAt: dispatch.submittedAt,
+    });
+    return provenanceRelativePath(dispatch.attemptId);
+  } catch (err) {
+    console.error("[submission-capture] provenance record not written:", err);
+    return null;
+  }
 }
 
 export function registerSubmissionCapture(pi: ExtensionAPI): void {

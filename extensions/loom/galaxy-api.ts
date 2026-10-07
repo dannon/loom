@@ -23,14 +23,27 @@ export type { InvocationDetail } from "@galaxyproject/galaxy-ops";
 
 /**
  * Subset of GET /api/jobs/{jobId} we actually read.
- * tool_version lives at the top level per Galaxy's Job.to_dict().
+ *
+ * `tool_version` is declared because the ORM emits it, but Galaxy's response
+ * model drops it (pydantic `extra="ignore"`), so on a real server it is
+ * absent. The submission response is where a version actually survives. The
+ * rest are only filled with `?full=true`; `inputs`/`outputs` are dicts keyed
+ * by the tool's input/output name, not lists.
  */
 export interface GalaxyJobDetailsResponse {
   id: string;
   state: string;
   tool_id: string;
-  tool_version: string;
+  tool_version?: string;
   params?: Record<string, unknown>;
+  exit_code?: number | null;
+  create_time?: string;
+  update_time?: string;
+  command_version?: string | null;
+  history_id?: string;
+  inputs?: Record<string, unknown>;
+  outputs?: Record<string, unknown>;
+  output_collections?: Record<string, unknown>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -87,19 +100,33 @@ export class GalaxyApiError extends Error {
   }
 }
 
+/**
+ * Replaces the network for every Galaxy call made here, galaxy-ops' included.
+ * Set only by the Tier-1 fixture seam (galaxy-fixture.ts) and by tests: the
+ * capture scenarios have to exercise reconcile and enrichment against recorded
+ * responses, and there is no other layer every one of those calls shares.
+ */
+type GalaxyFetch = (url: string, init: RequestInit) => Promise<Response>;
+let fetchOverride: GalaxyFetch | null = null;
+
+export function setGalaxyFetchOverride(fetchImpl: GalaxyFetch | null): void {
+  fetchOverride = fetchImpl;
+}
+
+function galaxyFetch(url: string, init: RequestInit): Promise<Response> {
+  if (fetchOverride) return fetchOverride(url, init);
+  return fetchSameOriginOnly(url, init, GALAXY_REDIRECT_LABELS);
+}
+
 export async function galaxyGet<T = unknown>(path: string, signal?: AbortSignal): Promise<T> {
   const config = getGalaxyConfig();
   if (!config) throw new Error("Galaxy credentials not configured (GALAXY_URL, GALAXY_API_KEY)");
 
   const url = `${config.url}/api${path}`;
-  const resp = await fetchSameOriginOnly(
-    url,
-    {
-      headers: { "x-api-key": config.apiKey },
-      signal,
-    },
-    GALAXY_REDIRECT_LABELS,
-  );
+  const resp = await galaxyFetch(url, {
+    headers: { "x-api-key": config.apiKey },
+    signal,
+  });
 
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
@@ -119,19 +146,15 @@ async function galaxyMutate<T>(
   if (!config) throw new Error("Galaxy credentials not configured (GALAXY_URL, GALAXY_API_KEY)");
 
   const url = `${config.url}/api${path}`;
-  const resp = await fetchSameOriginOnly(
-    url,
-    {
-      method,
-      headers: {
-        "x-api-key": config.apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal,
+  const resp = await galaxyFetch(url, {
+    method,
+    headers: {
+      "x-api-key": config.apiKey,
+      "Content-Type": "application/json",
     },
-    GALAXY_REDIRECT_LABELS,
-  );
+    body: JSON.stringify(body),
+    signal,
+  });
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
@@ -158,15 +181,62 @@ export async function galaxyPut<T = unknown>(
 }
 
 /**
- * Fetch job details from Galaxy: `id`, `state`, `tool_id`, `tool_version`,
- * and `params`. The invocation poller is the only caller today and reads
- * only `state`.
+ * Fetch one job by id. The poller reads only `state`; enrichment asks for
+ * `full` to get the effective params and the input/output maps.
+ *
+ * Hand-rolled because galaxy-ops' `getJobDetails` takes a *dataset* id and
+ * resolves the job from it, mirroring galaxy-mcp 1.9.0; nothing there looks a
+ * job up by its own id.
  */
 export async function galaxyGetJobDetails(
   jobId: string,
   signal?: AbortSignal,
+  options: { full?: boolean } = {},
 ): Promise<GalaxyJobDetailsResponse> {
-  return galaxyGet<GalaxyJobDetailsResponse>(`/jobs/${encodeURIComponent(jobId)}`, signal);
+  const query = options.full ? "?full=true" : "";
+  return galaxyGet<GalaxyJobDetailsResponse>(`/jobs/${encodeURIComponent(jobId)}${query}`, signal);
+}
+
+/** One row of `GET /api/jobs` (collection view). Every field but `id` is optional on purpose. */
+export interface GalaxyJobListing {
+  id: string;
+  state?: string;
+  tool_id?: string;
+  tool_version?: string;
+  history_id?: string;
+  create_time?: string;
+  update_time?: string;
+  exit_code?: number | null;
+}
+
+/**
+ * One page of a history's jobs, oldest first.
+ *
+ * `date_range_min` is a day, not an instant: Galaxy filters it against
+ * `update_time` and its accepted formats have moved between releases, while a
+ * bare date has always parsed. That makes the page a superset of what the
+ * caller wants, and the caller filters on `create_time` itself.
+ *
+ * Hand-rolled because galaxy-ops has no job listing.
+ */
+export async function galaxyListHistoryJobs(
+  params: { historyId: string; sinceDay?: string; limit: number; offset: number },
+  signal?: AbortSignal,
+): Promise<GalaxyJobListing[]> {
+  const query = new URLSearchParams({
+    history_id: params.historyId,
+    view: "collection",
+    order_by: "create_time",
+    limit: String(params.limit),
+    offset: String(params.offset),
+  });
+  if (params.sinceDay) query.set("date_range_min", params.sinceDay);
+  const rows = await galaxyGet<unknown>(`/jobs?${query.toString()}`, signal);
+  if (!Array.isArray(rows)) throw new Error("Galaxy's job index did not return a list");
+  return rows.filter(
+    (r): r is GalaxyJobListing =>
+      !!r && typeof r === "object" && typeof (r as { id?: unknown }).id === "string",
+  );
 }
 
 /**
@@ -198,6 +268,11 @@ const ABSENT_STATUSES: ReadonlySet<number> = new Set([400, 404]);
  * verified block for a job that does not exist.
  */
 const ENCODED_ID_RE = /^[0-9a-fA-F]+$/;
+
+/** Whether a value has the shape of a Galaxy encoded id. See ENCODED_ID_RE. */
+export function isGalaxyEncodedId(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 64 && ENCODED_ID_RE.test(value);
+}
 
 /**
  * Ask Galaxy whether a run id exists, without caring what it says beyond that.
@@ -298,11 +373,7 @@ function galaxyOpsFetch(callerSignal?: AbortSignal): typeof fetch {
     const body =
       req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
     const signal = callerSignal ? AbortSignal.any([req.signal, callerSignal]) : req.signal;
-    return fetchSameOriginOnly(
-      req.url,
-      { method: req.method, headers: req.headers, body, signal },
-      GALAXY_REDIRECT_LABELS,
-    );
+    return galaxyFetch(req.url, { method: req.method, headers: req.headers, body, signal });
   };
 }
 
