@@ -222,6 +222,9 @@ describe("symlinked directories", () => {
     const result = writeNoClobber(lessonFilePath("stats", "x"), "text");
     expect(result.ok).toBe(false);
     expect(fs.existsSync(path.join(elsewhere, "stats", "x.md"))).toBe(false);
+    // The guard runs before mkdir, so a refused write leaves nothing behind
+    // through the link, not even an empty namespace directory.
+    expect(fs.readdirSync(elsewhere)).toEqual([]);
   });
 
   it("refuses to stage a draft through a symlinked drafts directory", () => {
