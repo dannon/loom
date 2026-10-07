@@ -386,6 +386,15 @@ function emptyShape(version: string): TemplateShape {
  * the proposal makes, and refusing on a guess would be worse than letting
  * Galaxy say so at submission.
  */
+/**
+ * A group's members. Galaxy's `io_details` calls them `inputs` (and a
+ * conditional's branches `cases`, its selector `test_param`); a user-defined
+ * tool's YAML definition calls them `parameters` (`whens`, `test_parameter`).
+ */
+function children(group: Record<string, unknown>): unknown {
+  return group.inputs ?? group.parameters;
+}
+
 function walkToolInputs(
   inputs: unknown,
   shape: TemplateShape,
@@ -406,17 +415,19 @@ function walkToolInputs(
         multiple: raw.multiple === true,
       });
     } else if (type === "conditional") {
-      const test = isRecord(raw.test_param) ? raw.test_param : null;
+      const testRaw = raw.test_param ?? raw.test_parameter;
+      const test = isRecord(testRaw) ? testRaw : null;
       if (test && typeof test.name === "string") shape.params.add(`${name}|${test.name}`);
-      const cases = Array.isArray(raw.cases) ? raw.cases : [];
+      const casesRaw = raw.cases ?? raw.whens;
+      const cases = Array.isArray(casesRaw) ? casesRaw : [];
       for (const c of cases) {
-        if (isRecord(c)) walkToolInputs(c.inputs, shape, `${name}|`, true);
+        if (isRecord(c)) walkToolInputs(children(c), shape, `${name}|`, true);
       }
     } else if (type === "repeat") {
       shape.repeats.add(name);
-      walkToolInputs(raw.inputs, shape, `${name}_#|`, true);
+      walkToolInputs(children(raw), shape, `${name}_#|`, true);
     } else if (type === "section") {
-      walkToolInputs(raw.inputs, shape, `${name}|`, conditional);
+      walkToolInputs(children(raw), shape, `${name}|`, conditional);
     } else if (type === "upload_dataset") {
       continue;
     } else {
@@ -490,6 +501,12 @@ function foldRepeats(param: string, repeats: Set<string>): string {
     .join("|");
 }
 
+/** The template slot a proposal's slot name means, with repeat indices folded. */
+export function slotFor(shape: TemplateShape, name: string): TemplateSlot | undefined {
+  if (name.includes("_#")) return undefined;
+  return shape.slots.get(name) ?? shape.slots.get(foldRepeats(name, shape.repeats));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Validation
 // ─────────────────────────────────────────────────────────────────────────────
@@ -532,9 +549,12 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
     );
   }
 
+  // Counted by the name as given (two repeat instances are two slots) and,
+  // separately, by the template slot they fill, for the required check.
   const filled = new Map<string, number>();
+  const covered = new Set<string>();
   for (const input of proposal.inputs) {
-    const slot = shape.slots.get(input.slot);
+    const slot = slotFor(shape, input.slot);
     if (!slot) {
       problems.push(
         `input slot "${input.slot}" is not a dataset input; slots: ${describeSlots(shape)}`,
@@ -549,14 +569,15 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
       );
     }
     filled.set(input.slot, (filled.get(input.slot) ?? 0) + 1);
+    covered.add(slot.name);
   }
   for (const [name, n] of filled) {
-    if (n > 1 && !shape.slots.get(name)?.multiple) {
+    if (n > 1 && !slotFor(shape, name)?.multiple) {
       problems.push(`input slot "${name}" takes one dataset but is given ${n}`);
     }
   }
   for (const slot of shape.slots.values()) {
-    if (slot.required && !filled.has(slot.name)) {
+    if (slot.required && !covered.has(slot.name)) {
       problems.push(
         `required input "${slot.name}"${slot.label && slot.label !== slot.name ? ` (${slot.label})` : ""} is not given`,
       );
@@ -567,11 +588,11 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
   for (const o of proposal.overrides) {
     if (seen.has(o.param)) problems.push(`parameter "${o.param}" is overridden twice`);
     seen.add(o.param);
-    if (shape.slots.has(o.param)) {
+    if (slotFor(shape, o.param)) {
       problems.push(`"${o.param}" is a dataset input; give it in inputs, not overrides`);
       continue;
     }
-    if (!shape.params.has(foldRepeats(o.param, shape.repeats))) {
+    if (o.param.includes("_#") || !shape.params.has(foldRepeats(o.param, shape.repeats))) {
       problems.push(`"${o.param}" is not a parameter of this ${proposalNoun(proposal)}`);
     }
   }
@@ -728,7 +749,7 @@ export function approveProposal(store: RegistryStore, req: ApproveRequest): Appr
         version: snapshot.version,
         templateRef: { digest, fetched_at: now, version: snapshot.version },
         definitionDigest: definition ? sha256Hex(canonicalJson(definition)) : undefined,
-        required: (slot) => shape.slots.get(slot)?.required ?? false,
+        required: (slot) => slotFor(shape, slot)?.required ?? false,
         assertions,
       }),
     );
@@ -741,15 +762,21 @@ export function approveProposal(store: RegistryStore, req: ApproveRequest): Appr
   const live = attemptsForProposal(current, proposal.proposalId).filter(
     (a) => a.approval?.status === "live",
   );
-  const same = live.find(
-    (a) => a.approval?.spec_revision === revision && a.binding.step_anchor === proposal.stepAnchor,
-  );
+  // The same proposal against the same template is the same approval, even
+  // though a fresh `fetched_at` makes a fresh Spec hash: compare against each
+  // live approval with its own frozen template reference put back.
+  const same = live.find((a) => {
+    const old = a.approval?.spec_snapshot;
+    if (!old || a.binding.step_anchor !== proposal.stepAnchor) return false;
+    if (old.template_ref.digest !== spec.template_ref.digest) return false;
+    return specRevision({ ...spec, template_ref: old.template_ref }) === a.approval?.spec_revision;
+  });
   if (same) {
     return {
       ok: true,
       attemptId: same.attempt_id,
-      specRevision: revision,
-      spec,
+      specRevision: same.approval?.spec_revision ?? revision,
+      spec: same.approval?.spec_snapshot ?? spec,
       unchanged: true,
       superseded: [],
     };
@@ -815,7 +842,7 @@ function revokeAttempts(store: RegistryStore, ids: AttemptId[]): AttemptId[] {
   return ids;
 }
 
-export type DriftReason = "edited" | "removed" | "duplicated" | "unreadable";
+export type DriftReason = "edited" | "removed" | "duplicated" | "unreadable" | "step_removed";
 
 export interface Drift {
   attemptId: AttemptId;
@@ -835,7 +862,12 @@ export interface ProposalSighting {
  * claiming one id -- there is no telling which was approved), or made
  * unreadable. Pure; `revokeDrifted` applies it.
  */
-export function findDrift(registry: Registry, sightings: ProposalSighting[]): Drift[] {
+export function findDrift(
+  registry: Registry,
+  sightings: ProposalSighting[],
+  /** Whether the approved step still exists in the notebook; omitted, it isn't checked. */
+  stepExists?: (anchor: string) => boolean,
+): Drift[] {
   const byId = new Map<string, ProposalSighting[]>();
   for (const s of sightings) byId.set(s.proposalId, [...(byId.get(s.proposalId) ?? []), s]);
   const drift: Drift[] = [];
@@ -848,12 +880,19 @@ export function findDrift(registry: Registry, sightings: ProposalSighting[]): Dr
     else if (seen.length > 1) drift.push({ ...base, reason: "duplicated" });
     else if (!seen[0].proposal) drift.push({ ...base, reason: "unreadable" });
     else if (!proposalStillMatches(seen[0].proposal, a)) drift.push({ ...base, reason: "edited" });
+    else if (stepExists && !stepExists(a.binding.step_anchor)) {
+      drift.push({ ...base, reason: "step_removed" });
+    }
   }
   return drift;
 }
 
-export function revokeDrifted(store: RegistryStore, sightings: ProposalSighting[]): Drift[] {
-  const drift = findDrift(store.snapshot(), sightings);
+export function revokeDrifted(
+  store: RegistryStore,
+  sightings: ProposalSighting[],
+  stepExists?: (anchor: string) => boolean,
+): Drift[] {
+  const drift = findDrift(store.snapshot(), sightings, stepExists);
   revokeAttempts(
     store,
     drift.map((d) => d.attemptId),
@@ -897,9 +936,10 @@ function cell(v: string): string {
   return v.replace(/\|/g, "\\|").replace(/[\r\n]+/g, " ");
 }
 
-function short(v: unknown): string {
-  const s = typeof v === "string" ? v : canonicalJson(v);
-  return s.length > 80 ? `${s.slice(0, 77)}...` : s;
+/** A value as JSON, so `4` and `"4"` don't look alike; shortened only when asked. */
+function showValue(v: unknown, compact: boolean): string {
+  const s = canonicalJson(v);
+  return compact && s.length > 80 ? `${s.slice(0, 77)}...` : s;
 }
 
 export function describePredicate(p: Predicate): string {
@@ -922,7 +962,11 @@ export function describePredicate(p: Predicate): string {
  */
 export function renderProposalTable(
   proposal: Proposal,
-  opts: { resolvedVersion?: string; specRevision?: string } = {},
+  /**
+   * `compact` shortens long values, for listings. Anything shown to someone
+   * about to approve must leave it off: the table is what they consent to.
+   */
+  opts: { resolvedVersion?: string; specRevision?: string; compact?: boolean } = {},
 ): string {
   const t = proposal.target;
   const version =
@@ -938,7 +982,10 @@ export function renderProposalTable(
   if (proposal.label) rows.splice(1, 0, ["Label", proposal.label]);
   for (const i of proposal.inputs) rows.push([`input ${i.slot}`, `${i.src} ${i.id}`]);
   for (const o of proposal.overrides) {
-    rows.push([`param ${o.param}`, `${short(o.value)} -- ${o.rationale}`]);
+    rows.push([
+      `param ${o.param}`,
+      `${showValue(o.value, opts.compact === true)} -- ${o.rationale}`,
+    ]);
   }
   rows.push(["Done when", describePredicate(proposal.predicate)]);
   if (opts.specRevision) rows.push(["spec_revision", opts.specRevision.slice(0, 12)]);

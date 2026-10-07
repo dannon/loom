@@ -471,3 +471,95 @@ describe("ids and rendering", () => {
     expect(table).toContain("| spec_revision | eeeeeeeeeeee |");
   });
 });
+
+describe("review follow-ups", () => {
+  const shape = templateShape("tool", TOOL_SNAPSHOT);
+
+  it("never shortens a value in the table someone approves from", () => {
+    const long = "x".repeat(200) + "TAIL";
+    const p = toolProposal({ overrides: [{ param: "threads", value: long, rationale: "r" }] });
+    expect(renderProposalTable(p)).toContain("TAIL");
+    expect(renderProposalTable(p, { compact: true })).not.toContain("TAIL");
+    // And a string never looks like a number.
+    const s = toolProposal({ overrides: [{ param: "threads", value: "4", rationale: "r" }] });
+    expect(renderProposalTable(s)).toContain('| param threads | "4" -- r |');
+  });
+
+  it("reads concrete repeat instances as dataset slots, and refuses the placeholder", () => {
+    const ok = toolProposal({
+      inputs: [
+        { slot: "reads", src: "hda", id: "a1" },
+        { slot: "queries_0|extra", src: "hda", id: "a2" },
+        { slot: "queries_1|extra", src: "hda", id: "a3" },
+      ],
+    });
+    expect(validateProposal(ok, shape)).toEqual([]);
+    const placeholder = toolProposal({
+      inputs: [
+        { slot: "reads", src: "hda", id: "a1" },
+        { slot: "queries_#|extra", src: "hda", id: "a2" },
+      ],
+      overrides: [{ param: "queries_#|tag", value: "x", rationale: "r" }],
+    });
+    expect(validateProposal(placeholder, shape)).toEqual([
+      expect.stringMatching(/"queries_#\|extra" is not a dataset input/),
+      expect.stringMatching(/"queries_#\|tag" is not a parameter/),
+    ]);
+  });
+
+  it("reads a user-defined tool's nested groups in its own vocabulary", () => {
+    const udt = templateShape("udt", {
+      version: "1.0",
+      body: {
+        representation: {
+          version: "1.0",
+          inputs: [
+            {
+              name: "mode",
+              type: "conditional",
+              test_parameter: { name: "pick", type: "select" },
+              whens: [{ discriminator: "a", parameters: [{ name: "extra", type: "data" }] }],
+            },
+            { name: "opts", type: "section", parameters: [{ name: "table", type: "data" }] },
+            { name: "rows", type: "repeat", parameters: [{ name: "n", type: "integer" }] },
+          ],
+        },
+      },
+    });
+    expect([...udt.slots.keys()].sort()).toEqual(["mode|extra", "opts|table"]);
+    expect(udt.slots.get("opts|table")?.required).toBe(true);
+    expect(udt.slots.get("mode|extra")?.required).toBe(false);
+    expect([...udt.params].sort()).toEqual(["mode|pick", "rows_#|n"]);
+  });
+
+  it("re-approving the same proposal later is still the same approval", () => {
+    const s = store();
+    const first = approveProposal(s, {
+      proposal: toolProposal(),
+      snapshot: TOOL_SNAPSHOT,
+      assertionDefinitions: new Map(),
+      now: "2026-10-07T12:00:00.000Z",
+    });
+    const second = approveProposal(s, {
+      proposal: toolProposal(),
+      snapshot: TOOL_SNAPSHOT,
+      assertionDefinitions: new Map(),
+      now: "2026-10-07T13:30:00.000Z",
+    });
+    if (!first.ok || !second.ok) throw new Error("expected both to approve");
+    expect(second.unchanged).toBe(true);
+    expect(second.attemptId).toBe(first.attemptId);
+    expect(second.specRevision).toBe(first.specRevision);
+    expect(Object.keys(s.snapshot().attempts)).toHaveLength(1);
+  });
+
+  it("revokes when the approved step is gone from the notebook", () => {
+    const s = store();
+    const r = approve(s, toolProposal());
+    if (!r.ok) throw new Error("approve failed");
+    expect(findDrift(s.snapshot(), [seen(toolProposal())], () => true)).toEqual([]);
+    expect(findDrift(s.snapshot(), [seen(toolProposal())], () => false)).toEqual([
+      { attemptId: r.attemptId, proposalId: "prop-abc123", reason: "step_removed" },
+    ]);
+  });
+});
