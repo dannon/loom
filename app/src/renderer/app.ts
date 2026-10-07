@@ -3079,8 +3079,16 @@ function openExtConfirm(id: string, title: string, message: string): void {
   const cancelThis = () => respond(undefined);
   const release = claimExtModal(cancelThis);
   extTitleEl.textContent = title;
-  extMessageEl.textContent = message;
-  extMessageEl.classList.remove("hidden");
+  // A multi-line message is usually the thing being agreed to -- a command, a
+  // run proposal's table -- and collapsing it into one paragraph made it
+  // unreadable. Show it the way the select dialog shows its body (#399).
+  if (message.includes("\n")) {
+    extDetailEl.textContent = message;
+    extDetailEl.classList.remove("hidden");
+  } else {
+    extMessageEl.textContent = message;
+    extMessageEl.classList.remove("hidden");
+  }
   extAcceptBtn.classList.remove("hidden");
   extDenyBtn.classList.remove("hidden");
   extOverlay.classList.remove("hidden");
