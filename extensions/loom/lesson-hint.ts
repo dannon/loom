@@ -37,7 +37,6 @@ import {
   LESSON_HINT_MARKER,
   withoutLessonHints,
 } from "../../shared/lesson-hint-marker.js";
-import { galaxyCall } from "./mcp-recovery";
 import { getNotebookPath } from "./state";
 
 /** Distinctive opening, so a hint can't be mistaken for the tool's own output. */
@@ -123,16 +122,11 @@ export function decideHintForEvent(
   event: { toolName: string; input?: Record<string, unknown>; content: LessonToolResultContent },
   armed: ReadonlySet<string>,
 ): HintDecision | null {
-  // Normalize the three Galaxy call surfaces to one spelling and unwrap the
-  // `mcp({tool, args})` form, so a lesson's `mcp_tools` and argument matching
-  // mean the same thing however the call arrived.
   // A search result already is the lesson, framed; a hint on it would re-fire
   // on the Symptom text it quotes and count the same surfacing twice.
   if (event.toolName === LESSONS_SEARCH_TOOL) return null;
-  const input = event.input ?? {};
-  const call = galaxyCall(event.toolName, input);
   return decideToolResultHint(
-    { toolName: call?.name ?? event.toolName, input: call?.args ?? input, content: event.content },
+    { toolName: event.toolName, input: event.input ?? {}, content: event.content },
     getLessonStore().lessons,
     armed,
   );

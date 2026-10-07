@@ -191,7 +191,8 @@ const MCP_PREFIX = /^(?:galaxy_|mcp__galaxy__)/;
 /**
  * Compared after stripping either prefix from both sides, so a lesson written
  * against `galaxy_run_tool` still fires when the call arrived as
- * `mcp__galaxy__run_tool` or through the `mcp({tool})` wrapper.
+ * `mcp__galaxy__run_tool`. Only the exact galaxy-mcp prefix is stripped, so
+ * another server's `mcp__galaxy___x` or `mcp__galaxy__a__x` never matches.
  */
 export function mcpToolMatches(toolName: string, want: string): boolean {
   const norm = (s: string): string => s.trim().toLowerCase().replace(MCP_PREFIX, "");
@@ -234,12 +235,12 @@ function rank(matches: Match[]): Match[] {
 
 export interface ToolEventInput {
   /**
-   * The NORMALIZED tool name. The caller runs pi's name through `galaxyCall()`
-   * first, so a direct, a proxied (`mcp__galaxy__*`) and an
-   * `mcp({tool})`-wrapped Galaxy call all arrive spelled `galaxy_<name>`.
+   * pi's tool name: galaxy-mcp tools as `mcp__galaxy__<name>`, Loom's own as
+   * `galaxy_<name>`. mcpToolMatches strips either prefix, so a lesson can name
+   * the tool either way.
    */
   toolName: string;
-  /** The call's arguments, unwrapped by the same `galaxyCall()`. */
+  /** The call's arguments. */
   input: Record<string, unknown>;
   /** Every text block of the result, joined with newlines. */
   resultText: string;

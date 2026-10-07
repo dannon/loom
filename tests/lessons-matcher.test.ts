@@ -177,6 +177,13 @@ describe("mcpToolMatches", () => {
     expect(mcpToolMatches("galaxy_run_tool", "galaxy_upload_file")).toBe(false);
     expect(mcpToolMatches("", "galaxy_run_tool")).toBe(false);
   });
+
+  it("does not take another server sharing the galaxy prefix for galaxy-mcp", () => {
+    // A server named "galaxy_" or "galaxy__x" registers under pi as
+    // mcp__galaxy___<tool> or mcp__galaxy__x__<tool>.
+    expect(mcpToolMatches("mcp__galaxy___run_tool", "galaxy_run_tool")).toBe(false);
+    expect(mcpToolMatches("mcp__galaxy__x__run_tool", "galaxy_run_tool")).toBe(false);
+  });
 });
 
 describe("isMatchable", () => {
@@ -235,6 +242,19 @@ describe("matchToolEvent", () => {
     const byMcp = lesson("a/mcp", { mcp_tools: ["galaxy_run_tool"] });
     const byTool = lesson("b/tool", { tools: ["featurecounts"] });
     const out = matchToolEvent(ev({ input: { tool_id: GUID } }), [byMcp, byTool]);
+    expect(out.map((m) => [m.lesson.id, m.trigger])).toEqual([
+      ["a/mcp", "tool"],
+      ["b/tool", "tool"],
+    ]);
+  });
+
+  it("matches the tool and its arguments when pi spells it mcp__galaxy__", () => {
+    const byMcp = lesson("a/mcp", { mcp_tools: ["galaxy_run_tool"] });
+    const byTool = lesson("b/tool", { tools: ["featurecounts"] });
+    const out = matchToolEvent(
+      ev({ toolName: "mcp__galaxy__run_tool", input: { tool_id: GUID } }),
+      [byMcp, byTool],
+    );
     expect(out.map((m) => [m.lesson.id, m.trigger])).toEqual([
       ["a/mcp", "tool"],
       ["b/tool", "tool"],
