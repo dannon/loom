@@ -16,6 +16,7 @@ import { SEED_OAUTH_ONLY_PROVIDERS } from "../shared/provider-auth-caps.js";
 import { EX_CONFIG } from "../shared/brain-exit.js";
 import { resolvePiExtensionDir } from "./pi-extension-path.js";
 import { migrateLegacyMcpConfig } from "./legacy-mcp-config.js";
+import { loadPiDefaultModels, piDefaultModel } from "../shared/pi-default-model.js";
 import { pickChannel } from "../shared/version-compare.js";
 import {
   isCustomProvider,
@@ -589,13 +590,16 @@ const providerArgs = [];
 if (!hasArg("--provider")) {
   // Prefer consolidated config (multi-provider shape)
   if (activeLlmProvider) {
-    providerArgs.push("--provider", activeLlmProvider);
-    if (
-      activeLlmConfig?.model &&
-      !userArgs.includes("--model") &&
-      !userArgs.some((a) => a.startsWith("--model="))
-    ) {
-      providerArgs.push("--model", activeLlmConfig.model);
+    // A user's --models picks the model itself, and pi 1.0 refuses --provider
+    // alongside it without a --model.
+    if (!hasArg("--models")) {
+      providerArgs.push("--provider", activeLlmProvider);
+      if (!hasArg("--model")) {
+        // A provider saved with a key but no model gets pi's own default for it.
+        const model =
+          activeLlmConfig?.model ?? piDefaultModel(activeLlmProvider, await loadPiDefaultModels());
+        if (model) providerArgs.push("--model", model);
+      }
     }
     // Custom endpoints have no built-in key resolution; hand pi the key at
     // runtime so it stays in memory (setRuntimeApiKey) rather than on disk.
