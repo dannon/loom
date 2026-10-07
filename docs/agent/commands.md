@@ -77,6 +77,9 @@ Saving a large response is normal output handling, not a model context failure.
 | `/execute` (alias `/run`) | Tell the agent to run the next pending step in the latest plan section                                                                            |
 | `/reconcile`              | Check the bound Galaxy history against the notebook: record runs no block claims as unattributed, and fetch details for finished runs now         |
 | `/override <step> <why>`  | User-only. Clear the evidence gate for one plan step, once, with the reason recorded                                                              |
+| `/pending`                | List run proposals waiting for approval, and why each is waiting                                                                                  |
+| `/approve <proposal-id>`  | User-only. Freeze a `loom_propose` proposal against Galaxy's template and record the approval                                                     |
+| `/revoke <proposal-id>`   | User-only. Withdraw an approval                                                                                                                   |
 | `/observations [sub]`     | User-only. Show or change Galaxy-failure reporting: `status`, `mode <off\|ask\|auto>`, `sent`, `retract <id>`                                     |
 | `/observe [note]`         | User-only. Report something that went wrong, as one generic line. The payload is shown before it is sent                                          |
 | `/dashboard [sub]`        | Show the dashboard layout; `preset <name>`, `reset`, `undo` change it. User-only                                                                  |
@@ -87,6 +90,13 @@ steps the evidence gate is currently holding and the anchor to address
 each one by. A clearance covers one step and the invocation that was in
 flight when it was granted, and is spent by the next write it lets
 through.
+
+`/approve` and `/revoke` are the user's too. Propose a run with
+`loom_propose`, show the table it returns, and ask for `/approve
+<proposal-id>`; you can't approve one yourself. With no dialog to confirm in, `/approve` shows the table and wants `--yes` before it records anything. An approval covers exactly
+the Spec frozen at approval time, and only in the session that recorded it:
+editing the proposal block afterwards revokes it, and after a restart it
+comes back restored, not live, until the user approves it again.
 
 `/observations` and `/observe` are the user's, not yours. In `ask`, the
 default, the signature and description are shown to the user in full and

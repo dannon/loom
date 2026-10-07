@@ -207,6 +207,7 @@ const LOOM_FENCE_KINDS: readonly NotebookFenceKind[] = [
   "udt",
   "session",
   "galaxy-page",
+  "proposal",
 ];
 
 const FENCE_CLOSE = "```";

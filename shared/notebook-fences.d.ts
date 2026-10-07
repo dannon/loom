@@ -1,5 +1,6 @@
 // Types for the notebook fence names. Impl is shared/notebook-fences.js.
-export type NotebookFenceKind = "session" | "invocation" | "job" | "galaxy-page" | "udt";
+export type NotebookFenceKind =
+  "session" | "invocation" | "job" | "galaxy-page" | "udt" | "proposal";
 export const NOTEBOOK_FENCE_WRITE_PREFIX: "loom";
 export const NOTEBOOK_FENCE_READ_PREFIXES: readonly string[];
 export function notebookFenceOpen(kind: NotebookFenceKind): string;

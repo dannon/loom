@@ -87,4 +87,30 @@ describe("RegistryLock", () => {
     a.release();
     expect(fs.existsSync(lockPath)).toBe(true);
   });
+
+  it("retries a busy rename on win32 when refreshing the heartbeat, and not elsewhere", () => {
+    const busyFs = (failures: number) => {
+      let left = failures;
+      return {
+        ...fs,
+        renameSync: (from: string, to: string) => {
+          if (left-- > 0) throw Object.assign(new Error("EBUSY: busy"), { code: "EBUSY" });
+          fs.renameSync(from, to);
+        },
+      };
+    };
+    const win = new RegistryLock(lockPath, busyFs(2), clock, 1, "s-a", "win32");
+    win.acquire();
+    now += 1000;
+    expect(win.heartbeat()).toBe(true);
+    expect(JSON.parse(fs.readFileSync(lockPath, "utf-8")).heartbeat).toBe(
+      new Date(now).toISOString(),
+    );
+    win.release();
+
+    const posix = new RegistryLock(lockPath, busyFs(1), clock, 1, "s-b", "linux");
+    posix.acquire();
+    expect(() => posix.heartbeat()).toThrow(/EBUSY/);
+    expect(fs.readdirSync(dir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+  });
 });

@@ -18,6 +18,11 @@ vi.mock("../extensions/loom/galaxy-page-sync.js", () => ({
 }));
 vi.mock("../extensions/loom/galaxy-cred-drift.js", () => ({ maybeNudgeGalaxyReconnect: vi.fn() }));
 vi.mock("../extensions/loom/config", () => ({ loadConfig: vi.fn(() => ({})) }));
+// Opening the real registry would take a lock under the test runner's cwd.
+vi.mock("../extensions/loom/registry-runtime.js", () => ({
+  openSessionRegistry: vi.fn(() => ({ session: { store: { mode: "writer" } }, notice: null })),
+  closeSessionRegistry: vi.fn(),
+}));
 
 import { startGalaxyPoller } from "../extensions/loom/galaxy-poller.js";
 import { registerSessionLifecycle } from "../extensions/loom/session-lifecycle";
