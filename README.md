@@ -513,7 +513,10 @@ takes effect once you have confirmed that sample on this install: a config that
 says `auto` without that recorded confirmation (hand-edited, or copied from
 another machine) runs as `ask`, and `/observations status` says so. For a managed
 deployment, `ORBIT_OBSERVATIONS=off` (or `LOOM_OBSERVATIONS=off`) disables the
-whole thing and cannot be overridden from the app.
+whole thing and cannot be overridden from the app. For local development,
+`ORBIT_OBSERVATIONS_URL` points the client at another intake; it is honoured
+only as `http://localhost[:port]`, `http://127.0.0.1[:port]` or an `https://`
+URL, and ignored with a warning otherwise.
 
 ### Custom endpoints (local LLMs, gateways, proxies)
 

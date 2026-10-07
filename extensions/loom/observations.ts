@@ -72,7 +72,7 @@ import {
   GALAXY_DATATYPES,
   GALAXY_MCP_TOOLS,
 } from "./observation-allowlists.js";
-import { isDesktopShell, readEnv } from "../../shared/orbit-env.js";
+import { envNames, isDesktopShell, readEnv } from "../../shared/orbit-env.js";
 
 // -----------------------------------------------------------------------------
 // Stage
@@ -560,10 +560,46 @@ export function collectObservationEnvelope(installToken: string): ObservationEnv
 // Transport
 // -----------------------------------------------------------------------------
 
+/**
+ * Whether `value` may replace the intake base URL: plain http only to this
+ * machine (`http://localhost[:port]`, `http://127.0.0.1[:port]`), otherwise
+ * https. Every request carries the shared feedback key and the payload, so an
+ * override pointing anywhere else would hand both to whoever is listening --
+ * and an env var is easy to inherit without noticing.
+ */
+export function isAllowedObservationsOverride(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (url.username || url.password) return false;
+  if (url.protocol === "https:") return url.hostname !== "";
+  return url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+}
+
+let warnedOverride = false;
+
 // ORBIT_OBSERVATIONS_URL points this at `wrangler dev` for local work, the same
-// way LOOM_FEEDBACK_URL does for /feedback.
+// way LOOM_FEEDBACK_URL does for /feedback -- but only in the forms
+// isAllowedObservationsOverride accepts. Anything else is ignored with a
+// warning that names the variable and never its value, which may embed a
+// token.
 function endpointBase(): string {
-  return readEnv("OBSERVATIONS_URL") || OBSERVATIONS_ENDPOINT_URL;
+  const override = readEnv("OBSERVATIONS_URL")?.trim();
+  if (!override) return OBSERVATIONS_ENDPOINT_URL;
+  if (isAllowedObservationsOverride(override)) return override;
+  if (!warnedOverride) {
+    warnedOverride = true;
+    const name =
+      envNames("OBSERVATIONS_URL").find((n) => process.env[n] !== undefined) ??
+      "ORBIT_OBSERVATIONS_URL";
+    console.warn(
+      `${name} is ignored: it must be http://localhost, http://127.0.0.1 or an https:// URL.`,
+    );
+  }
+  return OBSERVATIONS_ENDPOINT_URL;
 }
 
 const TIMEOUT_MS = 10_000;

@@ -224,6 +224,59 @@ describe("submitObservation", () => {
     await m.submitObservation(obs);
     expect(String(fetchMock.mock.calls[0][0])).toBe("http://localhost:8787/observations");
   });
+
+  it("accepts only localhost, 127.0.0.1 or https as an override", async () => {
+    const m = await load();
+    for (const ok of [
+      "http://localhost",
+      "http://localhost:8787",
+      "http://127.0.0.1:8787",
+      "https://intake.example.org",
+      "https://intake.example.org:8443/base",
+    ]) {
+      expect(m.isAllowedObservationsOverride(ok), ok).toBe(true);
+    }
+    for (const bad of [
+      "http://intake.example.org",
+      "http://localhost.example.org",
+      "http://127.0.0.1.nip.io",
+      "http://10.0.0.5:8787",
+      "http://[::1]:8787",
+      "http://user:pw@localhost:8787",
+      "https://user:pw@intake.example.org",
+      "ftp://localhost",
+      "file:///tmp/x",
+      "localhost:8787",
+      "not a url",
+    ]) {
+      expect(m.isAllowedObservationsOverride(bad), bad).toBe(false);
+    }
+  });
+
+  it("ignores a disallowed override, warns once by name only, and keeps the key off it", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, status: 202, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env.ORBIT_FEEDBACK_KEY = "shared-key";
+    process.env.LOOM_OBSERVATIONS_URL = "http://collector.example.net/steal";
+    try {
+      const m = await load();
+      await m.submitObservation(obs);
+      await m.retractObservation(obs.id, "b".repeat(32));
+      for (const [url] of fetchMock.mock.calls) {
+        expect(String(url)).not.toContain("collector.example.net");
+        expect(String(url)).toMatch(new RegExp("^https://"));
+      }
+      expect(warn).toHaveBeenCalledOnce();
+      const message = String(warn.mock.calls[0][0]);
+      expect(message).toContain("LOOM_OBSERVATIONS_URL");
+      expect(message).not.toContain("collector.example.net");
+    } finally {
+      delete process.env.LOOM_OBSERVATIONS_URL;
+    }
+  });
 });
 
 describe("retractObservation", () => {
