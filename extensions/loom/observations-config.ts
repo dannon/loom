@@ -2,9 +2,11 @@
  * Mode and install-token state for the observation collector.
  *
  * Split out of observations.ts so the privacy gate is one small file that can
- * be read end to end. Three rules hold here:
+ * be read end to end. Four rules hold here:
  *
  *  - `ask` is the default. A fresh install collects nothing silently.
+ *  - `auto` in the config is not enough on its own: it takes effect only with
+ *    the recorded acknowledgement of the sample payload, else it runs as `ask`.
  *  - The env var is a ONE-WAY hard disable. `ORBIT_OBSERVATIONS=off` wins over
  *    any config, and no env value turns collection on -- otherwise an ambient
  *    variable in a container or a shell profile could start data collection
@@ -35,11 +37,38 @@ export function isObservationsHardDisabled(env: NodeJS.ProcessEnv = process.env)
   return envNames("OBSERVATIONS").some((name) => env[name]?.trim().toLowerCase() === "off");
 }
 
+export interface ObservationsModeState {
+  /** The mode collection actually runs in. */
+  mode: ObservationsMode;
+  /**
+   * Why `mode` differs from what the config says, when it does:
+   * `hard-disabled` for the env kill switch, `auto-unacknowledged` for an
+   * `auto` nobody confirmed on this install.
+   */
+  override?: "hard-disabled" | "auto-unacknowledged";
+}
+
+/**
+ * `auto` only counts once the sample-payload confirm has been answered yes on
+ * this install. Without that, a hand-edited, copied or restored config would
+ * start sending with no one ever having seen what goes out, so it runs as
+ * `ask` instead.
+ */
+export function describeObservationsMode(): ObservationsModeState {
+  if (isObservationsHardDisabled()) return { mode: "off", override: "hard-disabled" };
+  const block = loadConfig().observations;
+  const mode = block?.mode;
+  if (mode === "auto") {
+    return isAcknowledgement(block?.autoAcknowledgedAt)
+      ? { mode: "auto" }
+      : { mode: "ask", override: "auto-unacknowledged" };
+  }
+  if (mode === "off" || mode === "ask") return { mode };
+  return { mode: DEFAULT_MODE };
+}
+
 export function resolveObservationsMode(): ObservationsMode {
-  if (isObservationsHardDisabled()) return "off";
-  const mode = loadConfig().observations?.mode;
-  if (mode === "off" || mode === "ask" || mode === "auto") return mode;
-  return DEFAULT_MODE;
+  return describeObservationsMode().mode;
 }
 
 /**
@@ -108,8 +137,13 @@ export function getOrCreateInstallToken(): string {
   return token;
 }
 
+// Only what markAutoAcknowledged writes counts; a stray `true` or "" doesn't.
+function isAcknowledgement(value: unknown): boolean {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
 export function hasAcknowledgedAuto(): boolean {
-  return typeof loadConfig().observations?.autoAcknowledgedAt === "string";
+  return isAcknowledgement(loadConfig().observations?.autoAcknowledgedAt);
 }
 
 export function markAutoAcknowledged(): void {

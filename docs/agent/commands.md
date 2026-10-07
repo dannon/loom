@@ -91,7 +91,8 @@ through.
 default, the signature and description are shown to the user in full and
 sent only if they confirm; an error line that still looks identifying after
 scrubbing is withheld and only the rest is offered. In `auto` no free text is sent at all -- only the
-structured fields, never an error line or a description; `/observe` always
+structured fields, never an error line or a description -- and `auto` runs
+as `ask` until the user has confirmed its sample payload; `/observe` always
 asks first, whatever the mode. Do not offer to file one
 for them, do not ask them to switch the mode, and do not treat a tool
 failure as a reason to bring it up.

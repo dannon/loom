@@ -652,6 +652,45 @@ describe("registerObservationTriggers", () => {
     expect(sent.stage).toBe("tool-parameterization");
   });
 
+  async function settleOneFailure(config: unknown) {
+    fs.writeFileSync(path.join(tmpHome, ".loom", "config.json"), JSON.stringify(config));
+    const { registerObservationTriggers } =
+      await import("../extensions/loom/observation-triggers.js");
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      json: async () => ({ ok: true, id: "x", retractToken: "b".repeat(32) }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const confirm = vi.fn().mockResolvedValue(false);
+    const ctx = {
+      hasUI: true,
+      ui: { confirm, input: vi.fn().mockResolvedValue(""), notify: vi.fn() },
+    };
+    const pi = fakePi();
+    registerObservationTriggers(pi.api as any);
+    await pi.emit("session_start", {}, ctx);
+    await pi.emit("tool_result", failure, ctx);
+    await pi.emit("agent_settled", {}, ctx);
+    return { confirm, fetchMock };
+  }
+
+  it("asks first when the config says auto but auto was never acknowledged", async () => {
+    const { confirm, fetchMock } = await settleOneFailure({ observations: { mode: "auto" } });
+    expect(confirm).toHaveBeenCalledOnce();
+    // Declined, so nothing went.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sends without a confirm when auto carries the acknowledgement", async () => {
+    const { confirm, fetchMock } = await settleOneFailure({
+      observations: { mode: "auto", autoAcknowledgedAt: "2026-10-07T08:00:00.000Z" },
+    });
+    expect(confirm).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).signature).toBe("unknown");
+  });
+
   it("counts a retry loop across galaxy-mcp's pi spelling", async () => {
     const { registerObservationTriggers, pendingObservationCount, lastObservationFacts } =
       await import("../extensions/loom/observation-triggers.js");

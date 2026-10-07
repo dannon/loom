@@ -14,6 +14,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
+  describeObservationsMode,
   hasAcknowledgedAuto,
   isObservationsHardDisabled,
   markAutoAcknowledged,
@@ -21,7 +22,7 @@ import {
   resolveObservationsMode,
   setObservationsMode,
 } from "./observations-config.js";
-import type { ObservationsMode } from "./observations-config.js";
+import type { ObservationsMode, ObservationsModeState } from "./observations-config.js";
 import {
   SENT_LOG_FILE,
   appendSentLog,
@@ -53,6 +54,7 @@ export const OBSERVATIONS_USAGE =
 
 export function formatObservationsStatus(info: {
   mode: ObservationsMode;
+  override?: ObservationsModeState["override"];
   hardDisabled: boolean;
   hasToken: boolean;
   sentLogPath: string;
@@ -63,6 +65,13 @@ export function formatObservationsStatus(info: {
     "",
     `  mode: ${info.mode}`,
   ];
+  if (info.override === "auto-unacknowledged") {
+    lines.push(
+      "  The config says auto, but auto was never confirmed on this install, so it runs as",
+      "  ask: every report is shown to you before it goes. /observations mode auto shows",
+      "  the sample payload and turns auto on once you confirm.",
+    );
+  }
   if (info.hardDisabled) {
     lines.push("  ORBIT_OBSERVATIONS=off is set, so collection is disabled for this install");
     lines.push("  and the mode can't be changed from here.");
@@ -163,9 +172,11 @@ async function showStatus(ctx: ExtensionContext): Promise<void> {
   for (const row of latest.values()) {
     if (row.status in counts) counts[row.status] += 1;
   }
+  const state = describeObservationsMode();
   ctx.ui.notify(
     formatObservationsStatus({
-      mode: resolveObservationsMode(),
+      mode: state.mode,
+      override: state.override,
       hardDisabled: isObservationsHardDisabled(),
       hasToken: peekInstallToken() !== undefined,
       sentLogPath: observationsFilePath(SENT_LOG_FILE),

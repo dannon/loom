@@ -8,6 +8,7 @@ const appendSentLog = vi.fn();
 const deliverObservation = vi.fn();
 const removeFromObservationOutbox = vi.fn();
 let mode = "ask";
+let override: string | undefined;
 let hardDisabled = false;
 let acknowledged = false;
 let sentRows: any[] = [];
@@ -16,6 +17,7 @@ let lastFacts: any = null;
 
 vi.mock("../extensions/loom/observations-config.js", () => ({
   resolveObservationsMode: () => mode,
+  describeObservationsMode: () => ({ mode, ...(override ? { override } : {}) }),
   isObservationsHardDisabled: () => hardDisabled,
   setObservationsMode: (m: string) => setObservationsMode(m),
   peekInstallToken: () => "a".repeat(32),
@@ -83,6 +85,7 @@ beforeEach(() => {
   hardDisabled = false;
   acknowledged = false;
   sentRows = [];
+  override = undefined;
   token = "b".repeat(32);
   lastFacts = null;
 });
@@ -113,6 +116,31 @@ describe("formatObservationsStatus", () => {
       counts: { sent: 0, queued: 0, retracted: 0, cancelled: 0 },
     });
     expect(text).toMatch(/ORBIT_OBSERVATIONS=off/);
+  });
+
+  it("says auto is running as ask when it was never acknowledged", () => {
+    const text = formatObservationsStatus({
+      mode: "ask",
+      override: "auto-unacknowledged",
+      hardDisabled: false,
+      hasToken: false,
+      sentLogPath: "/x",
+      counts: { sent: 0, queued: 0, retracted: 0, cancelled: 0 },
+    });
+    expect(text).toContain("mode: ask");
+    expect(text).toContain("The config says auto, but auto was never confirmed");
+    expect(text).toContain("/observations mode auto");
+  });
+
+  it("adds no override note when the mode is what the config says", () => {
+    const text = formatObservationsStatus({
+      mode: "auto",
+      hardDisabled: false,
+      hasToken: true,
+      sentLogPath: "/x",
+      counts: { sent: 0, queued: 0, retracted: 0, cancelled: 0 },
+    });
+    expect(text).not.toContain("never confirmed");
   });
 
   it("never prints the install token value", () => {
@@ -192,6 +220,18 @@ describe("/observations", () => {
     expect(ui.notify).toHaveBeenCalledWith(expect.stringContaining("mode: ask"), "info");
   });
 
+  it("/observations status explains an unacknowledged auto", async () => {
+    mode = "ask";
+    override = "auto-unacknowledged";
+    const { pi, commands } = makeApi();
+    registerObservationsCommand(pi as any);
+    const ui = uiMock();
+    await commands.get("observations")!.handler("status", { hasUI: true, ui });
+    const text = String(ui.notify.mock.calls[0][0]);
+    expect(text).toContain("mode: ask");
+    expect(text).toContain("never confirmed on this install");
+  });
+
   it("rejects an unknown subcommand with the usage", async () => {
     const { pi, commands } = makeApi();
     registerObservationsCommand(pi as any);
@@ -222,6 +262,10 @@ describe("/observations", () => {
     expect(message).toContain("Rows expire after 180 days");
     expect(setObservationsMode).toHaveBeenCalledWith("auto");
     expect(markAutoAcknowledged).toHaveBeenCalledOnce();
+    // The acknowledgement lands first: a mode write without it would only run as ask.
+    expect(markAutoAcknowledged.mock.invocationCallOrder[0]).toBeLessThan(
+      setObservationsMode.mock.invocationCallOrder[0],
+    );
   });
 
   it("mode auto is not set when the sample is declined", async () => {

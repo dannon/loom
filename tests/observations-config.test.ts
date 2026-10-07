@@ -51,8 +51,44 @@ describe("resolveObservationsMode", () => {
   });
 
   it("reads the configured mode", async () => {
+    writeConfig({ observations: { mode: "off" } });
+    let m = await load();
+    expect(m.resolveObservationsMode()).toBe("off");
+    vi.resetModules();
+    writeConfig({ observations: { mode: "ask" } });
+    m = await load();
+    expect(m.resolveObservationsMode()).toBe("ask");
+  });
+
+  it("runs a configured auto as auto only with the recorded acknowledgement", async () => {
+    writeConfig({ observations: { mode: "auto", autoAcknowledgedAt: "2026-10-07T08:00:00.000Z" } });
+    const m = await load();
+    expect(m.resolveObservationsMode()).toBe("auto");
+    expect(m.describeObservationsMode()).toEqual({ mode: "auto" });
+  });
+
+  it("runs a configured auto without the acknowledgement as ask", async () => {
     writeConfig({ observations: { mode: "auto" } });
     const m = await load();
+    expect(m.resolveObservationsMode()).toBe("ask");
+    expect(m.describeObservationsMode()).toEqual({ mode: "ask", override: "auto-unacknowledged" });
+  });
+
+  it("does not count a junk acknowledgement", async () => {
+    for (const ack of [true, "", "yes", 1, null]) {
+      vi.resetModules();
+      writeConfig({ observations: { mode: "auto", autoAcknowledgedAt: ack } });
+      const m = await load();
+      expect(m.resolveObservationsMode(), String(ack)).toBe("ask");
+      expect(m.hasAcknowledgedAuto(), String(ack)).toBe(false);
+    }
+  });
+
+  it("marking the acknowledgement makes a configured auto take effect", async () => {
+    writeConfig({ observations: { mode: "auto" } });
+    const m = await load();
+    expect(m.resolveObservationsMode()).toBe("ask");
+    m.markAutoAcknowledged();
     expect(m.resolveObservationsMode()).toBe("auto");
   });
 
