@@ -2,7 +2,7 @@
   "name": "a registry that can't be opened degrades to read-only and refuses approvals without blocking the session",
   "description": "`.loom` is a file in this fixture, so the state directory can't be created. The session still starts (registry.opened says unavailable, read-only), /pending still lists the proposal, and /approve refuses before fetching anything: no template.replay row and no proposal.approved.",
   "tier": 1,
-  "inputs": ["/pending", "/approve prop-abc123"],
+  "inputs": ["/pending", "/approve prop-abc123 --yes"],
   "env": {
     "ANTHROPIC_API_KEY": "fake-eval-key",
     "GALAXY_URL": "https://usegalaxy.org",
@@ -17,11 +17,16 @@
     "activity": {
       "mustNotIncludeKinds": ["proposal.approved", "template.replay"],
       "mustInclude": [
-        { "kind": "session.started" },
+        {
+          "kind": "session.started"
+        },
         {
           "kind": "registry.opened",
           "source": "harness",
-          "payloadContains": { "mode": "read-only", "outcome": "unavailable" }
+          "payloadContains": {
+            "mode": "read-only",
+            "outcome": "unavailable"
+          }
         }
       ]
     },

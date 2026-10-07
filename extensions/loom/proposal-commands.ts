@@ -339,6 +339,9 @@ export interface CommandReply {
 }
 
 const PROPOSAL_ARG = /^\s*(\S+)\s*$/;
+const APPROVE_ARGS = /^\s*(?!--)(\S+)(?:\s+(--yes))?\s*$/;
+const APPROVE_USAGE =
+  "Usage: /approve <proposal-id>  (add --yes where there's no dialog to confirm in, e.g. the terminal's json/print modes)";
 
 function locate(content: string, id: string): ProposalBlock | string {
   const blocks = findProposalBlocks(content).filter((b) => b.proposalId === id);
@@ -364,13 +367,14 @@ export async function approveCommand(
   args: string,
   opts: ApproveOptions = {},
 ): Promise<CommandReply> {
-  const m = args.match(PROPOSAL_ARG);
+  const m = args.match(APPROVE_ARGS);
   if (!m)
     return {
       level: "info",
-      message: pendingCommand(deps).message + "\nUsage: /approve <proposal-id>",
+      message: pendingCommand(deps).message + `\n${APPROVE_USAGE}`,
     };
   const id = m[1];
+  const yes = m[2] !== undefined;
   const session = deps.registry();
   const blocked = cannotWrite(session);
   if (blocked || !session) return { level: "warning", message: `Can't approve: ${blocked}.` };
@@ -411,9 +415,26 @@ export async function approveCommand(
   }
 
   const table = renderProposalTable(proposal, { resolvedVersion: snapshot.version, plain: true });
+  // Approval re-fetches and freezes what Galaxy says now, by design; say so
+  // when that's not what the proposal was checked against.
+  const templateNote =
+    proposal.templateDigest && proposal.templateDigest !== sha256Hex(canonicalJson(snapshot.body))
+      ? "\n\nGalaxy's template for this target changed since it was proposed; the above was checked against the current one."
+      : "";
   if (opts.confirm) {
-    const yes = await opts.confirm(`Approve ${id}?`, `${table}\n\nThis freezes exactly the above.`);
-    if (!yes) return { level: "info", message: `Not approved; ${id} is still pending.` };
+    const confirmed = await opts.confirm(
+      `Approve ${id}?`,
+      `${table}${templateNote}\n\nThis freezes exactly the above.`,
+    );
+    if (!confirmed) return { level: "info", message: `Not approved; ${id} is still pending.` };
+  } else if (!yes) {
+    // No dialog to show the table in. Approving anyway would record consent to
+    // a spec the user never saw, so they have to see it here and say so.
+    const message =
+      `Not approved: there's no dialog here to confirm in. This is what /approve would freeze:\n\n` +
+      `${table}${templateNote}\n\nIf that's what you want, run /approve ${id} --yes.`;
+    activity(deps, "proposal.approval_unconfirmed", "user", { proposal_id: id, table });
+    return { level: "warning", message };
   }
 
   // The block must still say what was just shown.
@@ -456,6 +477,13 @@ export async function approveCommand(
     step_anchor: proposal.stepAnchor,
     version: result.spec.target.version,
     template_digest: result.spec.template_ref.digest,
+    confirmed_by: opts.confirm ? "dialog" : "--yes",
+    // On the record even where a notice goes nowhere (json/print modes).
+    table: renderProposalTable(proposal, {
+      resolvedVersion: result.spec.target.version,
+      specRevision: result.specRevision,
+      plain: true,
+    }),
     ...(result.superseded.length > 0 ? { superseded: result.superseded } : {}),
   });
   try {
@@ -709,7 +737,7 @@ Give every parameter you set a rationale. Leave version unset to take what Galax
   };
 
   pi.registerCommand("approve", {
-    description: "Approve a pending Galaxy run proposal: /approve <proposal-id>",
+    description: "Approve a pending Galaxy run proposal: /approve <proposal-id> [--yes]",
     handler: async (args: string | undefined, ctx: ExtensionContext) => {
       const confirm = ctx.hasUI
         ? (title: string, message: string) => ctx.ui.confirm(title, message)

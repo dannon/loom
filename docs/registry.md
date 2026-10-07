@@ -201,9 +201,9 @@ can't be opened or locked comes up read-only with one notice and never blocks th
   `proposal.created`. Assertion ids are refused until assertions exist.
 - **`/approve <proposal-id>`** is the consent. It re-fetches the template and re-validates
   (a hand-written block is held to the same rules), shows the table it is about to freeze
-  in a confirm dialog when there is a UI, re-reads the block and refuses if it moved, then
+  in a confirm dialog when there is a UI (where there isn't -- the terminal's json and print modes -- it refuses with the table unless the user adds `--yes`), re-reads the block and refuses if it moved, then
   freezes the template under `templates/`, resolves the version, builds and hashes the Spec,
-  and records a live user approval on a fresh attempt, logging `proposal.approved`. Pi runs
+  and records a live user approval on a fresh attempt, logging `proposal.approved` with the frozen table, so it is on the record even where a notice goes nowhere. Pi runs
   slash commands only for typed input -- extension-sent messages don't expand them -- so the
   model has no path to it.
 - **Revoke on edit** is "the hash no longer matches", literally: on every notebook change

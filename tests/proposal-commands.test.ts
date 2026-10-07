@@ -190,7 +190,7 @@ describe("loom_propose", () => {
 describe("/approve", () => {
   it("freezes, records a live approval, echoes spec_revision, logs proposal.approved", async () => {
     const id = await proposed();
-    const reply = await approveCommand(deps(), id);
+    const reply = await approveCommand(deps(), `${id} --yes`);
     expect(reply.level).toBe("info");
     expect(reply.message).toMatch(new RegExp(`Approved ${id}`));
     const live = liveApproval(session!.store.snapshot(), id);
@@ -298,10 +298,66 @@ describe("/approve", () => {
   });
 });
 
+describe("/approve with no dialog to confirm in", () => {
+  it("refuses without --yes, showing the table, and records nothing but the refusal", async () => {
+    const id = await proposed();
+    const reply = await approveCommand(deps(), id);
+    expect(reply.level).toBe("warning");
+    expect(reply.message).toMatch(/no dialog here to confirm in/);
+    expect(reply.message).toMatch(/param threads +4 -- the queue gives four cores/);
+    expect(reply.message).toContain(`/approve ${id} --yes`);
+    expect(liveApproval(session!.store.snapshot(), id)).toBeUndefined();
+    expect(activity().at(-1)).toMatchObject({
+      kind: "proposal.approval_unconfirmed",
+      payload: { proposal_id: id, table: expect.stringContaining("param threads") },
+    });
+  });
+
+  it("approves with --yes and puts the frozen table on the record", async () => {
+    const id = await proposed();
+    await approveCommand(deps(), `${id} --yes`);
+    expect(liveApproval(session!.store.snapshot(), id)).toBeDefined();
+    expect(activity().at(-1)).toMatchObject({
+      kind: "proposal.approved",
+      payload: {
+        confirmed_by: "--yes",
+        table: expect.stringMatching(/spec_revision +[0-9a-f]{12}/),
+      },
+    });
+  });
+
+  it("still asks in the dialog when there is one, --yes or not", async () => {
+    const id = await proposed();
+    let asked = false;
+    await approveCommand(deps(), `${id} --yes`, {
+      confirm: async () => {
+        asked = true;
+        return false;
+      },
+    });
+    expect(asked).toBe(true);
+    expect(liveApproval(session!.store.snapshot(), id)).toBeUndefined();
+  });
+
+  it("says when Galaxy's template changed since the proposal", async () => {
+    const id = await proposed();
+    snapshot = {
+      ...TOOL_SNAPSHOT,
+      body: { ...TOOL_SNAPSHOT.body, description: "updated upstream" },
+    };
+    const reply = await approveCommand(deps(), id);
+    expect(reply.message).toMatch(/template for this target changed since it was proposed/);
+  });
+
+  it("does not take --yes as the proposal id", async () => {
+    expect((await approveCommand(deps(), "--yes")).message).toMatch(/Usage: \/approve/);
+  });
+});
+
 describe("edit after approve revokes, on the next read", () => {
   it("an edit that changes what would run revokes and logs proposal.revoked", async () => {
     const id = await proposed();
-    await approveCommand(deps(), id);
+    await approveCommand(deps(), `${id} --yes`);
     const attempt = liveApproval(session!.store.snapshot(), id)!.attempt_id;
     const edited = notebook().replace('"value":4', '"value":64');
     fs.writeFileSync(nb, edited);
@@ -318,7 +374,7 @@ describe("edit after approve revokes, on the next read", () => {
 
   it("an edit to the label alone leaves the approval live", async () => {
     const id = await proposed();
-    await approveCommand(deps(), id);
+    await approveCommand(deps(), `${id} --yes`);
     const edited = notebook().replace("label: Trim reads", "label: Trim the reads");
     fs.writeFileSync(nb, edited);
     expect(checkProposalDrift(deps(), edited)).toEqual([]);
@@ -330,7 +386,7 @@ describe("edit after approve revokes, on the next read", () => {
     const pi = { registerTool: () => {}, registerCommand: () => {}, on: () => {} } as never;
     registerProposalCommands(pi, deps());
     const id = await proposed();
-    await approveCommand(deps(), id);
+    await approveCommand(deps(), `${id} --yes`);
     state.setNotebookPath(nb);
     try {
       state.reemitNotebookIfChanged();
@@ -351,7 +407,7 @@ describe("edit after approve revokes, on the next read", () => {
 describe("/revoke and /pending", () => {
   it("revokes a live approval, then has nothing to revoke", async () => {
     const id = await proposed();
-    await approveCommand(deps(), id);
+    await approveCommand(deps(), `${id} --yes`);
     expect(revokeCommand(deps(), id).message).toMatch(/Revoked the approval/);
     expect(revokeCommand(deps(), id).message).toMatch(/no live approval/);
     expect(activity().at(-1)).toMatchObject({ kind: "proposal.revoked", source: "user" });
@@ -360,7 +416,7 @@ describe("/revoke and /pending", () => {
   it("says when nothing is pending", async () => {
     expect(pendingCommand(deps()).message).toBe("No proposals in the notebook.");
     const id = await proposed();
-    await approveCommand(deps(), id);
+    await approveCommand(deps(), `${id} --yes`);
     expect(pendingCommand(deps()).message).toBe("Nothing pending; 1 proposal(s) approved.");
   });
 });
@@ -387,7 +443,7 @@ describe("record tools binding a run to its proposal", () => {
 
   it("logs the agent's claim against the live approval's attempt, and touches nothing else", async () => {
     const id = await proposed();
-    await approveCommand(deps(), id);
+    await approveCommand(deps(), `${id} --yes`);
     const before = JSON.stringify(session!.store.snapshot());
     const nbBefore = notebook();
     const r = noteProposalBinding(deps(), { proposalId: id, notebookAnchor: "plan-a-step-1", run });
@@ -410,7 +466,7 @@ describe("record tools binding a run to its proposal", () => {
       bound: false,
       reason: `${id} has no live approval in this session`,
     });
-    await approveCommand(deps(), id);
+    await approveCommand(deps(), `${id} --yes`);
     expect(
       noteProposalBinding(deps(), { proposalId: id, notebookAnchor: "plan-a-step-2", run }),
     ).toMatchObject({ bound: false, reason: expect.stringMatching(/approved for plan-a-step-1/) });
@@ -421,7 +477,7 @@ describe("record tools binding a run to its proposal", () => {
 describe("review follow-ups", () => {
   it("deleting the approved step revokes", async () => {
     const id = await proposed();
-    await approveCommand(deps(), id);
+    await approveCommand(deps(), `${id} --yes`);
     fs.writeFileSync(
       nb,
       notebook()
@@ -436,7 +492,7 @@ describe("review follow-ups", () => {
 
   it("deleting the notebook revokes", async () => {
     const id = await proposed();
-    await approveCommand(deps(), id);
+    await approveCommand(deps(), `${id} --yes`);
     fs.rmSync(nb);
     expect(checkProposalDrift(deps())).toEqual([
       expect.objectContaining({ proposalId: id, reason: "removed" }),
@@ -446,7 +502,7 @@ describe("review follow-ups", () => {
 
   it("an unreadable-but-present notebook revokes nothing", async () => {
     const id = await proposed();
-    await approveCommand(deps(), id);
+    await approveCommand(deps(), `${id} --yes`);
     expect(checkProposalDrift(deps({ notebookPath: () => dir }))).toEqual([]);
     expect(liveApproval(session!.store.snapshot(), id)).toBeDefined();
   });

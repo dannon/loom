@@ -90,7 +90,7 @@ through.
 
 `/approve` and `/revoke` are the user's too. Propose a run with
 `loom_propose`, show the table it returns, and ask for `/approve
-<proposal-id>`; you can't approve one yourself. An approval covers exactly
+<proposal-id>`; you can't approve one yourself. With no dialog to confirm in, `/approve` shows the table and wants `--yes` before it records anything. An approval covers exactly
 the Spec frozen at approval time, and only in the session that recorded it:
 editing the proposal block afterwards revokes it, and after a restart it
 comes back restored, not live, until the user approves it again.
