@@ -160,7 +160,9 @@ function credentialFileCandidates(home: string, agentDir: string): Set<string> {
   // snapshot of a relative dir would outlive a chdir. The candidates keep the
   // spellings as given too, since on Windows resolving a drive-less home
   // prepends the cwd's drive and callers may still pass the drive-less form.
-  const key = JSON.stringify([path.resolve(home), path.resolve(agentDir)]);
+  const absHome = path.resolve(home);
+  const absAgentDir = path.resolve(agentDir);
+  const key = JSON.stringify([absHome, absAgentDir]);
   const cached = candidateCache.get(key);
   if (cached?.settled && signaturesMatch(cached.watched)) return cached.candidates;
 
@@ -169,22 +171,26 @@ function credentialFileCandidates(home: string, agentDir: string): Set<string> {
     ...SENSITIVE_HOME_FILES.map((f) => path.join(home, f)),
     ...AGENT_DIR_CREDENTIAL_FILES.map((f) => path.join(agentDir, f)),
   ];
+  const candidates = new Set<string>();
+  if (absHome !== home) for (const f of SENSITIVE_HOME_FILES) addFolded(candidates, absHome, f);
+  if (absAgentDir !== agentDir) {
+    for (const f of AGENT_DIR_CREDENTIAL_FILES) addFolded(candidates, absAgentDir, f);
+  }
   // Walk (and so sign) every dir BEFORE realpath resolves it, so a change
   // that lands mid-build leaves a stale signature behind and forces the next
   // call to rebuild.
   const watched = new Map<string, DirSignature>();
-  const walked = new Map<string, Walk>();
+  const walks = new Map<string, Walk>();
+  const parents = new Map<string, Walk>();
   for (const f of files) {
     const dir = path.dirname(f);
-    if (!walked.has(dir)) walked.set(dir, watchResolution(dir, watched));
+    if (!parents.has(dir)) parents.set(dir, watchResolution(dir, watched, walks));
   }
   const resolvedParents = new Map<string, string | null>();
-  const candidates = new Set<string>();
   let sawLink = false;
   for (const f of files) {
     const link = isSymlink(f);
     if (link) sawLink = true;
-    candidates.add(path.resolve(f).toLowerCase());
     for (const c of withRealpath(f, resolvedParents, link)) candidates.add(c.toLowerCase());
   }
   // realpath decides the spelling, since that's what callers compare against;
@@ -192,7 +198,7 @@ function credentialFileCandidates(home: string, agentDir: string): Set<string> {
   // platform quirk the walk doesn't model -- the watched set may be the wrong
   // one, so don't trust it.
   let walksAgree = true;
-  for (const [dir, w] of walked) {
+  for (const [dir, w] of parents) {
     if (!w.complete || w.real !== (resolvedParents.get(dir) ?? null)) walksAgree = false;
   }
   // A credential file that is itself a symlink resolves through its target's
@@ -211,6 +217,10 @@ function credentialFileCandidates(home: string, agentDir: string): Set<string> {
   return candidates;
 }
 
+function addFolded(set: Set<string>, dir: string, file: string): void {
+  set.add(path.join(dir, file).toLowerCase());
+}
+
 interface Walk {
   // False when the walk hit something it can't promise to notice changing.
   complete: boolean;
@@ -223,55 +233,71 @@ const MAX_LINK_HOPS = 40;
 
 /**
  * Resolve `dir` the way fs.realpathSync does -- lexically normalize, then lstat
- * one component at a time, restarting from the root on each symlink -- and
- * sign every directory whose entries that depended on: every dir walked
- * through, which includes the one holding each link and every dir the link's
- * target passes through. A missing component is fine wherever it turns up --
- * in the path as written or in a dangling link's target: the walk stops in the
- * dir it would appear in, that dir is already signed, and creating the entry
- * rewrites it. Anything else that stops the walk (an unreadable dir or link, a
- * file where a dir should be, too many hops) means the dirs a later resolution
+ * one component at a time, starting over from a symlink's target -- and sign
+ * every directory whose entries that depended on: every dir walked through,
+ * which includes the one holding each link and every dir the link's target
+ * passes through. A missing component is fine wherever it turns up -- in the
+ * path as written or in a dangling link's target: the walk stops in the dir it
+ * would appear in, that dir is already signed, and creating the entry rewrites
+ * it. Anything else that stops the walk (an unreadable dir or link, a file
+ * where a dir should be, too many hops) means the dirs a later resolution
  * would depend on aren't known, so the walk reports itself incomplete and the
  * snapshot is rebuilt on every call.
+ *
+ * `walks` memoizes by absolute path within one build, so the credential dirs'
+ * shared ancestors (and any link along them) are resolved once, not once per
+ * dir.
  */
-function watchResolution(dir: string, watched: Map<string, DirSignature>): Walk {
-  let rest = path.resolve(dir);
-  let cur = path.parse(rest).root;
-  let pending = rest.slice(cur.length).split(path.sep).filter(Boolean);
-  if (!watched.has(cur)) watched.set(cur, dirSignature(cur));
-  let hops = 0;
-  while (pending.length > 0) {
-    const next = path.join(cur, pending.shift()!);
-    // Only dirs go in `watched`, so one already there needs no second lstat.
-    if (watched.has(next)) {
-      cur = next;
-      continue;
-    }
-    let st: fs.Stats;
-    try {
-      st = fs.lstatSync(next);
-    } catch (err) {
-      return { complete: (err as NodeJS.ErrnoException).code === "ENOENT", real: null };
-    }
-    if (st.isSymbolicLink()) {
-      if (++hops > MAX_LINK_HOPS) return { complete: false, real: null };
-      let target: string;
-      try {
-        target = fs.readlinkSync(next);
-      } catch {
-        return { complete: false, real: null };
-      }
-      rest = path.resolve(cur, target, ...pending);
-      cur = path.parse(rest).root;
-      pending = rest.slice(cur.length).split(path.sep).filter(Boolean);
-      if (!watched.has(cur)) watched.set(cur, dirSignature(cur));
-      continue;
-    }
-    if (!st.isDirectory()) return { complete: false, real: null };
-    watched.set(next, signatureOf(st));
-    cur = next;
+function watchResolution(
+  dir: string,
+  watched: Map<string, DirSignature>,
+  walks: Map<string, Walk>,
+  hops = 0,
+): Walk {
+  const abs = path.resolve(dir);
+  let walk = walks.get(abs);
+  if (!walk) {
+    walk = resolveStep(abs, watched, walks, hops);
+    walks.set(abs, walk);
   }
-  return { complete: true, real: cur };
+  return walk;
+}
+
+function resolveStep(
+  abs: string,
+  watched: Map<string, DirSignature>,
+  walks: Map<string, Walk>,
+  hops: number,
+): Walk {
+  const up = path.dirname(abs);
+  if (up === abs) {
+    if (!watched.has(abs)) watched.set(abs, dirSignature(abs));
+    return { complete: true, real: abs };
+  }
+  const parent = watchResolution(up, watched, walks, hops);
+  if (!parent.complete || parent.real === null) return parent;
+  const next = path.join(parent.real, path.basename(abs));
+  // Only dirs go in `watched`, so one already there needs no second lstat.
+  if (watched.has(next)) return { complete: true, real: next };
+  let st: fs.Stats;
+  try {
+    st = fs.lstatSync(next);
+  } catch (err) {
+    return { complete: (err as NodeJS.ErrnoException).code === "ENOENT", real: null };
+  }
+  if (st.isSymbolicLink()) {
+    if (hops >= MAX_LINK_HOPS) return { complete: false, real: null };
+    let target: string;
+    try {
+      target = fs.readlinkSync(next);
+    } catch {
+      return { complete: false, real: null };
+    }
+    return watchResolution(path.resolve(parent.real, target), watched, walks, hops + 1);
+  }
+  if (!st.isDirectory()) return { complete: false, real: null };
+  watched.set(next, signatureOf(st));
+  return { complete: true, real: next };
 }
 
 function isSymlink(p: string): boolean {
