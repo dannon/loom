@@ -327,7 +327,7 @@ describe("edit after approve revokes, on the next read", () => {
 
   it("the drift check runs on every notebook change once registered", async () => {
     const state = await import("../extensions/loom/state");
-    const pi = { registerTool: () => {}, registerCommand: () => {} } as never;
+    const pi = { registerTool: () => {}, registerCommand: () => {}, on: () => {} } as never;
     registerProposalCommands(pi, deps());
     const id = await proposed();
     await approveCommand(deps(), id);
@@ -372,6 +372,7 @@ describe("the model has no way to approve", () => {
     const pi = {
       registerTool: (t: { name: string }) => tools.push(t.name),
       registerCommand: (name: string) => commands.push(name),
+      on: () => {},
     } as never;
     registerProposalCommands(pi, deps());
     expect(tools).toEqual(["loom_propose"]);
@@ -414,5 +415,56 @@ describe("record tools binding a run to its proposal", () => {
       noteProposalBinding(deps(), { proposalId: id, notebookAnchor: "plan-a-step-2", run }),
     ).toMatchObject({ bound: false, reason: expect.stringMatching(/approved for plan-a-step-1/) });
     expect(activity().some((e) => e.kind === "proposal.bound")).toBe(false);
+  });
+});
+
+describe("review follow-ups", () => {
+  it("deleting the approved step revokes", async () => {
+    const id = await proposed();
+    await approveCommand(deps(), id);
+    fs.writeFileSync(
+      nb,
+      notebook()
+        .replace("## Plan A: QC [remote]", "## Notes")
+        .replace(/^- \[ \] 1\. \*\*Trim\*\*.*$/m, ""),
+    );
+    expect(checkProposalDrift(deps())).toEqual([
+      expect.objectContaining({ proposalId: id, reason: "step_removed" }),
+    ]);
+    expect(liveApproval(session!.store.snapshot(), id)).toBeUndefined();
+  });
+
+  it("deleting the notebook revokes", async () => {
+    const id = await proposed();
+    await approveCommand(deps(), id);
+    fs.rmSync(nb);
+    expect(checkProposalDrift(deps())).toEqual([
+      expect.objectContaining({ proposalId: id, reason: "removed" }),
+    ]);
+    expect(liveApproval(session!.store.snapshot(), id)).toBeUndefined();
+  });
+
+  it("an unreadable-but-present notebook revokes nothing", async () => {
+    const id = await proposed();
+    await approveCommand(deps(), id);
+    expect(checkProposalDrift(deps({ notebookPath: () => dir }))).toEqual([]);
+    expect(liveApproval(session!.store.snapshot(), id)).toBeDefined();
+  });
+
+  it("the approval table shows a long value whole", async () => {
+    const long = "y".repeat(150) + "END";
+    const r = await propose(
+      deps(),
+      params({ overrides: [{ param: "threads", value: long, rationale: "r" }] }),
+    );
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    let shown = "";
+    await approveCommand(deps(), r.proposal.proposalId, {
+      confirm: async (_t, m) => {
+        shown = m;
+        return false;
+      },
+    });
+    expect(shown).toContain("END");
   });
 });

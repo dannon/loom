@@ -68,6 +68,14 @@ export async function fetchTemplateWith(
   try {
     if (target.kind === "tool") {
       const body = await getToolDetails({ toolId: id, ioDetails: true }, ctx);
+      // Galaxy can answer for a tool id it doesn't have with a different tool
+      // or lineage. Freezing that schema against a Spec naming this id would
+      // approve one thing and describe another.
+      if (body.id !== id) {
+        throw new TemplateUnavailableError(
+          `Galaxy answered with tool ${String(body.id)} when asked for ${id}; propose the tool id Galaxy has`,
+        );
+      }
       if (typeof body.version !== "string" || body.version === "") {
         throw new TemplateUnavailableError(`Galaxy did not say which version of ${id} it has`);
       }
@@ -138,19 +146,43 @@ export const galaxyTemplateFetcher: TemplateFetcher = async (target, historyId, 
  * template is never indistinguishable from one frozen from Galaxy. It only
  * stands in for Galaxy's answer; consent still comes from `/approve`.
  */
+const replaySnapshots = new Map<string, Record<string, unknown> | Error>();
+
+/**
+ * Read the replay file once and keep what it said. Primed at session start,
+ * before the model has had a turn, so editing the file mid-session -- the
+ * model can write inside the session directory -- changes nothing.
+ */
+export function primeTemplateReplay(sessionDir: string): void {
+  const configured = readEnv("TEMPLATE_REPLAY")?.trim();
+  if (!configured) return;
+  const file = resolveReplayPath(sessionDir, configured);
+  const key = file ?? `${sessionDir}::${configured}`;
+  if (replaySnapshots.has(key)) return;
+  try {
+    if (!file) throw new Error("outside the session directory");
+    const parsed = JSON.parse(fs.readFileSync(file, "utf-8")) as unknown;
+    if (!isRecord(parsed)) throw new Error("not a JSON object");
+    replaySnapshots.set(key, parsed);
+  } catch (err) {
+    replaySnapshots.set(key, err instanceof Error ? err : new Error(String(err)));
+  }
+}
+
 export function replayTemplateFetcher(sessionDir: string): TemplateFetcher | null {
   const configured = readEnv("TEMPLATE_REPLAY")?.trim();
   if (!configured) return null;
   const file = resolveReplayPath(sessionDir, configured);
+  primeTemplateReplay(sessionDir);
+  const snapshot = replaySnapshots.get(file ?? `${sessionDir}::${configured}`);
   return async (target) => {
     const key = `${target.kind}:${targetId(target)}`;
-    let entry: unknown;
-    try {
-      if (!file) throw new Error("outside the session directory");
-      entry = (JSON.parse(fs.readFileSync(file, "utf-8")) as Record<string, unknown>)[key];
-    } catch (err) {
-      throw new TemplateUnavailableError(`template replay unreadable: ${reason(err)}`);
+    if (!snapshot || snapshot instanceof Error) {
+      throw new TemplateUnavailableError(
+        `template replay unreadable: ${snapshot instanceof Error ? snapshot.message : "not loaded"}`,
+      );
     }
+    const entry = snapshot[key];
     if (!isRecord(entry) || typeof entry.version !== "string" || !("body" in entry)) {
       throw new TemplateUnavailableError(`template replay has no entry for ${key}`);
     }
@@ -160,7 +192,7 @@ export function replayTemplateFetcher(sessionDir: string): TemplateFetcher | nul
       source: "template-replay",
       payload: { file: path.relative(sessionDir, file as string), key, version: entry.version },
     });
-    return { body: entry.body, version: entry.version };
+    return { body: structuredClone(entry.body), version: entry.version };
   };
 }
 

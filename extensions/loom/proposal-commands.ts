@@ -62,6 +62,7 @@ import {
 } from "./registry-proposal";
 import { getSessionRegistry, type SessionRegistry } from "./registry-runtime";
 import {
+  primeTemplateReplay,
   TemplateUnavailableError,
   templateFetcherFor,
   type TemplateFetcher,
@@ -138,11 +139,19 @@ export function checkProposalDrift(deps: ProposalDeps, content?: string): Drift[
   const session = deps.registry();
   if (!session || session.store.mode !== "writer") return [];
   const nb = deps.notebookPath();
-  const text = content ?? (nb ? readNotebookSync(nb) : null);
+  let text = content ?? (nb ? readNotebookSync(nb) : null);
+  // A notebook that's gone takes its proposals with it. One that exists but
+  // can't be read right now is left for the next look.
+  if (text === null && nb && !fs.existsSync(nb)) text = "";
   if (text === null) return [];
+  const notebook = text;
+  const stepExists = (anchor: string) => {
+    const r = resolveNotebookAnchor(notebook, anchor);
+    return r.kind === "resolved" && r.anchor === anchor;
+  };
   let drift: Drift[];
   try {
-    drift = revokeDrifted(session.store, proposalSightings(text));
+    drift = revokeDrifted(session.store, proposalSightings(notebook), stepExists);
   } catch {
     return [];
   }
@@ -421,12 +430,18 @@ export async function approveCommand(
     };
   }
 
-  const result = approveProposal(session.store, {
-    proposal,
-    snapshot,
-    assertionDefinitions: assertionDefinitions(proposal.assertions),
-    now: deps.now(),
-  });
+  let result: ReturnType<typeof approveProposal>;
+  try {
+    result = approveProposal(session.store, {
+      proposal,
+      snapshot,
+      assertionDefinitions: assertionDefinitions(proposal.assertions),
+      now: deps.now(),
+    });
+  } catch (err) {
+    // Typically the lock was taken over mid-approval; the store is read-only now.
+    return { level: "warning", message: `Not approved: ${(err as Error).message}.` };
+  }
   if (!result.ok) {
     return { level: "warning", message: `Not approved:\n- ${result.problems.join("\n- ")}` };
   }
@@ -473,7 +488,12 @@ export function revokeCommand(deps: ProposalDeps, args: string): CommandReply {
   const blocked = cannotWrite(session);
   if (blocked || !session) return { level: "warning", message: `Can't revoke: ${blocked}.` };
   checkProposalDrift(deps);
-  const revoked = revokeProposal(session.store, id);
+  let revoked: string[];
+  try {
+    revoked = revokeProposal(session.store, id);
+  } catch (err) {
+    return { level: "warning", message: `Can't revoke: ${(err as Error).message}.` };
+  }
   if (revoked.length === 0) {
     return { level: "info", message: `${id} has no live approval to revoke.` };
   }
@@ -528,7 +548,7 @@ export function pendingCommand(deps: ProposalDeps): CommandReply {
       const block = blocks.find((b) => b.proposalId === sighting.proposalId);
       return `${head}: ${block?.errors.join("; ") ?? "unreadable"}`;
     }
-    return `${head}\n\n${renderProposalTable(sighting.proposal)}`;
+    return `${head}\n\n${renderProposalTable(sighting.proposal, { compact: true })}`;
   });
   const tail =
     registry && session?.store.mode === "writer"
@@ -599,6 +619,12 @@ function toolText(text: string, details: Record<string, unknown>) {
 export function registerProposalCommands(pi: ExtensionAPI, deps: ProposalDeps = defaultDeps): void {
   onNotebookChange((content) => {
     checkProposalDrift(deps, content);
+  });
+
+  // The eval-only template replay is read once, before the model's first turn.
+  pi.on("session_start", async () => {
+    const nb = deps.notebookPath();
+    primeTemplateReplay(nb ? path.dirname(nb) : process.cwd());
   });
 
   pi.registerTool({

@@ -4,6 +4,7 @@ import { createGalaxyContext } from "@galaxyproject/galaxy-ops";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   fetchTemplateWith,
+  primeTemplateReplay,
   replayTemplateFetcher,
   TemplateUnavailableError,
 } from "../extensions/loom/registry-templates";
@@ -129,5 +130,44 @@ describe("template replay (eval seam)", () => {
     await expect(fetcher({ kind: "tool", tool_id: "x", version: "unpinned" }, "h")).rejects.toThrow(
       /outside the session directory/,
     );
+  });
+});
+
+describe("review follow-ups", () => {
+  it("refuses a tool description for a different tool than the one asked for", async () => {
+    await expect(
+      fetchTemplateWith(
+        ctx({ [`/api/tools/${TOOL_ID}`]: () => ({ ...TOOL_BODY, id: "toolshed/other/9.9" }) }),
+        { kind: "tool", tool_id: TOOL_ID, version: "unpinned" },
+        "h",
+      ),
+    ).rejects.toThrow(/answered with tool toolshed\/other\/9.9/);
+  });
+
+  it("reads the replay file once, so a later edit to it changes nothing", async () => {
+    const dir = tmpAnalysisDir();
+    const saved = process.env.LOOM_TEMPLATE_REPLAY;
+    try {
+      const file = path.join(dir, "templates.json");
+      fs.writeFileSync(
+        file,
+        JSON.stringify({ [`tool:${TOOL_ID}`]: { body: TOOL_BODY, version: "0.23.4+galaxy0" } }),
+      );
+      process.env.LOOM_TEMPLATE_REPLAY = "templates.json";
+      primeTemplateReplay(dir);
+      fs.writeFileSync(
+        file,
+        JSON.stringify({ [`tool:${TOOL_ID}`]: { body: { inputs: [] }, version: "6.6.6" } }),
+      );
+      const snap = await replayTemplateFetcher(dir)!(
+        { kind: "tool", tool_id: TOOL_ID, version: "unpinned" },
+        "h",
+      );
+      expect(snap.version).toBe("0.23.4+galaxy0");
+    } finally {
+      if (saved === undefined) delete process.env.LOOM_TEMPLATE_REPLAY;
+      else process.env.LOOM_TEMPLATE_REPLAY = saved;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
