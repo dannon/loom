@@ -183,6 +183,15 @@ describe("mcpToolMatches", () => {
     // mcp__galaxy___<tool> or mcp__galaxy__x__<tool>.
     expect(mcpToolMatches("mcp__galaxy___run_tool", "galaxy_run_tool")).toBe(false);
     expect(mcpToolMatches("mcp__galaxy__x__run_tool", "galaxy_run_tool")).toBe(false);
+    expect(mcpToolMatches("mcp__Galaxy__run_tool", "galaxy_run_tool")).toBe(false);
+  });
+
+  it("does not let a lesson's tool name line up with such a server either", () => {
+    // The corpus validator accepts these spellings, so the matcher has to
+    // refuse them itself.
+    expect(mcpToolMatches("mcp__galaxy___run_tool", "galaxy__run_tool")).toBe(false);
+    expect(mcpToolMatches("mcp__galaxy__x__run_tool", "galaxy_x__run_tool")).toBe(false);
+    expect(mcpToolMatches("galaxy__run_tool", "galaxy__run_tool")).toBe(false);
   });
 });
 

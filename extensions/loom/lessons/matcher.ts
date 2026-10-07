@@ -24,6 +24,7 @@
  */
 
 import { normalizeSignature, UNKNOWN_SIGNATURE } from "../../../shared/observation-contract.js";
+import { GALAXY_MCP_PREFIX, galaxyMcpToolName } from "../../../shared/galaxy-mcp-tools.js";
 import type { Lesson, Match, MatchTrigger } from "./types";
 
 /** Lower is more specific, so a signature hit beats an ambient step-text hit. */
@@ -186,19 +187,34 @@ export function toolMatches(candidates: Set<string>, want: string): boolean {
   return w.length >= MIN_TOOL_CHARS && candidates.has(w);
 }
 
-const MCP_PREFIX = /^(?:galaxy_|mcp__galaxy__)/;
+/**
+ * The Galaxy tool behind a name, or undefined when it is not one. A
+ * `mcp__galaxy__` name goes through galaxyMcpToolName, so another server that
+ * shares the prefix (`mcp__galaxy___x`, `mcp__galaxy__a__x`, a server named
+ * "Galaxy") is not galaxy-mcp. The remainder is held to galaxy-mcp's own name
+ * shape -- no leading "_", no "__" -- on both sides, so a lesson naming
+ * `galaxy__x` cannot line up with such a server either.
+ */
+function galaxyToolOf(name: string): string | undefined {
+  const raw = name.trim();
+  const tool = raw.startsWith(GALAXY_MCP_PREFIX)
+    ? galaxyMcpToolName(raw)
+    : raw.toLowerCase().startsWith("galaxy_")
+      ? raw.slice("galaxy_".length)
+      : raw;
+  if (!tool || tool.startsWith("_") || tool.includes("__")) return undefined;
+  return tool.toLowerCase();
+}
 
 /**
  * Compared after stripping either prefix from both sides, so a lesson written
  * against `galaxy_run_tool` still fires when the call arrived as
- * `mcp__galaxy__run_tool`. Only the exact galaxy-mcp prefix is stripped, so
- * another server's `mcp__galaxy___x` or `mcp__galaxy__a__x` never matches.
+ * `mcp__galaxy__run_tool`.
  */
 export function mcpToolMatches(toolName: string, want: string): boolean {
-  const norm = (s: string): string => s.trim().toLowerCase().replace(MCP_PREFIX, "");
-  const a = norm(toolName);
-  const b = norm(want);
-  return a.length > 0 && b.length > 0 && a === b;
+  const a = galaxyToolOf(toolName);
+  const b = galaxyToolOf(want);
+  return a !== undefined && b !== undefined && a === b;
 }
 
 export function isMatchable(lesson: Lesson): boolean {
