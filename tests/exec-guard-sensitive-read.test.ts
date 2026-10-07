@@ -235,6 +235,32 @@ describe("isLoomStatePath -- a home that is itself under a state dir", () => {
   });
 });
 
+describe("observation state is a credential store", () => {
+  it("hard-denies the token store, the outbox and the sent log under both state dirs", () => {
+    for (const dir of [".loom", ".orbit"]) {
+      for (const name of [
+        "observations-tokens.json",
+        "observations-outbox.jsonl",
+        "observations-sent.jsonl",
+      ]) {
+        const p = `/test-home/alice/${dir}/${name}`;
+        expect(isCredentialStore(p, HOME), p).toBe(true);
+        expect(isSensitivePath(p, HOME), p).toBe(true);
+      }
+    }
+  });
+
+  it("still protects every one of them from a write", () => {
+    for (const name of [
+      "observations-tokens.json",
+      "observations-outbox.jsonl",
+      "observations-sent.jsonl",
+    ]) {
+      expect(isProtectedWritePath(`/test-home/alice/.loom/${name}`, HOME), name).toBe(true);
+    }
+  });
+});
+
 describe("pi agent-dir credential stores", () => {
   it("treats pi's own credential-bearing files as stores, denied for every tier", () => {
     for (const f of ["auth.json", "mcp.json", "galaxy-profiles.json"]) {
