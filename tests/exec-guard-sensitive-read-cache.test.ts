@@ -138,7 +138,7 @@ describe("isCredentialStore realpath cache", () => {
     settle();
     expect(isCredentialStore(target, home, agentDir)).toBe(false);
     // ~/.orbit did not exist; the change lands in ~, not in any dir under it.
-    fs.symlinkSync(path.dirname(target), path.join(home, ".orbit"));
+    fs.symlinkSync(path.dirname(target), path.join(home, ".orbit"), "dir");
     const asConfig = path.join(path.dirname(target), "config.json");
     fs.writeFileSync(asConfig, "{}");
     expect(isCredentialStore(fs.realpathSync(asConfig), home, agentDir)).toBe(true);
@@ -188,13 +188,13 @@ describe("isCredentialStore realpath cache", () => {
     fs.mkdirSync(path.join(ws, "a", "b"), { recursive: true });
     fs.writeFileSync(path.join(ws, "a", "b", "config.json"), "{}");
     fs.rmSync(path.join(home, ".loom"), { recursive: true });
-    fs.symlinkSync(path.join(ws, "a", "b"), path.join(home, ".loom"));
+    fs.symlinkSync(path.join(ws, "a", "b"), path.join(home, ".loom"), "dir");
     settle();
     expect(
       isCredentialStore(fs.realpathSync(path.join(ws, "a", "b", "config.json")), home, agentDir),
     ).toBe(true);
     fs.renameSync(path.join(ws, "a"), path.join(ws, "c"));
-    fs.symlinkSync("c", path.join(ws, "a"));
+    fs.symlinkSync("c", path.join(ws, "a"), "dir");
     const moved = fs.realpathSync(path.join(ws, "c", "b", "config.json"));
     expect(isCredentialStore(moved, home, agentDir)).toBe(true);
   });
@@ -208,7 +208,7 @@ describe("isCredentialStore realpath cache", () => {
       true,
     );
     fs.renameSync(path.join(root, "proj"), path.join(root, "proj2"));
-    fs.symlinkSync("proj2", path.join(root, "proj"));
+    fs.symlinkSync("proj2", path.join(root, "proj"), "dir");
     const moved = fs.realpathSync(path.join(root, "proj2", "pi", "agent", "auth.json"));
     expect(isCredentialStore(moved, home, outside)).toBe(true);
   });
@@ -222,9 +222,9 @@ describe("isCredentialStore realpath cache", () => {
     for (const d of [u, b, c]) fs.mkdirSync(d);
     fs.writeFileSync(path.join(b, "config.json"), "{}");
     fs.writeFileSync(path.join(c, "config.json"), "{}");
-    fs.symlinkSync(b, path.join(u, "link"));
+    fs.symlinkSync(b, path.join(u, "link"), "dir");
     fs.rmSync(path.join(home, ".loom"), { recursive: true });
-    fs.symlinkSync(path.join(u, "link"), path.join(home, ".loom"));
+    fs.symlinkSync(path.join(u, "link"), path.join(home, ".loom"), "dir");
     const inB = fs.realpathSync(path.join(b, "config.json"));
     const inC = fs.realpathSync(path.join(c, "config.json"));
     settle();
@@ -232,7 +232,7 @@ describe("isCredentialStore realpath cache", () => {
     expect(isCredentialStore(inC, home, agentDir)).toBe(false);
 
     fs.rmSync(path.join(u, "link"));
-    fs.symlinkSync(c, path.join(u, "link"));
+    fs.symlinkSync(c, path.join(u, "link"), "dir");
     expect(isCredentialStore(inC, home, agentDir)).toBe(true);
     expect(isCredentialStore(inB, home, agentDir)).toBe(false);
   });
@@ -245,11 +245,11 @@ describe("isCredentialStore realpath cache", () => {
     for (const d of [...hops, b, c]) fs.mkdirSync(d);
     fs.writeFileSync(path.join(b, "config.json"), "{}");
     fs.writeFileSync(path.join(c, "config.json"), "{}");
-    fs.symlinkSync(path.join(hops[1], "l"), path.join(hops[0], "l"));
-    fs.symlinkSync(path.join(hops[2], "l"), path.join(hops[1], "l"));
-    fs.symlinkSync(b, path.join(hops[2], "l"));
+    fs.symlinkSync(path.join(hops[1], "l"), path.join(hops[0], "l"), "dir");
+    fs.symlinkSync(path.join(hops[2], "l"), path.join(hops[1], "l"), "dir");
+    fs.symlinkSync(b, path.join(hops[2], "l"), "dir");
     fs.rmSync(path.join(home, ".loom"), { recursive: true });
-    fs.symlinkSync(path.join(hops[0], "l"), path.join(home, ".loom"));
+    fs.symlinkSync(path.join(hops[0], "l"), path.join(home, ".loom"), "dir");
     const inB = fs.realpathSync(path.join(b, "config.json"));
     const inC = fs.realpathSync(path.join(c, "config.json"));
     settle();
@@ -257,7 +257,7 @@ describe("isCredentialStore realpath cache", () => {
     expect(isCredentialStore(inB, home, agentDir)).toBe(true);
 
     fs.rmSync(path.join(hops[1], "l"));
-    fs.symlinkSync(c, path.join(hops[1], "l"));
+    fs.symlinkSync(c, path.join(hops[1], "l"), "dir");
     expect(isCredentialStore(inC, home, agentDir)).toBe(true);
     expect(isCredentialStore(inB, home, agentDir)).toBe(false);
   });
@@ -267,7 +267,7 @@ describe("isCredentialStore realpath cache", () => {
     const u = path.join(root, "u");
     fs.mkdirSync(u);
     fs.rmSync(path.join(home, ".loom"), { recursive: true });
-    fs.symlinkSync(path.join(u, "target"), path.join(home, ".loom"));
+    fs.symlinkSync(path.join(u, "target"), path.join(home, ".loom"), "dir");
     settle();
     expect(isCredentialStore(target, home, agentDir)).toBe(false);
     expect(isCredentialStore(target, home, agentDir)).toBe(false);
@@ -304,7 +304,7 @@ describe("isCredentialStore realpath cache", () => {
     const u = path.join(root, "u");
     fs.mkdirSync(u);
     fs.rmSync(path.join(home, ".loom"), { recursive: true });
-    fs.symlinkSync(path.join(u, "target"), path.join(home, ".loom"));
+    fs.symlinkSync(path.join(u, "target"), path.join(home, ".loom"), "dir");
     settle();
     isCredentialStore(target, home, agentDir);
     calls.realpath = 0;
@@ -318,8 +318,8 @@ describe("isCredentialStore realpath cache", () => {
     const u = path.join(root, "u");
     fs.mkdirSync(u);
     fs.rmSync(path.join(home, ".loom"), { recursive: true });
-    fs.symlinkSync(path.join(home, ".loom"), path.join(u, "l"));
-    fs.symlinkSync(path.join(u, "l"), path.join(home, ".loom"));
+    fs.symlinkSync(path.join(home, ".loom"), path.join(u, "l"), "dir");
+    fs.symlinkSync(path.join(u, "l"), path.join(home, ".loom"), "dir");
     settle();
     isCredentialStore(target, home, agentDir);
     calls.realpath = 0;
@@ -328,7 +328,7 @@ describe("isCredentialStore realpath cache", () => {
 
     // And once it can be followed, the next call sees where it goes.
     fs.rmSync(path.join(u, "l"));
-    fs.symlinkSync(path.dirname(target), path.join(u, "l"));
+    fs.symlinkSync(path.dirname(target), path.join(u, "l"), "dir");
     const asConfig = path.join(path.dirname(target), "config.json");
     fs.writeFileSync(asConfig, "{}");
     expect(isCredentialStore(fs.realpathSync(asConfig), home, agentDir)).toBe(true);
@@ -341,10 +341,10 @@ describe("isCredentialStore realpath cache", () => {
     fs.mkdirSync(r);
     const tail = Array(450).fill("a").join("/");
     for (let k = 0; k < 10; k++) {
-      fs.symlinkSync(path.join(r, `l${k + 1}`, tail), path.join(r, `l${k}`));
+      fs.symlinkSync(path.join(r, `l${k + 1}`, tail), path.join(r, `l${k}`), "dir");
     }
     fs.rmSync(path.join(home, ".loom"), { recursive: true });
-    fs.symlinkSync(path.join(r, "l0"), path.join(home, ".loom"));
+    fs.symlinkSync(path.join(r, "l0"), path.join(home, ".loom"), "dir");
     settle();
     expect(() => isCredentialStore(target, home, agentDir)).not.toThrow();
     expect(isCredentialStore(target, home, agentDir)).toBe(false);
@@ -353,17 +353,24 @@ describe("isCredentialStore realpath cache", () => {
   it("flags where the kernel puts a `..` after a link, not where string math does", () => {
     // ~/s -> x/y and ~/.loom -> s/../real. Opening ~/.loom/config.json goes
     // to x/real, which is where fs.promises.realpath says it is too;
-    // fs.realpathSync collapses the `..` first and says ~/real.
+    // fs.realpathSync collapses the `..` first and says ~/real. Windows
+    // collapses it the same way as the string math (CI's native lookup missed
+    // x/real), so there both get a config.json and only "flagged wherever it
+    // opens" is asserted.
     const x = path.join(root, "x");
     fs.mkdirSync(path.join(x, "y"), { recursive: true });
     fs.mkdirSync(path.join(x, "real"));
     fs.writeFileSync(path.join(x, "real", "config.json"), "{}");
     fs.mkdirSync(path.join(home, "real"));
-    fs.symlinkSync(path.join(x, "y"), path.join(home, "s"));
+    if (process.platform === "win32")
+      fs.writeFileSync(path.join(home, "real", "config.json"), "{}");
+    fs.symlinkSync(path.join(x, "y"), path.join(home, "s"), "dir");
     fs.rmSync(path.join(home, ".loom"), { recursive: true });
-    fs.symlinkSync("s/../real", path.join(home, ".loom"));
+    fs.symlinkSync("s/../real", path.join(home, ".loom"), "dir");
     const opened = fs.realpathSync.native(path.join(home, ".loom", "config.json"));
-    expect(opened).toBe(fs.realpathSync(path.join(x, "real", "config.json")));
+    if (process.platform !== "win32") {
+      expect(opened).toBe(fs.realpathSync(path.join(x, "real", "config.json")));
+    }
     settle();
     expect(isCredentialStore(opened, home, agentDir)).toBe(true);
     // Which dirs decide each answer differ, so neither is cached.
