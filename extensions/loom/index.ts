@@ -37,6 +37,7 @@ import { registerIwcPlanCheck } from "./iwc-plan-check";
 import { registerSraImportGate } from "./sra-import-gate";
 import { registerEvidenceGate } from "./evidence-gate";
 import { registerEvidenceOverrideCommand } from "./evidence-override-command";
+import { registerProposalCommands } from "./proposal-commands";
 import { registerExecGuard } from "./exec-guard";
 import { registerSandbox } from "./sandbox";
 import { isLocalExecDisabled } from "./local-exec";
@@ -147,6 +148,11 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerEvidenceGate(pi);
   registerSraImportGate(pi);
   registerEvidenceOverrideCommand(pi);
+  // ── Approval registry (#476): the model proposes with loom_propose; the user
+  // approves with /approve (or revokes, or lists with /pending). The registry
+  // itself is opened and closed by the session lifecycle.
+  registerProposalCommands(pi);
+  // ── end approval registry
   if (isTeamDispatchEnabled()) {
     registerTeamTools(pi);
   }

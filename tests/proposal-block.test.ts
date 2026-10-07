@@ -112,3 +112,11 @@ describe("setProposalSpecRevision", () => {
     expect(setProposalSpecRevision(dup, "prop-abc123", rev)).toBe(dup);
   });
 });
+
+describe("setProposalSpecRevision(null)", () => {
+  it("takes the echo back out after a revoke", () => {
+    const content = appendProposalBlock(NOTEBOOK, toolProposal());
+    const echoed = setProposalSpecRevision(content, "prop-abc123", "c".repeat(64));
+    expect(setProposalSpecRevision(echoed, "prop-abc123", null)).toBe(content);
+  });
+});

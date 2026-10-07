@@ -807,23 +807,23 @@ export function appendProposalBlock(content: string, p: Proposal): string {
 }
 
 /**
- * Write `spec_revision` into the one block carrying this id, touching no other
- * line of it. Returns the content unchanged when there isn't exactly one
- * unambiguous block -- the registry already holds the approval, and this is
- * only the echo.
+ * Write `spec_revision` into the one block carrying this id, or take it out
+ * (`null`, after a revoke), touching no other line of it. Returns the content
+ * unchanged when there isn't exactly one unambiguous block -- the registry
+ * already holds the truth, and this is only the echo.
  */
 export function setProposalSpecRevision(
   content: string,
   proposalId: string,
-  specRevision: string,
+  specRevision: string | null,
 ): string {
-  if (!/^[0-9a-f]{64}$/.test(specRevision)) return content;
+  if (specRevision !== null && !/^[0-9a-f]{64}$/.test(specRevision)) return content;
   const lines = content.split("\n");
   const blocks = findProposalBlocks(content).filter((b) => b.proposalId === proposalId);
   if (blocks.length !== 1 || !isUnambiguousRange(lines, blocks[0].start)) return content;
   const { start, end } = blocks[0];
   const body = lines.slice(start + 1, end).filter((l) => !/^spec_revision:/.test(l));
-  body.push(`spec_revision: ${specRevision}`);
+  if (specRevision !== null) body.push(`spec_revision: ${specRevision}`);
   return [...lines.slice(0, start + 1), ...body, ...lines.slice(end)].join("\n");
 }
 
