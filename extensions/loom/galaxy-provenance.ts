@@ -57,7 +57,8 @@ export interface ProvenanceJob {
   tool_id: Maybe<string>;
   tool_version: Maybe<string>;
   /** Where `tool_version` came from, since job details never carry it. */
-  tool_version_source: "submission" | "invocation_step" | "job_listing" | typeof UNKNOWN;
+  tool_version_source:
+    "submission" | "invocation_step" | "job_listing" | "tool_id" | typeof UNKNOWN;
   state: Maybe<string>;
   exit_code: number | null | typeof UNKNOWN;
   create_time: Maybe<string>;
@@ -358,7 +359,7 @@ export async function writeEnrichment(
       ...record,
       jobs,
       enrichment: {
-        state: update.state,
+        state: attemptState(record, jobs, update.state),
         attempts: update.attempts,
         ...(update.error ? { error: update.error } : {}),
         updated_at: new Date().toISOString(),
@@ -368,6 +369,24 @@ export async function writeEnrichment(
     await writeAtomically(file, next);
     return next;
   });
+}
+
+/**
+ * A mapped tool run is one attempt but several blocks, each enriched on its
+ * own, so the attempt's state is read off its jobs rather than taken from
+ * whichever block wrote last: complete only when every owned job has a full
+ * record, unavailable as soon as one cannot have one.
+ */
+function attemptState(
+  record: AttemptRecord,
+  jobs: Record<string, ProvenanceJob>,
+  reported: AttemptRecord["enrichment"]["state"],
+): AttemptRecord["enrichment"]["state"] {
+  if (record.kind === "invocation") return reported;
+  const owned = record.ids.job_ids ?? [];
+  if (owned.some((id) => jobs[id]?.unavailable)) return "unavailable";
+  if (reported === "unavailable") return "unavailable";
+  return owned.every((id) => jobs[id]) ? "complete" : "pending";
 }
 
 /** Synchronous existence check, for the evidence gate's tool_call hook. */

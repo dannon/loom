@@ -9,6 +9,7 @@ import {
   createGalaxyContext,
   GalaxyConnectionError,
   GalaxyError,
+  getDatasetDetails,
   getInvocations,
   type GalaxyContext,
   type InvocationDetail,
@@ -427,4 +428,55 @@ export async function galaxyGetInvocation(
     throw new Error(`Galaxy answered a listing for invocation ${invocationId}`);
   }
   return result;
+}
+
+/**
+ * One dataset's metadata (name, extension, dbkey, state, create time), through
+ * galaxy-ops. No preview: enrichment wants the facts about a dataset, never
+ * its content.
+ */
+export async function galaxyGetDataset(
+  datasetId: string,
+  signal?: AbortSignal,
+): Promise<Record<string, unknown>> {
+  const ctx = galaxyOpsContext(signal);
+  if (!ctx) throw new Error("Galaxy credentials not configured (GALAXY_URL, GALAXY_API_KEY)");
+  try {
+    const result = await getDatasetDetails({ datasetId, includePreview: false }, ctx);
+    return result.dataset;
+  } catch (err) {
+    throw asLoomFailure(err);
+  }
+}
+
+/**
+ * A page of one history's invocations, through galaxy-ops. galaxy-ops takes
+ * no offset or time filter, so this is the newest `limit` and the caller
+ * filters by `create_time`.
+ */
+export async function galaxyListHistoryInvocations(
+  historyId: string,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<{ id: string; create_time?: string; state?: string; workflow_id?: string }[]> {
+  const ctx = galaxyOpsContext(signal);
+  if (!ctx) throw new Error("Galaxy credentials not configured (GALAXY_URL, GALAXY_API_KEY)");
+  let result;
+  try {
+    result = await getInvocations({ historyId, limit, stepDetails: false }, ctx);
+  } catch (err) {
+    throw asLoomFailure(err);
+  }
+  if (!Array.isArray(result)) throw new Error("Galaxy answered one invocation for a listing");
+  return result
+    .filter((r) => !!r && typeof r === "object" && typeof (r as { id?: unknown }).id === "string")
+    .map((r) => {
+      const row = r as Record<string, unknown>;
+      return {
+        id: row.id as string,
+        ...(typeof row.create_time === "string" ? { create_time: row.create_time } : {}),
+        ...(typeof row.state === "string" ? { state: row.state } : {}),
+        ...(typeof row.workflow_id === "string" ? { workflow_id: row.workflow_id } : {}),
+      };
+    });
 }
