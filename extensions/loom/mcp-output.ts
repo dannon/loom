@@ -251,8 +251,15 @@ function isMcpOutputFile(root: string, parent: string, name: string): boolean {
   );
 }
 
-/** Only MCP output files registered by tool-result metadata are readable. */
-async function readArtifact(path: string): Promise<string> {
+/**
+ * Only MCP output files registered by tool-result metadata are readable.
+ * `maxBytes` defaults to the inspection limit; a caller that needs the whole
+ * file regardless of size, like submission capture, raises it.
+ */
+export async function readMcpOutputFile(
+  path: string,
+  maxBytes: number = MAX_FILE_BYTES,
+): Promise<string> {
   const root = await realpath(tmpdir());
   const parent = await realpath(dirname(path));
   if (!isMcpOutputFile(root, parent, basename(path))) {
@@ -269,10 +276,10 @@ async function readArtifact(path: string): Promise<string> {
       stat.nlink !== 1 ||
       stat.dev !== before.dev ||
       stat.ino !== before.ino ||
-      stat.size > MAX_FILE_BYTES
+      stat.size > maxBytes
     )
       throw new Error(
-        "MCP artifact is not a regular file within the 32 MB inspection limit; narrow the original read-only query.",
+        `MCP artifact is not a regular file within the ${Math.round(maxBytes / (1024 * 1024))} MB limit; narrow the original read-only query.`,
       );
     const bytes = Buffer.alloc(stat.size + 1);
     let length = 0;
@@ -338,7 +345,7 @@ export function registerMcpOutputRecovery(pi: ExtensionAPI): void {
           throw new Error(
             "Unknown MCP outputId for this session. Use the ID from its recovery notice.",
           );
-        const text = await readArtifact(path);
+        const text = await readMcpOutputFile(path);
         signal?.throwIfAborted();
         return {
           content: [{ type: "text", text: JSON.stringify(inspectOutput(text, args)) }],
@@ -365,7 +372,7 @@ export function registerMcpOutputRecovery(pi: ExtensionAPI): void {
     let next =
       "Select a JSON Pointer from the preview, or use query to find relevant records. A partial preview does not establish that omitted records are absent.";
     try {
-      const page = inspectOutput(await readArtifact(path), {
+      const page = inspectOutput(await readMcpOutputFile(path), {
         outputId: event.toolCallId,
         limit: 20,
       });

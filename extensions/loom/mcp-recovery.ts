@@ -48,7 +48,10 @@ inspect the destination history, jobs/invocations or affected resource first.
 Reuse an accepted operation; retry only when non-acceptance or safe retry is
 established. Never blindly replay a mutation, invent its ID, or infer success.
 Limit recovery to one narrowed retry and one re-bind per incident. If those
-fail, report the concrete blocker and preserve work instead of looping.
+fail, report the concrete blocker and preserve work instead of looping. If small
+requests still time out after the re-bind, the server process may be stuck,
+and mcp__galaxy__connect() can't restart it -- that is when to suggest
+/mcp reconnect galaxy to the user.
 `;
 
 export function galaxyRecoveryHint(name: string, kind: Exclude<GalaxyFailureKind, null>): string {

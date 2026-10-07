@@ -39,6 +39,18 @@ const PATH_GATED_TOOLS = new Set(["edit", "write", "read"]);
 // gtn_* and notebook_* are brain-registered tools.
 const ALLOWED_PREFIXES = ["mcp__galaxy__", "mcp__brc_analytics__", "galaxy_", "gtn_", "notebook_"];
 
+/**
+ * Another server's tools can pass a plain startsWith: "galaxy_" or "galaxy-"
+ * gives mcp__galaxy___<tool>, and "galaxy__x" gives mcp__galaxy__x__<tool>.
+ * The curated servers' own tool names never start with "_" or contain "__".
+ */
+function hasToolPrefix(toolName: string, prefix: string): boolean {
+  if (!toolName.startsWith(prefix)) return false;
+  if (!prefix.startsWith("mcp__")) return true;
+  const tool = toolName.slice(prefix.length);
+  return !tool.startsWith("_") && !tool.includes("__");
+}
+
 // Allowed tool names that don't share one of the prefixes above.
 // The MCP output reader only inspects registered artifacts from this session.
 const ALLOWED_EXACT = new Set(["skills_fetch", "mcp_read_output"]);
@@ -123,7 +135,7 @@ export function shouldBlockTool(
   }
   // Curated remote surface -> allowed.
   if (ALLOWED_EXACT.has(toolName)) return undefined;
-  if (ALLOWED_PREFIXES.some((p) => toolName.startsWith(p))) return undefined;
+  if (ALLOWED_PREFIXES.some((p) => hasToolPrefix(toolName, p))) return undefined;
   // Default deny: bash/grep/find/ls, egress tools, experiments, future tools.
   return { block: true, reason: `${toolName} is not available in remote mode` };
 }
