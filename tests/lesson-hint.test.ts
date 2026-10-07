@@ -202,6 +202,7 @@ describe("recordSurfacing + registerLessonHint", () => {
   let dir: string;
   let lessonsDir: string;
   let prevHome: string | undefined;
+  let prevUserProfile: string | undefined;
 
   beforeEach(() => {
     resetState();
@@ -210,7 +211,10 @@ describe("recordSurfacing + registerLessonHint", () => {
     dir = mkdtempSync(join(tmpdir(), "lesson-hint-"));
     lessonsDir = join(dir, "lessons");
     prevHome = process.env.HOME;
+    prevUserProfile = process.env.USERPROFILE;
     process.env.HOME = join(dir, "home");
+    // os.homedir() reads USERPROFILE on Windows, so the temp home has to cover both.
+    process.env.USERPROFILE = join(dir, "home");
     writeFileSync(join(dir, "notebook.md"), "# nb\n");
     setNotebookPath(join(dir, "notebook.md"));
     process.env.LOOM_LESSONS_DIR = lessonsDir;
@@ -221,6 +225,8 @@ describe("recordSurfacing + registerLessonHint", () => {
     delete process.env.ANTHROPIC_API_KEY;
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
     setNotebookPath(null);
     resetLessonStore();
     rmSync(dir, { recursive: true, force: true });

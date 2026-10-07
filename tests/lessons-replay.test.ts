@@ -33,6 +33,7 @@ function copyDir(src: string, dest: string): void {
 let dir: string;
 let cwd: string;
 let prevHome: string | undefined;
+let prevUserProfile: string | undefined;
 
 beforeEach(() => {
   resetState();
@@ -43,7 +44,10 @@ beforeEach(() => {
   copyDir(FIXTURE, cwd);
   setNotebookPath(path.join(cwd, "notebook.md"));
   prevHome = process.env.HOME;
+  prevUserProfile = process.env.USERPROFILE;
   process.env.HOME = path.join(dir, "home");
+  // os.homedir() reads USERPROFILE on Windows, so the temp home has to cover both.
+  process.env.USERPROFILE = path.join(dir, "home");
   process.env.LOOM_LESSONS_DIR = path.join(cwd, "lessons");
   process.env.LOOM_LESSON_REPLAY = "lesson-events.jsonl";
 });
@@ -51,6 +55,8 @@ beforeEach(() => {
 afterEach(() => {
   if (prevHome === undefined) delete process.env.HOME;
   else process.env.HOME = prevHome;
+  if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = prevUserProfile;
   delete process.env.LOOM_LESSONS_DIR;
   delete process.env.LOOM_LESSON_REPLAY;
   setNotebookPath(null);

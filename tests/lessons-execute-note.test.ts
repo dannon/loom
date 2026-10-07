@@ -53,6 +53,7 @@ const NOTEBOOK = [
 let dir: string;
 let lessonsDir: string;
 let prevHome: string | undefined;
+let prevUserProfile: string | undefined;
 
 beforeEach(() => {
   resetState();
@@ -60,7 +61,10 @@ beforeEach(() => {
   resetLessonStore();
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-exec-note-"));
   prevHome = process.env.HOME;
+  prevUserProfile = process.env.USERPROFILE;
   process.env.HOME = path.join(dir, "home");
+  // os.homedir() reads USERPROFILE on Windows, so the temp home has to cover both.
+  process.env.USERPROFILE = path.join(dir, "home");
   lessonsDir = path.join(dir, "lessons");
   fs.mkdirSync(path.join(lessonsDir, "stats"), { recursive: true });
   fs.writeFileSync(path.join(lessonsDir, "stats", "normalize-drops-samples.md"), LESSON);
@@ -73,6 +77,8 @@ afterEach(() => {
   delete process.env.LOOM_LESSONS_DIR;
   if (prevHome === undefined) delete process.env.HOME;
   else process.env.HOME = prevHome;
+  if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = prevUserProfile;
   setNotebookPath(null);
   resetState();
   resetLessonStore();

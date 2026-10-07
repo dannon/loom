@@ -466,18 +466,24 @@ describe("loadLessonStore", () => {
 
 describe("getLessonStore", () => {
   let prevHome: string | undefined;
+  let prevUserProfile: string | undefined;
   let home: string;
 
   beforeEach(() => {
     prevHome = process.env.HOME;
+    prevUserProfile = process.env.USERPROFILE;
     home = path.join(dir, "home");
     fs.mkdirSync(path.join(home, ".loom"), { recursive: true });
     process.env.HOME = home;
+    // os.homedir() reads USERPROFILE on Windows, so the temp home has to cover both.
+    process.env.USERPROFILE = home;
     resetLessonStore();
   });
   afterEach(() => {
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
     delete process.env.LOOM_LESSONS;
     delete process.env.LOOM_LESSONS_DIR;
     resetLessonStore();

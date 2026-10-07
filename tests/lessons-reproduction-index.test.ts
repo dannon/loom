@@ -45,6 +45,7 @@ function wireContext() {
 
 let dir: string;
 let prevHome: string | undefined;
+let prevUserProfile: string | undefined;
 
 beforeEach(() => {
   resetState();
@@ -52,7 +53,10 @@ beforeEach(() => {
   resetLessonStore();
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-repro-idx-"));
   prevHome = process.env.HOME;
+  prevUserProfile = process.env.USERPROFILE;
   process.env.HOME = path.join(dir, "home");
+  // os.homedir() reads USERPROFILE on Windows, so the temp home has to cover both.
+  process.env.USERPROFILE = path.join(dir, "home");
   const lessonsDir = path.join(dir, "lessons", "reproduction");
   fs.mkdirSync(lessonsDir, { recursive: true });
   fs.writeFileSync(
@@ -66,6 +70,8 @@ afterEach(() => {
   delete process.env.LOOM_LESSONS_DIR;
   if (prevHome === undefined) delete process.env.HOME;
   else process.env.HOME = prevHome;
+  if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = prevUserProfile;
   setNotebookPath(null);
   resetState();
   resetLessonStore();

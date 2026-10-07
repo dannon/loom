@@ -50,6 +50,7 @@ const LESSON = lessonFile({
 
 let dir: string;
 let prevHome: string | undefined;
+let prevUserProfile: string | undefined;
 let prevAnthropic: string | undefined;
 
 beforeEach(() => {
@@ -58,7 +59,10 @@ beforeEach(() => {
   resetLessonStore();
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-lesson-redact-"));
   prevHome = process.env.HOME;
+  prevUserProfile = process.env.USERPROFILE;
   process.env.HOME = path.join(dir, "home");
+  // os.homedir() reads USERPROFILE on Windows, so the temp home has to cover both.
+  process.env.USERPROFILE = path.join(dir, "home");
   const stateDir = path.join(dir, "home", ".loom");
   fs.mkdirSync(path.join(stateDir, "lessons", "reproduction"), { recursive: true });
   fs.writeFileSync(
@@ -82,6 +86,8 @@ afterEach(() => {
   else process.env.ANTHROPIC_API_KEY = prevAnthropic;
   if (prevHome === undefined) delete process.env.HOME;
   else process.env.HOME = prevHome;
+  if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = prevUserProfile;
   setNotebookPath(null);
   resetState();
   resetLessonStore();

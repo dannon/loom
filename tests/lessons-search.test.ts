@@ -191,6 +191,7 @@ describe("renderLessonSearchResult", () => {
 describe("the lessons_search tool", () => {
   let dir: string;
   let prevHome: string | undefined;
+  let prevUserProfile: string | undefined;
 
   beforeEach(() => {
     resetState();
@@ -198,7 +199,10 @@ describe("the lessons_search tool", () => {
     resetLessonStore();
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-lessons-search-"));
     prevHome = process.env.HOME;
+    prevUserProfile = process.env.USERPROFILE;
     process.env.HOME = path.join(dir, "home");
+    // os.homedir() reads USERPROFILE on Windows, so the temp home has to cover both.
+    process.env.USERPROFILE = path.join(dir, "home");
     process.env.LOOM_LESSONS_DIR = path.join(dir, "lessons");
     fs.writeFileSync(path.join(dir, "notebook.md"), "# nb\n");
     setNotebookPath(path.join(dir, "notebook.md"));
@@ -206,6 +210,8 @@ describe("the lessons_search tool", () => {
   afterEach(() => {
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
     delete process.env.LOOM_LESSONS_DIR;
     delete process.env.LOOM_LESSONS;
     setNotebookPath(null);

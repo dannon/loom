@@ -47,17 +47,23 @@ async function search(query: string): Promise<string> {
 
 let dir: string;
 let prevHome: string | undefined;
+let prevUserProfile: string | undefined;
 
 beforeEach(() => {
   resetState();
   resetLessonStore();
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tier2-fixtures-"));
   prevHome = process.env.HOME;
+  prevUserProfile = process.env.USERPROFILE;
   process.env.HOME = dir;
+  // os.homedir() reads USERPROFILE on Windows, so the temp home has to cover both.
+  process.env.USERPROFILE = dir;
 });
 afterEach(() => {
   if (prevHome === undefined) delete process.env.HOME;
   else process.env.HOME = prevHome;
+  if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = prevUserProfile;
   delete process.env.LOOM_LESSONS_DIR;
   resetLessonStore();
   fs.rmSync(dir, { recursive: true, force: true });
