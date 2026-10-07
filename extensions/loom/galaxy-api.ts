@@ -5,32 +5,21 @@
  * Provides typed wrappers for the specific endpoints used by invocation polling.
  */
 
+import {
+  createGalaxyContext,
+  GalaxyConnectionError,
+  GalaxyError,
+  getInvocations,
+  type GalaxyContext,
+  type InvocationDetail,
+} from "@galaxyproject/galaxy-ops";
 import { fetchSameOriginOnly } from "../../shared/redirect-guard.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Galaxy API response types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface GalaxyInvocationStepJob {
-  id: string;
-  state: string;
-  tool_id: string;
-}
-
-export interface GalaxyInvocationStep {
-  id: string;
-  order_index: number;
-  state: string | null;
-  jobs: GalaxyInvocationStepJob[];
-}
-
-export interface GalaxyInvocationResponse {
-  id: string;
-  state: string;
-  workflow_id: string;
-  history_id: string;
-  steps: GalaxyInvocationStep[];
-}
+export type { InvocationDetail } from "@galaxyproject/galaxy-ops";
 
 /**
  * Subset of GET /api/jobs/{jobId} we actually read.
@@ -287,4 +276,84 @@ export async function galaxyGetMostRecentHistory(
 ): Promise<GalaxyHistorySummary | null> {
   const res = await galaxyGet<GalaxyHistorySummary | null>("/histories/most_recently_used", signal);
   return res && typeof res.id === "string" && res.id.length > 0 ? res : null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// galaxy-ops
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The fetch galaxy-ops gets, so its requests keep the redirect guard every
+ * other Galaxy call here has: openapi-fetch hands over a Request carrying
+ * `x-api-key`, and Node would forward that header across origins on a 3xx.
+ *
+ * It also carries the caller's abort signal. galaxy-ops' ops don't all pass
+ * the context's signal to their requests (getInvocations doesn't, as of
+ * 0.3.1), so without this a cancelled check would keep its request running.
+ * Combined with the request's own signal, which galaxy-ops uses for timeouts.
+ */
+function galaxyOpsFetch(callerSignal?: AbortSignal): typeof fetch {
+  return async (input, init) => {
+    const req = new Request(input, init);
+    const body =
+      req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
+    const signal = callerSignal ? AbortSignal.any([req.signal, callerSignal]) : req.signal;
+    return fetchSameOriginOnly(
+      req.url,
+      { method: req.method, headers: req.headers, body, signal },
+      GALAXY_REDIRECT_LABELS,
+    );
+  };
+}
+
+/** A galaxy-ops context on the configured server, or null without credentials. */
+export function galaxyOpsContext(signal?: AbortSignal): GalaxyContext | null {
+  const config = getGalaxyConfig();
+  if (!config) return null;
+  return createGalaxyContext({
+    baseUrl: config.url,
+    apiKey: config.apiKey,
+    signal,
+    fetchImpl: galaxyOpsFetch(signal),
+  });
+}
+
+/**
+ * A galaxy-ops failure, as the rest of the brain has always seen one. An HTTP
+ * failure becomes the GalaxyApiError galaxyGet throws -- same status, same
+ * message, built from the same raw body -- and a request that never got a
+ * reply (a refused redirect, an abort, a dead network) rethrows what fetch
+ * threw, which galaxy-ops had wrapped.
+ */
+function asLoomFailure(err: unknown): unknown {
+  if (!(err instanceof GalaxyError)) return err;
+  const http = err.http;
+  if (http && http.status !== null) {
+    return new GalaxyApiError(http.status, http.bodyText, http.reason ?? "");
+  }
+  if (err instanceof GalaxyConnectionError && err.cause !== undefined) return err.cause;
+  return err;
+}
+
+/**
+ * One invocation with each step's jobs. `stepDetails` matters: without it
+ * Galaxy answers with every step's `jobs` list empty, so a run still going
+ * looks like one with nothing left to do.
+ */
+export async function galaxyGetInvocation(
+  invocationId: string,
+  signal?: AbortSignal,
+): Promise<InvocationDetail> {
+  const ctx = galaxyOpsContext(signal);
+  if (!ctx) throw new Error("Galaxy credentials not configured (GALAXY_URL, GALAXY_API_KEY)");
+  let result;
+  try {
+    result = await getInvocations({ invocationId, stepDetails: true }, ctx);
+  } catch (err) {
+    throw asLoomFailure(err);
+  }
+  if (Array.isArray(result)) {
+    throw new Error(`Galaxy answered a listing for invocation ${invocationId}`);
+  }
+  return result;
 }

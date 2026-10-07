@@ -135,6 +135,23 @@ describe("parseRegistry", () => {
         d.exceptions = [ex, { ...ex }];
       },
     ],
+    [
+      "an assertion_id on an exception that isn't an evidence gate",
+      (d, id) => {
+        d.exceptions = [
+          {
+            id: "e",
+            attempt_id: id,
+            spec_revision: HEX("1"),
+            scope: "manual_attestation",
+            assertion_id: "build",
+            by: "user",
+            at: "t",
+            reason: "r",
+          },
+        ];
+      },
+    ],
     ["an attempt both live and quarantined", (d, id) => (d.quarantine = { [id]: d.attempts[id] })],
     ["a missing supervision block", (d) => delete d.supervision],
   ];
@@ -190,5 +207,34 @@ describe("prototype keys", () => {
     spec.assertions = [{ id: "__proto__", definition_digest: HEX("1"), definition: {} }];
     doc.attempts[id].approval.spec_revision = specRevision(spec);
     expect(() => parseRegistry(doc)).toThrow(RegistryFormatError);
+  });
+});
+
+describe("exceptions", () => {
+  it("keeps an evidence gate's assertion_id through a parse", () => {
+    const doc = registryWith() as Record<string, any>;
+    const id = Object.keys(doc.attempts)[0];
+    doc.exceptions = [
+      {
+        id: "e",
+        attempt_id: id,
+        spec_revision: HEX("1"),
+        scope: "evidence_gate",
+        assertion_id: "build",
+        by: "user",
+        at: "t",
+        reason: "r",
+      },
+    ];
+    expect(parseRegistry(doc).exceptions[0].assertion_id).toBe("build");
+  });
+});
+
+describe("evaluation", () => {
+  it("keeps an attested predicate result distinct from pass", () => {
+    const doc = registryWith() as Record<string, any>;
+    const id = Object.keys(doc.attempts)[0];
+    doc.attempts[id].evaluation.predicate_result = "attested";
+    expect(parseRegistry(doc).attempts[id].evaluation!.predicate_result).toBe("attested");
   });
 });
