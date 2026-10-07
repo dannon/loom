@@ -1,0 +1,120 @@
+{
+  "routes": [
+    {
+      "path": "/api/version",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "version_major": "26.0",
+            "version_minor": "0"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/invocations",
+      "query": {
+        "history_id": "0a248a1f62a0cc04"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "body": []
+        }
+      ]
+    },
+    {
+      "path": "/api/jobs",
+      "query": {
+        "history_id": "0a248a1f62a0cc04"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "body": [
+            {
+              "id": "cc00000000000003",
+              "state": "ok",
+              "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+              "create_time": "2026-10-07T10:00:00"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/api/jobs/cc00000000000003",
+      "query": {
+        "full": "true"
+      },
+      "responses": [
+        {
+          "status": 502,
+          "body": "bad gateway"
+        },
+        {
+          "status": 200,
+          "body": {
+            "id": "cc00000000000003",
+            "state": "ok",
+            "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+            "exit_code": 0,
+            "create_time": "2026-10-07T10:00:00",
+            "update_time": "2026-10-07T10:05:00",
+            "command_version": "",
+            "history_id": "0a248a1f62a0cc04",
+            "params": {
+              "qualified_quality_phred": "20"
+            },
+            "inputs": {
+              "in1": {
+                "id": "d0000000000000a0",
+                "src": "hda"
+              }
+            },
+            "outputs": {
+              "out1": {
+                "id": "d0000000000000c3",
+                "src": "hda"
+              }
+            },
+            "output_collections": {}
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/datasets/d0000000000000a0",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "id": "d0000000000000a0",
+            "name": "reads.fq",
+            "extension": "fastqsanger",
+            "genome_build": "?",
+            "state": "ok",
+            "create_time": "2026-10-07T10:05:00"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/datasets/d0000000000000c3",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "id": "d0000000000000c3",
+            "name": "trimmed.fq",
+            "extension": "fastqsanger",
+            "genome_build": "?",
+            "state": "ok",
+            "create_time": "2026-10-07T10:05:00"
+          }
+        }
+      ]
+    }
+  ]
+}

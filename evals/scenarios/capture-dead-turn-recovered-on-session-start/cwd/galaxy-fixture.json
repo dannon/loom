@@ -1,0 +1,61 @@
+{
+  "routes": [
+    {
+      "path": "/api/version",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "version_major": "26.0",
+            "version_minor": "0"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/invocations",
+      "query": {
+        "history_id": "0a248a1f62a0cc04"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "body": []
+        }
+      ]
+    },
+    {
+      "path": "/api/jobs",
+      "query": {
+        "history_id": "0a248a1f62a0cc04"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "body": [
+            {
+              "id": "a700000000000006",
+              "state": "running",
+              "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+              "tool_version": "0.24.0",
+              "create_time": "2026-10-07T10:20:01"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/api/jobs/a700000000000006",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "id": "a700000000000006",
+            "state": "running",
+            "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0"
+          }
+        }
+      ]
+    }
+  ]
+}
