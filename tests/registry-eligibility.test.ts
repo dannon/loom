@@ -95,6 +95,7 @@ describe("computeHandoffEligible (v3 §7)", () => {
       a.submission!.submitted_by = "agent";
       a.submission!.check.outcome = "unchecked";
       a.evaluation!.conformity = "excepted";
+      a.evaluation!.predicate_result = "attested";
       return a;
     }
 
@@ -107,8 +108,17 @@ describe("computeHandoffEligible (v3 §7)", () => {
 
     it("isn't eligible on a submission exception alone, whatever the evaluation claims", () => {
       const a = ungated();
-      expect(a.evaluation!.predicate_result).toBe("pass");
       expect(computeHandoffEligible(a, [userException(a)])).toBe(false);
+      a.evaluation!.predicate_result = "pass";
+      expect(computeHandoffEligible(a, [userException(a)])).toBe(false);
+    });
+
+    it("doesn't take an attested result reported as pass", () => {
+      const a = ungated();
+      a.evaluation!.predicate_result = "pass";
+      const check = userException(a);
+      const attest = userException(a, { id: "ex-2", scope: "manual_attestation" });
+      expect(computeHandoffEligible(a, [check, attest])).toBe(false);
     });
 
     it("isn't eligible on an attestation alone", () => {
@@ -133,15 +143,25 @@ describe("computeHandoffEligible (v3 §7)", () => {
       expect(computeHandoffEligible(a)).toBe(false);
     });
 
-    it("is eligible once the user attests the result", () => {
+    it("is eligible once the user attests the result, recorded as attested", () => {
       const a = eligibleAttempt({ spec });
+      a.evaluation!.predicate_result = "attested";
       expect(computeHandoffEligible(a, [userException(a, { scope: "manual_attestation" })])).toBe(
         true,
       );
     });
 
+    it("doesn't take an attested result reported as pass", () => {
+      const a = eligibleAttempt({ spec });
+      expect(a.evaluation!.predicate_result).toBe("pass");
+      expect(computeHandoffEligible(a, [userException(a, { scope: "manual_attestation" })])).toBe(
+        false,
+      );
+    });
+
     it("rejects a restored attestation, one for another revision, and other scopes", () => {
       const a = eligibleAttempt({ spec });
+      a.evaluation!.predicate_result = "attested";
       const attest = (o: Parameters<typeof userException>[1]) =>
         computeHandoffEligible(a, [userException(a, { scope: "manual_attestation", ...o })]);
       expect(attest({ by: "restored" })).toBe(false);
@@ -150,7 +170,7 @@ describe("computeHandoffEligible (v3 §7)", () => {
       expect(attest({ scope: "evidence_gate" })).toBe(false);
     });
 
-    it("still needs the predicate to have been marked passed", () => {
+    it("still needs the result to have been marked attested", () => {
       const a = eligibleAttempt({ spec });
       a.evaluation!.predicate_result = "unevaluable";
       expect(computeHandoffEligible(a, [userException(a, { scope: "manual_attestation" })])).toBe(
@@ -166,6 +186,15 @@ describe("computeHandoffEligible (v3 §7)", () => {
         { id: "build", definition_digest: HEX("1"), definition: { dbkey: "hg38" } },
         { id: "population", definition_digest: HEX("2"), definition: { min_rows: 7000 } },
       ],
+    });
+
+    it("isn't satisfied by an attestation", () => {
+      const a = eligibleAttempt({ spec });
+      a.evaluation!.assertions = { build: "pass", population: "pass" };
+      a.evaluation!.predicate_result = "attested";
+      expect(computeHandoffEligible(a, [userException(a, { scope: "manual_attestation" })])).toBe(
+        false,
+      );
     });
 
     it("is eligible only when every named assertion passed", () => {

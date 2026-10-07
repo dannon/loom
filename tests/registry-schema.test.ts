@@ -229,3 +229,12 @@ describe("exceptions", () => {
     expect(parseRegistry(doc).exceptions[0].assertion_id).toBe("build");
   });
 });
+
+describe("evaluation", () => {
+  it("keeps an attested predicate result distinct from pass", () => {
+    const doc = registryWith() as Record<string, any>;
+    const id = Object.keys(doc.attempts)[0];
+    doc.attempts[id].evaluation.predicate_result = "attested";
+    expect(parseRegistry(doc).attempts[id].evaluation!.predicate_result).toBe("attested");
+  });
+});

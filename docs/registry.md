@@ -152,7 +152,7 @@ That window is one synchronous rename against a two-minute staleness limit.
 handoff_eligible =
      execution == success
   && (conformity == conformant || conformity == excepted)
-  && predicate_result == pass
+  && (predicate_result == pass || predicate_result == attested)
   && integrity == ok
   && evaluation.authority == established
   && provenance.authority == established
@@ -168,9 +168,11 @@ supports fails closed:
   eligibility, even for a run it already submitted;
 - `excepted` conformity needs a user `submission_check` exception;
 - an ungated attempt (no approval, so no frozen predicate to check the evaluation against)
-  also needs a user `manual_attestation` exception, so excusing how it was submitted never
-  excuses what came out;
-- a `manual` predicate needs a user `manual_attestation` exception;
+  needs its result `attested` with a user `manual_attestation` exception, so excusing how it
+  was submitted never excuses what came out;
+- a `manual` predicate needs the result `attested` with a user `manual_attestation`
+  exception -- an attested result reported as `pass` is refused;
+- `attested` satisfies only those two; every other predicate needs `pass`;
 - `assertions_pass` needs every named assertion to have passed, or to be `excepted` with a
   user `evidence_gate` exception naming that assertion (`assertion_id`) -- one exception per
   waived assertion. A `fail` or `inconclusive` assertion is never excused.
@@ -205,33 +207,40 @@ real import graph to hold that line.
 
 ## Status
 
-| Piece                                                                                     | State                                    |
-| ----------------------------------------------------------------------------------------- | ---------------------------------------- |
-| Schema, parser, canonical JSON, migrations hook                                           | built (#548)                             |
-| Signed atomic store, own/stale/import load, templates store                               | built (#548)                             |
-| Writer lock with fencing                                                                  | built (#548)                             |
-| Import rule, server quarantine                                                            | built (#548)                             |
-| `computeHandoffEligible`                                                                  | built (#548)                             |
-| `Submitter` port                                                                          | built (#548); galaxy-ops adapter not yet |
-| `loom_propose`, `loom-proposal` block, `/approve`, `/revoke`, `/pending`, proposal card   | next                                     |
-| `loom_submit`, reservation, `submission_unknown`, `/attribute`, ungated auto-registration | after that                               |
-| `trustedRecord` allowlist, desktop floors, evaluation writer, evidence gate, Page carrier | last                                     |
+| Piece                                                                                     | State                                                                   |
+| ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Schema, parser, canonical JSON, migrations hook                                           | built (#548)                                                            |
+| Signed atomic store, own/stale/import load, templates store                               | built (#548)                                                            |
+| Writer lock with fencing                                                                  | built (#548)                                                            |
+| Import rule, server quarantine                                                            | built (#548)                                                            |
+| `computeHandoffEligible`                                                                  | built (#548, rules settled in #558)                                     |
+| `Submitter` port                                                                          | built (#548); galaxy-ops adapter not yet                                |
+| `loom_propose`, `loom-proposal` block, `/approve`, `/revoke`, `/pending`, proposal card   | next                                                                    |
+| `loom_submit`, reservation, `submission_unknown`, `/attribute`, ungated auto-registration | after that                                                              |
+| `trustedRecord` allowlist, desktop floors, evaluation writer, evidence gate, Page carrier | last                                                                    |
+| `conformant_by_reconcile` for imported attempts                                           | waits on capture keeping effective params and input ids, and enrichment |
 
 ## Decisions
 
-- **Manual predicates pass by attestation.** A manual predicate is the user's judgment, so
-  their `manual_attestation` exception is what passes it. Without one it is never eligible,
-  whatever an evaluation claims.
-- **Imported attempts return only through a user exception.** Consent is session-scoped:
-  reconcile can re-establish what ran on Galaxy, but never that this session's user approved
-  it. An attempt from an earlier session stays `unchecked` until the user records a
-  `submission_check` exception for it, which makes the hand-off a visible decision rather
-  than something a reload restores.
+One principle covers these: when a person (or, later, Galaxy) vouches for something the code
+can't check, it can count toward `handoff_eligible`, but always under its own label --
+`attested`, `excepted`, and eventually `conformant_by_reconcile` -- never as `pass` or
+`conformant_by_construction`, so a record never reads as checked when it was vouched for.
+
+- **Manual predicates count once attested.** A manual predicate is the user's judgment, so
+  their `manual_attestation` exception satisfies it, recorded as `predicate_result: attested`
+  rather than `pass`. Until the assertions exist nearly every step is manual, so refusing
+  them would make the deny mode block almost everything.
+- **Imported attempts come back through re-verification, under its own label.** Consent is
+  session-scoped, so an imported attempt can't regain `conformant_by_construction`. Once
+  capture keeps the effective parameters and input dataset ids and enrichment exists,
+  re-checking the run against Galaxy will restore conformity as `conformant_by_reconcile`.
+  Until then the only way back is a user `submission_check` exception.
 - **An excepted assertion counts with an evidence-gate exception naming it.** Accepting a
   failed check is allowed but has to be on the record as the user's call, one assertion at a
   time. The assertion stays `excepted`, not `pass`, so the notebook shows what was waived.
 - **Revoking withdraws eligibility.** A revoked approval no longer makes a run conformant,
   even one it already submitted. Handing that run off takes a fresh user exception.
 - **Ungated attempts need an attestation as well.** Without an approval there is no frozen
-  predicate to hold the evaluation to, so the user attests the result as well as excusing
-  the submission.
+  predicate to hold the evaluation to, so the user attests the result (`attested`) as well
+  as excusing the submission.

@@ -97,7 +97,8 @@ export interface Attempt {
   evaluation?: {
     execution: "success" | "failed" | "unknown";
     conformity: "conformant" | "nonconformant" | "unverified" | "excepted";
-    predicate_result: "pass" | "fail" | "unevaluable";
+    /** `attested`: the user vouched for a result no code checked; never reported as `pass`. */
+    predicate_result: "pass" | "fail" | "unevaluable" | "attested";
     assertions: Record<string, "pass" | "fail" | "inconclusive" | "excepted">;
     integrity: "ok" | "unverified_identity" | "render_contradiction" | "effective_contradiction";
     authority: "established" | "historical";
@@ -566,7 +567,7 @@ function parseAttempt(v: unknown, path: string): Attempt {
       ),
       predicate_result: oneOf(
         e.predicate_result,
-        ["pass", "fail", "unevaluable"],
+        ["pass", "fail", "unevaluable", "attested"],
         `${p}.predicate_result`,
       ),
       assertions,

@@ -24,7 +24,7 @@ export function computeHandoffEligible(
   const formula =
     ev.execution === "success" &&
     (ev.conformity === "conformant" || ev.conformity === "excepted") &&
-    ev.predicate_result === "pass" &&
+    (ev.predicate_result === "pass" || ev.predicate_result === "attested") &&
     ev.integrity === "ok" &&
     ev.authority === "established" &&
     pv.authority === "established";
@@ -58,16 +58,21 @@ export function computeHandoffEligible(
     return false;
   }
 
+  // What a person vouches for counts, but under its own label: a result no code
+  // checked is `attested`, never `pass`, and needs the attestation on record.
+  const attested = () => ev.predicate_result === "attested" && userExcepted("manual_attestation");
+
   const spec = attempt.approval?.spec_snapshot;
   if (!spec) {
     // Ungated: there's no frozen predicate to hold the evaluation to, so the
-    // result needs the user's attestation too. Excusing how it was submitted
-    // doesn't excuse what came out.
-    return userExcepted("manual_attestation");
+    // result has to be attested. Excusing how it was submitted doesn't excuse
+    // what came out.
+    return attested();
   }
   const predicate = spec.predicate;
-  // A manual predicate is the user's judgment, so only their attestation passes it.
-  if (predicate.kind === "manual" && !userExcepted("manual_attestation")) return false;
+  if (predicate.kind === "manual") return attested();
+  // Only a manual predicate is the user's to vouch for; the rest are checked.
+  if (ev.predicate_result !== "pass") return false;
   if (predicate.kind === "assertions_pass") {
     if (predicate.ids.length === 0) return false;
     // An excepted assertion is a failure the user chose to accept; it counts
