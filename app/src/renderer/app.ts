@@ -52,6 +52,7 @@ import { isOAuthOnly, SEED_PROVIDER_AUTH_CAPS } from "../../../shared/provider-a
 import type { ProviderAuthCaps } from "../../../shared/provider-auth-caps.js";
 import { splitApprovalPrompt } from "../../../shared/approval-prompt.js";
 import { openReleaseWithFallback, clearReleaseFallback } from "./update-banner.js";
+import { createModalClaim } from "./ext-modal-claim.js";
 
 declare global {
   interface Window {
@@ -2974,6 +2975,8 @@ const extConfirmBtn = document.getElementById("ext-confirm") as HTMLButtonElemen
 const extAcceptBtn = document.getElementById("ext-accept") as HTMLButtonElement;
 const extDenyBtn = document.getElementById("ext-deny") as HTMLButtonElement;
 
+const claimExtModal = createModalClaim();
+
 function hideExtModal(): void {
   extOverlay.classList.add("hidden");
   extMessageEl.classList.add("hidden");
@@ -2989,6 +2992,8 @@ function hideExtModal(): void {
 }
 
 function openExtInput(id: string, title: string, placeholder?: string): void {
+  const cancelThis = () => respond(undefined);
+  const release = claimExtModal(cancelThis);
   extTitleEl.textContent = title;
   extInputEl.classList.remove("hidden");
   extInputEl.placeholder = placeholder || "";
@@ -3015,6 +3020,7 @@ function openExtInput(id: string, title: string, placeholder?: string): void {
   const onOk = () => respond(extInputEl.value);
   const onCancel = () => respond(undefined);
   const cleanup = () => {
+    release();
     extInputEl.removeEventListener("keydown", onKey);
     extConfirmBtn.removeEventListener("click", onOk);
     extCancelBtn.removeEventListener("click", onCancel);
@@ -3025,6 +3031,8 @@ function openExtInput(id: string, title: string, placeholder?: string): void {
 }
 
 function openExtSelect(id: string, title: string, options: string[]): void {
+  const cancelThis = () => respond(undefined);
+  const release = claimExtModal(cancelThis);
   // The brain has only the title string to work with, so anything below the
   // first blank line is the thing being approved -- render it in the body,
   // where it can scroll and keep its newlines. #399
@@ -3059,6 +3067,7 @@ function openExtSelect(id: string, title: string, options: string[]): void {
     }
   };
   const cleanup = () => {
+    release();
     extCancelBtn.removeEventListener("click", onCancel);
     document.removeEventListener("keydown", onKey);
   };
@@ -3067,6 +3076,8 @@ function openExtSelect(id: string, title: string, options: string[]): void {
 }
 
 function openExtConfirm(id: string, title: string, message: string): void {
+  const cancelThis = () => respond(undefined);
+  const release = claimExtModal(cancelThis);
   extTitleEl.textContent = title;
   extMessageEl.textContent = message;
   extMessageEl.classList.remove("hidden");
@@ -3092,6 +3103,7 @@ function openExtConfirm(id: string, title: string, message: string): void {
     }
   };
   const cleanup = () => {
+    release();
     extAcceptBtn.removeEventListener("click", onYes);
     extDenyBtn.removeEventListener("click", onNo);
     extCancelBtn.removeEventListener("click", onCancel);
