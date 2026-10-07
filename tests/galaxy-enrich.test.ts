@@ -25,6 +25,7 @@ import {
 } from "../extensions/loom/notebook-writer";
 import {
   ensureAttemptRecord,
+  noteEnrichmentRetry,
   readAttemptRecord,
   writeEnrichment,
   UNKNOWN,
@@ -461,20 +462,63 @@ describe("runEnrichmentPass", () => {
     expect(rows("enrichment.unavailable")[0].payload).toMatchObject({ reason: "not_found" });
   });
 
-  it("goes unavailable after the last allowed attempt", async () => {
-    await seedJob({}, { enrichmentAttempts: MAX_ENRICHMENT_ATTEMPTS - 1 });
-    await runEnrichmentPass({
-      deps: deps({
-        getJob: async () => {
-          throw new GalaxyApiError(500, "boom", "");
-        },
-      }),
+  const failing = () =>
+    deps({
+      getJob: async () => {
+        throw new GalaxyApiError(500, "boom", "");
+      },
     });
+
+  it("goes unavailable after the last allowed attempt, counted in the record", async () => {
+    const attemptId = await seedJob();
+    await noteEnrichmentRetry(
+      dir,
+      attemptId,
+      { blockKind: "job", blockId: "aa11", serverUrl: SERVER },
+      MAX_ENRICHMENT_ATTEMPTS - 1,
+      "earlier failures",
+    );
+    await runEnrichmentPass({ deps: failing() });
     expect(theJob()).toMatchObject({
       enrichment: "unavailable",
       enrichmentAttempts: MAX_ENRICHMENT_ATTEMPTS,
     });
     expect(rows("enrichment.unavailable")[0].payload).toMatchObject({ reason: "attempts" });
+  });
+
+  it("ignores an edited enrichment_attempts on the block", async () => {
+    const attemptId = await seedJob({}, { enrichmentAttempts: MAX_ENRICHMENT_ATTEMPTS - 1 });
+    await runEnrichmentPass({ deps: failing() });
+    expect(theJob()).toMatchObject({ enrichment: "pending", enrichmentAttempts: 1 });
+    expect((await readAttemptRecord(dir, attemptId))!.enrichment.attempts_by_block).toEqual({
+      "job:aa11": 1,
+    });
+  });
+
+  it("counts a failed attempt and backs off even when the block write is lost", async () => {
+    const attemptId = await seedJob();
+    let calls = 0;
+    const flaky = deps({
+      getJob: async () => {
+        calls++;
+        // The agent rewrites the notebook mid-fetch, so the block write
+        // that follows loses its compare-and-swap target.
+        fs.writeFileSync(
+          nbPath,
+          fs
+            .readFileSync(nbPath, "utf-8")
+            .replace(/attempt_id: \S+/, "attempt_id: 01K6ZQ7B3M2N4P5Q6R7S8T9V0W"),
+        );
+        throw new GalaxyApiError(500, "boom", "");
+      },
+    });
+    await runEnrichmentPass({ deps: flaky });
+    expect((await readAttemptRecord(dir, attemptId))!.enrichment.attempts_by_block).toEqual({
+      "job:aa11": 1,
+    });
+    const again = await runEnrichmentPass({ deps: flaky });
+    expect(calls).toBe(1);
+    expect(again.completed).toEqual([]);
   });
 
   it("refuses a block re-pointed at another attempt's record", async () => {

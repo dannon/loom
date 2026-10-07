@@ -557,7 +557,9 @@ export function findEnrichmentWarnings(
       if (x.b.enrichment === "complete") {
         if (!owned) reasons.push("provenance_missing");
         else {
-          if (owned.origin === "notebook") reasons.push("provenance_untrusted");
+          // Made from notebook text, or from fixture answers: neither is a
+          // server's word about this run.
+          if (owned.origin === "notebook" || owned.fixture) reasons.push("provenance_untrusted");
           const incomplete =
             recordJobs.length === 0 ||
             recordJobs.some((j) => j.unavailable) ||

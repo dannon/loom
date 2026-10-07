@@ -162,6 +162,19 @@ describe("findEnrichmentWarnings", () => {
     );
   });
 
+  it("does not count a record built from fixture answers as evidence", async () => {
+    const content = await enrichedNotebook();
+    const attemptId = /attempt_id: (\S+)/.exec(content)![1];
+    const file = path.join(dir, ".loom", "provenance", `${attemptId}.json`);
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ ...JSON.parse(fs.readFileSync(file, "utf-8")), fixture: true }),
+    );
+    expect(findEnrichmentWarnings(content, flips(), dir)[0].reasons).toEqual([
+      "provenance_untrusted",
+    ]);
+  });
+
   it("judges the completed run, not an earlier failed attempt", async () => {
     const content =
       (await enrichedNotebook()) +

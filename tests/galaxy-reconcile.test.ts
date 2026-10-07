@@ -432,4 +432,12 @@ describe("reconcile", () => {
     expect(block.serverVerified).toBeUndefined();
     expect((await readAttemptRecord(dir, block.attemptId!))!.fixture).toBe(true);
   });
+
+  it("seals the first page binding: editing it later does not move reconcile", async () => {
+    write(binding());
+    jobs = [];
+    expect((await runReconcile("command", deps())).historyId).toBe(HISTORY);
+    write(binding("eeee000000000009"));
+    expect((await runReconcile("command", deps())).historyId).toBe(HISTORY);
+  });
 });

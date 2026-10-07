@@ -19,6 +19,9 @@
   "enrichment": {
     "state": "pending",
     "attempts": 0,
+    "attempts_by_block": {
+      "job:f100000000000002": 0
+    },
     "updated_at": "2026-10-07T09:31:00.000Z"
   },
   "jobs": {}

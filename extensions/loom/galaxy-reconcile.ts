@@ -228,9 +228,11 @@ export interface ReconcileResult {
 
 /** Ids checked this process; a block is verified once per session, not every run. */
 const verifiedThisSession = new Set<string>();
+const reportedIncomplete = new Set<string>();
 
 export function resetReconcileState(): void {
   verifiedThisSession.clear();
+  reportedIncomplete.clear();
 }
 
 /**
@@ -583,6 +585,11 @@ export async function reconcile(
   if (survey.jobsWithheld || survey.incomplete) {
     result.error = survey.jobsWithheld ?? survey.incomplete;
     result.incomplete = true;
+  }
+  // Said once per session per reason: a history past galaxy-ops' listing cap
+  // stays that way, and a row every five minutes would bury everything else.
+  if (result.error && !reportedIncomplete.has(result.error)) {
+    reportedIncomplete.add(result.error);
     record(dir, "reconcile.incomplete", {
       history_id: historyId,
       trigger: options.trigger,
@@ -742,22 +749,38 @@ export async function runReconcile(
     return { ...empty, skipped: "notebook unreadable" };
   }
   const records = await listAttemptRecords(dir);
-  const bound = boundHistoryId(content, server, records);
-  const historyId = bound?.historyId ?? null;
+  let bound = boundHistoryId(content, server, records);
 
   let state: ReconcileState | null = await readReconcileState(dir);
+  let stateDirty = false;
   if (!state) {
     state = {
       schema: 1,
       analysis_started_at: iso(inferAnalysisStart(records, now)),
       histories: {},
     };
+    stateDirty = true;
+  }
+  // A page binding is notebook text, so it gets one say: the first history it
+  // names is sealed into the cursor, and an edit after that cannot point
+  // reconcile somewhere else. A harness submission still moves the binding,
+  // since that is a protected record of where the work actually went.
+  if (bound?.source === "page_binding") {
+    const sealed = state.bound_histories?.[server];
+    if (sealed) bound = { historyId: sealed, source: "page_binding" };
+    else {
+      state.bound_histories = { ...state.bound_histories, [server]: bound.historyId };
+      stateDirty = true;
+    }
+  }
+  if (stateDirty) {
     try {
       await writeReconcileState(dir, state);
     } catch (err) {
       console.error("[reconcile] cursor not written:", err);
     }
   }
+  const historyId = bound?.historyId ?? null;
 
   if (!historyId) {
     // Nothing to list, but the existence half still applies to what is recorded.

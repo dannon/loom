@@ -113,6 +113,13 @@ export interface AttemptRecord {
   enrichment: {
     state: "pending" | "complete" | "unavailable";
     attempts: number;
+    /**
+     * Attempts per block (`job:<id>` / `invocation:<id>`). The count that
+     * decides when a block goes unavailable lives here, not in the block's
+     * `enrichment_attempts`, which is notebook text: editing it would let the
+     * agent retry forever or exhaust a record on purpose.
+     */
+    attempts_by_block?: Record<string, number>;
     error?: string;
     updated_at: string;
   };
@@ -373,20 +380,7 @@ export async function writeEnrichment(
 ): Promise<AttemptRecord> {
   const file = provenancePath(analysisDir, attemptId);
   return withFileLock(file, async () => {
-    const record = await readAttemptRecord(analysisDir, attemptId);
-    if (!record) throw new ProvenanceRefusal(`no provenance record for ${attemptId}`);
-    if (!attemptOwns(record, update.blockKind, update.blockId)) {
-      throw new ProvenanceRefusal(
-        `${update.blockKind} ${update.blockId} is not part of attempt ${attemptId}`,
-      );
-    }
-    // Ids are only unique per server, so a record is bound to the server it was
-    // recorded on: another server's job with a colliding id is another job.
-    if (record.galaxy_server_url && !sameGalaxyServer(record.galaxy_server_url, update.serverUrl)) {
-      throw new ProvenanceRefusal(
-        `attempt ${attemptId} was recorded on ${record.galaxy_server_url}, not ${update.serverUrl}`,
-      );
-    }
+    const record = await ownedRecord(analysisDir, attemptId, update);
     if (
       update.historyId &&
       record.history_id !== UNKNOWN &&
@@ -416,6 +410,10 @@ export async function writeEnrichment(
       enrichment: {
         state: attemptState(record, jobs, update.state),
         attempts: update.attempts,
+        attempts_by_block: {
+          ...record.enrichment.attempts_by_block,
+          [`${update.blockKind}:${update.blockId}`]: update.attempts,
+        },
         ...(update.error ? { error: update.error } : {}),
         updated_at: new Date().toISOString(),
       },
@@ -423,6 +421,56 @@ export async function writeEnrichment(
     await ensureProvenanceDir(analysisDir);
     await writeAtomically(file, next);
     return next;
+  });
+}
+
+/** The record, when it exists, belongs to this block, and was recorded on this server. */
+async function ownedRecord(
+  analysisDir: string,
+  attemptId: string,
+  who: { blockKind: "invocation" | "job"; blockId: string; serverUrl: string },
+): Promise<AttemptRecord> {
+  const record = await readAttemptRecord(analysisDir, attemptId);
+  if (!record) throw new ProvenanceRefusal(`no provenance record for ${attemptId}`);
+  if (!attemptOwns(record, who.blockKind, who.blockId)) {
+    throw new ProvenanceRefusal(
+      `${who.blockKind} ${who.blockId} is not part of attempt ${attemptId}`,
+    );
+  }
+  // Ids are only unique per server, so a record is bound to the server it was
+  // recorded on: another server's job with a colliding id is another job.
+  if (record.galaxy_server_url && !sameGalaxyServer(record.galaxy_server_url, who.serverUrl)) {
+    throw new ProvenanceRefusal(
+      `attempt ${attemptId} was recorded on ${record.galaxy_server_url}, not ${who.serverUrl}`,
+    );
+  }
+  return record;
+}
+
+/** Count one failed enrichment attempt for a block, in the record rather than the notebook. */
+export async function noteEnrichmentRetry(
+  analysisDir: string,
+  attemptId: string,
+  who: { blockKind: "invocation" | "job"; blockId: string; serverUrl: string },
+  attempts: number,
+  error: string,
+): Promise<void> {
+  const file = provenancePath(analysisDir, attemptId);
+  await withFileLock(file, async () => {
+    const record = await ownedRecord(analysisDir, attemptId, who);
+    await ensureProvenanceDir(analysisDir);
+    await writeAtomically(file, {
+      ...record,
+      enrichment: {
+        ...record.enrichment,
+        attempts_by_block: {
+          ...record.enrichment.attempts_by_block,
+          [`${who.blockKind}:${who.blockId}`]: attempts,
+        },
+        error,
+        updated_at: new Date().toISOString(),
+      },
+    });
   });
 }
 
@@ -483,6 +531,12 @@ export interface ReconcileState {
   schema: number;
   analysis_started_at: string;
   histories: Record<string, { stamp: string }>;
+  /**
+   * Per server, the history a page binding bound this analysis to, sealed the
+   * first time reconcile used it. Only consulted before the harness has
+   * submitted anything; a later edit to the notebook's binding cannot move it.
+   */
+  bound_histories?: Record<string, string>;
 }
 
 export async function readReconcileState(analysisDir: string): Promise<ReconcileState | null> {
@@ -502,6 +556,9 @@ export async function readReconcileState(analysisDir: string): Promise<Reconcile
       schema: PROVENANCE_SCHEMA_VERSION,
       analysis_started_at: parsed.analysis_started_at,
       histories: parsed.histories && typeof parsed.histories === "object" ? parsed.histories : {},
+      ...(parsed.bound_histories && typeof parsed.bound_histories === "object"
+        ? { bound_histories: parsed.bound_histories }
+        : {}),
     };
   } catch {
     return null;

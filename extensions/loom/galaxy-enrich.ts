@@ -57,6 +57,7 @@ import {
   ensureAttemptRecord,
   provenanceRelativePath,
   readAttemptRecord,
+  noteEnrichmentRetry,
   readAttemptRecordSync,
   writeEnrichment,
   type AttemptRecord,
@@ -852,7 +853,10 @@ async function enrichOnce(options: {
       continue;
     }
     const block = candidate.block;
-    const attempts = (block.enrichmentAttempts ?? 0) + 1;
+    // Provisional until the record is open: the record's count is the one that
+    // decides, and the block's is only display.
+    let attempts = (block.enrichmentAttempts ?? 0) + 1;
+    let counted: AttemptRecord | null = null;
     const rowBase = {
       block_kind: candidate.kind,
       id: candidate.id,
@@ -931,13 +935,31 @@ async function enrichOnce(options: {
         await giveUp("attempts", error);
         return;
       }
-      const persisted = await persistBlock(
+      if (counted) {
+        try {
+          await noteEnrichmentRetry(
+            dir,
+            counted.attempt_id,
+            { blockKind: candidate.kind, blockId: candidate.id, serverUrl: server },
+            attempts,
+            flattenErrorText(error),
+          );
+        } catch (err) {
+          if (err instanceof ProvenanceRefusal) {
+            await giveUp("attribution", err.message);
+            return;
+          }
+          // Disk trouble: the block write below still counts it for display.
+        }
+      }
+      // The block mirrors the count; whether that write lands does not decide
+      // whether this attempt counted or when the next one is due.
+      await persistBlock(
         nbPath,
         candidate,
         { enrichmentAttempts: attempts, enrichmentError: error },
         false,
       ).catch(() => ({ written: false }));
-      if (!persisted.written) return;
       const wait = backoffMs(attempts);
       nextAttemptAt.set(key, deps.now() + wait);
       result.retried.push(key);
@@ -952,6 +974,8 @@ async function enrichOnce(options: {
     let attemptRecord: AttemptRecord;
     try {
       attemptRecord = await attemptRecordFor(dir, candidate, content);
+      counted = attemptRecord;
+      attempts = (attemptRecord.enrichment.attempts_by_block?.[key] ?? 0) + 1;
     } catch (err) {
       if (err instanceof ProvenanceRefusal) {
         await giveUp("attribution", err.message);
