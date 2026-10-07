@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import {
+  INVOCATION_LISTING_LIMIT,
   boundHistoryId,
   inferAnalysisStart,
   parseGalaxyTime,
@@ -395,7 +396,7 @@ describe("reconcile", () => {
 
   it("holds standalone jobs and the cursor back when the invocation listing may be cut short", async () => {
     write(binding());
-    invocations = Array.from({ length: 500 }, (_, i) => ({
+    invocations = Array.from({ length: INVOCATION_LISTING_LIMIT }, (_, i) => ({
       id: (0xa000 + i).toString(16).padStart(16, "0"),
       state: "scheduled",
       create_time: "2026-10-06T00:00:00",

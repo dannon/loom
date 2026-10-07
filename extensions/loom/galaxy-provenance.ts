@@ -463,6 +463,7 @@ export async function noteEnrichmentRetry(
       ...record,
       enrichment: {
         ...record.enrichment,
+        attempts: Math.max(record.enrichment.attempts, attempts),
         attempts_by_block: {
           ...record.enrichment.attempts_by_block,
           [`${who.blockKind}:${who.blockId}`]: attempts,

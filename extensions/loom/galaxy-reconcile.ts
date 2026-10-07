@@ -33,6 +33,7 @@ import * as path from "path";
 import { galaxyMcpToolName } from "../../shared/galaxy-mcp-tools.js";
 import { appendActivityEvent } from "./activity";
 import {
+  INVOCATION_SCHEDULING_DONE,
   galaxyGetInvocation,
   galaxyListHistoryInvocations,
   galaxyListHistoryJobs,
@@ -91,7 +92,13 @@ import { ulid } from "./ulid";
 export const RECONCILE_EVERY_N_TICKS = 20;
 const JOB_PAGE_SIZE = 500;
 const MAX_JOB_PAGES = 10;
-const INVOCATION_LISTING_LIMIT = 500;
+/**
+ * Galaxy's own ceiling on `GET /api/invocations?limit=` (`le=100`); anything
+ * higher is a 400 and the whole reconcile fails. The listing comes back
+ * newest first by default, and galaxy-ops passes no offset, so a full page
+ * means "maybe more" and is treated as incomplete.
+ */
+export const INVOCATION_LISTING_LIMIT = 100;
 /**
  * The stamp is the newest `create_time` seen, in Galaxy's own clock, and the
  * next window starts this far before it: a job's row can commit after a
@@ -351,9 +358,7 @@ export async function surveyHistory(
   });
   const toWalk = new Set<string>([
     ...newInvocations.map((i) => i.id),
-    ...listed
-      .filter((i) => i.state !== "scheduled" && i.state !== "cancelled" && i.state !== "failed")
-      .map((i) => i.id),
+    ...listed.filter((i) => !INVOCATION_SCHEDULING_DONE.has(i.state ?? "")).map((i) => i.id),
     ...recordedInvocations.map((b) => b.invocationId).filter((id) => isGalaxyEncodedId(id)),
   ]);
   const stepJobs = new Set<string>(claimed.jobs);

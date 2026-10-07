@@ -23,6 +23,26 @@ import { fetchSameOriginOnly } from "../../shared/redirect-guard.js";
 export type { InvocationDetail } from "@galaxyproject/galaxy-ops";
 
 /**
+ * Invocation states in which Galaxy has stopped scheduling steps
+ * (`InvocationState`). Anything else -- `new`, `ready`, `cancelling`, and
+ * whatever Galaxy adds next -- means more jobs may still appear.
+ *
+ * `completed` arrived in Galaxy 26.0 with workflow completion monitoring: a
+ * finished invocation moves on from `scheduled` to `completed` once all its
+ * jobs are terminal. Leaving it out meant a finished workflow on a 26.x server
+ * was never terminal to the poller, so it never transitioned or got enriched.
+ */
+export const INVOCATION_SCHEDULING_DONE: ReadonlySet<string> = new Set([
+  "scheduled",
+  "completed",
+  "cancelled",
+  "failed",
+]);
+
+/** States in which a finished invocation succeeded at scheduling everything. */
+export const INVOCATION_SCHEDULED_OK: ReadonlySet<string> = new Set(["scheduled", "completed"]);
+
+/**
  * Subset of GET /api/jobs/{jobId} we actually read.
  *
  * `tool_version` is declared because the ORM emits it, but Galaxy's response

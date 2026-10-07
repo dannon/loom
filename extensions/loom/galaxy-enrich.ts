@@ -35,6 +35,7 @@ import * as path from "path";
 import { appendActivityEvent } from "./activity";
 import {
   GalaxyApiError,
+  INVOCATION_SCHEDULING_DONE,
   galaxyGetDataset,
   galaxyGetInvocation,
   galaxyGetJobDetails,
@@ -517,8 +518,7 @@ type Outcome =
   /** Galaxy says the run has not ended. Not a failed attempt; ask again later. */
   | { state: "not_ready" };
 
-/** Invocation states after which Galaxy hands out no more jobs. */
-const SCHEDULING_DONE: ReadonlySet<string> = new Set(["scheduled", "cancelled", "failed"]);
+const SCHEDULING_DONE = INVOCATION_SCHEDULING_DONE;
 
 function isNotFound(err: unknown): boolean {
   return err instanceof GalaxyApiError && (err.status === 404 || err.status === 400);

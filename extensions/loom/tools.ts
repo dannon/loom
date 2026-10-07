@@ -41,6 +41,8 @@ import {
   UnknownAnchorError,
 } from "./notebook-anchors";
 import {
+  INVOCATION_SCHEDULED_OK,
+  INVOCATION_SCHEDULING_DONE,
   getGalaxyConfig,
   galaxyGetInvocation,
   sameGalaxyServer,
@@ -932,21 +934,7 @@ interface CheckResultEntry {
   autoAction?: string;
 }
 
-/**
- * Invocation states in which Galaxy has stopped scheduling steps
- * (`WorkflowInvocation.states`). Anything else -- `new`, `ready`, `cancelling`,
- * and whatever Galaxy adds next -- means more jobs may still appear, so the
- * jobs materialized so far cannot be the whole story.
- *
- * Listing the terminal states rather than the transient ones is the same safe
- * default the job-state table uses: an unrecognised state keeps us watching
- * instead of declaring an outcome we can't name.
- */
-const TERMINAL_INVOCATION_STATES: ReadonlySet<string> = new Set([
-  "scheduled",
-  "cancelled",
-  "failed",
-]);
+const TERMINAL_INVOCATION_STATES = INVOCATION_SCHEDULING_DONE;
 
 /** Galaxy job states that mean "this job failed", as opposed to ended some other way. */
 const FAILED_JOB_STATES: ReadonlySet<string> = new Set(["error", "failed", "deleted"]);
@@ -1159,7 +1147,7 @@ export async function checkInvocations(
             summary: `Workflow failed: Galaxy reported invocation state "failed"`,
           };
           autoAction = "failed";
-        } else if (summary.ok > 0 && inv.state === "scheduled") {
+        } else if (summary.ok > 0 && INVOCATION_SCHEDULED_OK.has(inv.state)) {
           transition = {
             status: "completed",
             summary:
