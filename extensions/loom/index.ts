@@ -455,7 +455,15 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         ctx.ui.setStatus("galaxy-tool", `✓ ${label} (${elapsed}s)`);
         toolStartTimes.delete(event.toolName);
-        setTimeout(() => ctx.ui.setStatus("galaxy-tool", ""), 3000);
+        setTimeout(() => {
+          // pi throws on a ctx captured before a reload or session switch (/connect,
+          // /new); uncaught, that takes the whole brain down three seconds later.
+          try {
+            ctx.ui.setStatus("galaxy-tool", "");
+          } catch {
+            // The session that showed the label is gone, and its status with it.
+          }
+        }, 3000);
       } else {
         ctx.ui.setStatus("galaxy-tool", "");
       }

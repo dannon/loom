@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -256,17 +257,57 @@ describe("submission capture: truncated results", () => {
   // A tool_result handler that rewrites the content also drops structuredContent,
   // so the file is the only complete copy left for a big mapped-over run.
   it("re-reads pi's full-output file when the inline text is cut", async () => {
-    const full = path.join(tmpDir, "pi-mcp-0123456789abcdef.txt");
+    // Where pi writes it: straight into the temp dir, named pi-mcp-<16 hex>.txt.
+    const full = path.join(os.tmpdir(), `pi-mcp-${crypto.randomBytes(8).toString("hex")}.txt`);
     fs.writeFileSync(full, JSON.stringify(THREE_JOBS));
+    try {
+      await submit(
+        "mcp__galaxy__run_tool",
+        { tool_id: "fastp" },
+        {
+          content: [
+            { type: "text", text: "Warning: truncated output (original token count: 9000)" },
+          ],
+          details: { server: "galaxy", tool: "run_tool", fullOutputPath: full },
+        },
+      );
+    } finally {
+      fs.rmSync(full, { force: true });
+    }
+    expect(findJobBlocks(notebook())).toHaveLength(3);
+  });
+
+  it("re-reads a full-output file past mcp_read_output's 32 MB preview limit", async () => {
+    const full = path.join(os.tmpdir(), `pi-mcp-${crypto.randomBytes(8).toString("hex")}.txt`);
+    fs.writeFileSync(full, JSON.stringify(THREE_JOBS) + " ".repeat(33 * 1024 * 1024));
+    try {
+      await submit(
+        "mcp__galaxy__run_tool",
+        { tool_id: "fastp" },
+        {
+          content: [{ type: "text", text: "Warning: truncated output" }],
+          details: { server: "galaxy", tool: "run_tool", fullOutputPath: full },
+        },
+      );
+    } finally {
+      fs.rmSync(full, { force: true });
+    }
+    expect(findJobBlocks(notebook())).toHaveLength(3);
+  });
+
+  it("won't re-read a path that isn't one of pi's output files", async () => {
+    const elsewhere = path.join(tmpDir, "pi-mcp-0123456789abcdef.txt");
+    fs.writeFileSync(elsewhere, JSON.stringify(THREE_JOBS));
     await submit(
       "mcp__galaxy__run_tool",
       { tool_id: "fastp" },
       {
-        content: [{ type: "text", text: "Warning: truncated output (original token count: 9000)" }],
-        details: { server: "galaxy", tool: "run_tool", fullOutputPath: full },
+        content: [{ type: "text", text: "Warning: truncated output" }],
+        details: { server: "galaxy", tool: "run_tool", fullOutputPath: elsewhere },
       },
     );
-    expect(findJobBlocks(notebook())).toHaveLength(3);
+    expect(findJobBlocks(notebook())).toHaveLength(0);
+    expect(activity().some((r) => r.kind === "submission.unparsed")).toBe(true);
   });
 
   it("uses structuredContent when it survived", async () => {

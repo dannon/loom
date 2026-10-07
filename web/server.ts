@@ -37,6 +37,7 @@ import {
 } from "../shared/orbit-env.js";
 import { resolveConfigPath, resolveDefaultAnalysesDir } from "../shared/state-dir.js";
 import { agentPromptPayload } from "../shared/agent-prompt.js";
+import { loadPiDefaultModels, piDefaultModel } from "../shared/pi-default-model.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // In dev this file runs from web/; the container bundles it to web/build/ and
@@ -46,6 +47,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // the brain, the lockdown gate, and the static bundle all silently go missing.
 const WEB_ROOT = basename(__dirname) === "build" ? resolve(__dirname, "..") : __dirname;
 const LOOM_BIN = resolve(WEB_ROOT, "../bin/loom.js");
+// pi 1.0 refuses --provider without --model, and a bring-your-own key names
+// only the provider.
+const PI_DEFAULT_MODELS = await loadPiDefaultModels();
 
 // A container may be handed only ORBIT_ACTIVE_LLM_API_KEY; the BYO-key check
 // and pi both look up the LOOM_ name, so give it one before anything reads it.
@@ -204,11 +208,12 @@ function startLoom(opts: { fresh?: boolean } = {}): void {
     const gatePath = resolve(WEB_ROOT, "extensions/web-mode-gate.ts");
     args.push("--extension", gatePath);
     const prov = activeProvider();
+    const envModel = readEnv("LLM_MODEL");
     if (providedProvider || readEnv("LLM_PROVIDER")) {
       args.push("--provider", prov);
-    }
-    const envModel = readEnv("LLM_MODEL");
-    if (envModel) {
+      const model = envModel ?? piDefaultModel(prov, PI_DEFAULT_MODELS);
+      if (model) args.push("--model", model);
+    } else if (envModel) {
       args.push("--model", envModel);
     }
     // BYO-key: inject the user-supplied key into the brain's env (env var name

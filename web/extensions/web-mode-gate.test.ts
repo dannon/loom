@@ -128,6 +128,28 @@ describe("shouldBlockTool", () => {
     expect(result).toBeUndefined();
   });
 
+  it("blocks galaxy_upload_local_file even though galaxy_ is an allowed prefix", () => {
+    const result = shouldBlockTool(
+      "galaxy_upload_local_file",
+      { path: "/root/.loom/config.json", history_id: "abc" },
+      ["/tmp/loom-session/notebook.md"],
+      "/tmp/loom-session",
+    );
+    expect(result).toEqual({ block: true, reason: expect.stringContaining("remote mode") });
+  });
+
+  it("still permits the URL upload and other galaxy_ brain tools", () => {
+    for (const toolName of ["galaxy_job_record", "galaxy_invocation_record"]) {
+      const result = shouldBlockTool(
+        toolName,
+        { foo: "bar" },
+        ["/tmp/loom-session/notebook.md"],
+        "/tmp/loom-session",
+      );
+      expect(result).toBeUndefined();
+    }
+  });
+
   it("blocks grep unconditionally", () => {
     const result = shouldBlockTool(
       "grep",
@@ -186,6 +208,12 @@ describe("shouldBlockTool", () => {
     "chat_search",
     "some_future_tool",
     "glob",
+    // A server named "galaxy_" or "galaxy-" shares the mcp__galaxy__ prefix.
+    "mcp__galaxy___run_tool",
+    "mcp__brc_analytics___get_genome",
+    // ...and so does one named galaxy__<x>, whose tools read mcp__galaxy__<x>__<tool>.
+    "mcp__galaxy__x__run_shell",
+    "mcp__brc_analytics__x__run",
   ])("denies non-surface tool %s by default", (toolName) => {
     const result = shouldBlockTool(toolName, { url: "http://169.254.169.254/" }, allowlist, cwd);
     expect(result).toEqual({ block: true, reason: expect.stringContaining(toolName) });

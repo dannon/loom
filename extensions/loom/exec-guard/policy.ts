@@ -19,12 +19,23 @@ import type { GalaxyDestructiveOp } from "../../../shared/galaxy-destructive.js"
 // denied for every tier, not downgraded to an ask. This is the floor that closes
 // #183: a capable model that gets to read ~/.loom/config.json echoes the keys
 // straight into the provider's request logs. Approval can't override it.
-function denyCredentialStore(p: string): PolicyResult {
+function denyCredentialStore(p: string, home: string): PolicyResult {
   return {
     decision: "deny",
     category: "read:credential-store",
-    reason: `access to credential store ${p} blocked for all models`,
+    reason: `access to credential store ${shown(p, home)} blocked for all models`,
   };
+}
+
+// Reasons land in the activity log, and a path the classifier resolved is
+// absolute; spelling the home dir as `~` keeps the username out of it.
+// Compared as forward-slashed strings so the spelling is the same on every host.
+function shown(p: string, home: string): string {
+  const fp = p.replace(/\\/g, "/");
+  const fh = home.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!fh) return p;
+  if (fp.toLowerCase() === fh.toLowerCase()) return "~";
+  return fp.toLowerCase().startsWith(fh.toLowerCase() + "/") ? `~/${fp.slice(fh.length + 1)}` : p;
 }
 
 const FILE_WRITE_TOOLS = new Set(["write", "edit"]);
@@ -107,7 +118,7 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
 
   if (toolName === "bash") {
     const command = pick(req.toolInput, "command") ?? "";
-    const c = classifyBash(command, deps.home);
+    const c = classifyBash(command, deps.home, req.cwd);
     if (c.kind === "catastrophic") {
       return { decision: "deny", category: "bash:catastrophic", reason: c.reason };
     }
@@ -127,13 +138,24 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     // compound command (closes the `cat secret | tool` evasion). A dedicated
     // credential store is denied for ALL tiers; any other sensitive path
     // downgrades to an ask (deny for weak / non-interactive).
+    // Targets resolved after a cd go first, so the credential store a cd reached
+    // is denied even when the operand as typed is only basename-sensitive
+    // (`cd ~/.ssh && cat id_rsa`). A command with no cd has none, and keeps the
+    // single first-match pass it always had.
+    const cdReads = c.cdReadPaths.map((p) => ({ p, ...deps.resolver.contains(p) }));
+    for (const { p, resolved } of cdReads) {
+      if (isCredentialStore(resolved, deps.home)) return denyCredentialStore(p, deps.home);
+    }
     for (const p of c.sensitiveReadPaths) {
       const { resolved } = deps.resolver.contains(p);
-      if (isCredentialStore(resolved, deps.home)) {
-        return denyCredentialStore(p);
-      }
+      if (isCredentialStore(resolved, deps.home)) return denyCredentialStore(p, deps.home);
       if (isSensitivePath(resolved, deps.home)) {
-        return finalizeAsk(req, "read:sensitive", `read of sensitive path ${p}`);
+        return finalizeAsk(req, "read:sensitive", `read of sensitive path ${shown(p, deps.home)}`);
+      }
+    }
+    for (const { p, resolved } of cdReads) {
+      if (isSensitivePath(resolved, deps.home)) {
+        return finalizeAsk(req, "read:sensitive", `read of sensitive path ${shown(p, deps.home)}`);
       }
     }
     // Workspace-jail floor: only confidently-parsed simple read commands, so a
@@ -158,8 +180,10 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     // Unknown command. A trusted workspace relaxes by one notch only, and only
     // for this category: trusted model ask->allow, weak model deny->ask (the
     // human stays in the loop). It never lifts the catastrophic/jail/sensitive
-    // floor above.
-    if (req.config.trustedWorkspaces.includes(req.cwd)) {
+    // floor above, and it never covers a command run after a cd into Loom's own
+    // state or a credential store -- trusting the workspace says nothing about
+    // those directories.
+    if (req.config.trustedWorkspaces.includes(req.cwd) && !c.guardedCwd) {
       if (req.modelTier === "trusted") {
         return {
           decision: "allow",
@@ -201,7 +225,7 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     // verdict wins no matter which key carries the offending path.
     const targets = pathTargets(req, deps);
     for (const t of targets) {
-      if (isCredentialStore(t.resolved, deps.home)) return denyCredentialStore(t.raw);
+      if (isCredentialStore(t.resolved, deps.home)) return denyCredentialStore(t.raw, deps.home);
     }
     for (const t of targets) {
       if (isSensitivePath(t.resolved, deps.home)) {
