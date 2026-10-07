@@ -1,43 +1,22 @@
 import { describe, expect, it } from "vitest";
 
-import { render, RENDERERS, resolveArtifacts } from "./artifacts";
+import type { Artifact } from "../artifacts/kinds";
+import { resolveArtifacts } from "./artifacts";
 
-const VEGA = { kind: "vega-lite", title: "Glucose by BMI", spec: { mark: "point" } };
-const LINEAGE = { kind: "mermaid", title: "Dataset lineage", diagram: "graph TD;\nA-->B;" };
-
-describe("rendering an artifact", () => {
-  it("makes a vega artifact a vega cell holding its spec", () => {
-    const out = render(VEGA)!;
-    expect(out.startsWith("```vega\n") && out.endsWith("\n```")).toBe(true);
-    expect(JSON.parse(out.slice("```vega\n".length, -"\n```".length))).toEqual({ mark: "point" });
-  });
-
-  it("makes a mermaid artifact a mermaid cell", () => {
-    expect(render(LINEAGE)).toBe("```mermaid\ngraph TD;\nA-->B;\n```");
-  });
-
-  it("makes a visualization a galaxy directive naming the plugin and dataset", () => {
-    const viz = { kind: "visualization", title: "t", visualization: "atlas", dataset_id: "d1" };
-    expect(render(viz)).toBe(
-      "```galaxy\nvisualization(visualization_id=atlas, history_dataset_id=d1)\n```",
-    );
-  });
-
-  it("has a renderer for every artifact olit produces", () => {
-    expect(Object.keys(RENDERERS)).toEqual(
-      expect.arrayContaining(["vega-lite", "visualization", "mermaid"]),
-    );
-  });
-});
+const VEGA: Artifact = { kind: "vega-lite", title: "Glucose by BMI", spec: { mark: "point" } };
+const READS: Artifact = {
+  kind: "visualization",
+  title: "Reads",
+  visualization: "igv",
+  dataset_id: "d1",
+};
+const LINEAGE: Artifact = {
+  kind: "mermaid",
+  title: "Dataset lineage",
+  diagram: "graph TD;\nA-->B;",
+};
 
 describe("resolving tokens", () => {
-  it("refuses a kind with no renderer rather than writing it broken", () => {
-    const { text, refusal } = resolveArtifacts("{{artifact}}", [{ kind: "hologram", title: "x" }]);
-    expect(text).toBe("{{artifact}}");
-    expect(refusal).toContain('"hologram"');
-    expect(refusal).toContain("mermaid");
-  });
-
   it("keeps the prose around the token", () => {
     const { text, refusal } = resolveArtifacts("Before.\n\n{{artifact}}\n\nAfter.", [VEGA]);
     expect(refusal).toBeNull();
@@ -46,24 +25,30 @@ describe("resolving tokens", () => {
   });
 
   it("takes the most recent artifact for a bare token", () => {
-    const { text } = resolveArtifacts("{{artifact}}", [VEGA, LINEAGE]);
-    expect((text as string).startsWith("```mermaid")).toBe(true);
+    const { text } = resolveArtifacts("{{artifact}}", [VEGA, READS]);
+    expect((text as string).startsWith("```visualization")).toBe(true);
   });
 
   it("takes the one a titled token names", () => {
-    const { text } = resolveArtifacts("{{artifact: Glucose by BMI}}", [VEGA, LINEAGE]);
+    const { text } = resolveArtifacts("{{artifact: Glucose by BMI}}", [VEGA, READS]);
     expect((text as string).startsWith("```vega")).toBe(true);
   });
 
   it("resolves several tokens in one write", () => {
     const { text, refusal } = resolveArtifacts(
-      "{{artifact: Dataset lineage}}\n{{artifact: Glucose by BMI}}",
-      [VEGA, LINEAGE],
+      "{{artifact: Reads}}\n{{artifact: Glucose by BMI}}",
+      [VEGA, READS],
     );
     expect(refusal).toBeNull();
-    expect((text as string).indexOf("```mermaid")).toBeLessThan(
+    expect((text as string).indexOf("```visualization")).toBeLessThan(
       (text as string).indexOf("```vega"),
     );
+  });
+
+  it("refuses a diagram Galaxy pages cannot render, leaving the token", () => {
+    const { text, refusal } = resolveArtifacts("{{artifact: Dataset lineage}}", [VEGA, LINEAGE]);
+    expect(text).toBe("{{artifact: Dataset lineage}}");
+    expect(refusal).toContain("cannot render");
   });
 
   it("refuses an unknown title and names what there is", () => {

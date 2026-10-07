@@ -1,15 +1,40 @@
-/** The session's watch on submitted Galaxy work, which lets the agent hand control back. */
+/** The conversation's watch on submitted Galaxy work, which lets the agent hand control back. */
 
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import type { Models } from "@earendil-works/pi-ai";
+import {
+  createRegistry,
+  defineExtension,
+  Harness,
+  InboxDoc,
+  MemoryStorage,
+  type Conversation,
+  type Storage,
+} from "@earendil-works/pi-durable";
+import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { describe, expect, it } from "vitest";
 
-import type { Galaxy } from "./galaxy";
+import {
+  DATASET_TERMINAL_STATES,
+  INVOCATION_FINISHED_STATES,
+  JOB_SETTLED_STATES,
+} from "@galaxyproject/galaxy-ops/browser";
+
+import { FollowUps } from "./documents";
+import { FOLLOW_UP_MARK } from "./markers";
+import { HttpError, type Galaxy } from "./galaxy";
+import { context, watchedBy } from "./runtime";
 import {
   followUpPrompt,
-  isFailure,
+  galaxyWatch,
+  FOLLOWS_UP,
   isTerminal,
   outcomeOf,
+  SETTLED,
   stateReader,
-  Watch,
   watchedFrom,
   type Watched,
 } from "./watch";
@@ -77,96 +102,221 @@ describe("watchedFrom", () => {
   });
 });
 
-describe("terminal states", () => {
-  it("treats a scheduled invocation as still running", () => {
-    // `scheduled` means every step was scheduled, not that the jobs finished.
+describe("what a settled state amounts to", () => {
+  it("settles exactly where Galaxy and galaxy-ops call a state final, and at a paused dataset", () => {
+    // Galaxy's Job.is_terminal, plus `failed`, which galaxy-ops settles too.
+    expect(Object.keys(SETTLED.job).sort()).toEqual(
+      [...new Set([...JOB_SETTLED_STATES, "paused"])].sort(),
+    );
+    expect(Object.keys(SETTLED.dataset).sort()).toEqual(
+      [...DATASET_TERMINAL_STATES, "paused"].sort(),
+    );
+    expect(Object.keys(SETTLED.invocation).sort()).toEqual([...INVOCATION_FINISHED_STATES].sort());
     expect(isTerminal("invocation", "scheduled")).toBe(false);
-    expect(isTerminal("invocation", "completed")).toBe(true);
-  });
-
-  it("knows which job and dataset states will not change again", () => {
     expect(isTerminal("job", "running")).toBe(false);
-    expect(isTerminal("job", "ok")).toBe(true);
-    expect(isTerminal("dataset", "queued")).toBe(false);
-    expect(isTerminal("dataset", "error")).toBe(true);
   });
 
-  it("calls an errored dataset a failure, which its fetch job does not", () => {
-    expect(isFailure("dataset", "error")).toBe(true);
-    expect(isFailure("job", "ok")).toBe(false);
+  it("calls a cancel a cancel and a skip a skip, as loom does, not a failure or a success", () => {
+    expect(outcomeOf("job", "deleted")).toBe("cancelled");
+    expect(outcomeOf("job", "stopped")).toBe("cancelled");
+    expect(outcomeOf("invocation", "cancelled")).toBe("cancelled");
+    expect(outcomeOf("job", "skipped")).toBe("skipped");
   });
 
-  it("stops watching a dataset at every state Galaxy calls terminal", () => {
-    for (const state of ["ok", "empty", "error", "deferred", "discarded", "failed_metadata"]) {
-      expect(isTerminal("dataset", state), state).toBe(true);
-    }
+  it("calls paused work paused, since it waits on a failed input rather than finishing", () => {
+    expect(outcomeOf("job", "paused")).toBe("paused");
+    expect(outcomeOf("dataset", "paused")).toBe("paused");
   });
 
-  it("stops at a paused dataset, which only the user can move on", () => {
-    expect(isTerminal("dataset", "paused")).toBe(true);
-    expect(isFailure("dataset", "paused")).toBe(false);
-  });
-
-  it("calls a dataset a failure exactly where Galaxy does", () => {
+  it("calls a failure a failure exactly where Galaxy does", () => {
     for (const state of ["error", "discarded", "failed_metadata"]) {
-      expect(isFailure("dataset", state), state).toBe(true);
+      expect(outcomeOf("dataset", state), state).toBe("failed");
     }
-    for (const state of ["ok", "empty", "deferred"]) {
-      expect(isFailure("dataset", state), state).toBe(false);
-    }
-  });
-
-  it("reports a failed or deleted job as failed, not completed", () => {
-    for (const state of ["error", "failed", "deleted"]) {
+    for (const state of ["error", "failed"]) {
       expect(outcomeOf("job", state), state).toBe("failed");
     }
-    expect(outcomeOf("job", "skipped")).toBe("completed");
+    expect(outcomeOf("dataset", "ok")).toBe("completed");
   });
 
-  it("answers cancelled as itself, because a stop the user asked for is not a failure", () => {
-    expect(outcomeOf("invocation", "cancelled")).toBe("cancelled");
-    expect(outcomeOf("job", "error")).toBe("failed");
-    expect(outcomeOf("job", "ok")).toBe("completed");
+  it("follows up on what the model has to act on, not on what someone chose", () => {
+    expect(
+      Object.entries(FOLLOWS_UP)
+        .filter(([, yes]) => yes)
+        .map(([o]) => o)
+        .sort(),
+    ).toEqual(["completed", "failed", "paused", "unreadable"]);
   });
 });
 
 const JOB: Watched = { kind: "job", id: "j1", label: "run_tool", state: "queued" };
 
-describe("Watch", () => {
-  it("reports an item once it reaches a terminal state, then stops watching it", async () => {
-    const states: Record<string, string> = { j1: "running" };
-    const watch = new Watch(async (w) => states[w.id]);
-    watch.add([JOB]);
-    expect(await watch.poll()).toEqual([]);
-    states.j1 = "ok";
-    expect(await watch.poll()).toEqual([
-      { watched: { ...JOB, state: "ok" }, state: "ok", outcome: "completed" },
+/** A Harness running only the watch task, over `storage`, against a Galaxy answering `state`. */
+async function watching(
+  storage: Storage,
+  state: () => string | Error,
+  edits: string[] = [],
+  unwritten?: string,
+) {
+  const galaxy = {
+    get: async () => {
+      const s = state();
+      if (s instanceof Error) throw s;
+      return { state: s };
+    },
+  } as unknown as Galaxy;
+  const watch = galaxyWatch({
+    galaxy,
+    pollMs: 5,
+    editRecord: async (_id, edit) => {
+      edits.push(edit(""));
+      return unwritten;
+    },
+  });
+  const registry = createRegistry();
+  registry.install(defineExtension({ name: "watch", tasks: [watch] }));
+  const harness = await Harness.open(storage, { models: {} as Models, registry }, context);
+  return { harness, watch };
+}
+
+async function submitted(
+  storage: Storage,
+  state: () => string | Error,
+  edits?: string[],
+  paused = false,
+  unwritten?: string,
+) {
+  const { harness, watch } = await watching(storage, state, edits, unwritten);
+  const conversation = await harness.createConversation(
+    { ownership: { kind: "ownerless" } },
+    context,
+  );
+  const task = await conversation.commit(async (tx) => {
+    if (paused) (await tx.doc(FollowUps, conversation.id)).paused = true;
+    return tx.createTask(watch, JOB, {
+      ownership: { kind: "conversation" },
+      conversationId: conversation.id,
+      background: true,
+    });
+  }, context);
+  harness.resume();
+  return { harness, conversation, task };
+}
+
+/** What the conversation was asked, as user entries. */
+const followUps = async (conversation: Conversation) =>
+  (await conversation.context(context)).entries.flatMap((e) =>
+    e.kind === "pi.user" ? [String((e.model?.[0] as { content: unknown }).content)] : [],
+  );
+
+describe("the watch task", () => {
+  it("notes the work, watches it, and follows up once it settles", async () => {
+    let state = "running";
+    const edits: string[] = [];
+    const { harness, conversation, task } = await submitted(
+      new MemoryStorage(),
+      () => state,
+      edits,
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    expect(await watchedBy(harness, conversation.id, context)).toEqual([
+      { ...JOB, state: "running" },
     ]);
-    expect(watch.pending).toBe(0);
-    expect(await watch.poll()).toEqual([]);
+    state = "ok";
+    const done = await harness.waitForTask(task, context);
+    expect(done.state.outcome).toEqual({
+      status: "completed",
+      result: { watched: { ...JOB, state: "ok" }, state: "ok", outcome: "completed" },
+    });
+    expect(await watchedBy(harness, conversation.id, context)).toEqual([]);
+    const asked = await followUps(conversation);
+    expect(asked).toHaveLength(1);
+    expect(asked[0].startsWith(FOLLOW_UP_MARK)).toBe(true);
+    expect((await harness.snapshot(FollowUps, conversation.id, context))?.automatic).toBe(1);
+    expect(edits[0]).toContain("Galaxy job `j1` — submitted");
+    await harness.close(context);
   });
 
-  it("names what it is still watching, with the state last read", async () => {
-    const watch = new Watch(async () => "running");
-    watch.add([JOB]);
-    await watch.poll();
-    expect(watch.list()).toEqual([{ ...JOB, state: "running" }]);
+  it("records a failure the record did not yet hold, as work submitted before it was opened", async () => {
+    const edits: string[] = [];
+    const { harness, task } = await submitted(new MemoryStorage(), () => "error", edits);
+    await harness.waitForTask(task, context);
+    const settled = edits.at(-1)!;
+    expect(settled).toContain("Galaxy job `j1`");
+    expect(settled).toContain("Status: failed (error) — recorded automatically");
+    await harness.close(context);
   });
 
-  it("does not watch the same id twice, and says what it newly took on", () => {
-    const watch = new Watch(async () => undefined);
-    expect(watch.add([JOB])).toHaveLength(1);
-    expect(watch.add([JOB])).toEqual([]);
-    expect(watch.pending).toBe(1);
+  it("tells the model and the page when the record could not be updated", async () => {
+    const { harness, conversation, task } = await submitted(
+      new MemoryStorage(),
+      () => "ok",
+      [],
+      false,
+      "record page p1 could not be written (HTTP 400: bad fence)",
+    );
+    const done = await harness.waitForTask(task, context);
+    expect(done.state.outcome).toMatchObject({
+      result: { record: "record page p1 could not be written (HTTP 400: bad fence)" },
+    });
+    const [asked] = await followUps(conversation);
+    expect(asked).toContain("The record was not updated for this work");
+    expect(asked).toContain("HTTP 400: bad fence");
+    await harness.close(context);
+  });
+
+  it("settles work Galaxy refuses to show as unreadable, and says so, rather than polling on", async () => {
+    const { harness, conversation, task } = await submitted(
+      new MemoryStorage(),
+      () => new HttpError("HTTP 404: No job", 404),
+    );
+    const done = await harness.waitForTask(task, context);
+    expect(done.state.outcome).toMatchObject({
+      result: { state: "HTTP 404", outcome: "unreadable" },
+    });
+    const [asked] = await followUps(conversation);
+    expect(asked).toContain("Galaxy no longer shows some of this work");
+    await harness.close(context);
   });
 
   it("keeps watching when Galaxy errors, rather than dropping the job", async () => {
-    const watch = new Watch(async () => {
-      throw new Error("502");
-    });
-    watch.add([JOB]);
-    expect(await watch.poll()).toEqual([]);
-    expect(watch.pending).toBe(1);
+    let state: string | Error = new Error("502");
+    const { harness, conversation, task } = await submitted(new MemoryStorage(), () => state);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(await watchedBy(harness, conversation.id, context)).toHaveLength(1);
+    state = "ok";
+    await harness.waitForTask(task, context);
+    expect(await watchedBy(harness, conversation.id, context)).toEqual([]);
+    await harness.close(context);
+  });
+
+  it("queues its follow-up for the user while follow-ups are paused", async () => {
+    const { harness, conversation, task } = await submitted(
+      new MemoryStorage(),
+      () => "ok",
+      [],
+      true,
+    );
+    await harness.waitForTask(task, context);
+    expect(await followUps(conversation)).toEqual([]);
+    const inbox = await harness.snapshot(InboxDoc, conversation.id, context);
+    expect(inbox?.items).toHaveLength(1);
+    expect((await harness.snapshot(FollowUps, conversation.id, context))?.automatic).toBe(0);
+    await harness.close(context);
+  });
+
+  it("resumes after the page closes and opens again, and follows up once", async () => {
+    const file = join(mkdtempSync(join(tmpdir(), "olit-watch-")), "olit.sqlite3");
+    let state = "running";
+    const first = await submitted(await openNodeSqliteStorage(file), () => state);
+    await new Promise((r) => setTimeout(r, 20));
+    await first.harness.close(context);
+    state = "ok";
+    const { harness } = await watching(await openNodeSqliteStorage(file), () => state);
+    harness.resume();
+    await harness.waitForTask(first.task, context);
+    const conversation = (await harness.conversation(first.conversation.id, context))!;
+    expect(await followUps(conversation)).toHaveLength(1);
+    await harness.close(context);
   });
 });
 
@@ -178,15 +328,6 @@ const galaxy = (answers: Record<string, unknown>, asked: string[] = []) =>
       return answers[path];
     },
   }) as unknown as Galaxy;
-
-describe("Watch, polled twice at once", () => {
-  it("reports a settled item once", async () => {
-    const watch = new Watch(async () => "ok");
-    watch.add([{ kind: "job", id: "j1", label: "run_tool", state: "running" }]);
-    const [a, b] = await Promise.all([watch.poll(), watch.poll()]);
-    expect(a.length + b.length).toBe(1);
-  });
-});
 
 describe("stateReader", () => {
   it("reports a job's state as Galaxy gives it", async () => {
@@ -235,11 +376,14 @@ describe("followUpPrompt", () => {
   it("asks for a turn about runs that finished or failed", () => {
     const prompt = followUpPrompt([
       { watched: JOB, state: "ok", outcome: "completed" },
-      { watched: { ...JOB, id: "j2" }, state: "error", outcome: "failed" },
+      { watched: { ...JOB, id: "j2", outputs: ["d9"] }, state: "error", outcome: "failed" },
     ])!;
     expect(prompt.startsWith("[Olit automatic Galaxy follow-up]")).toBe(true);
     expect(prompt).toContain('"label": "Galaxy job j1"');
-    expect(prompt).toContain("still have jobs running");
+    // A failed job is read through its output, which get_job_details takes.
+    expect(prompt).toContain('"outputs": [\n      "d9"\n    ]');
+    // galaxy-ops calls a run failed only once nothing of it is running.
+    expect(prompt).not.toContain("still have jobs running");
   });
 
   it("asks for nothing about a run the user cancelled", () => {

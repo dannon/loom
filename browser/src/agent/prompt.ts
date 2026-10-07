@@ -491,7 +491,8 @@ was drafted and nobody asked you to write it down.
   record page and returns its id, current content and \`content_hash\`.
 - **Add to the record a section at a time.** \`update_page({ page_id, section_heading,
   section_content })\` replaces one section and leaves the rest of the page alone, which is
-  what appending a finding or a step usually is.
+  what appending a finding or a step usually is. \`section_heading\` is the heading line
+  itself, such as \`## Results\`, and \`section_content\` starts with it.
 - **\`content\` replaces the whole page.** Reach for it only to restructure the record, and
   then send the existing content with your addition merged in, never the new part alone --
   passing only the new text discards everything already recorded.
@@ -540,9 +541,9 @@ lists, tables, links, emphasis, blockquotes -- and embed Galaxy results only wit
 **encoded** ids, never raw integers or HIDs; get them from \`get_history_contents\` or
 \`get_dataset_details\`.
 
-Do **not** wrap content in \`\`\`txt, \`\`\`text, or any other fence: Galaxy renders those as
-raw monospace instead of formatted content. Present data as Markdown tables or prose.
-The only meaningful fenced block on a Galaxy page is \`\`\`galaxy.`;
+A \`\`\` fence on a Galaxy page opens a cell, and Galaxy renders only \`\`\`galaxy, \`\`\`vega and
+\`\`\`visualization cells; any other type shows as an error and Galaxy refuses the page. Present
+data as Markdown tables or prose; for code or plain text use ~~~ fences.`;
 
 function localDate(now: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -597,7 +598,6 @@ export interface PromptOptions {
   galaxyStatus?: GalaxyStatus;
   seedDataset?: string;
   galaxyRoot?: string;
-  galaxyReads?: boolean;
 }
 
 function galaxyNotice(status: GalaxyStatus): string {
@@ -612,10 +612,9 @@ export function systemText({
   galaxyStatus = GALAXY_READY,
   seedDataset,
   galaxyRoot,
-  galaxyReads = true,
 }: PromptOptions = {}): string {
-  const ready = galaxyStatus === GALAXY_READY && galaxyReads;
-  const galaxy = (block: string) => (ready ? block : "");
+  // As loom does: the Galaxy guidance rides on the connection, whichever tools are granted.
+  const galaxy = (block: string) => (galaxyStatus === GALAXY_READY ? block : "");
   return [
     IDENTITY,
     seedDatasetBlock(seedDataset),

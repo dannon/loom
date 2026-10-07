@@ -3,9 +3,16 @@ import { malformedObjectIds } from "@galaxyproject/galaxy-ops/browser";
 
 import * as biocontainers from "./biocontainers";
 import { segment, type Galaxy } from "./galaxy";
-import { catalogMissHint, fetchFailureHint, iwcCandidatesHint } from "./hints";
+import {
+  catalogMissHint,
+  fetchFailureHint,
+  invocationOutcomeHint,
+  iwcCandidatesHint,
+} from "./hints";
 import { ELIDED } from "./notebook";
-import { UPSTREAM_DOCS, type Annotate, type OpPolicy } from "./ops";
+import { pageContentProblem } from "./page-edit";
+import { watchedFrom } from "./watch";
+import { type Annotate, type OpPolicy } from "./ops";
 import { serialized } from "./record-write";
 import { fail, Outcome, rendered, type Capability, type Context, type OlitTool } from "./tool";
 
@@ -13,6 +20,38 @@ export const DATA_DIR = "/data";
 /** Lines of a downloaded dataset shown in its result. */
 export const PREVIEW_LINES = 50;
 export const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
+const HEADING = /^#{1,6}\s+\S/;
+
+/** A refusal for a section edit that would leave its text without a heading in the record. */
+function headingless(args: Record<string, unknown>) {
+  if (args.section_heading == null) {
+    return undefined;
+  }
+  const heading = String(args.section_heading).trim();
+  if (!HEADING.test(heading)) {
+    return fail(
+      `Refused: section_heading is the heading line itself, such as ${quote(`## ${heading}`)}, ` +
+        "not the title alone; a line the page does not hold as a heading appends the text " +
+        "under no heading.",
+    );
+  }
+  const first = String(args.section_content ?? "")
+    .trimStart()
+    .split("\n")[0];
+  return HEADING.test(first)
+    ? undefined
+    : fail(
+        "Refused: section_content replaces the whole section, heading line included, so it " +
+          `starts with ${quote(heading)}; without it the record loses the heading.`,
+      );
+}
+
+/** A refusal for page content Galaxy would not render, before it is sent. */
+const invalidPage = async (content: unknown) => {
+  const problem = typeof content === "string" ? pageContentProblem(content) : undefined;
+  return problem ? fail(`Refused: ${problem}`) : undefined;
+};
+
 /**
  * Olit's policy over galaxy-ops operations it runs but does not own: a refusal of its own before
  * the call, a queue the call waits its turn in, or an answer to galaxy-ops' refusal.
@@ -22,6 +61,10 @@ export const OPS_POLICY: Record<string, OpPolicy> = {
   // does so has nearly always copied the wrong id, and the job answers a question nobody asked.
   run_tool: {
     check: async (args, ctx) => {
+      const unread = await unreadInputs(ctx.galaxy, args);
+      if (unread) {
+        return unread;
+      }
       const foreign = await foreignInputs(ctx.galaxy, args.inputs, String(args.history_id));
       return foreign.length
         ? fail(
@@ -34,6 +77,9 @@ export const OPS_POLICY: Record<string, OpPolicy> = {
     },
   },
   update_history: { destructiveWhen: (args) => args.deleted === true },
+  create_page: { check: async (args) => invalidPage(args.content) },
+  // A revert rewrites the page too, so it waits its turn behind the session's own record writes.
+  revert_page_revision: { around: serialized },
   get_dataset_details: { polls: "dataset_id" },
   get_job_details: { polls: "dataset_id" },
   get_invocations: { polls: "invocation_id" },
@@ -48,7 +94,7 @@ export const OPS_POLICY: Record<string, OpPolicy> = {
         ? fail(
             "Refused: this content still holds the record excerpt's elision marker, so it would delete the elided middle. Edit a section instead.",
           )
-        : undefined,
+        : (headingless(args) ?? invalidPage(args.section_content ?? args.content)),
     around: serialized,
     refused: (message, args) =>
       malformedObjectIds(String(args.section_content ?? args.content ?? "")).length
@@ -62,10 +108,14 @@ export const OPS_POLICY: Record<string, OpPolicy> = {
   },
 };
 
-/** What Olit adds to a galaxy-ops result: where a missed search lives, or fetch-failure triage. */
+/**
+ * What Olit adds to a galaxy-ops result: where a missed search lives, what listed invocations'
+ * jobs make of them, or fetch-failure triage.
+ */
 export const annotate: Annotate = async (name, args, data, ctx) =>
   iwcCandidatesHint(name) ??
   (await catalogMissHint(ctx.galaxy, name, args, data)) ??
+  (await invocationOutcomeHint(ctx.galaxy, name, data)) ??
   fetchFailureHint(data);
 
 type Row = Record<string, any>;
@@ -98,6 +148,85 @@ export function hdaInputs(inputs: unknown): [string, string, string][] {
   };
   walk("", inputs || {});
   return found;
+}
+
+/**
+ * Whether Galaxy's legacy tool state reads `key` for these declared inputs: a parameter by its
+ * name, a repeat's instance as `name_N|`, a conditional or section member as `name|`, the way
+ * `_populate_state_legacy` builds its keys. Galaxy runs the tool without any key it does not read.
+ */
+function reads(declared: unknown, key: string): boolean {
+  return ((declared as Row[]) || []).filter(isRow).some((p) => {
+    const name = String(p.name ?? "");
+    if (!name) {
+      return false;
+    }
+    if (p.type === "repeat" || p.type === "upload_dataset") {
+      const instance = key.match(/^(.+?)_\d+\|(.+)$/);
+      return instance?.[1] === name && reads(p.inputs, instance[2]);
+    }
+    if (p.type === "conditional") {
+      const test = p.test_param?.name;
+      if (key === test) {
+        return true;
+      }
+      const rest = key.startsWith(`${name}|`) ? key.slice(name.length + 1) : undefined;
+      return (
+        rest !== undefined &&
+        (rest === test || ((p.cases as Row[]) || []).some((c) => reads(c.inputs, rest)))
+      );
+    }
+    if (p.type === "section") {
+      return key.startsWith(`${name}|`) && reads(p.inputs, key.slice(name.length + 1));
+    }
+    return key === name;
+  });
+}
+
+/** The keys Galaxy reads for these declared inputs, a repeat's shown by its first instance. */
+function keysOf(declared: unknown, prefix = ""): string[] {
+  return ((declared as Row[]) || []).filter(isRow).flatMap((p) => {
+    const key = `${prefix}${p.name}`;
+    if (p.type === "repeat" || p.type === "upload_dataset") {
+      return keysOf(p.inputs, `${key}_0|`);
+    }
+    if (p.type === "conditional") {
+      const cases = ((p.cases as Row[]) || []).flatMap((c) => keysOf(c.inputs, `${key}|`));
+      return [`${key}|${p.test_param?.name}`, ...new Set(cases)];
+    }
+    return p.type === "section" ? keysOf(p.inputs, `${key}|`) : [key];
+  });
+}
+
+/** A refusal for input keys Galaxy would not read, which it otherwise drops without a word. */
+async function unreadInputs(galaxy: Galaxy, args: Row) {
+  if (!isRow(args.inputs)) {
+    return undefined;
+  }
+  const version = args.tool_version ? `&tool_version=${encodeURIComponent(args.tool_version)}` : "";
+  let schema: unknown;
+  try {
+    schema = await galaxy.get(`api/tools/${segment(args.tool_id)}?io_details=true${version}`);
+  } catch {
+    return undefined;
+  }
+  if (!isRow(schema) || !Array.isArray(schema.inputs)) {
+    return undefined;
+  }
+  const unread = Object.keys(args.inputs).filter(
+    (key) =>
+      !key.startsWith("__") && !key.endsWith("|__identifier__") && !reads(schema.inputs, key),
+  );
+  if (!unread.length) {
+    return undefined;
+  }
+  return fail(
+    `Refused: ${args.tool_id} has no parameter at ${unread.map(quote).join(", ")}, so Galaxy ` +
+      `would run it without ${unread.length > 1 ? "them" : "it"}. Its keys are ` +
+      `${keysOf(schema.inputs).map(quote).join(", ")}; a repeat takes one instance per ` +
+      `\`name_0|\`, \`name_1|\`, and a parameter that takes several datasets takes them under ` +
+      `its own key as {"values": [...]}.`,
+  );
 }
 
 /** Inputs that belong to a history other than the one the job will run in. */
@@ -160,10 +289,15 @@ async function downloadDataset(args: Row, { galaxy, python }: Context) {
   let partial = false;
   let data: Uint8Array;
   if (Number.isInteger(stated) && stated > MAX_DOWNLOAD_BYTES) {
-    const prefix = await chunk(galaxy, args.dataset_id, MAX_DOWNLOAD_BYTES);
+    // Only Galaxy's tabular datatypes serve a chunk of themselves; any other ignores the offset
+    // and streams the whole file, and BAM answers with SAM text.
+    const tabular = Array.isArray(details.metadata_column_types);
+    const prefix = tabular ? await chunk(galaxy, args.dataset_id, MAX_DOWNLOAD_BYTES) : undefined;
     if (prefix === undefined) {
       return fail(
-        `Dataset is ${(stated / 1e6).toFixed(1)} MB and cannot be read in chunks. Run a Galaxy tool on it instead.`,
+        `Dataset is ${(stated / 1e6).toFixed(1)} MB, over the ${MAX_DOWNLOAD_BYTES / 1e6} MB a ` +
+          `download reads, and Galaxy cannot serve ${quote(details.extension)} data in parts. ` +
+          "Run a Galaxy tool on it instead.",
       );
     }
     data = new TextEncoder().encode(prefix);
@@ -243,16 +377,20 @@ type Run = (args: Row, ctx: Context) => Promise<unknown>;
 
 /**
  * What Olit says of the two tools that work on the browser's in-memory filesystem, which
- * galaxy-mcp's docstrings describe as the server's own disk.
+ * galaxy-mcp's docstrings describe as the server's own disk, and of the image resolver, which
+ * reads quay.io's tag listing rather than galaxy-mcp's mulled extra.
  */
 const LOCAL_DOCS: Record<string, string> = {
   download_dataset:
     "Save a Galaxy dataset to the local filesystem.\n\nReturns `path`, `bytes`, `binary`, and for text data `lines`, a `preview` of the first 50 lines and `truncated`. Fetched as raw bytes, so BAM/HDF5/gzip arrive intact. The file lives in the browser's in-memory filesystem, which persists for the session, so read it with run_python -- text with `pandas.read_csv(path, sep='\\t')`, binary with `open(path, 'rb')` or a suitable library. Do not paste the preview into code: it is a sample, and re-emitting file content as a string breaks on tabs and newlines.",
+  recommend_biocontainer:
+    'Resolve a verified quay.io/biocontainers image for a conda package.\n\nUse this to pick the ``container`` of a user-defined tool instead of guessing an image, before the definition is written, as the udt-authoring skill says to do first. The result is read from quay.io\'s tag listing rather than hallucinated, which avoids the most common user-defined-tool failure: inventing a tag, or using a bare image (e.g. "python:3.12-slim") that doesn\'t ship the libraries the tool imports.\n\nArgs:\n    packages: The conda packages the tool wraps, each as "name" or "name=version" (e.g. ["samtools=1.17"]). Use canonical conda names you would `conda install` (e.g. "pandas", "r-ggplot2", "samtools"). A single package yields a single-package image. Several need a mulled-v2 image, which a tag listing cannot resolve: the result then holds no image and a note saying so.\n\nReturns:\n    - image: the resolved quay.io/biocontainers/... reference, or null if none.\n    - found: whether an image was resolved.\n    - match_quality: "exact_version" | "name_only" | "not_found" (name_only means the pinned version has no built tag, or no version was pinned, so the newest built tag was used).\n    - source, notes: provenance and any explanatory notes.\n    - verified: true if the tag is built on quay.io, null if it could not be checked.\n\nNEXT STEPS:\n- If match_quality is "exact_version" and verified is not false, use data["image"] as the "container".\n- If match_quality is "name_only", the newest tag was substituted -- show the user which image you got before using it.\n- If image is null, don\'t guess a tag: tell the user no built image was found for those packages and ask how to proceed.',
   upload_file:
     "Upload a file from the local filesystem to a Galaxy history.\n\nReads the path from the browser's in-memory filesystem, so it pairs with run_python: write a result to a file, then upload it. Sent to Galaxy as pasted content. Use upload_file_from_url to ingest directly from a URL instead.\n\nAn upload is a Galaxy job: the dataset comes back before it is readable. Wait for it to reach 'ok' (check its state with get_dataset_details) before running a tool on it or charting it.",
 };
 
-/** A tool Olit runs itself, under galaxy-mcp's description, with fetch-failure triage appended. */
+/** A tool Olit runs itself, under galaxy-mcp's name and its own description, with fetch-failure
+ * triage appended. */
 function tool(
   name: string,
   capability: Capability,
@@ -262,13 +400,17 @@ function tool(
 ): OlitTool {
   return {
     name,
-    description: LOCAL_DOCS[name] ?? UPSTREAM_DOCS[name],
+    description: LOCAL_DOCS[name],
     capability,
     parameters: { type: "object", properties, required },
     run: async (args, ctx) => {
       const value = await run(args, ctx);
       const hint = value instanceof Outcome ? undefined : fetchFailureHint(value);
-      return hint ? new Outcome(`${rendered({ data: value })}\n\n${hint}`) : value;
+      if (!hint) return value;
+      // Wrapped, the result is text the tool runner no longer reads work from, so watch it here,
+      // as the galaxy-ops tools do.
+      ctx.watch.add(watchedFrom(name, value));
+      return new Outcome(`${rendered({ data: value })}\n\n${hint}`);
     },
   };
 }

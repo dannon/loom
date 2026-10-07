@@ -8,15 +8,18 @@ import {
 } from "galaxy-charts/runtime";
 
 import { query, segment, type Galaxy } from "./galaxy";
-import { fail, type OlitTool } from "./tool";
+import type { ArtifactOf } from "../artifacts/kinds";
+import { fail, type Artifact, type OlitTool } from "./tool";
 import * as vega from "./vega";
 import {
   buildVisualizationTemplate,
   declaredPaths,
-  isOffered,
+  identity,
+  offeredValue,
   optionBearing,
   resolvedDefault,
   resolveParameter,
+  unresolved,
   type Types,
 } from "./visualization-inputs";
 
@@ -40,7 +43,6 @@ export const NOT_OFFERED = new Set(["olit", "vintent"]);
 const NUMERIC_COLUMNS = new Set(["int", "float"]);
 const MATCH_CAP = 5;
 const ROW_CAP = 100;
-const EMBED = { hide_panels: "true", hide_masthead: "true" };
 const STR = { type: "string" };
 
 const isObject = (value: unknown): value is Json =>
@@ -95,19 +97,6 @@ export const chartOptions: ResolveOptions = (galaxy) => {
     }
   };
 };
-
-/** The installed visualization this query names, if the tool catalog is the wrong one. */
-export async function aVisualizationNamed(
-  galaxy: Galaxy,
-  search: string | undefined,
-): Promise<string | undefined> {
-  const wanted = (search || "").trim().toLowerCase();
-  const installed: Json[] = (await galaxy.get("api/plugins")) || [];
-  return installed
-    .map((p) => p.name)
-    .filter((n) => !NOT_OFFERED.has(n))
-    .find((n) => n && n.toLowerCase() === wanted);
-}
 
 function columnParameters(plugin: Json): string[] {
   return [...(plugin.tracks || []), ...(plugin.settings || [])]
@@ -254,7 +243,7 @@ function describeParameter(param: Json, types: Types, path: string[] = []): Json
     }
     if (source.kind !== "declared") {
       options.resolve = "get_visualization_options";
-      options.pass_through = "the resolved option's `value`, unchanged";
+      options.chosen_by = "an option's id, as get_visualization_options lists it";
     }
     described.options = options;
   }
@@ -289,26 +278,18 @@ async function getVisualizationDetails(galaxy: Galaxy, a: Json): Promise<unknown
     ),
     tracks: ((plugin.tracks as Json[]) || []).map((p) => describeParameter(p, TYPES, ["tracks"])),
     hint:
-      "`stores` is the schema a value is validated against; for an input naming " +
-      "`pass_through`, resolve its options and send the chosen option's `value` rather than " +
-      "building one to that schema. Build `settings` and `tracks` and pass them to " +
-      "save_visualization: settings cannot ride in a displayed visualization, only in a saved one.",
+      "`stores` is the schema a value is validated against. For an input naming `chosen_by`, " +
+      'resolve its options and pass the chosen id, as {"id": ...} where it stores an object; ' +
+      "the server stores the whole entry. Build `settings` and `tracks` and pass them to " +
+      "show_visualization or save_visualization; both take the same config.",
   };
 }
-
-/** What names an option: an object's id, or the value itself when it is a scalar. */
-const identity = (value: unknown) => (isObject(value) ? value.id : value);
 
 function matches(entry: Json, search: string | undefined): boolean {
   if (!search) {
     return false;
   }
-  const hay = ["id", "name", "label", "value"]
-    .map((k) =>
-      !entry[k] ? "" : typeof entry[k] === "object" ? quote(entry[k]) : String(entry[k]),
-    )
-    .join(" ")
-    .toLowerCase();
+  const hay = `${entry.id ?? ""} ${entry.name ?? ""}`.toLowerCase();
   return hay.includes(search.toLowerCase());
 }
 
@@ -349,18 +330,9 @@ async function getVisualizationOptions(
         "get_visualization_details says what it accepts.",
     };
   }
-  const entries = offered.map((o) => ({
-    id: identity(o.value),
-    name: o.label,
-    value: o.value,
-  }));
+  const entries = offered.map((o) => ({ id: identity(o.value), name: o.label }));
 
-  const result: Json = {
-    parameter: wanted,
-    source: kind,
-    total: entries.length,
-    options: entries.slice(0, ROW_CAP),
-  };
+  const result: Json = { parameter: wanted, source: kind, total: entries.length };
   if (!entries.length && siblings.length) {
     result.other_cases = siblings;
     result.hint =
@@ -370,12 +342,13 @@ async function getVisualizationOptions(
   }
   if (search) {
     result.matches = entries.filter((e) => matches(e, search)).slice(0, MATCH_CAP);
-    result.hint =
-      "`matches` holds the values to store as given; pass one through unchanged rather than rebuilding it.";
   } else {
-    result.hint =
-      "Store an option's `value` as given rather than rebuilding it from its id; `search` narrows a long list.";
+    result.options = entries.slice(0, ROW_CAP);
   }
+  result.hint =
+    'An option is chosen by its id: pass {"id": ...} for an input that stores an object, ' +
+    "the id itself otherwise, and the server stores the entry it names." +
+    (search ? "" : " `search` narrows a long list.");
   return result;
 }
 
@@ -402,24 +375,72 @@ async function getVisualization(galaxy: Galaxy, a: Json): Promise<unknown> {
   };
 }
 
-async function showVisualization(galaxy: Galaxy, a: Json): Promise<Json> {
+/**
+ * The visualization both tools accept, as its artifact: a plugin that renders the dataset, with
+ * settings and tracks that leave nothing for the viewer to choose. Saving only adds where it is kept.
+ */
+async function checked(
+  galaxy: Galaxy,
+  resolveOptions: ResolveOptions,
+  a: Json,
+): Promise<{ artifact?: ArtifactOf<"visualization">; refusal?: Json; rejected?: Json }> {
   const { dataset, refusal } = await resolveVisualization(galaxy, a);
+  if (refusal) {
+    return { refusal };
+  }
+  const plugin: Json = (await galaxy.get(`api/plugins/${segment(a.visualization)}`)) || {};
+  const chosen = { ...a, settings: structuredClone(a.settings), tracks: structuredClone(a.tracks) };
+  const rejected =
+    rejectUndeclared(plugin, chosen) ??
+    (await selectOffered(resolveOptions(galaxy), plugin, chosen)) ??
+    rejectIncomplete(plugin, chosen);
+  if (rejected) {
+    return { rejected };
+  }
+  return {
+    artifact: {
+      kind: "visualization",
+      title: a.title || `${a.visualization} of ${dataset!.name || a.dataset_id}`,
+      visualization: a.visualization,
+      dataset_id: a.dataset_id,
+      ...(present(chosen.settings) ? { settings: chosen.settings } : {}),
+      ...(present(chosen.tracks) ? { tracks: chosen.tracks } : {}),
+    },
+  };
+}
+
+/** Refuse a config that leaves an input only the dataset can fill, which the viewer would pick. */
+function rejectIncomplete(plugin: Json, a: Json): Json | null {
+  const missing = isObject(plugin) ? unresolved(plugin, a, TYPES) : [];
+  if (!missing.length) {
+    return null;
+  }
+  return {
+    error:
+      `Refused: ${quote(a.visualization)} needs ${missing.join(", ")}, which only the ` +
+      "dataset can supply, so the config is not complete without it.",
+    hint:
+      "Call get_visualization_options for each and pass the chosen option's id in " +
+      "settings or tracks, the same config for showing or saving.",
+  };
+}
+
+async function showVisualization(
+  galaxy: Galaxy,
+  resolveOptions: ResolveOptions,
+  a: Json,
+): Promise<unknown> {
+  const { artifact, refusal, rejected } = await checked(galaxy, resolveOptions, a);
   if (refusal) {
     return { shown: false, ...refusal };
   }
-  const name = a.visualization;
-  const title = a.title || `${name} of ${dataset!.name || a.dataset_id}`;
-  const params = { visualization: name, dataset_id: a.dataset_id, ...EMBED };
+  if (rejected) {
+    return fail(JSON.stringify({ shown: false, ...rejected }));
+  }
   return {
     shown: true,
-    title,
-    artifact: {
-      kind: "visualization",
-      title,
-      visualization: name,
-      dataset_id: a.dataset_id,
-      url: `${rootPath(galaxy)}visualizations/display${query(params)}`,
-    },
+    title: artifact!.title,
+    artifact,
     hint:
       "The visualization is displayed to the user. Nothing was added to Galaxy, so " +
       "call save_visualization if they ask to keep it. Writing it into the record " +
@@ -474,9 +495,9 @@ function issueRefusal(issue: ValueIssueType, entry: unknown, where: string): Jso
       const wanted = (issue.stores as Json)?.type;
       let error: string;
       if (wanted === "object") {
-        error = `Refused: ${quote(issue.name)} takes the whole entry it was chosen from, not ${quote(value)}.`;
+        error = `Refused: ${quote(issue.name)} takes an entry, {"id": ...}, not ${quote(value)}.`;
       } else if (typeof value === "object") {
-        error = `Refused: ${quote(issue.name)} stores ${wanted}, not the entry it was chosen from.`;
+        error = `Refused: ${quote(issue.name)} stores ${wanted}, the option's id, not an entry.`;
       } else {
         error = `Refused: ${quote(issue.name)} stores ${wanted}: ${issue.message}`;
       }
@@ -484,8 +505,8 @@ function issueRefusal(issue: ValueIssueType, entry: unknown, where: string): Jso
         error,
         expected: issue.stores,
         hint:
-          "Call get_visualization_options with `search`: it returns the value to store, " +
-          "whole for an input that takes an entry and bare for one that takes a string.",
+          "Call get_visualization_options with `search` for the id to choose: pass it as " +
+          '{"id": ...} for an input that takes an entry and bare for one that takes a string.',
       };
     }
     case "not_offered":
@@ -517,14 +538,12 @@ function rejectUndeclared(plugin: unknown, a: Json): Json | null {
   const tracks = a.tracks ?? null;
   if (settings !== null && !isObject(settings)) {
     return {
-      saved: false,
       error: "Refused: settings is one object keyed by parameter name.",
       hint: 'Send {"locus": "chr1:1-100"}, not a list.',
     };
   }
   if (tracks !== null && !Array.isArray(tracks)) {
     return {
-      saved: false,
       error: "Refused: tracks is a list, one object per track.",
       hint: "Send [{...}], one entry for each track.",
     };
@@ -532,20 +551,20 @@ function rejectUndeclared(plugin: unknown, a: Json): Json | null {
   if (settings !== null) {
     const bad = checkLevel(settings, plugin.settings, "settings");
     if (bad) {
-      return { saved: false, ...bad };
+      return bad;
     }
   }
   for (const track of tracks || []) {
     const bad = checkLevel(track, plugin.tracks, "a track");
     if (bad) {
-      return { saved: false, ...bad };
+      return bad;
     }
   }
   return null;
 }
 
-/** Refuse a value the server does not offer, resolving the options again at the write. */
-async function rejectUnoffered(
+/** Write the offered entry each option-bearing value names, or refuse one naming none. */
+async function selectOffered(
   lookup: ReturnType<ResolveOptions>,
   plugin: Json,
   a: Json,
@@ -561,12 +580,15 @@ async function rejectUnoffered(
         continue;
       }
       const offered: Json[] = envelope.data || [];
-      if (isOffered(value, offered, param)) {
+      const stored = offeredValue(value, offered, param);
+      if (stored !== undefined) {
+        const steps = path.split(".");
+        const parent = steps.slice(0, -1).reduce((held: Json, step) => held[step], entry as Json);
+        parent[steps.at(-1)!] = stored;
         continue;
       }
       if (!offered.length && branch) {
         return {
-          saved: false,
           error: `Refused: this server lists no ${path} for ${branch.test}=${quote(branch.value)}.`,
           other_cases: branch.siblings,
           hint:
@@ -581,16 +603,13 @@ async function rejectUnoffered(
         .map((o) => quote(identity(o.value)))
         .join(", ");
       return {
-        saved: false,
-        error: `Refused: ${path} does not exactly match a value this server offers.`,
+        error: `Refused: ${path} names ${quote(identity(value))}, which this server does not offer.`,
         hint:
           `${offered.length} value(s) are offered` +
           (names ? `, including ${names}` : " for this case") +
           ". These were resolved with " +
           (a.dataset_id ? `dataset_id=${quote(a.dataset_id)}` : "no dataset") +
-          "; call get_visualization_options the same way and store the option's " +
-          "complete `value` unchanged, since a value naming the right entry with " +
-          "different or fewer fields is not it.",
+          "; call get_visualization_options the same way and choose one by its id.",
       };
     }
   }
@@ -602,26 +621,16 @@ async function saveVisualization(
   resolveOptions: ResolveOptions,
   a: Json,
 ): Promise<unknown> {
-  const { dataset, refusal } = await resolveVisualization(galaxy, a);
+  const { artifact, refusal, rejected } = await checked(galaxy, resolveOptions, a);
   if (refusal) {
     return { saved: false, ...refusal };
   }
-
-  if (present(a.settings) || present(a.tracks)) {
-    const plugin: Json = (await galaxy.get(`api/plugins/${segment(a.visualization)}`)) || {};
-    const undeclared = rejectUndeclared(plugin, a);
-    if (undeclared) {
-      return fail(JSON.stringify(undeclared));
-    }
-    const unoffered = await rejectUnoffered(resolveOptions(galaxy), plugin, a);
-    if (unoffered) {
-      return fail(JSON.stringify(unoffered));
-    }
+  if (rejected) {
+    return fail(JSON.stringify({ saved: false, ...rejected }));
   }
-
   const name = a.visualization;
-  const title = a.title || `${name} of ${dataset!.name || a.dataset_id}`;
-  const config = visualizationConfig(a);
+  let title = artifact!.title;
+  let config = visualizationConfig(artifact!);
 
   let visualizationId = a.visualization_id;
   if (visualizationId) {
@@ -633,6 +642,16 @@ async function saveVisualization(
           `${quote(name)}. Leave visualization_id out to save a new one.`,
       );
     }
+    // Galaxy replaces a revision's config and title whole, so what Olit does not own -- the
+    // plugin's own keys, such as galaxy-charts' transcripts -- and an unchanged title carry over.
+    const {
+      dataset_id: _d,
+      settings: _s,
+      tracks: _t,
+      ...kept
+    } = (existing.latest_revision?.config as Json | undefined) ?? {};
+    config = { ...kept, ...config };
+    title = a.title || existing.title || title;
     await galaxy.put(`api/visualizations/${segment(visualizationId)}`, { title, config });
   } else {
     const created = await galaxy.post("api/visualizations", { type: name, title, config });
@@ -644,29 +663,16 @@ async function saveVisualization(
       );
     }
   }
-  const params = { visualization: name, visualization_id: visualizationId, ...EMBED };
-  const artifact: Json = {
-    kind: "visualization",
-    title,
-    visualization: name,
-    dataset_id: a.dataset_id,
-    url: `${rootPath(galaxy)}visualizations/display${query(params)}`,
-  };
-  for (const key of ["settings", "tracks"]) {
-    if (present(a[key])) {
-      artifact[key] = a[key];
-    }
-  }
   return {
     saved: true,
     visualization_id: visualizationId,
     title,
-    artifact,
+    artifact: { ...artifact!, title, visualization_id: visualizationId },
     hint:
       "Saved to the user's visualizations and displayed. It is not a history dataset. " +
       "Writing it into the record means putting {{artifact}} where it belongs in the " +
-      "page content; visualization_id above identifies the saved object and renders " +
-      "nothing in a page. Say what it shows and finish.",
+      "page content, which places it with these settings and tracks. Say what it shows " +
+      "and finish.",
   };
 }
 
@@ -696,7 +702,10 @@ async function vegaDataset(galaxy: Galaxy, a: Json): Promise<Json> {
     charted: true,
     title,
     columns: vega.columnNames(details),
-    artifact: { kind: "vega-lite", title, spec: ready },
+    artifact: { kind: "vega-lite", title, spec: ready } satisfies Artifact,
+    hint:
+      "The chart is displayed to the user. Writing it into the record means putting " +
+      "{{artifact}} where it belongs in the page content. Say what it shows and finish.",
   };
   const suspect = vega.unsatisfiableTypes(ready, details);
   if (suspect.length) {
@@ -722,7 +731,7 @@ export function visualizationTools(resolveOptions: ResolveOptions = chartOptions
         "Resolve a visualization parameter's selectable options from wherever the plugin says " +
         "they live. `parameter` is the `path` get_visualization_details publishes. Where a name is " +
         "declared in several cases of a conditional, pass `config` in the shape save_visualization " +
-        "takes, so the test parameter in it says which case. Use `search` to get the value to store.",
+        "takes, so the test parameter in it says which case. Use `search` to find the id to choose.",
       parameters: schema(
         {
           visualization: STR,
@@ -759,20 +768,26 @@ export function visualizationTools(resolveOptions: ResolveOptions = chartOptions
       name: "show_visualization",
       capability: "read",
       description:
-        "Display a dataset with an installed visualization. Renders only; saves nothing. Takes the " +
-        "plugin's defaults -- use save_visualization to bind settings or tracks.",
-      parameters: schema({ dataset_id: STR, visualization: STR, title: STR }, [
-        "dataset_id",
-        "visualization",
-      ]),
-      run: (args, ctx) => showVisualization(ctx.galaxy, args),
+        "Display a dataset with an installed visualization, with the settings and tracks it needs. " +
+        "Renders only; saves nothing. Takes the same config as save_visualization.",
+      parameters: schema(
+        {
+          dataset_id: STR,
+          visualization: STR,
+          title: STR,
+          settings: { type: "object" },
+          tracks: { type: "array", items: { type: "object" } },
+        },
+        ["dataset_id", "visualization"],
+      ),
+      run: (args, ctx) => showVisualization(ctx.galaxy, resolveOptions, args),
     },
     {
       name: "save_visualization",
       capability: "write",
       description:
-        "Save a Galaxy visualization of a dataset, the durable kind the user keeps. Needed to " +
-        "bind settings or tracks, which a displayed visualization cannot carry. Pass " +
+        "Save a Galaxy visualization of a dataset, the durable kind the user keeps. Takes the " +
+        "same config as show_visualization and displays it the same way. Pass " +
         "visualization_id to revise one already saved instead of adding another.",
       parameters: schema(
         {

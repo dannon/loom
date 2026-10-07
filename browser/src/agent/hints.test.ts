@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { Galaxy } from "./galaxy";
-import { catalogMissHint, fetchFailureHint, iwcCandidatesHint } from "./hints";
+import {
+  catalogMissHint,
+  fetchFailureHint,
+  invocationOutcomeHint,
+  iwcCandidatesHint,
+} from "./hints";
 
 const ENA_FAILURE = {
   id: "d1",
@@ -67,7 +72,7 @@ describe("fetchFailureHint", () => {
   });
 });
 
-function plugins(installed: { name: string }[]) {
+function plugins(installed: { name: string; html?: string; tags?: string[] }[]) {
   const asked: string[] = [];
   const galaxy = {
     get: async (path: string) => {
@@ -78,44 +83,51 @@ function plugins(installed: { name: string }[]) {
   return { galaxy, asked };
 }
 
+const VIEWERS = [
+  { name: "ngl", html: "NGL Viewer" },
+  { name: "molstar", html: "Molstar Viewer" },
+  { name: "plotly", html: "Bar, Line and Scatter", tags: ["Plotly", "Chart"] },
+  { name: "olit", html: "AI Research Assistant" },
+];
+
 describe("catalogMissHint", () => {
-  it("answers a visualization name with where it lives", async () => {
-    const { galaxy } = plugins([{ name: "plotly" }, { name: "igv" }]);
-    const hint = await catalogMissHint(galaxy, "search_tools_by_name", { query: "plotly" }, []);
-    expect(hint).toContain("'plotly' is a visualization");
-    expect(hint).toContain("list_visualizations");
+  const search = (galaxy: Galaxy, query: string, found: unknown[] = []) =>
+    catalogMissHint(galaxy, "search_tools_by_name", { query }, found);
+
+  it("redirects an empty search whose words name a visualization", async () => {
+    const { galaxy } = plugins(VIEWERS);
+    for (const query of ["structure viewer", "ngl", "chart"]) {
+      const hint = await search(galaxy, query);
+      expect(hint, query).toContain(`No Galaxy tool matched '${query}'`);
+      expect(hint, query).toContain("list_visualizations");
+    }
   });
 
-  it("names neither this agent nor the frozen plugin", async () => {
-    const { galaxy } = plugins([{ name: "olit" }]);
-    expect(
-      await catalogMissHint(galaxy, "search_tools_by_name", { query: "olit" }, []),
-    ).toBeUndefined();
-  });
-
-  it("never asks about plugins when the search matched a real tool", async () => {
-    const { galaxy, asked } = plugins([{ name: "plotly" }]);
-    expect(
-      await catalogMissHint(galaxy, "search_tools_by_name", { query: "bowtie2" }, [
-        { id: "bowtie2" },
-      ]),
-    ).toBeUndefined();
+  it("never asks about plugins when the search found tools", async () => {
+    const { galaxy, asked } = plugins(VIEWERS);
+    expect(await search(galaxy, "heatmap viewer", [{ id: "heatmap2" }])).toBeUndefined();
     expect(asked).toEqual([]);
   });
 
+  it("says nothing when no visualization is named, nor for this agent", async () => {
+    const { galaxy } = plugins(VIEWERS);
+    expect(await search(galaxy, "bowtie2")).toBeUndefined();
+    expect(await search(galaxy, "research assistant")).toBeUndefined();
+  });
+
   it("reads a keyword search the same way", async () => {
-    const { galaxy } = plugins([{ name: "plotly" }]);
+    const { galaxy } = plugins(VIEWERS);
     const hint = await catalogMissHint(
       galaxy,
       "search_tools_by_keywords",
       { keywords: ["plotly"] },
       [],
     );
-    expect(hint).toContain("'plotly' is a visualization");
+    expect(hint).toContain("No Galaxy tool matched 'plotly'");
   });
 
   it("gives a tool that is not a catalog search no hint", async () => {
-    const { galaxy, asked } = plugins([{ name: "plotly" }]);
+    const { galaxy, asked } = plugins(VIEWERS);
     expect(await catalogMissHint(galaxy, "get_histories", { query: "plotly" }, [])).toBeUndefined();
     expect(asked).toEqual([]);
   });
@@ -128,5 +140,70 @@ describe("iwcCandidatesHint", () => {
       iwcCandidatesHint("recommend_iwc_workflows"),
     );
     expect(iwcCandidatesHint("get_iwc_workflow_details")).toBeUndefined();
+  });
+});
+
+describe("invocationOutcomeHint", () => {
+  /** Galaxy answering jobs_summary from `summaries`, by invocation id. */
+  function jobs(summaries: Record<string, Record<string, number>>) {
+    const asked: string[] = [];
+    const galaxy = {
+      get: async (path: string) => {
+        asked.push(path);
+        const id = path.match(/^api\/invocations\/([^/]+)\/jobs_summary$/)?.[1];
+        return id && summaries[id] ? { states: summaries[id] } : {};
+      },
+    } as unknown as Galaxy;
+    return { galaxy, asked };
+  }
+
+  it("names a listed invocation whose jobs failed while Galaxy reads it as scheduled", async () => {
+    const { galaxy } = jobs({ i1: { error: 1, ok: 2 }, i2: { ok: 3 } });
+    const hint = await invocationOutcomeHint(galaxy, "get_invocations", [
+      { id: "i1", state: "scheduled" },
+      { id: "i2", state: "completed" },
+    ]);
+    expect(hint).toContain('Invocation i1: outcome "failed"');
+    expect(hint).toContain("get_job_details");
+    expect(hint).not.toContain("i2");
+  });
+
+  it("says nothing of a listing whose jobs agree with Galaxy", async () => {
+    const { galaxy } = jobs({ i2: { ok: 3 } });
+    expect(
+      await invocationOutcomeHint(galaxy, "get_invocations", [{ id: "i2", state: "completed" }]),
+    ).toBeUndefined();
+  });
+
+  it("rolls up no more of a listing than galaxy-ops' page, and says which it left unchecked", async () => {
+    const summaries = Object.fromEntries(
+      Array.from({ length: 20 }, (_, i) => [`i${i}`, { ok: 1 }]),
+    );
+    const { galaxy, asked } = jobs(summaries);
+    const listed = Array.from({ length: 25 }, (_, i) => ({ id: `i${i}`, state: "completed" }));
+    const hint = await invocationOutcomeHint(galaxy, "get_invocations", listed);
+    expect(asked).toHaveLength(20);
+    expect(hint).toContain("the 5 listed after the first 20");
+  });
+
+  it("says which invocations' jobs could not be read", async () => {
+    const { galaxy } = jobs({ i2: { ok: 1 } });
+    const hint = await invocationOutcomeHint(galaxy, "get_invocations", [
+      { id: "i1", state: "scheduled" },
+      { id: "i2", state: "completed" },
+    ]);
+    expect(hint).toContain("i1 (their jobs could not be read)");
+  });
+
+  it("adds the note to an invocation read by id, whose outcome galaxy-ops gives", async () => {
+    const { galaxy, asked } = jobs({});
+    const one = { id: "i1", state: "scheduled", outcome: "failing" };
+    expect(await invocationOutcomeHint(galaxy, "get_invocations", one)).toContain("not over");
+    expect(asked).toEqual([]);
+  });
+
+  it("leaves other tools alone", async () => {
+    const { galaxy } = jobs({});
+    expect(await invocationOutcomeHint(galaxy, "get_histories", [{ id: "h1" }])).toBeUndefined();
   });
 });

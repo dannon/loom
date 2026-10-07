@@ -306,11 +306,57 @@ export function same(a: unknown, b: unknown): boolean {
   return false;
 }
 
-/** Whether a value is one the input offers, compared whole, or its default. */
-export function isOffered(value: unknown, options: Json[] | undefined, param: Json): boolean {
-  if ((options || []).some((option) => same(value, option.value))) {
-    return true;
+/** What names an option: an object's id, or the value itself when it is a scalar. */
+export const identity = (value: unknown) => (isObject(value) ? value.id : value);
+
+/**
+ * The value stored for `value`: the offered entry it names, as galaxy-charts' select picks an
+ * entry by id and writes the whole of it, or the input's default. Undefined when neither.
+ */
+export function offeredValue(value: unknown, options: Json[] | undefined, param: Json): unknown {
+  const id = identity(value);
+  const named = id == null ? undefined : (options || []).find((o) => same(identity(o.value), id));
+  if (named) {
+    return named.value;
   }
   const fallback = resolvedDefault(param);
-  return fallback !== null && same(value, fallback);
+  return fallback !== null && same(value, fallback) ? fallback : undefined;
+}
+
+/**
+ * What a config leaves the viewer to choose: inputs still unset once galaxy-charts' defaults
+ * apply, whose options only the server can offer, such as a dataset's columns. An input the
+ * plugin declares optional may stay unset, as galaxy-charts' form lets it.
+ */
+export function unresolved(plugin: Json, config: Json, types: Types): string[] {
+  const missing: string[] = [];
+  const walk = (declared: unknown, values: Json, path: string) => {
+    for (const param of (declared as unknown[]) || []) {
+      if (!isObject(param) || !param.name || String(param.optional).toLowerCase() === "true") {
+        continue;
+      }
+      const value = values[param.name];
+      if (param.type === "conditional") {
+        const inner = isObject(value) ? value : {};
+        walk(caseFor(param, inner)?.inputs, inner, `${path}${param.name}.`);
+      } else if (value == null && (types[param.type]?.options?.kind ?? "declared") !== "declared") {
+        missing.push(path + param.name);
+      }
+    }
+  };
+  const settings = isObject(config.settings) ? config.settings : {};
+  walk(plugin.settings, parseValues(plugin.settings, settings), "settings.");
+  if (Array.isArray(plugin.tracks) && plugin.tracks.length) {
+    // galaxy-charts gives a plugin with tracks one empty track when a config holds none.
+    const tracks: unknown[] =
+      Array.isArray(config.tracks) && config.tracks.length ? config.tracks : [{}];
+    tracks.forEach((track, i) =>
+      walk(
+        plugin.tracks,
+        parseValues(plugin.tracks, isObject(track) ? track : {}),
+        `tracks[${i}].`,
+      ),
+    );
+  }
+  return missing;
 }

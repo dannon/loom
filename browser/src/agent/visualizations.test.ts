@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { Watch } from "./watch";
 
-import { render } from "./artifacts";
+import { toPage, type Artifact } from "../artifacts/kinds";
 import type { Galaxy } from "./galaxy";
-import { asAgentTool, type Context, Outcome } from "./tool";
+import { claim, type Context, Outcome, rendered } from "./tool";
 import {
   chartOptions,
   checkLevel,
@@ -49,7 +48,7 @@ const context = (galaxy: unknown) =>
     galaxy: galaxy as Galaxy,
     artifacts: { prior: [], produced: [] },
     binding: {},
-    watch: new Watch(async () => undefined),
+    watch: { add: () => undefined },
   }) as unknown as Context;
 
 function call(name: string, galaxy: unknown, args: Json, charts = fakeCharts()): Promise<any> {
@@ -227,7 +226,7 @@ describe("get_visualization_details", () => {
       kind: "history_dataset",
       extension: "bam,bed",
       resolve: "get_visualization_options",
-      pass_through: "the resolved option's `value`, unchanged",
+      chosen_by: "an option's id, as get_visualization_options lists it",
     });
   });
 
@@ -245,7 +244,7 @@ describe("get_visualization_details", () => {
       kind: "data_json",
       url: "https://x/g.json",
       resolve: "get_visualization_options",
-      pass_through: "the resolved option's `value`, unchanged",
+      chosen_by: "an option's id, as get_visualization_options lists it",
     });
   });
 
@@ -461,9 +460,9 @@ describe("get_visualization_options", () => {
     );
   });
 
-  it("carries the value to store with every listed option", async () => {
+  it("lists each option by the id that chooses it, without its entry", async () => {
     const out = await options({ parameter: "settings.source.genome", config: builtin });
-    expect(out.options[0].value).toEqual(HG19.value);
+    expect(out.options[0]).toEqual({ id: "hg19", name: HG19.label });
   });
 
   it("lists the scalar itself as the value of a select over scalars", async () => {
@@ -471,21 +470,19 @@ describe("get_visualization_options", () => {
       { parameter: "tracks.displayMode" },
       fakeCharts([{ label: "Expanded", value: "EXPANDED" }]),
     );
-    expect(out.options[0]).toEqual({ id: "EXPANDED", name: "Expanded", value: "EXPANDED" });
+    expect(out.options[0]).toEqual({ id: "EXPANDED", name: "Expanded" });
     expect(out.source).toBe("declared");
     expect(out.total).toBe(1);
   });
 
-  it("carries a matched option's value whole", async () => {
+  it("answers a search with its matches alone", async () => {
     const out = await options({
       parameter: "settings.source.genome",
       config: builtin,
       search: "hg19",
     });
-    const match = out.matches[0];
-    expect(match.id).toBe("hg19");
-    expect(match.value.table).toBe("fasta_indexes");
-    expect(match.value.row).toEqual(["hg19", "Human hg19"]);
+    expect(out.matches).toEqual([{ id: "hg19", name: HG19.label }]);
+    expect(out).not.toHaveProperty("options");
   });
 
   it("asks the resolver for the declared input it found", async () => {
@@ -679,7 +676,7 @@ describe("get_visualization_options", () => {
     expect(out).toContain("no route to host");
   });
 
-  it("says how to get the value to store when browsing", async () => {
+  it("says how to narrow the list when browsing", async () => {
     const out = await options({ parameter: "settings.source.genome", config: builtin });
     expect(out.hint).toContain("search");
   });
@@ -797,26 +794,31 @@ describe("show_visualization and save_visualization", () => {
   function server(compatible = ["atlas"], plugins: Record<string, Json> = {}) {
     return fakeGalaxy((path) => {
       if (path.startsWith("api/datasets/")) return { extension: "tabular", name: "sample.tabular" };
-      if (path === "api/visualizations/v9") return { id: "v9", type: "atlas" };
+      if (path === "api/visualizations/v9")
+        return {
+          id: "v9",
+          type: "atlas",
+          title: "Atlas of samples",
+          latest_revision: {
+            config: { dataset_id: "d1", settings: { old: 1 }, transcripts: [{ role: "user" }] },
+          },
+        };
       if (path === "api/visualizations/s1") return { id: "s1", type: "olit" };
       const declared = path.match(/^api\/plugins\/(.+)$/);
       if (declared) return plugins[declared[1]] ?? [];
       if (path.startsWith("api/plugins?")) return compatible.map((n) => ({ name: n }));
       if (path === "api/plugins")
-        return compatible.some((n) => n === "igv") ? [{ name: "igv" }] : INSTALLED;
+        return [...INSTALLED, ...compatible.filter((n) => n !== "atlas").map((n) => ({ name: n }))];
       return [];
     });
   }
 
   type Server = ReturnType<typeof server>;
 
-  const show = (g: Server, args: Json) =>
-    call("show_visualization", g, { dataset_id: "d1", ...args });
+  const show = (g: Server, args: Json, charts = fakeCharts()) =>
+    call("show_visualization", g, { dataset_id: "d1", ...args }, charts);
   const save = (g: Server, args: Json, charts = fakeCharts()) =>
     call("save_visualization", g, { dataset_id: "d1", ...args }, charts);
-
-  const queryOf = (result: Json) =>
-    Object.fromEntries(new URL(result.artifact.url, "http://x").searchParams);
 
   it("puts nothing in galaxy when showing", async () => {
     const g = server();
@@ -824,19 +826,64 @@ describe("show_visualization and save_visualization", () => {
     expect(g.posted).toBeUndefined();
   });
 
-  it("names the plugin in the shown address and asks for a bare page", async () => {
-    const q = queryOf(await show(server(), { visualization: "atlas" }));
-    expect(q.visualization).toBe("atlas");
-    expect(q.dataset_id).toBe("d1");
-    expect(q).not.toHaveProperty("visualization_id");
-    expect(q.hide_panels).toBe("true");
-    expect(q.hide_masthead).toBe("true");
+  const PLOTLY = {
+    name: "plotly",
+    tracks: [
+      { name: "x", type: "data_column", is_auto: "true" },
+      { name: "y", type: "data_column", is_number: "true" },
+    ],
+  };
+  const plotly = () => server(["plotly"], { plotly: PLOTLY });
+  const columns = () =>
+    fakeCharts([
+      { label: "Column: 1", value: "0" },
+      { label: "Column: 2", value: "1" },
+    ]);
+  const both = [
+    [show, "shown"],
+    [save, "saved"],
+  ] as const;
+
+  it("shows and saves the same config, saving only adding where it is kept", async () => {
+    const config = { visualization: "plotly", title: "Hydrophobicity", tracks: [{ y: "1" }] };
+    const shown = await show(plotly(), config, columns());
+    const g = plotly();
+    const saved = await save(g, config, columns());
+    expect(shown.artifact).toEqual({
+      kind: "visualization",
+      title: "Hydrophobicity",
+      visualization: "plotly",
+      dataset_id: "d1",
+      tracks: [{ y: "1" }],
+    });
+    expect(saved.artifact).toEqual({ ...shown.artifact, visualization_id: "v1" });
+    expect(g.posted![1].config).toEqual({ dataset_id: "d1", tracks: [{ y: "1" }] });
   });
 
-  it("names the plugin beside the id in the saved address", async () => {
-    const q = queryOf(await save(server(), { visualization: "atlas" }));
-    expect(q.visualization).toBe("atlas");
-    expect(q.visualization_id).toBe("v1");
+  it("refuses either way a config that leaves the viewer to pick a column", async () => {
+    for (const [run, key] of both) {
+      for (const args of [{}, { tracks: [{ x: "0" }] }, { tracks: [{ y: "1" }, {}] }]) {
+        const g = plotly();
+        const out = refused(await run(g, { visualization: "plotly", ...args }, columns()));
+        expect(out[key]).toBe(false);
+        expect(out.error).toMatch(/needs tracks\[\d\]\.y/);
+        expect(out.hint).toContain("get_visualization_options");
+        expect(g.posted).toBeUndefined();
+      }
+    }
+  });
+
+  it("validates a shown config as a saved one is", async () => {
+    const out = refused(
+      await show(igv(), { visualization: "igv", tracks: [{ dataset_id: "d1" }] }),
+    );
+    expect(out.shown).toBe(false);
+    expect(out.declared).toContain("urlDataset");
+    const unoffered = refused(
+      await show(plotly(), { visualization: "plotly", tracks: [{ y: "9" }] }, columns()),
+    );
+    expect(unoffered.shown).toBe(false);
+    expect(unoffered.error).toContain("which this server does not offer");
   });
 
   it("refuses a visualization the server does not have either way", async () => {
@@ -907,9 +954,24 @@ describe("show_visualization and save_visualization", () => {
     expect(path).toBe("api/visualizations/v9");
     expect(body.config.settings).toEqual({ x_axis_label: "Time" });
     expect(out.visualization_id).toBe("v9");
-    const q = queryOf(out);
-    expect(q.visualization).toBe("atlas");
-    expect(q.visualization_id).toBe("v9");
+    expect(out.artifact).toMatchObject({ visualization: "atlas", visualization_id: "v9" });
+  });
+
+  it("keeps what the plugin stored and the title when revising, replacing only settings and tracks", async () => {
+    const g = server();
+    const out = await save(g, {
+      visualization: "atlas",
+      visualization_id: "v9",
+      settings: { x_axis_label: "Time" },
+    });
+    const [, body] = g.putTo!;
+    expect(body.config).toEqual({
+      dataset_id: "d1",
+      settings: { x_axis_label: "Time" },
+      transcripts: [{ role: "user" }],
+    });
+    expect(body.title).toBe("Atlas of samples");
+    expect(out.artifact.title).toBe("Atlas of samples");
   });
 
   it("refuses to overwrite a visualization of another type, such as a saved Olit session", async () => {
@@ -925,10 +987,9 @@ describe("show_visualization and save_visualization", () => {
     expect(out.error).toContain("not an installed visualization");
   });
 
-  it("addresses the display under Galaxy's own root path", async () => {
-    const g = Object.assign(server(), { root: "https://host.test/galaxy/" });
-    const out = await save(g, { visualization: "atlas" });
-    expect(out.artifact.url).toMatch(/^\/galaxy\/visualizations\/display\?/);
+  it("hands back a config, leaving the address to whoever renders it", async () => {
+    const out = await save(server(), { visualization: "atlas" });
+    expect(out.artifact).not.toHaveProperty("url");
   });
 
   it("refuses when galaxy returns no id for a new visualization", async () => {
@@ -989,7 +1050,7 @@ describe("show_visualization and save_visualization", () => {
     const out = refused(await save(g, { visualization: "igv", settings: { genome: "hg38" } }));
     expect(out.saved).toBe(false);
     expect(g.posted).toBeUndefined();
-    expect(out.error).toContain("whole entry");
+    expect(out.error).toContain('takes an entry, {"id": ...}');
     expect(out.expected.required).toEqual(["id"]);
     expect(out.hint).toContain("get_visualization_options");
   });
@@ -1008,7 +1069,6 @@ describe("show_visualization and save_visualization", () => {
         ],
       },
     ],
-    tracks: [{ name: "urlDataset", type: "data" }],
   };
 
   it("refuses a conditional's parameters flattened beside it", async () => {
@@ -1063,13 +1123,29 @@ describe("show_visualization and save_visualization", () => {
     expect(out.error).toContain('"builtin"');
   });
 
-  it("hands back an artifact that embeds the plugin and dataset from both tools", async () => {
+  it("hands back the config a page embeds, from both tools", async () => {
     const g = server();
-    const expected = "```galaxy\nvisualization(visualization_id=atlas, history_dataset_id=d1)\n```";
-    expect(render((await show(g, { visualization: "atlas" })).artifact)).toBe(expected);
+    const shown = (await show(g, { visualization: "atlas" })).artifact as Artifact;
+    expect(shown).toEqual({
+      kind: "visualization",
+      title: shown.title,
+      visualization: "atlas",
+      dataset_id: "d1",
+    });
     const saved = await save(g, { visualization: "atlas" });
-    expect(render(saved.artifact)).toBe(expected);
-    expect(render(saved.artifact)).not.toContain(saved.visualization_id);
+    expect(saved.artifact).toMatchObject({
+      visualization: "atlas",
+      dataset_id: "d1",
+      visualization_id: saved.visualization_id,
+    });
+    const page = JSON.parse(
+      toPage(saved.artifact)!.slice("```visualization\n".length, -"\n```".length),
+    );
+    expect(page).toEqual({
+      visualization_name: "atlas",
+      visualization_title: saved.title,
+      dataset_id: "d1",
+    });
   });
 
   it("refuses the entry a scalar parameter was chosen from", async () => {
@@ -1086,7 +1162,7 @@ describe("show_visualization and save_visualization", () => {
     expect(out.saved).toBe(false);
     expect(g.posted).toBeUndefined();
     expect(out.error).toContain("stores string");
-    expect(out.error).toContain("not the entry");
+    expect(out.error).toContain("not an entry");
 
     const column = refused(
       await save(g, { visualization: "igv", tracks: [{ x: { column: "col2", src: "hda" } }] }),
@@ -1172,28 +1248,47 @@ describe("show_visualization and save_visualization", () => {
     expect(g.posted![1].config.settings.source.genome).toEqual(OFFERED_MM10);
   });
 
-  it("refuses a genome written from memory", async () => {
+  it("stores the offered entry for a genome written from memory, as the form would", async () => {
+    const g = igv(CONDITIONAL);
+    const out = await igvGenome(
+      g,
+      fakeCharts([{ label: "mm10", value: OFFERED_MM10 }]),
+      INVENTED_MM10,
+    );
+    expect(out.saved).toBe(true);
+    expect(g.posted![1].config.settings.source.genome).toEqual(OFFERED_MM10);
+  });
+
+  it("stores the whole entry an id alone chooses", async () => {
+    const g = igv(CONDITIONAL);
+    const out = await igvGenome(g, fakeCharts([{ label: "mm10", value: OFFERED_MM10 }]), {
+      id: "mm10",
+    });
+    expect(out.saved).toBe(true);
+    expect(g.posted![1].config.settings.source.genome).toEqual(OFFERED_MM10);
+  });
+
+  it("shows the whole entry an id alone chooses", async () => {
+    const out = await show(
+      igv(CONDITIONAL),
+      { visualization: "igv", settings: { source: { origin: "igv", genome: { id: "mm10" } } } },
+      fakeCharts([{ label: "mm10", value: OFFERED_MM10 }]),
+    );
+    expect(out.shown).toBe(true);
+    expect(out.artifact.settings.source.genome).toEqual(OFFERED_MM10);
+  });
+
+  it("refuses a genome the server does not offer, naming it", async () => {
     const g = igv(CONDITIONAL);
     const out = refused(
-      await igvGenome(g, fakeCharts([{ label: "mm10", value: OFFERED_MM10 }]), INVENTED_MM10),
+      await igvGenome(g, fakeCharts([{ label: "mm10", value: OFFERED_MM10 }]), { id: "mm99" }),
     );
     expect(out.saved).toBe(false);
     expect(g.posted).toBeUndefined();
-    expect(out.error).toContain("source.genome");
-    expect(out.hint).toContain("get_visualization_options");
-  });
-
-  it("refuses a value naming the right entry with fewer fields and says so", async () => {
-    const partial = { id: OFFERED_MM10.id, name: OFFERED_MM10.name };
-    const out = refused(
-      await igvGenome(
-        igv(CONDITIONAL),
-        fakeCharts([{ label: "mm10", value: OFFERED_MM10 }]),
-        partial,
-      ),
+    expect(out.error).toBe(
+      'Refused: source.genome names "mm99", which this server does not offer.',
     );
-    expect(out.error).toContain("does not exactly match");
-    expect(out.hint).toContain("complete `value` unchanged");
+    expect(out.hint).toContain("get_visualization_options");
   });
 
   it("names the cases that might hold a value when this one offers nothing", async () => {
@@ -1291,7 +1386,7 @@ describe("show_visualization and save_visualization", () => {
       await call(
         "save_visualization",
         g,
-        { dataset_id: "d1", visualization: "igv", tracks: [{ urlDataset: { id: "d1" } }] },
+        { dataset_id: "d1", visualization: "igv", tracks: [{ urlDataset: { id: "d2" } }] },
         Object.assign(charts, { asked: [] }),
       ),
     );
@@ -1314,8 +1409,7 @@ describe("artifact claim", () => {
   async function dispatch(name: string, args: Json) {
     const ctx = context(galaxy);
     const tool = visualizationTools(fakeCharts()).find((t) => t.name === name)!;
-    const result = await asAgentTool(tool, () => ctx).execute("1", args);
-    const text = (result.content[0] as { text: string }).text;
+    const text = rendered({ data: claim(await tool.run(args, ctx), ctx) });
     return { produced: ctx.artifacts.produced, data: JSON.parse(text).data };
   }
 
@@ -1326,7 +1420,7 @@ describe("artifact claim", () => {
     });
     expect(produced).toHaveLength(1);
     expect(produced[0].kind).toBe("visualization");
-    expect(produced[0].url).toContain("visualization=ngl");
+    expect(produced[0]).toMatchObject({ visualization: "ngl", dataset_id: DATASET });
     expect(data.artifact).toEqual({ kind: "visualization", title: data.title });
   });
 
@@ -1392,6 +1486,12 @@ describe("vega_dataset", () => {
     });
     expect(out.charted).toBe(true);
     expect(out.note).toContain('Galaxy types "col:1" as text');
+  });
+
+  it("says how a chart goes into the record", async () => {
+    const out = await chart({ mark: "point", encoding: { x: { field: "col:2" } } });
+    expect(out.charted).toBe(true);
+    expect(out.hint).toContain("{{artifact}}");
   });
 
   it("refuses a dataset galaxy cannot read", async () => {

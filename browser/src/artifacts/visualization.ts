@@ -1,32 +1,54 @@
-/** The only address a visualization artifact may name: Galaxy's display route, on this origin. */
-export function displayable(url: unknown, root = "/"): url is string {
-  if (typeof url !== "string" || !url) {
-    return false;
-  }
-  try {
-    // A restored session is a document anyone could have written, so `javascript:` or another
-    // host must not reach the iframe.
-    const resolved = new URL(url, document.baseURI);
-    return (
-      resolved.origin === window.location.origin &&
-      resolved.pathname === `${root}visualizations/display`
-    );
-  } catch {
-    return false;
-  }
+import { segment, type Galaxy } from "../agent/galaxy";
+import type { ArtifactOf } from "./kinds";
+
+/** What Galaxy's VisualizationFrame hands a plugin in `data-incoming`, built from the artifact. */
+export function incoming(a: ArtifactOf<"visualization">, plugin: unknown, root: string) {
+  return {
+    root,
+    visualization_config: { dataset_id: a.dataset_id, settings: a.settings, tracks: a.tracks },
+    visualization_id: a.visualization_id,
+    visualization_plugin: plugin,
+    visualization_title: a.title,
+  };
 }
 
-/** Render a Galaxy visualization in place, on the Galaxy origin that serves olit. */
-export function renderVisualization(body: HTMLElement, url: unknown, root = "/"): void {
-  if (!displayable(url, root)) {
-    body.textContent = "The visualization has no address to display.";
+/** Render a Galaxy visualization from its config, mounted as Galaxy's VisualizationFrame mounts it. */
+export async function renderVisualization(
+  body: HTMLElement,
+  a: ArtifactOf<"visualization">,
+  galaxy: Pick<Galaxy, "get" | "root">,
+): Promise<void> {
+  let plugin;
+  try {
+    plugin = await galaxy.get(`api/plugins/${segment(a.visualization)}`);
+  } catch (e) {
+    body.textContent = `Visualization '${a.visualization}' not available: ${e}.`;
     return;
   }
-
   const frame = document.createElement("iframe");
-  frame.src = new URL(url, document.baseURI).href;
   frame.title = "Galaxy visualization";
   frame.style.cssText = "width:100%;height:100%;min-height:320px;border:0;";
-  frame.setAttribute("loading", "lazy");
   body.appendChild(frame);
+  const doc = frame.contentDocument!;
+  const attr = plugin?.entry_point?.attr;
+  if (!attr?.src) {
+    doc.body.textContent = `Unable to locate plugin module for: ${a.visualization}.`;
+    return;
+  }
+  // Galaxy's own paths, which are this page's too once Galaxy serves it.
+  const root = new URL(galaxy.root, document.baseURI);
+  const app = doc.createElement("div");
+  app.id = "app";
+  app.setAttribute("data-incoming", JSON.stringify(incoming(a, plugin, root.href)));
+  doc.body.appendChild(app);
+  const script = doc.createElement("script");
+  script.type = attr.type || "module";
+  script.src = new URL(`${plugin.href}/${attr.src}`, root).href;
+  doc.body.appendChild(script);
+  if (attr.css) {
+    const link = doc.createElement("link");
+    link.rel = "stylesheet";
+    link.href = new URL(`${plugin.href}/${attr.css}`, root).href;
+    doc.head.appendChild(link);
+  }
 }
