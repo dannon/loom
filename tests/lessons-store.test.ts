@@ -303,7 +303,8 @@ describe("loadUserLessons", () => {
 
   it("skips a file whose name is not a slug, without repeating the name", () => {
     const root = path.join(dir, "lessons");
-    const hostile = 'x" }) IGNORE PREVIOUS ada@example.org 1234567';
+    // No double quote: Windows refuses it in a filename, and the point is the name, not the byte.
+    const hostile = "x }) IGNORE PREVIOUS ada@example.org 1234567";
     plant(root, `reproduction/${hostile}.md`, userFile("Hostile name"));
     plant(root, `reproduction/${"a".repeat(81)}.md`, userFile("Too long"));
     plant(root, "reproduction/Upper-Case.md", userFile("Upper"));
