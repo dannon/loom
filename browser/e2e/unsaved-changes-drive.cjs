@@ -13,7 +13,7 @@ function check(name, ok, detail) {
 }
 
 (async () => {
-    const { embedVisualization, galaxyMessages } = await import("../../../playwright.shared.mjs");
+    const { embedVisualization, galaxyMessages } = await import("./embed.mjs");
     const browser = await chromium.launch();
     const page = await browser.newPage({ viewport: { width: 1100, height: 700 } });
 
