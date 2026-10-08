@@ -43,7 +43,7 @@ import { registerSandbox } from "./sandbox";
 import { isLocalExecDisabled } from "./local-exec";
 import { registerSecretRedaction } from "./secret-redaction";
 import { registerLessonHint } from "./lesson-hint";
-import { withoutLessonHints } from "../../shared/lesson-hint-marker.js";
+import { withoutAppendedLessonHints } from "./lessons/pi-event-contract";
 import { registerLessonsSearchTool } from "./lessons/search-tool";
 import { isLessonReplayEnabled, registerLessonReplay } from "./lessons/replay";
 import { registerObservationTriggers } from "./observation-triggers";
@@ -545,9 +545,10 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
     try {
       const name = galaxyCall(event.toolName, event.input)?.name;
       const failed = event.isError || Boolean((event.details as { error?: unknown })?.error);
-      // Without any lesson hint: lesson prose is not the tool's error text.
+      // Without Loom's own hint: lesson prose is not the tool's error text, but
+      // a tool that happens to open a block with the marker still is.
       const resultText = failed
-        ? withoutLessonHints(event.content)
+        ? withoutAppendedLessonHints(event.content)
             .filter((c) => c.type === "text")
             .map((c) => c.text)
             .join("\n")
