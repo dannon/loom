@@ -383,6 +383,11 @@ export function loadLessonStore(
 }
 
 let cached: LessonStore | null = null;
+const EMPTY_STORE: LessonStore = Object.freeze({
+  lessons: [],
+  warnings: [],
+  conflicts: [],
+}) as LessonStore;
 
 /**
  * The session-level corpus. Loaded once: a lesson edited mid-session takes
@@ -390,11 +395,11 @@ let cached: LessonStore | null = null;
  * surface in a turn agrees about what the corpus is.
  */
 export function getLessonStore(): LessonStore {
+  // The switch is read every time, ahead of the cache: a config edit or an
+  // env flip to off mid-session must silence every surface at once, not on
+  // the next restart.
+  if (!isLessonsEnabled()) return EMPTY_STORE;
   if (cached) return cached;
-  if (!isLessonsEnabled()) {
-    cached = { lessons: [], warnings: [], conflicts: [] };
-    return cached;
-  }
   const suppress = suppressedIds();
   cached = loadLessonStore({ suppress });
   syncSuppressedFlags(suppress);

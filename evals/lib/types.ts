@@ -191,7 +191,8 @@ export interface Scenario {
    * Written to `<fake HOME>/.loom/config.json` before the run. The runner
    * points HOME at a throwaway dir, so this is the only way a scenario can
    * set a config key -- `lessons.enabled`, `observations.mode` -- that no env
-   * value is allowed to turn on.
+   * value is allowed to turn on. `observations.mode: "auto"` and
+   * `autoAcknowledgedAt` are refused: a scenario must never be able to send.
    */
   config?: Record<string, unknown>;
   /**

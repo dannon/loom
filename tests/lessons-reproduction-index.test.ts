@@ -23,7 +23,7 @@ beforeAll(() => {
   process.env.LOOM_LESSONS = "on";
 });
 afterAll(() => {
-  if (prevLessonsSwitch === undefined) process.env.LOOM_LESSONS = "on";
+  if (prevLessonsSwitch === undefined) delete process.env.LOOM_LESSONS;
   else process.env.LOOM_LESSONS = prevLessonsSwitch;
 });
 

@@ -52,6 +52,7 @@ export async function runScenario(
       writePiModelsConfig(model, tmpAgentDir);
     }
     if (scenario.config) {
+      assertScenarioConfigIsSafe(scenario.config);
       const loomDir = path.join(tmpRoot, ".loom");
       fs.mkdirSync(loomDir, { recursive: true });
       fs.writeFileSync(path.join(loomDir, "config.json"), JSON.stringify(scenario.config, null, 2));
@@ -185,6 +186,23 @@ interface SpawnResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+}
+
+/**
+ * A scenario may turn lessons on and pick a reporting mode, but never `auto`
+ * and never the acknowledgement that makes `auto` live: automatic delivery
+ * needs no UI, and a scenario file must not be able to send anything.
+ */
+export function assertScenarioConfigIsSafe(config: Record<string, unknown>): void {
+  const observations = config.observations;
+  if (observations && typeof observations === "object") {
+    const block = observations as { mode?: unknown; autoAcknowledgedAt?: unknown };
+    if (block.mode === "auto" || block.autoAcknowledgedAt !== undefined) {
+      throw new Error(
+        'scenario config: observations.mode "auto" and autoAcknowledgedAt are not allowed -- a scenario must never be able to send',
+      );
+    }
+  }
 }
 
 function spawnLoom(

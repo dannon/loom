@@ -24,6 +24,8 @@ export interface LessonsSwitch {
   enabled: boolean;
   /** Where the answer came from, for the status line. */
   source: "env" | "config" | "default";
+  /** The env var that decided it, when `source` is "env" -- for messages. */
+  via?: string;
 }
 
 function envValue(name: string, env: NodeJS.ProcessEnv): string | undefined {
@@ -31,17 +33,22 @@ function envValue(name: string, env: NodeJS.ProcessEnv): string | undefined {
   return typeof value === "string" ? value.trim().toLowerCase() : undefined;
 }
 
+function envNameWith(value: string, env: NodeJS.ProcessEnv): string | undefined {
+  return envNames("LESSONS").find((n) => envValue(n, env) === value);
+}
+
 export function describeLessonsSwitch(env: NodeJS.ProcessEnv = process.env): LessonsSwitch {
-  const names = envNames("LESSONS");
   // Every spelling is checked for "off" first, so an ambient ORBIT_LESSONS=on
   // can't mask a LOOM_LESSONS=off a deployment put there on purpose.
-  if (names.some((n) => envValue(n, env) === "off")) return { enabled: false, source: "env" };
+  const off = envNameWith("off", env);
+  if (off) return { enabled: false, source: "env", via: off };
   const cfg = loadConfig() as { lessons?: { enabled?: unknown } };
   const configured = cfg.lessons?.enabled;
   if (configured === true || configured === false) {
     return { enabled: configured, source: "config" };
   }
-  if (names.some((n) => envValue(n, env) === "on")) return { enabled: true, source: "env" };
+  const on = envNameWith("on", env);
+  if (on) return { enabled: true, source: "env", via: on };
   return { enabled: false, source: "default" };
 }
 
@@ -52,36 +59,52 @@ export function isLessonsEnabled(): boolean {
 
 /** True when the env has the last word, so the config can't change anything. */
 export function isLessonsHardDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return envNames("LESSONS").some((n) => envValue(n, env) === "off");
+  return envNameWith("off", env) !== undefined;
 }
 
 /** The one line every refusing surface points at. */
 export const LESSONS_OFF_POINTER = "Lessons are off on this install. /lessons on turns them on.";
 
 /**
- * Write `lessons.enabled`, and nothing else. Fail-closed like the other
- * config writers: loadConfig() returns {} for a file it can't parse, and
- * saving that back would wipe the user's API keys.
+ * Write `lessons.enabled`. Fail-closed like the other config writers:
+ * loadConfig() returns {} for a file it can't parse (or one that isn't an
+ * object), and saving that back would wipe the user's API keys.
+ *
+ * Turning the loop on also sets `observations.mode` back to `off` when the
+ * file holds anything else: a mode left behind from before the switch went
+ * off, or hand-edited in, must not start reporting the moment lessons come
+ * back. The user picks a mode again; the one-time auto acknowledgement is
+ * kept, since it only records that the sample payload was seen.
  */
 export function setLessonsEnabled(enabled: boolean): void {
-  if (isLessonsHardDisabled()) {
+  const off = envNameWith("off", process.env);
+  if (off) {
     throw new Error(
-      "Lessons are hard-disabled for this install (LOOM_LESSONS=off), so the switch can't be changed here.",
+      `Lessons are hard-disabled for this install (${off}=off), so the switch can't be changed here.`,
     );
   }
   const configPath = getConfigPath();
   if (fs.existsSync(configPath)) {
+    let parsed: unknown;
     try {
-      JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      parsed = JSON.parse(fs.readFileSync(configPath, "utf-8"));
     } catch (err) {
       throw new Error(
         "The Loom config couldn't be read, so it wasn't changed -- fix or remove the file and try again.",
         { cause: err },
       );
     }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error(
+        "The Loom config isn't a JSON object, so it wasn't changed -- fix or remove the file and try again.",
+      );
+    }
   }
   const cfg = loadConfig();
   cfg.lessons = { ...(cfg.lessons ?? {}), enabled };
+  if (enabled && cfg.observations?.mode !== undefined && cfg.observations.mode !== "off") {
+    cfg.observations = { ...cfg.observations, mode: "off" };
+  }
   try {
     saveConfig(cfg);
   } catch (err) {

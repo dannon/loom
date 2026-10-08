@@ -1,18 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, vi, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-
-// The lesson switch is off by default; these suites are about what happens
-// once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.
-const prevLessonsSwitch = process.env.LOOM_LESSONS;
-beforeAll(() => {
-  process.env.LOOM_LESSONS = "on";
-});
-afterAll(() => {
-  if (prevLessonsSwitch === undefined) process.env.LOOM_LESSONS = "on";
-  else process.env.LOOM_LESSONS = prevLessonsSwitch;
-});
 
 let tmpHome: string;
 const realHome = process.env.HOME;
@@ -42,8 +31,13 @@ function configPath(): string {
   return path.join(tmpHome, ".loom", "config.json");
 }
 
-function writeConfig(obj: unknown): void {
-  fs.writeFileSync(configPath(), JSON.stringify(obj), "utf-8");
+/**
+ * Lessons on in the CONFIG unless the case says otherwise (`lessons: {}` for
+ * "no switch written"): reporting never follows the env spelling.
+ */
+function writeConfig(obj: Record<string, unknown>): void {
+  const withSwitch = "lessons" in obj ? obj : { lessons: { enabled: true }, ...obj };
+  fs.writeFileSync(configPath(), JSON.stringify(withSwitch), "utf-8");
 }
 
 function readConfig(): Record<string, any> {
@@ -72,22 +66,39 @@ describe("resolveObservationsMode", () => {
       const m = await load();
       expect(m.describeObservationsMode()).toEqual({ mode: "off", override: "lessons-off" });
     } finally {
-      process.env.LOOM_LESSONS = "on";
+      delete process.env.LOOM_LESSONS;
     }
   });
 
-  it("reads the mode through the config switch alone, with no env", async () => {
-    delete process.env.LOOM_LESSONS;
+  it("reads the mode only once the config switch is on", async () => {
+    writeConfig({ observations: { mode: "ask" }, lessons: {} });
+    let m = await load();
+    expect(m.describeObservationsMode()).toEqual({ mode: "off", override: "lessons-off" });
+    vi.resetModules();
+    writeConfig({ observations: { mode: "ask" }, lessons: { enabled: true } });
+    m = await load();
+    expect(m.describeObservationsMode()).toEqual({ mode: "ask" });
+  });
+
+  it("stays off when lessons are on from the env alone, and says why a change is refused", async () => {
+    process.env.LOOM_LESSONS = "on";
     try {
-      writeConfig({ observations: { mode: "ask" } });
-      let m = await load();
-      expect(m.describeObservationsMode()).toEqual({ mode: "off", override: "lessons-off" });
-      vi.resetModules();
-      writeConfig({ observations: { mode: "ask" }, lessons: { enabled: true } });
-      m = await load();
-      expect(m.describeObservationsMode()).toEqual({ mode: "ask" });
+      writeConfig({ observations: { mode: "ask" }, lessons: {} });
+      const m = await load();
+      expect(m.describeObservationsMode()).toEqual({ mode: "off", override: "lessons-env" });
+      expect(m.observationsModeChangeBlocker("ask")).toMatch(/environment only.*LOOM_LESSONS=on/);
+      expect(m.observationsModeChangeBlocker("auto")).toMatch(/never turns reporting on/);
+      expect(m.observationsModeChangeBlocker("off")).toBeNull();
     } finally {
-      process.env.LOOM_LESSONS = "on";
+      delete process.env.LOOM_LESSONS;
+    }
+  });
+
+  it("blocks nothing once the config switch is on", async () => {
+    writeConfig({});
+    const m = await load();
+    for (const mode of ["off", "ask", "auto"] as const) {
+      expect(m.observationsModeChangeBlocker(mode)).toBeNull();
     }
   });
 
@@ -210,7 +221,7 @@ describe("setObservationsMode", () => {
       m.setObservationsMode("off");
       expect(JSON.parse(fs.readFileSync(configPath(), "utf-8")).observations.mode).toBe("off");
     } finally {
-      process.env.LOOM_LESSONS = "on";
+      delete process.env.LOOM_LESSONS;
     }
   });
 

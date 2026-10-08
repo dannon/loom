@@ -19,6 +19,8 @@ import {
 } from "../extensions/loom/lessons/propose";
 import { registerLessonCommand } from "../extensions/loom/lesson-command";
 import { registerLessonNudge, resetLessonNudge } from "../extensions/loom/lesson-nudge";
+import { registerLessonReplay } from "../extensions/loom/lessons/replay";
+import { registerLessonProposalReplay } from "../extensions/loom/lessons/propose-replay";
 import { appendActivityEvent, resetActivity } from "../extensions/loom/activity";
 import { setNotebookPath } from "../extensions/loom/state";
 import { envNames } from "../shared/orbit-env.js";
@@ -30,7 +32,14 @@ let dir: string;
 let home: string;
 let lessonsDir: string;
 const saved: Record<string, string | undefined> = {};
-const ENV_KEYS = ["HOME", "USERPROFILE", "LOOM_LESSONS_DIR", ...envNames("LESSONS")];
+const ENV_KEYS = [
+  "HOME",
+  "USERPROFILE",
+  "LOOM_LESSONS_DIR",
+  "LOOM_LESSON_REPLAY",
+  "LOOM_LESSON_PROPOSAL_REPLAY",
+  ...envNames("LESSONS"),
+];
 
 beforeEach(() => {
   for (const k of ENV_KEYS) saved[k] = process.env[k];
@@ -99,7 +108,7 @@ describe("describeLessonsSwitch", () => {
     writeConfig({ lessons: { enabled: true } });
     for (const name of envNames("LESSONS")) {
       process.env[name] = "off";
-      expect(describeLessonsSwitch()).toEqual({ enabled: false, source: "env" });
+      expect(describeLessonsSwitch()).toEqual({ enabled: false, source: "env", via: name });
       expect(isLessonsHardDisabled()).toBe(true);
       delete process.env[name];
     }
@@ -109,12 +118,12 @@ describe("describeLessonsSwitch", () => {
     const [a, b] = envNames("LESSONS");
     process.env[a] = "on";
     process.env[b] = "off";
-    expect(describeLessonsSwitch()).toEqual({ enabled: false, source: "env" });
+    expect(describeLessonsSwitch()).toEqual({ enabled: false, source: "env", via: b });
   });
 
   it("LOOM_LESSONS=on stands in for a missing config, and an explicit config false beats it", () => {
     process.env.LOOM_LESSONS = "on";
-    expect(describeLessonsSwitch()).toEqual({ enabled: true, source: "env" });
+    expect(describeLessonsSwitch()).toEqual({ enabled: true, source: "env", via: "LOOM_LESSONS" });
     writeConfig({ lessons: { enabled: false } });
     expect(describeLessonsSwitch()).toEqual({ enabled: false, source: "config" });
   });
@@ -131,6 +140,25 @@ describe("setLessonsEnabled", () => {
     });
     setLessonsEnabled(false);
     expect(readConfig().lessons).toEqual({ suppress: ["stats/x"], enabled: false });
+  });
+
+  it("turning on puts a latent reporting mode back to off and keeps the acknowledgement", () => {
+    writeConfig({ observations: { mode: "auto", autoAcknowledgedAt: "2026-01-01T00:00:00Z" } });
+    setLessonsEnabled(true);
+    expect(readConfig()).toMatchObject({
+      lessons: { enabled: true },
+      observations: { mode: "off", autoAcknowledgedAt: "2026-01-01T00:00:00Z" },
+    });
+    // Turning off leaves the block alone: there is nothing latent to defuse.
+    writeConfig({ observations: { mode: "ask" }, lessons: { enabled: true } });
+    setLessonsEnabled(false);
+    expect(readConfig().observations.mode).toBe("ask");
+  });
+
+  it("refuses a config that is not a JSON object", () => {
+    fs.writeFileSync(configPath(), "[1, 2]");
+    expect(() => setLessonsEnabled(true)).toThrow(/isn't a JSON object/);
+    expect(fs.readFileSync(configPath(), "utf-8")).toBe("[1, 2]");
   });
 
   it("refuses to clobber an unparseable config", () => {
@@ -231,6 +259,40 @@ describe("every surface is silent while the switch is off", () => {
     expect(sent).toEqual([]);
     expect(notes).toHaveLength(5);
     for (const n of notes) expect(n).toEqual({ msg: LESSONS_OFF_POINTER, level: "warning" });
+  });
+
+  it("the cache does not outlive the switch: an edit to off silences the next read", () => {
+    plantLesson();
+    writeConfig({ lessons: { enabled: true } });
+    expect(getLessonStore().lessons.map((l) => l.id)).toContain(
+      "galaxy-tools/reference-index-not-registered",
+    );
+    writeConfig({ lessons: { enabled: false } });
+    expect(getLessonStore().lessons).toEqual([]);
+    process.env.LOOM_LESSONS = "on"; // an explicit config false still wins
+    expect(getLessonStore().lessons).toEqual([]);
+  });
+
+  it("the eval replay seams read nothing, write nothing and arm nothing", async () => {
+    fs.writeFileSync(path.join(dir, "lesson-events.jsonl"), "{}\n");
+    fs.writeFileSync(path.join(dir, "proposal.json"), "{}");
+    process.env.LOOM_LESSON_REPLAY = "lesson-events.jsonl";
+    process.env.LOOM_LESSON_PROPOSAL_REPLAY = "proposal.json";
+    const handlers: Array<(event: unknown, ctx: unknown) => Promise<void>> = [];
+    const pi = {
+      on: (_event: string, handler: (event: unknown, ctx: unknown) => Promise<void>) =>
+        handlers.push(handler),
+    } as never;
+    registerLessonReplay(pi);
+    registerLessonProposalReplay(pi);
+    const ctx = {
+      hasUI: true,
+      ui: { notify() {}, select: async () => undefined, confirm: async () => true },
+    };
+    for (const h of handlers) await h({}, ctx);
+    expect(fs.existsSync(path.join(dir, "activity.jsonl"))).toBe(false);
+    const { peekLessonProposalArming } = await import("../extensions/loom/lessons/propose");
+    expect(peekLessonProposalArming()).toBeNull();
   });
 
   it("the correction nudge does not fire or arm anything", async () => {

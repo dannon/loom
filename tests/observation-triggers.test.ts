@@ -23,7 +23,7 @@ beforeAll(() => {
   process.env.LOOM_LESSONS = "on";
 });
 afterAll(() => {
-  if (prevLessonsSwitch === undefined) process.env.LOOM_LESSONS = "on";
+  if (prevLessonsSwitch === undefined) delete process.env.LOOM_LESSONS;
   else process.env.LOOM_LESSONS = prevLessonsSwitch;
 });
 
@@ -619,7 +619,7 @@ describe("registerObservationTriggers", () => {
     fs.mkdirSync(path.join(tmpHome, ".loom"), { recursive: true });
     fs.writeFileSync(
       path.join(tmpHome, ".loom", "config.json"),
-      JSON.stringify({ observations: { mode: "ask" } }),
+      JSON.stringify({ lessons: { enabled: true }, observations: { mode: "ask" } }),
     );
     process.env.HOME = tmpHome;
     process.env.USERPROFILE = tmpHome;
@@ -691,7 +691,11 @@ describe("registerObservationTriggers", () => {
   });
 
   async function settleOneFailure(config: unknown) {
-    fs.writeFileSync(path.join(tmpHome, ".loom", "config.json"), JSON.stringify(config));
+    // Reporting needs the switch in the CONFIG: the env spelling reads lessons only.
+    fs.writeFileSync(
+      path.join(tmpHome, ".loom", "config.json"),
+      JSON.stringify({ lessons: { enabled: true }, ...(config as object) }),
+    );
     const { registerObservationTriggers } =
       await import("../extensions/loom/observation-triggers.js");
     const fetchMock = vi.fn().mockResolvedValue({

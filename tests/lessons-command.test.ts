@@ -190,6 +190,27 @@ describe("/lessons", () => {
     );
   });
 
+  it("`on` never revives a latent reporting mode", async () => {
+    writeConfig({ observations: { mode: "auto", autoAcknowledgedAt: "2026-01-01T00:00:00Z" } });
+    const h = harness({ confirm: true });
+    await h.run("on");
+    expect(readConfig().observations.mode).toBe("off");
+    await h.run("status");
+    expect(h.notes[1].msg).toContain("(off)");
+  });
+
+  it("`on` from the env alone still asks and writes, so reporting can be chosen afterwards", async () => {
+    process.env.LOOM_LESSONS = "on";
+    const h = harness({ confirm: true });
+    await h.run("status");
+    expect(h.notes[0].msg.split("\n")).toHaveLength(3);
+    expect(h.notes[0].msg).toContain("LOOM_LESSONS=on");
+    expect(h.notes[0].msg).toContain("reads lessons only");
+    await h.run("on");
+    expect(h.confirm).toHaveBeenCalledTimes(1);
+    expect(readConfig().lessons.enabled).toBe(true);
+  });
+
   it("`off` writes false straight away and empties the corpus for this session", async () => {
     writeConfig({ lessons: { enabled: true }, testerId: "orbit-007" });
     const h = harness();

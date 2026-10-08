@@ -18,6 +18,7 @@
  */
 
 import * as fs from "node:fs";
+import { isLessonsEnabled } from "./enabled";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readEnv } from "../../../shared/orbit-env.js";
@@ -49,6 +50,8 @@ export function registerLessonReplay(pi: ExtensionAPI): void {
   pi.on("session_start", async () => {
     const configured = readEnv("LESSON_REPLAY")?.trim();
     if (!configured) return;
+    // Same answer the live surface gives: nothing read, written or armed while off.
+    if (!isLessonsEnabled()) return;
 
     const notebookPath = getNotebookPath();
     if (!notebookPath) return;

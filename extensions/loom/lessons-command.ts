@@ -32,6 +32,7 @@ export const LESSONS_CONFIRM_MESSAGE = [
 export function formatLessonsStatus(info: {
   enabled: boolean;
   source: "env" | "config" | "default";
+  via?: string;
   observationsMode: "off" | "ask" | "auto";
 }): string {
   const lines = info.enabled
@@ -44,10 +45,11 @@ export function formatLessonsStatus(info: {
         "/lessons on turns the loop on, after one confirm.",
       ];
   if (info.source === "env") {
+    const name = info.via ?? "LOOM_LESSONS";
     lines.push(
       info.enabled
-        ? "(Set by LOOM_LESSONS=on in the environment.)"
-        : "(Set by LOOM_LESSONS=off in the environment, so it can't be changed from here.)",
+        ? `(Set by ${name}=on in the environment, which reads lessons only; reporting stays off until /lessons on writes the config.)`
+        : `(Set by ${name}=off in the environment, so it can't be changed from here.)`,
     );
   }
   return lines.join("\n");
@@ -59,6 +61,7 @@ function showStatus(ctx: ExtensionCommandContext): void {
     formatLessonsStatus({
       enabled: sw.enabled,
       source: sw.source,
+      via: sw.via,
       observationsMode: describeObservationsMode().mode,
     }),
     "info",
@@ -66,14 +69,17 @@ function showStatus(ctx: ExtensionCommandContext): void {
 }
 
 async function turnOn(ctx: ExtensionCommandContext): Promise<void> {
+  const sw = describeLessonsSwitch();
   if (isLessonsHardDisabled()) {
     ctx.ui.notify(
-      "Lessons are hard-disabled for this install (LOOM_LESSONS=off), so they can't be turned on here.",
+      `Lessons are hard-disabled for this install (${sw.via}=off), so they can't be turned on here.`,
       "warning",
     );
     return;
   }
-  if (describeLessonsSwitch().enabled) {
+  // On from the config already. On from the env alone still goes through the
+  // confirm and the write: that is what lets reporting be chosen afterwards.
+  if (sw.enabled && sw.source === "config") {
     ctx.ui.notify("Lessons are already on.", "info");
     return;
   }
@@ -98,7 +104,7 @@ async function turnOn(ctx: ExtensionCommandContext): Promise<void> {
   // load lessons without a restart.
   resetLessonStore();
   ctx.ui.notify(
-    "Lessons are on. Failure reports stay off until you pick /observations mode ask or auto.",
+    "Lessons are on. Failure reports are off until you pick /observations mode ask or auto.",
     "info",
   );
 }
