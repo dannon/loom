@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -15,6 +15,17 @@ import {
 import type { DeliverDeps } from "../extensions/loom/observation-triggers.js";
 import type { Observation } from "../shared/observation-contract.js";
 import type { ObservationFacts } from "../extensions/loom/observations.js";
+
+// The lesson switch is off by default; these suites are about what happens
+// once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.
+const prevLessonsSwitch = process.env.LOOM_LESSONS;
+beforeAll(() => {
+  process.env.LOOM_LESSONS = "on";
+});
+afterAll(() => {
+  if (prevLessonsSwitch === undefined) process.env.LOOM_LESSONS = "on";
+  else process.env.LOOM_LESSONS = prevLessonsSwitch;
+});
 
 const KEY = { mcpTool: "galaxy_run_tool", signature: "ToolExecutionError: dataset <id> failed" };
 

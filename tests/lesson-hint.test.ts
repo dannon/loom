@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, beforeAll, afterAll } from "vitest";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -23,6 +23,17 @@ import { clip, collapse, firstSentence } from "../extensions/loom/lessons/text";
 import { LESSONS_WRAPPER_TAG, wrapLessons } from "../extensions/loom/lessons/wrapper";
 import { appendHintToContent, resultTextOf } from "../extensions/loom/lessons/pi-event-contract";
 import { withoutLessonHints } from "../shared/lesson-hint-marker.js";
+
+// The lesson switch is off by default; these suites are about what happens
+// once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.
+const prevLessonsSwitch = process.env.LOOM_LESSONS;
+beforeAll(() => {
+  process.env.LOOM_LESSONS = "on";
+});
+afterAll(() => {
+  if (prevLessonsSwitch === undefined) process.env.LOOM_LESSONS = "on";
+  else process.env.LOOM_LESSONS = prevLessonsSwitch;
+});
 
 describe("text helpers", () => {
   it("collapses every run of whitespace, including newlines", () => {

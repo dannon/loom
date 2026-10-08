@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, beforeAll, afterAll } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -22,6 +22,17 @@ import { draftFilePath, lessonFilePath } from "../extensions/loom/lessons/paths"
 import { getLessonStore, resetLessonStore } from "../extensions/loom/lessons/store";
 import { resetActivity } from "../extensions/loom/activity";
 import { setNotebookPath } from "../extensions/loom/state";
+
+// The lesson switch is off by default; these suites are about what happens
+// once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.
+const prevLessonsSwitch = process.env.LOOM_LESSONS;
+beforeAll(() => {
+  process.env.LOOM_LESSONS = "on";
+});
+afterAll(() => {
+  if (prevLessonsSwitch === undefined) process.env.LOOM_LESSONS = "on";
+  else process.env.LOOM_LESSONS = prevLessonsSwitch;
+});
 
 let tmp: string;
 let cwd: string;

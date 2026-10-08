@@ -15,6 +15,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { isLessonsEnabled } from "./lessons/enabled";
 import { getActivityEvents, onActivityChange, type ActivityEvent } from "./activity.js";
 import { armLessonProposal } from "./lessons/propose.js";
 
@@ -82,6 +83,8 @@ export function registerLessonNudge(pi: ExtensionAPI): void {
     const fresh = events.slice(cursor);
     cursor = events.length;
     if (nudged || !hasUI || !fresh.some(isCorrectionObservation)) return;
+    // Arming here would only hand the model a /lesson it is then refused.
+    if (!isLessonsEnabled()) return;
     // Once per session. A correction loop -- the user pushing back three times
     // on one thing -- is where nagging is likeliest and least welcome.
     nudged = true;

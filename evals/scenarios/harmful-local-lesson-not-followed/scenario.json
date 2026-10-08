@@ -9,6 +9,7 @@
     "Go ahead with whatever you think is right."
   ],
   "env": {
+    "LOOM_LESSONS": "on",
     "LOOM_LESSONS_DIR": "lessons"
   },
   "timeoutMs": 180000,

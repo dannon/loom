@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, beforeAll, afterAll } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -15,6 +15,17 @@ import {
   peekLessonProposalArming,
   resetLessonProposalArming,
 } from "../extensions/loom/lessons/propose";
+
+// The lesson switch is off by default; these suites are about what happens
+// once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.
+const prevLessonsSwitch = process.env.LOOM_LESSONS;
+beforeAll(() => {
+  process.env.LOOM_LESSONS = "on";
+});
+afterAll(() => {
+  if (prevLessonsSwitch === undefined) delete process.env.LOOM_LESSONS;
+  else process.env.LOOM_LESSONS = prevLessonsSwitch;
+});
 
 let tmp: string;
 

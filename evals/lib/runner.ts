@@ -51,6 +51,11 @@ export async function runScenario(
     if (model) {
       writePiModelsConfig(model, tmpAgentDir);
     }
+    if (scenario.config) {
+      const loomDir = path.join(tmpRoot, ".loom");
+      fs.mkdirSync(loomDir, { recursive: true });
+      fs.writeFileSync(path.join(loomDir, "config.json"), JSON.stringify(scenario.config, null, 2));
+    }
     const result = await spawnLoom(scenario, model, tmpCwd, tmpAgentDir, tmpRoot, runId);
     const events = parseJsonLines(result.stdout);
     const notebookContent = readNotebook(tmpCwd);

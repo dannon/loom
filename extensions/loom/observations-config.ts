@@ -2,9 +2,13 @@
  * Mode and install-token state for the observation collector.
  *
  * Split out of observations.ts so the privacy gate is one small file that can
- * be read end to end. Four rules hold here:
+ * be read end to end. Five rules hold here:
  *
- *  - `ask` is the default. A fresh install collects nothing silently.
+ *  - The lesson switch comes first. While `lessons.enabled` is off (the
+ *    default), collection is off whatever this block says: the loop is one
+ *    opt-in, and reporting is its contributing half.
+ *  - `off` is the default once lessons are on. A fresh install collects
+ *    nothing and asks nothing until the user picks `ask` or `auto`.
  *  - `auto` in the config is not enough on its own: it takes effect only with
  *    the recorded acknowledgement of the sample payload, else it runs as `ask`.
  *  - The env var is a ONE-WAY hard disable. `ORBIT_OBSERVATIONS=off` wins over
@@ -21,10 +25,11 @@ import fs from "node:fs";
 import { randomBytes } from "node:crypto";
 import { getConfigPath, loadConfig, saveConfig } from "./config.js";
 import { envNames } from "../../shared/orbit-env.js";
+import { isLessonsEnabled, LESSONS_OFF_POINTER } from "./lessons/enabled.js";
 
 export type ObservationsMode = "off" | "ask" | "auto";
 
-const DEFAULT_MODE: ObservationsMode = "ask";
+const DEFAULT_MODE: ObservationsMode = "off";
 const INSTALL_TOKEN_RE = /^[0-9a-f]{32}$/;
 
 /**
@@ -42,10 +47,11 @@ export interface ObservationsModeState {
   mode: ObservationsMode;
   /**
    * Why `mode` differs from what the config says, when it does:
-   * `hard-disabled` for the env kill switch, `auto-unacknowledged` for an
-   * `auto` nobody confirmed on this install.
+   * `hard-disabled` for the env kill switch, `lessons-off` while the lesson
+   * switch is off, `auto-unacknowledged` for an `auto` nobody confirmed on
+   * this install.
    */
-  override?: "hard-disabled" | "auto-unacknowledged";
+  override?: "hard-disabled" | "lessons-off" | "auto-unacknowledged";
 }
 
 /**
@@ -57,6 +63,7 @@ export interface ObservationsModeState {
  */
 export function describeObservationsMode(): ObservationsModeState {
   if (isObservationsHardDisabled()) return { mode: "off", override: "hard-disabled" };
+  if (!isLessonsEnabled()) return { mode: "off", override: "lessons-off" };
   const block = loadConfig().observations;
   const mode = block?.mode;
   if (mode === "auto") {
@@ -113,6 +120,11 @@ export function setObservationsMode(mode: ObservationsMode): void {
     throw new Error(
       "Observations are hard-disabled for this install (ORBIT_OBSERVATIONS=off), so the mode can't be changed here.",
     );
+  }
+  // Turning collection on under an off lesson switch would write a mode that
+  // does nothing; `off` is always allowed so the finer control can be reset.
+  if (mode !== "off" && !isLessonsEnabled()) {
+    throw new Error(`${LESSONS_OFF_POINTER} Then pick an observations mode.`);
   }
   persist((block) => {
     block.mode = mode;

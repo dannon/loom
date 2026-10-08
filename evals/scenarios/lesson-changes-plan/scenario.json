@@ -9,6 +9,7 @@
     "Yes, that's right. Go ahead and draft the formal plan now."
   ],
   "env": {
+    "LOOM_LESSONS": "on",
     "LOOM_LESSONS_DIR": "lessons"
   },
   "timeoutMs": 180000,

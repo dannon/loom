@@ -4,6 +4,7 @@
   "tier": 1,
   "inputs": ["/status"],
   "env": {
+    "LOOM_LESSONS": "on",
     "ANTHROPIC_API_KEY": "fake-eval-key",
     "LOOM_LESSONS_DIR": "lessons",
     "LOOM_LESSON_REPLAY": "lesson-events.jsonl"

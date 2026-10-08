@@ -13,6 +13,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { LESSONS_SEARCH_TOOL, recordSurfacing, renderLessonSearchResult } from "../lesson-hint";
 import { searchLessons } from "./search";
+import { isLessonsEnabled, LESSONS_OFF_POINTER } from "./enabled";
 import { getLessonStore } from "./store";
 
 export function registerLessonsSearchTool(pi: ExtensionAPI): void {
@@ -45,6 +46,19 @@ first" line against what you actually have before acting on it.`,
       }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      if (!isLessonsEnabled()) {
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `${LESSONS_OFF_POINTER} Nothing recorded is searchable until the user does; ` +
+                "carry on and verify the result the usual way.",
+            },
+          ],
+          details: { hits: 0, corpus: 0, disabled: true },
+        };
+      }
       const store = getLessonStore();
       const query = typeof params.query === "string" ? params.query : "";
       const hits = searchLessons(query, store.lessons);

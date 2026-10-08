@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, beforeAll, afterAll } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -16,6 +16,17 @@ import {
 } from "../extensions/loom/lessons/store";
 import { readCounters } from "../extensions/loom/lessons/counters";
 import { lessonFile } from "./lessons-fixture";
+
+// The lesson switch is off by default; these suites are about what happens
+// once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.
+const prevLessonsSwitch = process.env.LOOM_LESSONS;
+beforeAll(() => {
+  process.env.LOOM_LESSONS = "on";
+});
+afterAll(() => {
+  if (prevLessonsSwitch === undefined) process.env.LOOM_LESSONS = "on";
+  else process.env.LOOM_LESSONS = prevLessonsSwitch;
+});
 
 const SECTIONS = {
   symptom: "s",
@@ -485,7 +496,7 @@ describe("getLessonStore", () => {
     else process.env.HOME = prevHome;
     if (prevUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = prevUserProfile;
-    delete process.env.LOOM_LESSONS;
+    process.env.LOOM_LESSONS = "on";
     delete process.env.LOOM_LESSONS_DIR;
     resetLessonStore();
   });
@@ -523,7 +534,7 @@ describe("getLessonStore", () => {
     resetLessonStore();
     process.env.LOOM_LESSONS = "off";
     expect(getLessonStore().lessons).toEqual([]);
-    delete process.env.LOOM_LESSONS;
+    process.env.LOOM_LESSONS = "on";
     resetLessonStore();
     config({ lessons: { enabled: false } });
     expect(getLessonStore().lessons).toEqual([]);

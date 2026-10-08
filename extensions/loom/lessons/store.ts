@@ -17,7 +17,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "../config";
 import { LESSON_NAMESPACES } from "../../../shared/lesson-rules.js";
-import { readEnv } from "../../../shared/orbit-env.js";
+import { isLessonsEnabled } from "./enabled";
 import { syncSuppressedFlags } from "./counters";
 import { userLessonsDir } from "./user-dir";
 import type { Lesson } from "./types";
@@ -178,12 +178,9 @@ export function loadPackageLessons(file: string = packageSnapshotPath()): {
  */
 export { userLessonsDir };
 
-/** Master switch. Off means no lesson reaches the model on any surface. */
-export function isLessonsEnabled(): boolean {
-  if (readEnv("LESSONS")?.trim().toLowerCase() === "off") return false;
-  const cfg = loadConfig() as { lessons?: { enabled?: unknown } };
-  return cfg.lessons?.enabled !== false;
-}
+// The switch lives in ./enabled so observations-config can read it without
+// pulling this loader in; re-exported because every lesson surface reads it here.
+export { isLessonsEnabled };
 
 /** `lessons.suppress` from the config -- the only authority on suppression. */
 export function suppressedIds(): string[] {

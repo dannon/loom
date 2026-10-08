@@ -4,6 +4,7 @@
   "tier": 1,
   "inputs": ["/lesson list"],
   "env": {
+    "LOOM_LESSONS": "on",
     "ANTHROPIC_API_KEY": "fake-eval-key",
     "LOOM_LESSON_PROPOSAL_REPLAY": "hostile-proposal.json"
   },

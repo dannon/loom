@@ -188,6 +188,13 @@ export interface Scenario {
   inputs: string[];
   env?: Record<string, string>;
   /**
+   * Written to `<fake HOME>/.loom/config.json` before the run. The runner
+   * points HOME at a throwaway dir, so this is the only way a scenario can
+   * set a config key -- `lessons.enabled`, `observations.mode` -- that no env
+   * value is allowed to turn on.
+   */
+  config?: Record<string, unknown>;
+  /**
    * Extra CLI flags forwarded verbatim to the loom invocation. Useful for
    * `--no-tools`, `--tools read,bash`, etc. -- different scenarios want
    * different tool surfaces. Comes after `--mode json` and any

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, beforeAll, afterAll } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -10,6 +10,17 @@ import { readCounters } from "../extensions/loom/lessons/counters";
 import { resetActivity } from "../extensions/loom/activity";
 import { resetState, setNotebookPath } from "../extensions/loom/state";
 import { lessonFile } from "./lessons-fixture";
+
+// The lesson switch is off by default; these suites are about what happens
+// once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.
+const prevLessonsSwitch = process.env.LOOM_LESSONS;
+beforeAll(() => {
+  process.env.LOOM_LESSONS = "on";
+});
+afterAll(() => {
+  if (prevLessonsSwitch === undefined) process.env.LOOM_LESSONS = "on";
+  else process.env.LOOM_LESSONS = prevLessonsSwitch;
+});
 
 const LESSON = lessonFile({
   title: "A normalized count table hides the samples it dropped",

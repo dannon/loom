@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, beforeAll, afterAll } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -12,6 +12,17 @@ import { readCounters } from "../extensions/loom/lessons/counters";
 import { resetActivity } from "../extensions/loom/activity";
 import { resetState, setNotebookPath } from "../extensions/loom/state";
 import type { Lesson } from "../extensions/loom/lessons/types";
+
+// The lesson switch is off by default; these suites are about what happens
+// once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.
+const prevLessonsSwitch = process.env.LOOM_LESSONS;
+beforeAll(() => {
+  process.env.LOOM_LESSONS = "on";
+});
+afterAll(() => {
+  if (prevLessonsSwitch === undefined) process.env.LOOM_LESSONS = "on";
+  else process.env.LOOM_LESSONS = prevLessonsSwitch;
+});
 
 const mk = (id: string, over: Partial<Lesson> = {}): Lesson => ({
   id,
@@ -213,7 +224,7 @@ describe("the lessons_search tool", () => {
     if (prevUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = prevUserProfile;
     delete process.env.LOOM_LESSONS_DIR;
-    delete process.env.LOOM_LESSONS;
+    process.env.LOOM_LESSONS = "on";
     setNotebookPath(null);
     resetLessonStore();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -288,10 +299,12 @@ describe("the lessons_search tool", () => {
     expect(rows()).toEqual([]);
   });
 
-  it("reports an empty install when lessons are turned off", async () => {
+  it("says lessons are off, and how to turn them on, when they are", async () => {
     process.env.LOOM_LESSONS = "off";
     const out = await tool()("stats/na-coerced-to-zero-in-filters");
-    expect(out.content[0].text).toContain("No lessons are loaded");
+    expect(out.content[0].text).toContain("Lessons are off on this install. /lessons on");
+    expect(out.details).toMatchObject({ hits: 0, corpus: 0, disabled: true });
+    expect(rows()).toEqual([]);
   });
 
   it("never surfaces a graduated shipped lesson", async () => {

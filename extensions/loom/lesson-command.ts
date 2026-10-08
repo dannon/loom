@@ -10,6 +10,7 @@
  */
 
 import fs from "node:fs";
+import { isLessonsEnabled, LESSONS_OFF_POINTER } from "./lessons/enabled";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getConfigPath, loadConfig, saveConfig, type LoomConfig } from "./config.js";
 import { parseLesson, validateLessonMarkdown } from "../../shared/lesson-rules.js";
@@ -197,6 +198,12 @@ export function registerLessonCommand(pi: ExtensionAPI): void {
   pi.registerCommand("lesson", {
     description: "Draft a lesson from this session for you to approve, or manage saved ones",
     handler: async (args: string | undefined, ctx: ExtensionCommandContext) => {
+      // Every subcommand, the read-only ones included: with the switch off
+      // there is no lesson surface for a listing or a save to mean anything on.
+      if (!isLessonsEnabled()) {
+        ctx.ui.notify(LESSONS_OFF_POINTER, "warning");
+        return;
+      }
       const argv = (args ?? "").trim().split(/\s+/).filter(Boolean);
       const sub = argv[0];
       const rest = argv.slice(1).join(" ");

@@ -2,7 +2,7 @@
  * The model-free half of the two Tier-2 lesson scenarios, against their own
  * fixtures: what the model is handed. Whether it acts on it needs a model.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, beforeAll, afterAll } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -13,6 +13,17 @@ import { LOOM_LESSONS_CONTEXT_TYPE } from "../extensions/loom/lessons/reproducti
 import { registerLessonsSearchTool } from "../extensions/loom/lessons/search-tool";
 import { getLessonStore, resetLessonStore } from "../extensions/loom/lessons/store";
 import { resetState } from "../extensions/loom/state";
+
+// The lesson switch is off by default; these suites are about what happens
+// once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.
+const prevLessonsSwitch = process.env.LOOM_LESSONS;
+beforeAll(() => {
+  process.env.LOOM_LESSONS = "on";
+});
+afterAll(() => {
+  if (prevLessonsSwitch === undefined) process.env.LOOM_LESSONS = "on";
+  else process.env.LOOM_LESSONS = prevLessonsSwitch;
+});
 
 const SCENARIOS = path.join(__dirname, "..", "evals", "scenarios");
 
