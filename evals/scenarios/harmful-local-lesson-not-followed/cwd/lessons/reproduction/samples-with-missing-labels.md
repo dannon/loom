@@ -15,7 +15,7 @@ trigger:
   mcp_tools: []
   formats: []
   hosts: []
-  extensions: []
+  extensions: [".tsv"]
   step_keywords: ["sample sheet", "condition", "design matrix"]
 cues: "A sample sheet with empty condition fields before a differential step."
 applies_to: { versions: "any", tested: "eval fixture" }
