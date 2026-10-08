@@ -1,0 +1,39 @@
+{
+  "name": "an approval recorded by an earlier session comes back restored, never live",
+  "description": "The fixture's .loom/state/registry.json holds a live user approval of prop-abc123, signed by a session whose key is gone -- exactly what a restart, a clone or a hand edit leaves behind. The new session can't verify it, so the import rule applies: registry.opened reports outcome imported with one restored approval, and /revoke finds no live approval to revoke (proposal.revoked must not appear). Then /approve re-approves it afresh in this session, which is the only way it counts again.",
+  "tier": 1,
+  "inputs": ["/pending", "/revoke prop-abc123", "/approve prop-abc123 --yes"],
+  "env": {
+    "ANTHROPIC_API_KEY": "fake-eval-key",
+    "GALAXY_URL": "https://usegalaxy.org",
+    "GALAXY_API_KEY": "fake-eval-galaxy-key",
+    "LOOM_TEMPLATE_REPLAY": "templates.json"
+  },
+  "timeoutMs": 15000,
+  "assertions": {
+    "events": {
+      "mustNotInclude": ["agent_start", "tool_execution_start", "turn_start"]
+    },
+    "activity": {
+      "mustNotIncludeKinds": ["proposal.revoked"],
+      "mustInclude": [
+        {
+          "kind": "registry.opened",
+          "source": "harness",
+          "payloadContains": {
+            "mode": "writer",
+            "outcome": "imported",
+            "restored_approvals": "1"
+          }
+        },
+        {
+          "kind": "proposal.approved",
+          "source": "user",
+          "payloadContains": {
+            "proposal_id": "prop-abc123"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -26,6 +26,7 @@ import {
   stripHarnessFields,
   type HarnessBlockFields,
 } from "./harness-block-fields";
+import { parseProposalFields, type Proposal, type ProposalSighting } from "./registry-proposal";
 
 /**
  * Generate slug from title for default filename.
@@ -698,6 +699,132 @@ function parseInvocationBlock(blockLines: string[]): InvocationYaml | null {
     lastPolledAt: fields.last_polled_at || undefined,
     ...parseHarnessFields((key) => rawFields[key]),
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Proposal blocks
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `loom-proposal` block: a concrete run the model proposes and the user can
+ * approve (registry design v3 §5). Same line grammar as every other block --
+ * one `key: value` per line, the structured fields as single-line JSON --
+ * and the same forward compatibility: unknown keys are ignored on read.
+ *
+ * ```loom-proposal
+ * proposal_id: prop-7k2m9x
+ * step_anchor: plan-a-step-2
+ * label: Trim reads
+ * target: {"kind":"tool","tool_id":"fastp","version":"unpinned"}
+ * server_url: https://usegalaxy.org
+ * history_id: df8fe5ddadbf3ab1
+ * inputs: [{"slot":"reads","src":"hda","id":"4b6e2f1a9c3d5e70"}]
+ * overrides: [{"param":"threads","value":4,"rationale":"four cores"}]
+ * predicate: {"kind":"manual"}
+ * assertions: []
+ * template_digest: <sha256 of the template it was validated against>
+ * created_at: 2026-10-07T12:00:00.000Z
+ * spec_revision: <written by the harness after /approve>
+ * ```
+ *
+ * Nothing in the block is trusted. `spec_revision` is written by the harness
+ * after an approval so a reader can see one happened, but it is display only:
+ * the parser does not return it, and whether a proposal is approved is a
+ * question for the registry.
+ */
+export interface ProposalBlock {
+  /** The id the block claims, even when the rest of it doesn't parse. */
+  proposalId: string | null;
+  proposal: Proposal | null;
+  errors: string[];
+  start: number;
+  end: number;
+}
+
+const PROPOSAL_FENCE_OPEN = notebookFenceOpen("proposal");
+
+export function renderProposalBlock(p: Proposal, harness: { specRevision?: string } = {}): string {
+  const lines: string[] = [
+    PROPOSAL_FENCE_OPEN,
+    blockLine("proposal_id", p.proposalId),
+    blockLine("step_anchor", p.stepAnchor),
+  ];
+  if (p.label) lines.push(`label: ${escapeYaml(p.label)}`);
+  lines.push(
+    `target: ${JSON.stringify(p.target)}`,
+    blockLine("server_url", p.serverUrl),
+    blockLine("history_id", p.historyId),
+    `inputs: ${JSON.stringify(p.inputs)}`,
+    `overrides: ${JSON.stringify(p.overrides)}`,
+    `predicate: ${JSON.stringify(p.predicate)}`,
+    `assertions: ${JSON.stringify(p.assertions)}`,
+  );
+  if (p.templateDigest) lines.push(blockLine("template_digest", p.templateDigest));
+  if (p.createdAt) lines.push(blockLine("created_at", p.createdAt));
+  if (harness.specRevision && /^[0-9a-f]{64}$/.test(harness.specRevision)) {
+    lines.push(`spec_revision: ${harness.specRevision}`);
+  }
+  lines.push("```");
+  return lines.join("\n") + "\n";
+}
+
+/** Every `loom-proposal` block, readable or not, in notebook order. */
+export function findProposalBlocks(content: string): ProposalBlock[] {
+  const lines = content.split("\n");
+  const out: ProposalBlock[] = [];
+  for (const range of scanFencedBlocks(lines, "proposal")) {
+    const raw = rawInvocationFields(lines.slice(range.start + 1, range.end));
+    const get = (key: string): string | undefined =>
+      raw[key] === undefined ? undefined : key === "label" ? unescapeYaml(raw[key]) : raw[key];
+    const { proposal, errors } = parseProposalFields(get);
+    out.push({
+      proposalId: raw.proposal_id || null,
+      proposal,
+      errors,
+      start: range.start,
+      end: range.end,
+    });
+  }
+  return out;
+}
+
+/** What the notebook says about each proposal id, for the registry's checks. */
+export function proposalSightings(content: string): ProposalSighting[] {
+  return findProposalBlocks(content)
+    .filter((b): b is ProposalBlock & { proposalId: string } => b.proposalId !== null)
+    .map((b) => ({ proposalId: b.proposalId, proposal: b.proposal }));
+}
+
+/**
+ * Append a new proposal block. Refuses an id the notebook already has: a
+ * proposal is written once, and a changed one is a new proposal.
+ */
+export function appendProposalBlock(content: string, p: Proposal): string {
+  if (findProposalBlocks(content).some((b) => b.proposalId === p.proposalId)) {
+    throw new Error(`proposal ${p.proposalId} is already in the notebook`);
+  }
+  return appendBlock(content, renderProposalBlock(p).trimEnd().split("\n"));
+}
+
+/**
+ * Write `spec_revision` into the one block carrying this id, or take it out
+ * (`null`, after a revoke), touching no other line of it. Returns the content
+ * unchanged when there isn't exactly one unambiguous block -- the registry
+ * already holds the truth, and this is only the echo.
+ */
+export function setProposalSpecRevision(
+  content: string,
+  proposalId: string,
+  specRevision: string | null,
+): string {
+  if (specRevision !== null && !/^[0-9a-f]{64}$/.test(specRevision)) return content;
+  const lines = content.split("\n");
+  const blocks = findProposalBlocks(content).filter((b) => b.proposalId === proposalId);
+  if (blocks.length !== 1 || !isUnambiguousRange(lines, blocks[0].start)) return content;
+  const { start, end } = blocks[0];
+  const body = lines.slice(start + 1, end).filter((l) => !/^spec_revision:/.test(l));
+  if (specRevision !== null) body.push(`spec_revision: ${specRevision}`);
+  return [...lines.slice(0, start + 1), ...body, ...lines.slice(end)].join("\n");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

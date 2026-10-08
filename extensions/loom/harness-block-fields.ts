@@ -25,11 +25,12 @@
  * silently dropped in others. JSON on one line round-trips exactly and still
  * greps.
  *
- * Every field here is either a bare token or a JSON array, so none of them
- * need the two block parsers' differing quote handling (`notebook-writer`
- * strips paired quotes, `galaxy-job-block` runs `JSON.parse`). A free-text
- * field -- `enrichment_error`, when the enrichment lifecycle lands -- has to
- * reconcile those two first.
+ * Every field here but one is a bare token or a JSON array, so they need
+ * neither of the two block parsers' differing quote handling (`notebook-writer`
+ * strips paired quotes, `galaxy-job-block` runs `JSON.parse`). The exception is
+ * `enrichment_error`, which carries text a Galaxy server wrote. It sidesteps the
+ * difference rather than reconciling it: it is always written JSON-quoted and
+ * read back here from the raw line, which both parsers hand over untouched.
  */
 
 import { isNotebookFenceOpen, type NotebookFenceKind } from "../../shared/notebook-fences.js";
@@ -74,6 +75,12 @@ export interface HarnessBlockFields {
   submittedBy?: SubmittedBy;
   enrichment?: EnrichmentState;
   enrichmentAttempts?: number;
+  /**
+   * Why the last enrichment attempt did not complete. Free text from a Galaxy
+   * error, so it is flattened and capped before it is written. An empty string
+   * clears it: `undefined` means "leave it alone" to the merge.
+   */
+  enrichmentError?: string;
   jobs?: BlockJobSummary[];
   drift?: BlockDriftNote[];
 }
@@ -88,6 +95,7 @@ export const HARNESS_FIELD_KEYS = [
   "submittedBy",
   "enrichment",
   "enrichmentAttempts",
+  "enrichmentError",
   "jobs",
   "drift",
 ] as const;
@@ -199,6 +207,7 @@ const LOOM_FENCE_KINDS: readonly NotebookFenceKind[] = [
   "udt",
   "session",
   "galaxy-page",
+  "proposal",
 ];
 
 const FENCE_CLOSE = "```";
@@ -350,6 +359,10 @@ export function renderHarnessFieldLines(fields: HarnessBlockFields): string[] {
   if (fields.enrichmentAttempts !== undefined) {
     lines.push(`enrichment_attempts: ${fields.enrichmentAttempts}`);
   }
+  if (fields.enrichmentError) {
+    const flat = flattenErrorText(fields.enrichmentError);
+    if (flat) lines.push(`enrichment_error: ${JSON.stringify(flat)}`);
+  }
   if (fields.jobs && fields.jobs.length > 0) {
     lines.push(`jobs: ${JSON.stringify(fields.jobs.map(jobSummaryToWire))}`);
   }
@@ -391,6 +404,9 @@ export function parseHarnessFields(get: (key: string) => string | undefined): Ha
   const attempts = Number(get("enrichment_attempts"));
   if (get("enrichment_attempts") && Number.isFinite(attempts)) fields.enrichmentAttempts = attempts;
 
+  const enrichmentError = parseQuotedText(get("enrichment_error"));
+  if (enrichmentError) fields.enrichmentError = enrichmentError;
+
   const jobs = parseJsonArray(get("jobs"), jobSummaryFromWire);
   if (jobs) fields.jobs = jobs;
 
@@ -398,6 +414,36 @@ export function parseHarnessFields(get: (key: string) => string | undefined): Ha
   if (drift) fields.drift = drift;
 
   return fields;
+}
+
+/** Longest `enrichment_error` the block carries; the full text is in the activity row. */
+const MAX_ERROR_TEXT = 200;
+
+/**
+ * One line, no control characters, capped. The text comes out of a Galaxy
+ * error body, which is neither ours nor short, and a block line has to stay
+ * one line whatever it says.
+ */
+export function flattenErrorText(text: string): string {
+  const flat = text
+    .replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return flat.length <= MAX_ERROR_TEXT ? flat : flat.slice(0, MAX_ERROR_TEXT - 1) + "…";
+}
+
+/** A JSON-quoted one-line string, or the raw text when a hand edit dropped the quotes. */
+function parseQuotedText(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  if (raw.startsWith('"')) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return typeof parsed === "string" && parsed.length > 0 ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return raw;
 }
 
 /**

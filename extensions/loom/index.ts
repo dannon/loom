@@ -22,6 +22,8 @@ import { registerActivityHooks } from "./activity-hooks";
 import { registerSubmissionCapture } from "./galaxy-submission-capture";
 import { isSubmissionReplayEnabled, registerSubmissionReplay } from "./submission-replay";
 import { isObservationReplayEnabled, registerObservationReplay } from "./observation-replay";
+import { registerCaptureFollowThrough } from "./galaxy-reconcile";
+import { isGalaxyFixtureEnabled, registerGalaxyFixture } from "./galaxy-fixture";
 import { registerExecutionCommands } from "./execution-commands";
 import { registerDashboardTools } from "./dashboard-tools";
 import { registerDashboardCommands } from "./dashboard-commands";
@@ -39,6 +41,7 @@ import { registerIwcPlanCheck } from "./iwc-plan-check";
 import { registerSraImportGate } from "./sra-import-gate";
 import { registerEvidenceGate } from "./evidence-gate";
 import { registerEvidenceOverrideCommand } from "./evidence-override-command";
+import { registerProposalCommands } from "./proposal-commands";
 import { registerExecGuard } from "./exec-guard";
 import { registerSandbox } from "./sandbox";
 import { isLocalExecDisabled } from "./local-exec";
@@ -162,6 +165,19 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   if (isObservationReplayEnabled()) {
     registerObservationReplay(pi);
   }
+  // ── Capture, part two (#473): reconcile + enrichment ──────────────────────
+  // Everything that happens to a recorded run after the submit: reconcile on
+  // session start, after galaxy_connect, every Nth poller tick and on
+  // /reconcile; per-job enrichment off the same queue. After the replay seam
+  // so a replayed session's blocks are on disk before the first reconcile.
+  registerCaptureFollowThrough(pi);
+  // Eval-only seam: answers Galaxy calls from a recorded fixture so the Tier-1
+  // scenarios can drive reconcile and enrichment without a server. Off unless
+  // LOOM_GALAXY_FIXTURE names a file inside the session directory.
+  if (isGalaxyFixtureEnabled()) {
+    registerGalaxyFixture(pi);
+  }
+  // ── end capture, part two ─────────────────────────────────────────────────
 
   registerPlanTools(pi);
   registerGalaxyUploadTool(pi);
@@ -183,6 +199,11 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerEvidenceGate(pi);
   registerSraImportGate(pi);
   registerEvidenceOverrideCommand(pi);
+  // ── Approval registry (#476): the model proposes with loom_propose; the user
+  // approves with /approve (or revokes, or lists with /pending). The registry
+  // itself is opened and closed by the session lifecycle.
+  registerProposalCommands(pi);
+  // ── end approval registry
   if (isTeamDispatchEnabled()) {
     registerTeamTools(pi);
   }

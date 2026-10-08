@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "attempt_id": "01K6ZQ7B3M2N4P5Q6R7S8T9V0W",
+  "kind": "jobs",
+  "galaxy_server_url": "https://usegalaxy.org",
+  "history_id": "0a248a1f62a0cc04",
+  "submitted_by": "harness",
+  "created_at": "2026-10-07T09:30:00.000Z",
+  "ids": {
+    "job_ids": ["cc00000000000003"]
+  },
+  "origin": "submission",
+  "seeds": {
+    "cc00000000000003": {
+      "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+      "tool_version": "0.24.0"
+    }
+  },
+  "enrichment": {
+    "state": "pending",
+    "attempts": 0,
+    "attempts_by_block": {
+      "job:cc00000000000003": 0
+    },
+    "updated_at": "2026-10-07T09:31:00.000Z"
+  },
+  "jobs": {}
+}

@@ -1,0 +1,40 @@
+{
+  "name": "a mapped-over workflow step with three jobs produces three job records",
+  "description": "Enrichment is per job, never per workflow: the invocation's step lists three jobs (only visible with step_details=true), each gets its own details fetch and its own record, and the three jobs in the history listing are filed under the invocation rather than written as unattributed runs.",
+  "tier": 1,
+  "inputs": ["/reconcile"],
+  "env": {
+    "ANTHROPIC_API_KEY": "fake-eval-key",
+    "GALAXY_URL": "https://usegalaxy.org",
+    "GALAXY_API_KEY": "fake-eval-galaxy-key",
+    "LOOM_GALAXY_FIXTURE": "galaxy-fixture.json"
+  },
+  "timeoutMs": 20000,
+  "assertions": {
+    "events": {
+      "mustNotInclude": ["agent_start", "tool_execution_start", "turn_start"]
+    },
+    "activity": {
+      "mustNotIncludeKinds": ["reconcile.unattributed", "enrichment.unavailable"],
+      "mustInclude": [
+        {
+          "kind": "enrichment.complete",
+          "source": "galaxy-enrich",
+          "payloadContains": {
+            "block_kind": "invocation",
+            "id": "ee00000000000005",
+            "job_count": "3"
+          }
+        }
+      ]
+    },
+    "notebook": {
+      "contains": [
+        "\"job_id\":\"e100000000000001\"",
+        "\"job_id\":\"e100000000000002\"",
+        "\"job_id\":\"e100000000000003\"",
+        "enrichment: complete"
+      ]
+    }
+  }
+}

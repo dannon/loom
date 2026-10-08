@@ -26,6 +26,8 @@ import { maybeNudgeGalaxyReconnect } from "./galaxy-cred-drift.js";
 import * as fs from "fs";
 import * as path from "path";
 import { isDesktopShell, readEnv } from "../../shared/orbit-env.js";
+import { closeSessionRegistry, openSessionRegistry } from "./registry-runtime.js";
+import { getGalaxyConfig } from "./galaxy-api.js";
 
 // Tracked across the session so the shutdown handler can write a complete
 // `loom-session` block. ctx is per-event; we can't read it on shutdown
@@ -124,6 +126,17 @@ export function registerSessionLifecycle(pi: ExtensionAPI): void {
       startedAt: new Date().toISOString(),
     };
 
+    // The approval registry. Opening it never blocks the session: a registry
+    // that can't be loaded or locked comes up read-only, with one notice.
+    const registry = openSessionRegistry({
+      analysisDir: process.cwd(),
+      sessionId: sessionStart.id,
+      serverUrl: getGalaxyConfig()?.url ?? "",
+    });
+    if (registry.notice) {
+      toast(registry.notice, registry.session.store.mode === "writer" ? "info" : "warning");
+    }
+
     const freshSession = readEnv("FRESH_SESSION") === "1";
     const isResume = process.argv.includes("--continue");
 
@@ -150,6 +163,7 @@ export function registerSessionLifecycle(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async () => {
+    closeSessionRegistry();
     stopGalaxyPoller();
     disarmGalaxyLivePanel();
     followUps.clear();

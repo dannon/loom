@@ -74,11 +74,12 @@ export function registerExecutionCommands(pi: ExtensionAPI): void {
       `The user typed /execute (or /run). Read \`${nbPath}\`, locate the most ` +
         `recent plan section that has unchecked steps (\`- [ ]\`), and execute ` +
         `the next pending step, then continue the authorized plan as prerequisites are verified. ` +
-        `This is an execution request, not a request for another proposal or status-only response. For each step:\n` +
+        `This is an execution request, not a request for another plan draft or status-only response. For each step:\n` +
         `1. Decide local vs Galaxy per the plan's routing tag (see [local|hybrid|remote] in the section header).\n` +
-        `2. **Galaxy steps run in the BACKGROUND — this is the default.** Invoke via Galaxy MCP, call ` +
-        `galaxy_invocation_record({ invocationId, notebookAnchor, label }) — or, for a single tool run, ` +
-        `galaxy_job_record({ jobId, notebookAnchor, label }). Continue other ready, authorized work. ` +
+        `2. **Galaxy steps run in the BACKGROUND — this is the default.** Propose the run with loom_propose ` +
+        `and wait for the user's /approve, then invoke exactly that via Galaxy MCP and call ` +
+        `galaxy_invocation_record({ invocationId, notebookAnchor, label, proposalId }) — or, for a single tool run, ` +
+        `galaxy_job_record({ jobId, notebookAnchor, label, proposalId }). Continue other ready, authorized work. ` +
         `If no work is ready because a prerequisite is still running, report that and yield; ` +
         `the background poller queues automatic follow-up by default. Do NOT sit in this turn polling the invocation to completion. ` +
         `Leave unverified steps unchecked. Respect an explicit automatic-follow-up opt-out and report it honestly.\n` +

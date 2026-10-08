@@ -96,6 +96,31 @@ describe("checkInvocations", () => {
     expect(notebook).toContain("Workflow completed: 2 jobs succeeded");
   });
 
+  it("marks a Galaxy 26.x invocation completed when it reports state completed", async () => {
+    // Galaxy 26.0 added workflow completion monitoring: a finished invocation
+    // moves on from `scheduled` to `completed`. Read as non-terminal, it left
+    // every finished workflow on a 26.x server at in_progress forever.
+    writeFileSync(nbPath, renderInvocationYaml(invocation()), "utf-8");
+    vi.spyOn(galaxyApi, "galaxyGetInvocation").mockResolvedValue({
+      id: "inv-1",
+      state: "completed",
+      workflow_id: "wf-1",
+      history_id: "hist-1",
+      steps: [
+        {
+          id: "step-1",
+          order_index: 0,
+          state: null,
+          jobs: [{ id: "job-1", state: "ok", tool_id: "Cut1" }],
+        },
+      ],
+    } as never);
+
+    const result = await checkInvocations(undefined);
+    expect(JSON.parse(result.content[0].text).results[0].autoAction).toBe("completed");
+    expect(readFileSync(nbPath, "utf-8")).toContain("status: completed");
+  });
+
   it("marks an invocation failed when any job errors", async () => {
     writeFileSync(nbPath, renderInvocationYaml(invocation()), "utf-8");
     vi.spyOn(galaxyApi, "galaxyGetInvocation").mockResolvedValue({

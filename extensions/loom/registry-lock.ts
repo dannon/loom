@@ -35,6 +35,44 @@ export interface LockRecord {
   heartbeat: string;
 }
 
+/** The store is synchronous end to end, so its retry backoff is too. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Rename `tmp` over `file`, removing `tmp` if that fails for good. Windows
+ * refuses to replace a file a scanner or another rename is touching at that
+ * instant (EPERM/EACCES/EBUSY) where POSIX would just swap it in -- the
+ * notebook writer hit this (#504) -- so there a brief retry gets the outcome
+ * POSIX gets. Shared by the lock file and the registry's own writes.
+ */
+export function renameReplacing(
+  fs: RegistryFs,
+  tmp: string,
+  file: string,
+  platform: NodeJS.Platform,
+): void {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.renameSync(tmp, file);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      const transient = code === "EPERM" || code === "EACCES" || code === "EBUSY";
+      if (platform !== "win32" || !transient || attempt >= 10) {
+        try {
+          fs.unlinkSync(tmp);
+        } catch {
+          // best effort
+        }
+        throw err;
+      }
+      sleepSync(10 * (attempt + 1));
+    }
+  }
+}
+
 export function newWriterToken(): string {
   return randomBytes(16).toString("hex");
 }
@@ -77,6 +115,7 @@ export class RegistryLock {
     private readonly clock: () => number,
     private readonly pid: number,
     private readonly sessionId: string,
+    private readonly platform: NodeJS.Platform = process.platform,
   ) {}
 
   /** The token this process holds, or null if it isn't the writer. */
@@ -112,16 +151,7 @@ export class RegistryLock {
   private writeAtomic(rec: LockRecord): void {
     const tmp = `${this.lockPath}.${this.pid}.${randomBytes(6).toString("hex")}.tmp`;
     this.fs.writeFileSync(tmp, JSON.stringify(rec), { flag: "wx" });
-    try {
-      this.fs.renameSync(tmp, this.lockPath);
-    } catch (err) {
-      try {
-        this.fs.unlinkSync(tmp);
-      } catch {
-        // best effort
-      }
-      throw err;
-    }
+    renameReplacing(this.fs, tmp, this.lockPath, this.platform);
   }
 
   acquire(): AcquireResult {

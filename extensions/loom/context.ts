@@ -458,6 +458,15 @@ whole wrapper — keep its keys, replace every placeholder (\`<value>\`,
 approved analysis.** Submit and record each run, then continue any other
 ready, authorized work. Do not spend a turn in a polling/sleep loop.
 
+**Propose, then wait for \`/approve\`.** Before a Galaxy run, call
+\`loom_propose\` with the step, the target, the exact inputs, and each
+parameter you set with a rationale. It checks them against the tool's or
+workflow's template and returns a table: show it, and ask the user to type
+\`/approve <proposal-id>\`. You can't approve a proposal, and editing its
+block afterwards revokes the approval. Once approved, submit exactly what
+was proposed with the usual Galaxy tools, and pass \`proposalId\` when you
+record the run.
+
 **The harness records the run; you name the step it belongs to.** Loom
 writes the notebook block itself the moment a Galaxy submission answers,
 reading the id out of Galaxy's own response, so the poller is already
@@ -468,6 +477,9 @@ invocationId, notebookAnchor, label })\` and tool runs with
 \`galaxy_job_record({ jobId, notebookAnchor, label })\`. The call sets the
 label and anchor on the block Loom already wrote, and writes a new block only
 if nothing in the notebook carries that id. Use the IDs returned by Galaxy.
+Runs Loom finds in the history that no block recorded are written with
+\`notebook_anchor: unattributed\`; bind them the same way, and the user can run
+\`/reconcile\` to re-check the history against the notebook.
 
 - If the submission result or a current check already shows terminal state,
   inspect the outputs now. A quick merge or metadata operation can finish

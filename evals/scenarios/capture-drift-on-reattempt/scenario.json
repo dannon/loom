@@ -1,0 +1,35 @@
+{
+  "name": "a re-attempt of a step on a different tool version is marked as drift",
+  "description": "Step 1 already has a completed attempt on fastp 0.23.4. A second attempt on the same step ran 0.24.0. When the new attempt's enrichment completes, the block must carry drift: [{tool_id, from, to}] -- versions only, compared on the tool id without its version segment -- and a drift.detected row must name the attempt it was compared against.",
+  "tier": 1,
+  "inputs": ["/reconcile"],
+  "env": {
+    "ANTHROPIC_API_KEY": "fake-eval-key",
+    "GALAXY_URL": "https://usegalaxy.org",
+    "GALAXY_API_KEY": "fake-eval-galaxy-key",
+    "LOOM_GALAXY_FIXTURE": "galaxy-fixture.json"
+  },
+  "timeoutMs": 20000,
+  "assertions": {
+    "events": {
+      "mustNotInclude": ["agent_start", "tool_execution_start", "turn_start"]
+    },
+    "activity": {
+      "mustInclude": [
+        {
+          "kind": "drift.detected",
+          "source": "galaxy-enrich",
+          "payloadContains": {
+            "id": "f100000000000002",
+            "against_attempt_id": "01K6ZQ7B3M2N4P5Q6R7S8T9V0W"
+          }
+        }
+      ]
+    },
+    "notebook": {
+      "contains": [
+        "drift: [{\"tool_id\":\"toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp\",\"from\":\"0.23.4\",\"to\":\"0.24.0\"}]"
+      ]
+    }
+  }
+}

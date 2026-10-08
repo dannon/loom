@@ -13,6 +13,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getNotebookPath } from "./state";
+import { defaultDeps as proposalDeps, noteProposalBinding } from "./proposal-commands";
 import {
   readNotebook,
   writeNotebook,
@@ -41,6 +42,8 @@ import {
   UnknownAnchorError,
 } from "./notebook-anchors";
 import {
+  INVOCATION_SCHEDULED_OK,
+  INVOCATION_SCHEDULING_DONE,
   getGalaxyConfig,
   galaxyGetInvocation,
   sameGalaxyServer,
@@ -581,6 +584,13 @@ anchor must resolve in notebook.md, and the invocation id must exist on the Gala
       label: Type.String({
         description: "Human-readable description for status display, e.g. 'BWA alignment'",
       }),
+      proposalId: Type.Optional(
+        Type.String({
+          description:
+            "The approved proposal this run carries out (the id from loom_propose that the " +
+            "user approved). Recorded alongside the run; it doesn't approve anything.",
+        }),
+      ),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
       const notebookPath = getNotebookPath();
@@ -664,6 +674,13 @@ anchor must resolve in notebook.md, and the invocation id must exist on the Gala
         );
 
         const where = `${inv.invocationId} (${inv.label}) at ${inv.notebookAnchor}`;
+        const proposal = params.proposalId
+          ? noteProposalBinding(proposalDeps, {
+              proposalId: params.proposalId,
+              notebookAnchor: inv.notebookAnchor,
+              run: { kind: "invocation", id: inv.invocationId },
+            })
+          : undefined;
         return {
           content: [
             {
@@ -677,6 +694,7 @@ anchor must resolve in notebook.md, and the invocation id must exist on the Gala
                   status: inv.status,
                   annotated,
                   serverVerified: inv.serverVerified,
+                  ...(proposal ? { proposal } : {}),
                   message: annotated
                     ? `Bound invocation ${where}. Loom had already recorded the run; this ` +
                       `named the step it belongs to.`
@@ -752,6 +770,13 @@ and the job id must exist on the Galaxy server. \`toolId\` is used only when cre
             "call creates the block; an existing block keeps the tool id it was recorded with.",
         }),
       ),
+      proposalId: Type.Optional(
+        Type.String({
+          description:
+            "The approved proposal this run carries out (the id from loom_propose that the " +
+            "user approved). Recorded alongside the run; it doesn't approve anything.",
+        }),
+      ),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
       const notebookPath = getNotebookPath();
@@ -811,6 +836,13 @@ and the job id must exist on the Galaxy server. \`toolId\` is used only when cre
         );
 
         const where = `${job.jobId} (${job.label}) at ${job.notebookAnchor}`;
+        const proposal = params.proposalId
+          ? noteProposalBinding(proposalDeps, {
+              proposalId: params.proposalId,
+              notebookAnchor: job.notebookAnchor,
+              run: { kind: "job", id: job.jobId },
+            })
+          : undefined;
         return {
           content: [
             {
@@ -824,6 +856,7 @@ and the job id must exist on the Galaxy server. \`toolId\` is used only when cre
                   status: job.status,
                   annotated,
                   serverVerified: job.serverVerified,
+                  ...(proposal ? { proposal } : {}),
                   message: annotated
                     ? `Bound job ${where}. Loom had already recorded the run; this named the ` +
                       `step it belongs to.`
@@ -932,21 +965,7 @@ interface CheckResultEntry {
   autoAction?: string;
 }
 
-/**
- * Invocation states in which Galaxy has stopped scheduling steps
- * (`WorkflowInvocation.states`). Anything else -- `new`, `ready`, `cancelling`,
- * and whatever Galaxy adds next -- means more jobs may still appear, so the
- * jobs materialized so far cannot be the whole story.
- *
- * Listing the terminal states rather than the transient ones is the same safe
- * default the job-state table uses: an unrecognised state keeps us watching
- * instead of declaring an outcome we can't name.
- */
-const TERMINAL_INVOCATION_STATES: ReadonlySet<string> = new Set([
-  "scheduled",
-  "cancelled",
-  "failed",
-]);
+const TERMINAL_INVOCATION_STATES = INVOCATION_SCHEDULING_DONE;
 
 /** Galaxy job states that mean "this job failed", as opposed to ended some other way. */
 const FAILED_JOB_STATES: ReadonlySet<string> = new Set(["error", "failed", "deleted"]);
@@ -1159,7 +1178,7 @@ export async function checkInvocations(
             summary: `Workflow failed: Galaxy reported invocation state "failed"`,
           };
           autoAction = "failed";
-        } else if (summary.ok > 0 && inv.state === "scheduled") {
+        } else if (summary.ok > 0 && INVOCATION_SCHEDULED_OK.has(inv.state)) {
           transition = {
             status: "completed",
             summary:

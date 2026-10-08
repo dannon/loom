@@ -1,10 +1,11 @@
 # Approval and attempt registry
 
 Engineer-facing design reference for the registry behind #476. The code lives in
-`extensions/loom/registry*.ts`; where this document and the code disagree, the code is
-right and this document is stale. Only the library exists so far -- nothing in the runtime
-uses it yet -- so most of what follows describes where it is going; the status table at the
-end says which parts are built.
+`extensions/loom/registry*.ts` (the trusted core) and `proposal-commands.ts` (the tool and
+commands that drive it); where this document and the code disagree, the code is right and
+this document is stale. Proposing and approving are wired in; submitting through the
+approval is not yet, so parts of what follows describe where it is going. The status table
+at the end says which parts are built.
 
 ## Why it exists
 
@@ -146,6 +147,13 @@ isn't signed with this session's key -- and the write fails without touching the
 A filesystem gives no compare-and-swap, so the check and the rename after it are two steps.
 That window is one synchronous rename against a two-minute staleness limit.
 
+Taking over a stale lock has a window of its own. Two sessions that both find the lock stale
+can each write their takeover and each read back its own token before the other's rename
+lands, so for a moment both believe they are the writer. The fencing token bounds it: the
+next write from the one whose token is no longer on disk finds that out, drops to
+read-only, and fails without touching the file. This is a known window, not a guarantee
+the lock gives.
+
 ## Handoff eligibility
 
 ```
@@ -182,6 +190,53 @@ when there is an approval, for its revision. Each check has one scope that can r
 attesting a result doesn't also excuse how it was submitted. None of these can make an
 attempt eligible that the formula alone would not.
 
+## Proposing and approving
+
+Each session opens its registry at session start (`registry-runtime.ts`, called from the
+session lifecycle) and holds the writer lock on a 30-second heartbeat. A registry that
+can't be opened or locked comes up read-only with one notice and never blocks the session;
+`/approve` and `/revoke` then refuse.
+
+- **`loom_propose`** is the model's one write. It takes the step, the target (tool id,
+  workflow id or user-defined tool uuid, optionally a version) and the exact inputs and
+  parameter overrides, each override with a rationale. It fetches the template, names a
+  workflow slot by its step index, and validates: every input names a dataset slot the
+  template has with a `src` that slot takes, every required slot outside a conditional or
+  repeat is filled, every override names a real parameter (Galaxy's flat `a|b` form, repeat
+  indices allowed), and a pinned version is the one Galaxy has. Problems come back as a list
+  and nothing is written. Otherwise it appends a `loom-proposal` block and records
+  `proposal.created`. Assertion ids are refused until assertions exist.
+- **`/approve <proposal-id>`** is the consent. It re-fetches the template and re-validates
+  (a hand-written block is held to the same rules), shows the table it is about to freeze
+  in a confirm dialog when there is a UI (where there isn't -- the terminal's json and print modes -- it refuses with the table unless the user adds `--yes`), re-reads the block and refuses if it moved, then
+  freezes the template under `templates/`, resolves the version, builds and hashes the Spec,
+  and records a live user approval on a fresh attempt, logging `proposal.approved` with the frozen table, so it is on the record even where a notice goes nowhere. Pi runs
+  slash commands only for typed input -- extension-sent messages don't expand them -- so the
+  model has no path to it.
+- **Revoke on edit** is "the hash no longer matches", literally: on every notebook change
+  and before each command, the Spec is rebuilt from the block as it reads now against what
+  was frozen, and a different `spec_revision` revokes the approval (`proposal.revoked`). A
+  removed, duplicated or unreadable block revokes too; a label edit doesn't, since the label
+  isn't part of what runs. `/revoke` does the same on request. Drift is computed whatever
+  the store's mode: a session that approved and then lost the lock, or whose revocation
+  write failed, holds the revocation in memory, every reader in the session applies it, and
+  it is written as soon as the store can take it.
+- **`/pending`** lists proposals without a live approval and why: never approved, revoked,
+  restored from an earlier session, or unreadable.
+
+The block may carry a `spec_revision` line the harness echoes after approval. The parser
+never returns it; whether a proposal is approved is the registry's call. Until
+`loom_submit` exists the model submits with the ordinary tools, and the record tools'
+`proposalId` only logs a `proposal.bound` row marked as the agent's claim -- it writes
+nothing to the registry or to the block's harness fields.
+
+What `/approve` freezes is Galaxy's own description, through galaxy-ops: a tool's
+`io_details` (`getToolDetails`), a workflow's details plus its run-form slots
+(`getWorkflowDetails`, `resolveWorkflowSlots`), or a user-defined tool's record found by
+uuid (`listUserTools`). galaxy-ops can't yet template an older workflow version, describe a
+tool at a version other than the one its id names, or fetch one user-defined tool by uuid;
+those requests are refused rather than guessed at.
+
 ## Submitting through galaxy-ops
 
 The registry does not talk to Galaxy. It defines a `Submitter` port
@@ -215,8 +270,8 @@ real import graph to hold that line.
 | Import rule, server quarantine                                                            | built (#548)                                                            |
 | `computeHandoffEligible`                                                                  | built (#548, rules settled in #558)                                     |
 | `Submitter` port                                                                          | built (#548); galaxy-ops adapter not yet                                |
-| `loom_propose`, `loom-proposal` block, `/approve`, `/revoke`, `/pending`, proposal card   | next                                                                    |
-| `loom_submit`, reservation, `submission_unknown`, `/attribute`, ungated auto-registration | after that                                                              |
+| `loom_propose`, `loom-proposal` block, `/approve`, `/revoke`, `/pending`                  | built; Orbit proposal card not yet                                      |
+| `loom_submit`, reservation, `submission_unknown`, `/attribute`, ungated auto-registration | next                                                                    |
 | `trustedRecord` allowlist, desktop floors, evaluation writer, evidence gate, Page carrier | last                                                                    |
 | `conformant_by_reconcile` for imported attempts                                           | waits on capture keeping effective params and input ids, and enrichment |
 
