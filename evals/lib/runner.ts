@@ -198,6 +198,7 @@ function spawnLoom(
     PI_TELEMETRY: "0",
     LOOM_FRESH_SESSION: "1",
     HOME: fakeHome, // isolates ~/.loom/config.json reads
+    USERPROFILE: fakeHome, // os.homedir() reads this one on Windows
     ...uvCacheEnv(),
   };
 
