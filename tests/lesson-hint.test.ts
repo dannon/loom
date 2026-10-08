@@ -8,6 +8,7 @@ import {
   decideToolResultHint,
   formatLessonHint,
   LESSON_HINT_MARKER,
+  MAX_HINTS_PER_TURN,
   recordSurfacing,
   registerLessonHint,
 } from "../extensions/loom/lesson-hint";
@@ -20,7 +21,7 @@ import { resetState, setNotebookPath } from "../extensions/loom/state";
 import { lessonFile } from "./lessons-fixture";
 import { clip, collapse, firstSentence } from "../extensions/loom/lessons/text";
 import { LESSONS_WRAPPER_TAG, wrapLessons } from "../extensions/loom/lessons/wrapper";
-import { resultTextOf } from "../extensions/loom/lessons/pi-event-contract";
+import { appendHintToContent, resultTextOf } from "../extensions/loom/lessons/pi-event-contract";
 import { withoutLessonHints } from "../shared/lesson-hint-marker.js";
 
 describe("text helpers", () => {
@@ -163,8 +164,8 @@ describe("decideToolResultHint", () => {
     ).not.toBeNull();
   });
 
-  it("returns null when the result already carries ANY lesson hint", () => {
-    const already = [...failing, text(`${LESSON_HINT_MARKER} something else`)];
+  it("returns null when the result already carries ANY hint Loom appended", () => {
+    const already = appendHintToContent(failing, `${LESSON_HINT_MARKER} something else`);
     expect(
       decideToolResultHint(
         { toolName: "galaxy_run_tool", input: {}, content: already },
@@ -172,6 +173,19 @@ describe("decideToolResultHint", () => {
         new Set(),
       ),
     ).toBeNull();
+  });
+
+  it("still hints when the TOOL opens a block with the marker, and reads that block as its text", () => {
+    // Not Loom's: a tool dressing its output up as a lesson neither suppresses
+    // the real hint nor hides its own text from the matcher.
+    const dressed = [text(`${LESSON_HINT_MARKER} No reference index registered for build mm39`)];
+    const out = decideToolResultHint(
+      { toolName: "galaxy_run_tool", input: {}, content: dressed },
+      [REF],
+      new Set(),
+    );
+    expect(out?.match.lesson.id).toBe(REF.id);
+    expect(out?.content).toHaveLength(2);
   });
 
   it("surfaces at most one lesson per result, the best-ranked one", () => {
@@ -280,21 +294,26 @@ describe("recordSurfacing + registerLessonHint", () => {
 
   /** pi's runner: handlers in registration order, each fed the previous content. */
   function chain(register: (pi: ExtensionAPI) => void) {
-    const handlers: ((e: unknown, c: unknown) => Promise<unknown>)[] = [];
+    type Handler = (e: unknown, c: unknown) => Promise<unknown>;
+    const handlers = new Map<string, Handler[]>();
     const pi = {
-      on: (name: string, h: (e: unknown, c: unknown) => Promise<unknown>) => {
-        if (name === "tool_result") handlers.push(h);
+      on: (name: string, h: Handler) => {
+        handlers.set(name, [...(handlers.get(name) ?? []), h]);
       },
     } as unknown as ExtensionAPI;
     register(pi);
-    return async (event: Record<string, unknown>) => {
+    const run = async (event: Record<string, unknown>) => {
       const current = { ...event };
-      for (const h of handlers) {
+      for (const h of handlers.get("tool_result") ?? []) {
         const r = (await h(current, {})) as { content?: unknown } | undefined;
         if (r?.content !== undefined) current.content = r.content;
       }
       return current as { content: { type: string; text: string }[] };
     };
+    run.emit = async (name: string) => {
+      for (const h of handlers.get(name) ?? []) await h({}, {});
+    };
+    return run;
   }
 
   const event = () => ({
@@ -345,6 +364,38 @@ describe("recordSurfacing + registerLessonHint", () => {
     expect(second.content.map((c) => c.text).join("\n")).not.toContain(LESSON_HINT_MARKER);
     expect(activityRows().filter((r) => r.kind === "lesson.surfaced")).toHaveLength(1);
     expect(readCounters()[REF.id].surfaced).toBe(1);
+  });
+
+  it("surfaces at most MAX_HINTS_PER_TURN lessons in one turn, and more after turn_start", async () => {
+    mkdirSync(join(lessonsDir, "galaxy-tools"), { recursive: true });
+    // Tool triggers need three characters or more.
+    const ids = ["toolone", "tooltwo", "toolthree", "toolfour"];
+    for (const id of ids) {
+      writeFileSync(
+        join(lessonsDir, "galaxy-tools", `budget-${id}.md`),
+        lessonFile({ title: `Tool ${id} fails`, trigger: { tools: `["${id}"]` } }),
+      );
+    }
+    resetLessonStore();
+    const run = chain(registerLessonHint);
+    const hinted = async (id: string) => {
+      const out = await run({ ...event(), toolCallId: `call-${id}`, input: { tool_id: id } });
+      return out.content
+        .map((c) => c.text)
+        .join("\n")
+        .includes(LESSON_HINT_MARKER);
+    };
+    expect(MAX_HINTS_PER_TURN).toBe(3);
+    expect(await hinted("toolone")).toBe(true);
+    expect(await hinted("tooltwo")).toBe(true);
+    expect(await hinted("toolthree")).toBe(true);
+    // Fourth distinct lesson in the same turn: withheld, and NOT armed.
+    expect(await hinted("toolfour")).toBe(false);
+    expect(activityRows().filter((r) => r.kind === "lesson.surfaced")).toHaveLength(3);
+    expect(readCounters()["galaxy-tools/budget-toolfour"]).toBeUndefined();
+    await run.emit("turn_start");
+    expect(await hinted("toolfour")).toBe(true);
+    expect(activityRows().filter((r) => r.kind === "lesson.surfaced")).toHaveLength(4);
   });
 
   it("re-arms on a new session", async () => {

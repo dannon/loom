@@ -13,7 +13,7 @@ import { getNotebookPath } from "./state";
 import { appendActivityEvent } from "./activity";
 import { collectSecretValues, redactSecrets } from "./secret-redaction";
 import { loadConfig } from "../../shared/loom-config.js";
-import { withoutLessonHints } from "../../shared/lesson-hint-marker.js";
+import { withoutAppendedLessonHints } from "./lessons/pi-event-contract";
 
 // Read-only / filesystem-traversal tools clutter the log without telling the
 // user anything they'd want to re-read later. Omit them. lessons_search is
@@ -90,7 +90,7 @@ export function summarizeResult(result: unknown, secrets: string[] = []): string
 function withoutHintBlocks(result: unknown): unknown {
   const content = (result as { content?: unknown } | null)?.content;
   if (!Array.isArray(content)) return result;
-  return { ...(result as object), content: withoutLessonHints(content) };
+  return { ...(result as object), content: withoutAppendedLessonHints(content) };
 }
 
 export function registerActivityHooks(pi: ExtensionAPI): void {

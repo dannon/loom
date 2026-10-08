@@ -3,6 +3,11 @@
 // sees that block too, so a handler that reads the result as the tool's own
 // output -- an error signature, a failure pattern -- has to leave it out, or a
 // failed call with no text of its own would be described by Loom's hint.
+//
+// The prefix test here is for a shell rendering a result it did not build.
+// Inside the brain, consumers strip only the hints the process itself
+// appended (extensions/loom/lessons/pi-event-contract.ts), since a tool can
+// open a block with the marker too and its text must still count as its own.
 
 export const LESSON_HINT_MARKER = "[loom lesson]";
 

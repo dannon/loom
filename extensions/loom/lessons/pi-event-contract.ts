@@ -12,10 +12,20 @@
  * Handlers chain inside one extension in registration order, and pi feeds each
  * one the previous handler's `content`. So every handler registered after
  * `registerLessonHint` sees the hint, which is why the hint is a block of its
- * own that `withoutLessonHints` (shared/lesson-hint-marker.js) can drop.
+ * own, and why this module remembers which blocks it appended: a consumer that
+ * drops "the hint" drops only those, never a tool's own block that happens to
+ * open with the marker.
  */
 
 import type { MessageEndEvent, ToolResultEvent } from "@earendil-works/pi-coding-agent";
+import { isLessonHintBlock } from "../../../shared/lesson-hint-marker.js";
+
+// The exact text of every hint this process appended. A tool can open a block
+// of its own with the marker, but it cannot put that block in here, so a
+// hostile output that dresses its error up as a lesson is still read as the
+// tool's error by the observation collector and the activity log. One entry
+// per lesson that fired; cleared with the armed set on session_start.
+const appendedHints = new Set<string>();
 
 /** The content array pi hands a `tool_result` handler, and accepts back. */
 export type LessonToolResultContent = ToolResultEvent["content"];
@@ -72,5 +82,24 @@ export function appendHintToContent(
   content: LessonToolResultContent,
   hint: string,
 ): LessonToolResultContent {
+  appendedHints.add(hint);
   return [...content, { type: "text", text: hint }];
+}
+
+/** A block Loom itself appended -- not merely one that opens with the marker. */
+export function isAppendedLessonHint(
+  block: { type: string; text?: string } | null | undefined,
+): boolean {
+  return isLessonHintBlock(block) && appendedHints.has(block!.text as string);
+}
+
+/** The content as the tool produced it: every hint Loom appended removed. */
+export function withoutAppendedLessonHints<T extends { type: string; text?: string }>(
+  content: readonly T[],
+): T[] {
+  return content.filter((block) => !isAppendedLessonHint(block));
+}
+
+export function resetAppendedLessonHints(): void {
+  appendedHints.clear();
 }

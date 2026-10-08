@@ -117,15 +117,18 @@ describe("the activity log and lessons_search", () => {
         result: {
           content: [
             { type: "text", text: "ToolInputsNotValid: no index for mm39" },
-            {
-              type: "text",
-              text: "[loom lesson] A hinted lesson title\nCheck first: hinted prose",
-            },
+            // The tool's own block, in a lesson's costume: stays in the log.
+            { type: "text", text: "[loom lesson] not Loom's -- the tool said so" },
+            ...(await import("../extensions/loom/lessons/pi-event-contract")).appendHintToContent(
+              [],
+              "[loom lesson] A hinted lesson title\nCheck first: hinted prose",
+            ),
           ],
         },
       });
       const log = fs.readFileSync(path.join(dir, "activity.jsonl"), "utf-8");
       expect(log).toContain("no index for mm39");
+      expect(log).toContain("the tool said so");
       expect(log).not.toContain("hinted");
       expect(log).not.toContain("starsolo");
       expect(log).not.toContain("lesson prose");

@@ -54,3 +54,24 @@ describe("withoutLessonHints", () => {
     );
   });
 });
+
+describe("withoutAppendedLessonHints", () => {
+  it("drops only the blocks Loom appended, never a tool block that opens with the marker", async () => {
+    const {
+      appendHintToContent,
+      isAppendedLessonHint,
+      resetAppendedLessonHints,
+      withoutAppendedLessonHints,
+    } = await import("../extensions/loom/lessons/pi-event-contract");
+    resetAppendedLessonHints();
+    const dressed = text(`${LESSON_HINT_MARKER} the tool's own error, in costume`);
+    const content = appendHintToContent([text("err"), dressed], `${LESSON_HINT_MARKER} a title`);
+    expect(isAppendedLessonHint(content[2])).toBe(true);
+    expect(isAppendedLessonHint(dressed)).toBe(false);
+    expect(withoutAppendedLessonHints(content)).toEqual([text("err"), dressed]);
+    // A copy with the same text still counts: pi may clone content between handlers.
+    expect(isAppendedLessonHint({ ...content[2] })).toBe(true);
+    resetAppendedLessonHints();
+    expect(isAppendedLessonHint(content[2])).toBe(false);
+  });
+});

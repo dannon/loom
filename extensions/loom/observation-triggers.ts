@@ -19,13 +19,13 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
-import { withoutLessonHints } from "../../shared/lesson-hint-marker.js";
 import { normalizeSignature } from "../../shared/observation-contract.js";
 import type {
   Observation,
   ObservationKind,
   ObservationTrigger,
 } from "../../shared/observation-contract.js";
+import { withoutAppendedLessonHints } from "./lessons/pi-event-contract";
 import {
   appendSentLog,
   appendToObservationOutbox,
@@ -493,8 +493,9 @@ export function liveDeliverDeps(
 }
 
 function errorTextOf(content: ReadonlyArray<{ type: string; text?: string }>): string {
-  // A lesson hint is Loom's prose, not the tool's error, wherever it sits.
-  return withoutLessonHints(content)
+  // A hint Loom appended is Loom's prose, not the tool's error, wherever it
+  // sits. A block the TOOL opened with the marker is still the tool's error.
+  return withoutAppendedLessonHints(content)
     .filter((c) => c.type === "text" && typeof c.text === "string")
     .map((c) => c.text as string)
     .join("\n");

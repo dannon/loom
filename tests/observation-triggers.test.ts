@@ -811,13 +811,31 @@ describe("registerObservationTriggers", () => {
     const { registerObservationTriggers, pendingObservationCount } =
       await import("../extensions/loom/observation-triggers.js");
     const { LESSON_HINT_MARKER } = await import("../shared/lesson-hint-marker.js");
-    const hint = { type: "text", text: `${LESSON_HINT_MARKER} A lesson title the matcher found` };
+    const { appendHintToContent } = await import("../extensions/loom/lessons/pi-event-contract");
     const pi = fakePi();
     registerObservationTriggers(pi.api as unknown as ExtensionAPI);
     await pi.emit("session_start", {}, {});
     // No text of its own: without the filter the hint becomes the signature.
-    await pi.emit("tool_result", { ...failure, content: [{ type: "text", text: "" }, hint] }, {});
+    const content = appendHintToContent(
+      [{ type: "text", text: "" }],
+      `${LESSON_HINT_MARKER} A lesson title the matcher found`,
+    );
+    await pi.emit("tool_result", { ...failure, content }, {});
     expect(pendingObservationCount()).toBe(0);
+  });
+
+  it("reads a block the TOOL opened with the marker as the tool's own error", async () => {
+    // A hostile output cannot hide its error from the collector by dressing
+    // it up as a lesson: only hints Loom itself appended are left out.
+    const { registerObservationTriggers, pendingObservationCount } =
+      await import("../extensions/loom/observation-triggers.js");
+    const { LESSON_HINT_MARKER } = await import("../shared/lesson-hint-marker.js");
+    const pi = fakePi();
+    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
+    await pi.emit("session_start", {}, {});
+    const dressed = { type: "text", text: `${LESSON_HINT_MARKER} ${failure.content[0].text}` };
+    await pi.emit("tool_result", { ...failure, content: [dressed] }, {});
+    expect(pendingObservationCount()).toBe(1);
   });
 
   it("takes the signature from the tool's text even when a hint block comes first", async () => {
@@ -841,7 +859,11 @@ describe("registerObservationTriggers", () => {
     const pi = fakePi();
     registerObservationTriggers(pi.api as unknown as ExtensionAPI);
     await pi.emit("session_start", {}, ctx);
-    const hint = { type: "text", text: `${LESSON_HINT_MARKER} A lesson title the matcher found` };
+    const { appendHintToContent } = await import("../extensions/loom/lessons/pi-event-contract");
+    const [hint] = appendHintToContent(
+      [],
+      `${LESSON_HINT_MARKER} A lesson title the matcher found`,
+    );
     await pi.emit("tool_result", { ...failure, content: [hint, ...failure.content] }, ctx);
     expect(pendingObservationCount()).toBe(1);
     await pi.emit("agent_settled", {}, ctx);

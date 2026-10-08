@@ -12,9 +12,11 @@
  * `redactLessonText` for the unwrapped inline hint), so a user-local lesson
  * quoting a key is scrubbed whatever the registration order in `index.ts`.
  *
- * One hint per result, once per lesson per session. Two notes on one result
- * crowd out the output the model is there to read, and re-firing the same
- * lesson through a retry loop is nagging.
+ * One hint per result, once per lesson per session, and a few per turn. Two
+ * notes on one result crowd out the output the model is there to read,
+ * re-firing the same lesson through a retry loop is nagging, and a turn with
+ * many matching results -- up to 200 local lessons are admitted -- would
+ * otherwise read as a lecture.
  */
 
 import * as path from "node:path";
@@ -24,7 +26,10 @@ import { bumpSurfaced } from "./lessons/counters";
 import { matchStepText, matchToolEvent } from "./lessons/matcher";
 import {
   appendHintToContent,
+  isAppendedLessonHint,
+  resetAppendedLessonHints,
   resultTextOf,
+  withoutAppendedLessonHints,
   type LessonToolResultContent,
 } from "./lessons/pi-event-contract";
 import { getLessonStore, resetLessonStore } from "./lessons/store";
@@ -32,11 +37,7 @@ import type { SearchHit } from "./lessons/search";
 import { clip, collapse, firstSentence } from "./lessons/text";
 import type { Lesson, Match, SurfaceKind } from "./lessons/types";
 import { redactLessonText, wrapLessons } from "./lessons/wrapper";
-import {
-  isLessonHintBlock,
-  LESSON_HINT_MARKER,
-  withoutLessonHints,
-} from "../../shared/lesson-hint-marker.js";
+import { LESSON_HINT_MARKER } from "../../shared/lesson-hint-marker.js";
 import { getNotebookPath } from "./state";
 
 /** Distinctive opening, so a hint can't be mistaken for the tool's own output. */
@@ -46,6 +47,8 @@ export const LESSONS_SEARCH_TOOL = "lessons_search";
 
 const MAX_CHECK_FIRST = 300;
 const MAX_STEP_LESSONS = 3;
+/** Inline hints per model turn; a matched lesson past this waits for a later turn. */
+export const MAX_HINTS_PER_TURN = 3;
 
 export function formatLessonHint(lesson: Lesson): string {
   // Redact each field BEFORE it is clipped: a key cut in half by the clip no
@@ -95,12 +98,12 @@ export function decideToolResultHint(
   lessons: readonly Lesson[],
   armed: ReadonlySet<string>,
 ): HintDecision | null {
-  // Any hint already present wins, including a different lesson's: this is the
-  // idempotency guard for a re-delivered result, and the one-per-result rule.
-  // A hint is a block of its own, so tool output that merely quotes the marker
-  // no longer counts as one.
-  if (ev.content.some(isLessonHintBlock)) return null;
-  const resultText = resultTextOf(withoutLessonHints(ev.content));
+  // A hint Loom already appended wins, including a different lesson's: this is
+  // the idempotency guard for a re-delivered result, and the one-per-result
+  // rule. Only Loom's own blocks count -- a tool that opens a block with the
+  // marker is quoting it, and that block is read as the tool's text.
+  if (ev.content.some(isAppendedLessonHint)) return null;
+  const resultText = resultTextOf(withoutAppendedLessonHints(ev.content));
 
   const match = matchToolEvent(
     { toolName: ev.toolName, input: ev.input ?? {}, resultText },
@@ -134,18 +137,28 @@ export function decideHintForEvent(
 
 export function registerLessonHint(pi: ExtensionAPI): void {
   const armed = new Set<string>();
+  let turnBudget = MAX_HINTS_PER_TURN;
 
   // A new session starts with nothing fired and re-reads the corpus, so a
   // lesson added or suppressed since the last one takes effect.
   pi.on("session_start", async () => {
     armed.clear();
+    resetAppendedLessonHints();
     resetLessonStore();
+    turnBudget = MAX_HINTS_PER_TURN;
+  });
+
+  pi.on("turn_start", async () => {
+    turnBudget = MAX_HINTS_PER_TURN;
   });
 
   pi.on("tool_result", async (event) => {
+    // Over budget: the lesson stays unarmed, so it can fire on a later turn.
+    if (turnBudget <= 0) return;
     const decision = decideHintForEvent(event, armed);
     if (!decision) return;
     armed.add(decision.match.lesson.id);
+    turnBudget -= 1;
     recordSurfacing(decision.match, "tool_result");
     return { content: decision.content };
   });
