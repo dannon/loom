@@ -467,6 +467,26 @@ If you have a tester ID, you can set it like this:
 
 Run `/tester-id` with no argument to see the current value. It writes only the `testerId` key to `~/.loom/config.json` (the rest of the file is left untouched), and Orbit attaches it to any feedback you send so reports can be traced back to your session. It can also be supplied via the `LOOM_TESTER_ID` environment variable.
 
+#### Lessons
+
+Lessons are short recorded notes on situations that go wrong -- a filter that
+counts NA as zero, a reference index that was never registered -- shipped with
+Loom and added to locally. The whole loop is off until you turn it on. On, a
+lesson is surfaced in chat when a tool result or plan step matches it, the
+agent can search them, `/lesson` lets you record one from the session (it stays
+on this machine until you say otherwise), and failure reports follow the
+`/observations` mode below. Off, nothing recorded is surfaced or searchable,
+`/lesson` is off, and no report is collected or sent.
+
+```
+/lessons          # on or off, and what that covers
+/lessons on       # asks you to confirm once, then turns the loop on
+/lessons off      # turns the whole loop off
+```
+
+`LOOM_LESSONS=off` in the environment keeps it off for a managed install and
+cannot be overridden from the app.
+
 #### Sharing Galaxy failure patterns
 
 When a Galaxy tool fails, or the same step fails three times in a row, Loom
@@ -474,15 +494,15 @@ can report the _shape_ of it -- which tool, which stage, which datatypes, and,
 in `ask` mode, a normalized one-line signature -- to the Galaxy team's private
 intake queue. Those reports are how a problem one person hits becomes a lesson
 Loom surfaces for the next person who hits it (you included), and how the team
-finds what to fix upstream. Nothing goes without your say-so: the default `ask`
-mode shows you the exact payload after a turn that hit a Galaxy error and sends
-only if you confirm.
+finds what to fix upstream. Nothing goes without your say-so: reporting is off
+until lessons are on and you pick a mode, and `ask` shows you the exact payload
+after a turn that hit a Galaxy error and sends only if you confirm.
 
 ```
 /observations               # mode, counts, and where the local log lives
-/observations mode ask      # show me the payload and ask, every time (default)
+/observations mode ask      # show me the payload and ask, every time
 /observations mode auto     # send without asking, structured fields only
-/observations mode off      # collect nothing
+/observations mode off      # collect nothing (default)
 /observations sent          # everything this install has sent
 /observations retract <id>  # delete a sent row, or cancel one still queued
 /observe <note>             # report something yourself
