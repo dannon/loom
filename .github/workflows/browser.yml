@@ -1,17 +1,21 @@
 name: browser
 
 # browser/ is its own package (own lockfile, own lint and test scripts) and is
-# not part of the root build, so it gets its own workflow and only runs when it
-# or this file changes.
+# not part of the root build, so it gets its own workflow. It runs when browser/
+# changes, or Orbit's chat UI and the shared contracts it imports from there.
 on:
   push:
     branches: [main]
     paths:
       - "browser/**"
+      - "app/src/renderer/**"
+      - "shared/**"
       - ".github/workflows/browser.yml"
   pull_request:
     paths:
       - "browser/**"
+      - "app/src/renderer/**"
+      - "shared/**"
       - ".github/workflows/browser.yml"
 
 concurrency:

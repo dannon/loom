@@ -1,4 +1,4 @@
-/** Orbit's layout chain, so the vendored styles.css applies as-is. */
+/** Orbit's layout chain, so Orbit's styles.css applies as-is. */
 
 export const LAYOUT = `
       <div id="app-main">

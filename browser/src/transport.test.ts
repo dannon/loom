@@ -10,7 +10,7 @@ import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const ROOT = join(__dirname);
-const SKIPPED = ["orbit/", "agent/skills/"];
+const SKIPPED = ["agent/skills/"];
 
 /** Every direct `fetch(` call that is not Galaxy, and what it reaches. */
 const NOT_GALAXY: Record<string, string> = {

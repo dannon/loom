@@ -1,7 +1,7 @@
-/* olit-owned styles. The vendored src/orbit/app/src/renderer/styles.css stays byte-identical
-   to loom so it can be re-synced by copy; additions belong here. */
+/* olit-owned styles, layered over Orbit's app/src/renderer/styles.css; additions belong here
+   rather than in Orbit's file. */
 
-/* Credentials picker — reuses the vendored modal shell. */
+/* Credentials picker — reuses Orbit's modal shell. */
 .cred-field {
   margin-bottom: 14px;
   display: flex;

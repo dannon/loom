@@ -1,9 +1,7 @@
-"""Vendored Orbit UI must stay byte-identical, so it can be re-synced by copy.
+"""The vendored skills corpus must stay as galaxy-skills has it.
 
-Upstream moves fast (87 commits to styles.css in six months); olit absorbs that
-for free only while these files are untouched. An edit here turns every future
-sync into a merge, so it fails loudly instead. The files are the ones
-src/orbit/MANIFEST.json lists, under their loom paths; `npm run sync:orbit` writes them.
+Orbit's chat UI used to be vendored here too, under src/orbit; it is now imported from
+app/src/renderer in the same repo, so there is no copy left to drift.
 """
 
 import hashlib
@@ -12,26 +10,11 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-VENDORED = ROOT / "src" / "orbit"
-MANIFEST = VENDORED / "MANIFEST.json"
 
 # The skills corpus is gitignored and fetched by scripts/install_skills.js, which stamps each
 # file's git blob id. Recomputing them catches an edit made after vendoring.
 SKILLS = ROOT / "src" / "agent" / "skills" / "galaxy-skills"
 SKILLS_STAMP = SKILLS / "VENDORED.json"
-
-
-def digest(path: pathlib.Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def current(tracked) -> dict:
-    out = {}
-    for rel in tracked:
-        p = VENDORED / rel
-        if p.exists():
-            out[rel] = digest(p)
-    return out
 
 
 def blob_id(path: pathlib.Path) -> str:
@@ -78,25 +61,6 @@ def skills(argv: list[str]) -> int:
 
 
 def main(argv: list[str]) -> int:
-    pinned = json.loads(MANIFEST.read_text())["files"]
-    now = current(pinned)
-
-    changed = [r for r in pinned if r in now and now[r] != pinned[r]]
-    missing = [r for r in pinned if r not in now]
-    if changed or missing:
-        for r in changed:
-            print(f"  MODIFIED  src/orbit/{r}")
-        for r in missing:
-            print(f"  MISSING   src/orbit/{r}")
-        print(
-            "\nVendored files are synced from loom by copy and must stay identical.\n"
-            "Put olit-specific changes in olit-owned files (e.g. src/credentials.css).\n"
-            "To take a newer loom, sync from a checkout of it, which re-pins them:\n"
-            "  npm run sync:orbit -- <path to a loom checkout>"
-        )
-        return 1
-
-    print(f"{len(pinned)} vendored files unchanged")
     return skills(argv)
 
 

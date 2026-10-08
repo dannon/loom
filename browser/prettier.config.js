@@ -1,4 +1,4 @@
-// Orbit's own settings, so the UI vendored from it stays byte-identical.
+// Orbit's own settings, so this code reads like the Orbit UI it builds on.
 export default {
   endOfLine: "lf",
   printWidth: 100,

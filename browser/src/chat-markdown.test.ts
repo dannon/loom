@@ -2,7 +2,7 @@ import { marked } from "marked";
 import { describe, expect, it, vi } from "vitest";
 
 import { useChatMarkdown } from "./chat-markdown";
-import { renderMarkdown } from "./orbit/app/src/renderer/chat/markdown";
+import { renderMarkdown } from "../../app/src/renderer/chat/markdown";
 
 // happy-dom has no `self.origin`; a browser gives the frame Galaxy's.
 vi.stubGlobal("origin", new URL(document.baseURI).origin);

@@ -112,7 +112,15 @@ export const viteConfigCharts = defineConfig({
     },
   },
   define: defines(env),
+  resolve: {
+    // Orbit's chat UI is imported from ../app/src/renderer, where a bare import would look for
+    // app/'s or the repo root's node_modules. Those aren't installed when only browser/ is, and
+    // chat-markdown.ts has to configure the same `marked` the chat UI renders with.
+    dedupe: ["dompurify", "marked"],
+  },
   server: {
+    // The chat UI and the shared contracts it imports live outside browser/.
+    fs: { allow: [".", "../app/src/renderer", "../shared"] },
     proxy: {
       "/api": proxyGalaxy(),
       // Galaxy serves its OpenAPI spec here; the scoped catalog fetches it.

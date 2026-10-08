@@ -2,7 +2,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { ChatPanel } from "./orbit/app/src/renderer/chat/chat-panel";
+import { ChatPanel } from "../../app/src/renderer/chat/chat-panel";
 import { settlePlanDrafts } from "./plan-drafts";
 
 const BODY = "## Plan A: chrM Variant Calling [remote]\n\n- [ ] 1. **QC**";

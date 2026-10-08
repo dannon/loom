@@ -79,38 +79,8 @@ async function galaxyCharts() {
         `           update: bump it and run npm test; visualizations.ts imports its input contract directly`;
 }
 
-/** GitHub's compare lists at most this many files, so a longer list may be missing some. */
-const COMPARE_FILE_CAP = 300;
-
-async function orbit() {
-  const manifest = read("src/orbit/MANIFEST.json");
-  const head = await github(`repos/${manifest.upstream}/commits/main`);
-  const pinned = manifest.commit.slice(0, 8);
-  if (head.sha === manifest.commit) {
-    return `orbit ui   up to date at ${pinned} (${manifest.upstream}@main)`;
-  }
-  const watched = new Set(Object.keys(manifest.files));
-  const cmp = await github(`repos/${manifest.upstream}/compare/${manifest.commit}...${head.sha}`);
-  const files = cmp.files || [];
-  const touched = files.map((f) => f.filename).filter((name) => watched.has(name));
-  const update = "           update: npm run sync:orbit -- <path to a loom checkout at main>";
-  if (touched.length) {
-    return (
-      `orbit ui   BEHIND: ${touched.length} vendored file(s) changed in loom since ${pinned}: ${touched.join(", ")}\n` +
-      update
-    );
-  }
-  if (files.length >= COMPARE_FILE_CAP) {
-    return (
-      `orbit ui   UNKNOWN: loom changed ${files.length}+ files since ${pinned}, more than GitHub lists;\n` +
-      `           compare src/orbit with loom by hand`
-    );
-  }
-  return `orbit ui   up to date: loom is ${cmp.total_commits} commit(s) past ${pinned}, none touching the vendored files`;
-}
-
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  const results = await Promise.allSettled([skills(), galaxyOps(), galaxyCharts(), orbit()]);
+  const results = await Promise.allSettled([skills(), galaxyOps(), galaxyCharts()]);
   for (const r of results) {
     console.log(r.status === "fulfilled" ? r.value : `(could not check: ${r.reason.message})`);
   }

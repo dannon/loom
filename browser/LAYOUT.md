@@ -9,7 +9,6 @@ src/                      the shell (TypeScript)
   saved-session.ts          a conversation saved to Galaxy as a visualization
   transcript.ts artifacts/  the chat drawn from the conversation's events; charts and visualizations
   chat-markdown.ts          the chat's markdown: the model's raw HTML as text, images only from Galaxy
-  orbit/                    vendored from Orbit under loom's own paths, byte-identical
 src/agent/               the agent: pi-durable's harness, in a worker in the browser
   runtime.ts                the harness: conversations per history, model, Stop, save and open
   extension.ts              Olit as a pi-durable extension: tools, prompt, guards
@@ -36,7 +35,6 @@ src/agent/               the agent: pi-durable's harness, in a worker in the bro
 e2e/                      Playwright drives against a stub, plus opt-in live drives
 scripts/                  tooling, one flat folder, each file named for what it does
   install_*                 what `npm run build` calls: pyodide, skills
-  sync_*                    run by hand to copy a pinned upstream in: the Orbit UI
   check_*                   reports and gates that change nothing: stale pins, the
                             integrity of files copied in from elsewhere
 ```
@@ -55,13 +53,12 @@ the entries pi-durable appended. `src/agent/describe.test.ts` pins what `--descr
 
 ## Vendored integrity
 
-Some files are copies of files owned elsewhere: Orbit's chat UI under `src/orbit/` and the
-galaxy-skills corpus under `src/agent/skills/`. They are synced by copy, which works only
-while the copies stay byte-identical, so their hashes are pinned.
+The galaxy-skills corpus under `src/agent/skills/` is a copy of files owned elsewhere. It is
+synced by copy, which works only while the copy stays byte-identical, so its hashes are pinned.
+Orbit's chat UI is not copied: it is imported from `app/src/renderer` in this repo.
 
 ```bash
 npm run vendored                              # or: python3 scripts/check_vendored.py
-npm run sync:orbit -- <loom checkout>         # re-sync the Orbit UI from loom, re-pinned
 ```
 
 The Orbit seam registry, which tracks what Olit's prompts and tools carry from Orbit, lives

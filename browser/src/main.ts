@@ -1,11 +1,11 @@
 /** olit shell: mounts Orbit's ChatPanel, starts the agent worker, drives the chat. */
-import "./orbit/app/src/renderer/styles.css";
+import "../../app/src/renderer/styles.css";
 import "./olit.css";
 import { useChatMarkdown } from "./chat-markdown";
 import { settlePlanDrafts } from "./plan-drafts";
 import { resolveLaunch, summarize } from "./seed-dataset";
-import { ChatPanel } from "./orbit/app/src/renderer/chat/chat-panel";
-import { applyOrbitTheme } from "./orbit/app/src/renderer/theme";
+import { ChatPanel } from "../../app/src/renderer/chat/chat-panel";
+import { applyOrbitTheme } from "../../app/src/renderer/theme";
 import { parseIncoming } from "./incoming";
 import { galaxyCanRun, galaxyRefusalMessage } from "./diagnostics";
 import { buildConfig } from "./config";
