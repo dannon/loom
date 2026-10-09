@@ -200,3 +200,53 @@ describe("tool versions, enrichment and unattributed runs", () => {
     );
   });
 });
+
+describe("the registry's verdict on a row", () => {
+  it("reads handoff_eligible as the brain renders it, and says it", async () => {
+    document.body.innerHTML = `
+      <div id="activity-galaxy-section" class="hidden">
+        <span id="galaxy-invocations-count"></span>
+        <div id="galaxy-invocations-body"></div>
+      </div>`;
+    const evaluation = {
+      execution: "success",
+      conformity: "conformant",
+      check: "conformant_by_reconcile",
+      predicate: "pass",
+      integrity: "ok",
+      authority: "established",
+    };
+    const eligible = upsertInvocationBlock("", invocation({ status: "completed" }), {
+      evaluation,
+      handoffEligible: true,
+      registryRevision: 4,
+    });
+    const held = upsertInvocationBlock(
+      "",
+      invocation({ invocationId: "inv-2", status: "completed" }),
+      {
+        evaluation: { ...evaluation, execution: "unknown" },
+        handoffEligible: false,
+        registryRevision: 4,
+      },
+    );
+    const plain = upsertInvocationBlock("", invocation({ invocationId: "inv-3" }));
+    expect(parseInvocationBlocks(eligible)[0].handoffEligible).toBe(true);
+    expect(parseInvocationBlocks(held)[0].handoffEligible).toBe(false);
+    expect(parseInvocationBlocks(plain)[0].handoffEligible).toBeUndefined();
+
+    const notebook = [eligible, held, plain].join("\n");
+    await refreshGalaxyInvocations({
+      readFile: async () => ({ ok: true, bytes: new TextEncoder().encode(notebook) }),
+    });
+    const rows = [...document.querySelectorAll(".galaxy-invocation-row")].map((r) =>
+      r.textContent!.replace(/\s+/g, " "),
+    );
+    expect(
+      rows.some((t) => t.includes("eligible to hand off") && !t.includes("not eligible")),
+    ).toBe(true);
+    expect(rows.some((t) => t.includes("not eligible to hand off"))).toBe(true);
+    // A run the registry doesn't know about says nothing either way.
+    expect(rows.filter((t) => t.includes("hand off"))).toHaveLength(2);
+  });
+});

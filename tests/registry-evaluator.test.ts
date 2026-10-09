@@ -4,9 +4,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GalaxyApiError } from "../extensions/loom/galaxy-api";
 import {
   evaluateRegistryAttempts,
+  renderRegistryProjection,
   resetRegistryEvaluator,
   type EvaluatorDeps,
 } from "../extensions/loom/registry-evaluator";
+import { findJobBlocks, renderJobYaml } from "../extensions/loom/galaxy-job-block";
 import {
   closeSessionRegistry,
   openSessionRegistry,
@@ -310,5 +312,43 @@ describe("evaluation writer", () => {
     const session = open();
     expect(recordActiveAtShutdown(session)).toBe(1);
     expect(session.store.snapshot().supervision.active_at_shutdown).toEqual([a.attempt_id]);
+  });
+
+  it("renders the verdict onto the run's block, and re-renders a block someone edited", async () => {
+    const a = eligibleAttempt();
+    plantForeignRegistry(a);
+    const session = open();
+    const nb = path.join(dir, "notebook.md");
+    fs.writeFileSync(
+      nb,
+      "# N\n\n" +
+        renderJobYaml({
+          jobId: JOB,
+          galaxyServerUrl: SERVER,
+          notebookAnchor: "step-2",
+          label: "cat",
+          submittedAt: "2026-09-25T12:00:02.000Z",
+          status: "completed",
+        }) +
+        "\n",
+    );
+    await evaluateRegistryAttempts("command", deps({ registry: () => session }));
+    await renderRegistryProjection(session, nb);
+    const [block] = findJobBlocks(fs.readFileSync(nb, "utf-8"));
+    expect(block.handoffEligible).toBe(true);
+    expect(block.evaluation).toMatchObject({
+      execution: "success",
+      check: "conformant_by_reconcile",
+    });
+    expect(block.registryRevision).toBe(session.store.snapshot().revision);
+
+    // An edit to the rendering is representation only: put back on the next pass.
+    fs.writeFileSync(
+      nb,
+      fs.readFileSync(nb, "utf-8").replace("handoff_eligible: true", "handoff_eligible: false"),
+    );
+    await renderRegistryProjection(session, nb);
+    expect(findJobBlocks(fs.readFileSync(nb, "utf-8"))[0].handoffEligible).toBe(true);
+    expect(rows("state.repaired")).toHaveLength(1);
   });
 });

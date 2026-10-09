@@ -35,7 +35,24 @@ import {
   type InvocationDetail,
 } from "./galaxy-api";
 import { parseDatasetRefs, versionFromToolId, walkInvocationJobs } from "./galaxy-enrich";
-import { isTerminalJobState } from "./galaxy-job-block";
+import {
+  isTerminalJobState,
+  locateJobBlock,
+  upsertJobBlock,
+  type JobYaml,
+} from "./galaxy-job-block";
+import type { HarnessBlockFields } from "./harness-block-fields";
+import {
+  NotebookChangedError,
+  locateInvocationBlock,
+  readNotebook,
+  statNotebook,
+  upsertInvocationBlock,
+  withNotebookLock,
+  writeNotebook,
+  type InvocationYaml,
+} from "./notebook-writer";
+import { getNotebookPath } from "./state";
 import { attemptOwns, listAttemptRecords, type AttemptRecord } from "./galaxy-provenance";
 import {
   canonicalJson,
@@ -392,7 +409,96 @@ async function runPass(trigger: EvaluationTrigger, deps: EvaluatorDeps): Promise
       },
     });
   }
+  try {
+    await renderRegistryProjection(session);
+  } catch (err) {
+    console.error("[registry] projection not rendered:", err);
+  }
   return out;
+}
+
+/** The block fields an attempt's evaluation renders as. */
+export function projectionFields(a: Attempt, registry: Registry): HarnessBlockFields | null {
+  if (!a.evaluation || !a.submission) return null;
+  return {
+    evaluation: {
+      execution: a.evaluation.execution,
+      conformity: a.evaluation.conformity,
+      check: a.submission.check.outcome,
+      predicate: a.evaluation.predicate_result,
+      integrity: a.evaluation.integrity,
+      authority: a.evaluation.authority,
+    },
+    handoffEligible: computeHandoffEligible(a, registry.exceptions),
+    registryRevision: registry.revision,
+  };
+}
+
+/**
+ * Registry first, then render: write each evaluated attempt's verdict onto the
+ * block for its run. Representation only -- nothing reads these fields back
+ * for a decision -- so a block someone edited is simply rendered again, with a
+ * `state.repaired` row.
+ */
+export async function renderRegistryProjection(
+  session: SessionRegistry,
+  nbPath: string | null = getNotebookPath(),
+): Promise<number> {
+  if (!nbPath) return 0;
+  const view = sessionView(session);
+  const targets = Object.values(view.attempts).filter(
+    (a) => a.evaluation && (a.submission?.invocation_id || a.submission?.job_id),
+  );
+  if (targets.length === 0) return 0;
+  return withNotebookLock(nbPath, async () => {
+    for (let round = 0; ; round++) {
+      const stamp = await statNotebook(nbPath);
+      let content: string;
+      try {
+        content = await readNotebook(nbPath);
+      } catch {
+        return 0;
+      }
+      let next = content;
+      const repaired: string[] = [];
+      for (const a of targets) {
+        const fields = projectionFields(a, view);
+        if (!fields) continue;
+        const sub = a.submission!;
+        const located = sub.invocation_id
+          ? locateInvocationBlock(next, sub.invocation_id)
+          : locateJobBlock(next, sub.job_id!);
+        const current = located.record;
+        if (!current) continue;
+        const rendered = sub.invocation_id
+          ? upsertInvocationBlock(next, current as InvocationYaml, fields)
+          : upsertJobBlock(next, current as JobYaml, fields);
+        if (rendered === next) continue;
+        // A block that already carried a verdict and now gets a different one
+        // was either edited or rendered from an older revision.
+        if (current.evaluation && current.registryRevision === view.revision) {
+          repaired.push(a.attempt_id);
+        }
+        next = rendered;
+      }
+      if (next === content) return 0;
+      try {
+        await writeNotebook(nbPath, next, stamp ?? undefined);
+      } catch (err) {
+        if (!(err instanceof NotebookChangedError) || round >= 2) throw err;
+        continue;
+      }
+      for (const id of repaired) {
+        appendActivityEvent(session.analysisDir, {
+          timestamp: new Date().toISOString(),
+          kind: "state.repaired",
+          source: "harness",
+          payload: { attempt_id: id, registry_revision: view.revision },
+        });
+      }
+      return 1;
+    }
+  });
 }
 
 /** Test reset. */
