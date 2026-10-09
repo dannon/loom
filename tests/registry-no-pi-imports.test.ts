@@ -62,6 +62,10 @@ describe("registry has no harness coupling", () => {
     expect(couplingViolations(path.join(EXT, "registry-proposal.ts"))).toEqual([]);
   });
 
+  it("holds for the evaluation core too", () => {
+    expect(couplingViolations(path.join(EXT, "registry-evaluation.ts"))).toEqual([]);
+  });
+
   it("walks the whole graph, not just the entry file", () => {
     // Guard against the walker going quiet: it must reach the modules the
     // store is built from.
