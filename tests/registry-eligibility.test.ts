@@ -54,6 +54,36 @@ describe("computeHandoffEligible (v3 §7)", () => {
       expect(computeHandoffEligible(a)).toBe(false);
     });
 
+    it("accepts conformant_by_reconcile on a restored approval", () => {
+      const a = eligibleAttempt();
+      a.approval!.by = "restored";
+      a.approval!.status = "restored";
+      a.submission!.check.outcome = "conformant_by_reconcile";
+      expect(computeHandoffEligible(a)).toBe(true);
+    });
+
+    it("rejects conformant_by_reconcile on a revoked approval", () => {
+      const a = eligibleAttempt();
+      a.approval!.status = "revoked";
+      a.submission!.check.outcome = "conformant_by_reconcile";
+      expect(computeHandoffEligible(a)).toBe(false);
+    });
+
+    it("rejects conformant_by_reconcile with no approval to check against", () => {
+      const a = eligibleAttempt();
+      delete a.approval;
+      a.submission!.check.outcome = "conformant_by_reconcile";
+      expect(computeHandoffEligible(a)).toBe(false);
+    });
+
+    it("rejects conformant on an unchecked or mismatched submission", () => {
+      for (const outcome of ["unchecked", "mismatch", "unverified"] as const) {
+        const a = eligibleAttempt();
+        a.submission!.check.outcome = outcome;
+        expect(computeHandoffEligible(a)).toBe(false);
+      }
+    });
+
     it("rejects excepted with no exception behind it", () => {
       const a = eligibleAttempt();
       a.evaluation!.conformity = "excepted";

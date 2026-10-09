@@ -79,7 +79,17 @@ export interface Attempt {
     submitted_by: "harness" | "agent" | "unknown" | "pre-existing";
     server_verified: boolean;
     check: {
-      outcome: "conformant_by_construction" | "unchecked" | "mismatch" | "unverified";
+      /**
+       * `conformant_by_reconcile`: the run Galaxy reports was re-checked against
+       * the frozen Spec in this session. Never written for a by-construction
+       * submission, and never carried across an import.
+       */
+      outcome:
+        | "conformant_by_construction"
+        | "conformant_by_reconcile"
+        | "unchecked"
+        | "mismatch"
+        | "unverified";
       diff?: Diff[];
       mode: "off" | "warn" | "deny";
     };
@@ -489,7 +499,13 @@ function parseAttempt(v: unknown, path: string): Attempt {
     const check: NonNullable<Attempt["submission"]>["check"] = {
       outcome: oneOf(
         c.outcome,
-        ["conformant_by_construction", "unchecked", "mismatch", "unverified"],
+        [
+          "conformant_by_construction",
+          "conformant_by_reconcile",
+          "unchecked",
+          "mismatch",
+          "unverified",
+        ],
         `${p}.check.outcome`,
       ),
       mode: oneOf(c.mode, ["off", "warn", "deny"], `${p}.check.mode`),

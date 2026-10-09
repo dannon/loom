@@ -49,11 +49,20 @@ export function computeHandoffEligible(
     );
 
   if (ev.conformity === "conformant") {
-    // Conformant means the harness built the request from a user approval.
-    if (attempt.submission.check.outcome !== "conformant_by_construction") return false;
-    if (attempt.approval?.by !== "user") return false;
-    // A revoked approval no longer vouches for the run, even one it already submitted.
-    if (attempt.approval.status !== "live") return false;
+    const outcome = attempt.submission.check.outcome;
+    if (outcome === "conformant_by_construction") {
+      // The harness built the request from a user approval in this session.
+      if (attempt.approval?.by !== "user") return false;
+      // A revoked approval no longer vouches for the run, even one it already submitted.
+      if (attempt.approval.status !== "live") return false;
+    } else if (outcome === "conformant_by_reconcile") {
+      // Galaxy's account of the run matched the frozen Spec when this session
+      // checked. That's an execution fact, not consent, so a restored approval
+      // is enough to check against -- but a revoked one still withdraws it.
+      if (!attempt.approval || attempt.approval.status === "revoked") return false;
+    } else {
+      return false;
+    }
   } else if (!userExcepted("submission_check")) {
     return false;
   }
