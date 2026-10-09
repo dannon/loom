@@ -475,6 +475,25 @@ export function isProtectedWritePath(absPath: string, home = ""): boolean {
   return isLoomStatePath(absPath, home);
 }
 
+// The harness-owned record: the signed registry and frozen templates under
+// `<state dir>/state/`, and the per-attempt provenance under
+// `<state dir>/provenance/`. Nothing the model does needs to write either, and
+// an approval it could write itself would not be consent, so these are a
+// floor for the file tools -- denied, not asked about -- where the rest of the
+// state dir only prompts.
+const RECORD_STORE_DIRS = new Set(["state", "provenance"]);
+
+export function isRecordStorePath(absPath: string): boolean {
+  const segments = path.normalize(absPath).split(path.sep);
+  for (let i = 0; i < segments.length - 1; i++) {
+    if (!(WORKSPACE_STATE_DIR_NAMES as readonly string[]).includes(segments[i].toLowerCase())) {
+      continue;
+    }
+    if (RECORD_STORE_DIRS.has(segments[i + 1].toLowerCase())) return true;
+  }
+  return false;
+}
+
 // Both spellings are state in every workspace, whichever one it actually uses:
 // a `.loom` workspace must not leave a sibling `.orbit` writable, or the other
 // way round.

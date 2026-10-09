@@ -783,6 +783,66 @@ describe.each(WORKSPACE_STATE_DIR_NAMES)("decide -- %s state dir", (D) => {
     }
   });
 
+  it("the registry and provenance are a floor for the file tools, not an ask", () => {
+    for (const toolName of ["write", "edit"])
+      for (const key of ["path", "file_path"])
+        for (const target of [
+          `${CWD}/${D}/state/registry.json`,
+          `${CWD}/${D}/state/templates/${"a".repeat(64)}.json`,
+          `${CWD}/${D}/state/lock`,
+          `${CWD}/${D}/provenance/01J00000000000000000000000.json`,
+          `${CWD}/${D.toUpperCase()}/STATE/registry.json`,
+          `${wcwd}/${D}/state/registry.json`,
+        ]) {
+          const r = decide(
+            req({
+              toolName,
+              toolInput: { [key]: target },
+              config: { ...baseCfg, trustedWorkspaces: [CWD] },
+            }),
+            deps,
+          );
+          expect(r.decision, `${toolName}/${key}/${target}`).toBe("deny");
+          expect(r.category, `${toolName}/${key}/${target}`).toBe("write:record-store");
+        }
+  });
+
+  it("a download aimed at the record is denied; one aimed elsewhere, or a reader, is not", () => {
+    const dl = (file_path: string) =>
+      decide(
+        req({
+          toolName: "mcp__galaxy__download_dataset",
+          toolInput: { dataset_id: "a1", file_path },
+        }),
+        deps,
+      );
+    for (const target of [
+      `${CWD}/notebook.md`,
+      "notebook.md",
+      `${CWD}/${D}/state/registry.json`,
+      `${CWD}/activity.jsonl`,
+    ]) {
+      expect(dl(target).decision, target).toBe("deny");
+      expect(dl(target).category, target).toBe("write:record-store");
+    }
+    expect(dl(`${CWD}/data/reads.fastq`).decision).toBe("allow");
+    expect(
+      decide(
+        req({ toolName: "galaxy_upload_local_file", toolInput: { path: `${CWD}/notebook.md` } }),
+        deps,
+      ).decision,
+    ).toBe("allow");
+  });
+
+  it("bash writes into the registry stay catastrophic", () => {
+    for (const command of [
+      `echo '{}' > ${CWD}/${D}/state/registry.json`,
+      `cp forged.json ${wcwd}/${D}/provenance/x.json`,
+    ]) {
+      expect(decide(req({ toolInput: { command } }), wdeps).decision, command).toBe("deny");
+    }
+  });
+
   it("the analysis under ~/<state>/analyses is work product; either nested state dir is not", () => {
     expect(
       decide(

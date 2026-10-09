@@ -470,6 +470,109 @@ function scanLoomWrite(
   return { catastrophic: false, targets };
 }
 
+// The analysis record: the notebook the evidence gate adjudicates and the
+// activity log every gate writes to. The file tools reach both through hooks
+// that see the write; a shell redirect or `sed -i` reaches them through
+// nothing, so on the desktop the shell may not write them at all. Matched by
+// basename, case-folded (macOS), wherever the path points: refusing a write to
+// some other analysis's notebook costs nothing an honest command needs.
+const RECORD_FILES = new Set(["notebook.md", "activity.jsonl"]);
+const RECORD_MENTION = /notebook\.md|activity\.jsonl/i;
+// A target whose text the shell would still expand -- a variable, a glob, a
+// brace, a substitution. Unresolvable, so it is presumed to be the record when
+// the line names one anywhere (`NB=notebook.md; echo x >> $NB`).
+const EXPANDS = /[$`*?[{]/;
+const SEGMENT_OPS = new Set([";", "&&", "||", "|", "&", "(", ")", "\n", "|&", ";;"]);
+// Every argument is a write target (the source of a `mv` is removed).
+const ALL_ARGS_WRITE = new Set(["tee", "mv", "rm", "unlink", "truncate", "shred"]);
+// Only the last argument is (`cp notebook.md backup.md` reads the notebook).
+const LAST_ARG_WRITE = new Set(["cp", "install", "ln", "rsync"]);
+
+/** A plain glob (`notebook.m*`, `*.jsonl`) whose last segment could name the record. */
+function globCouldMatchRecord(text: string): boolean {
+  const base = text.replace(/\\/g, "").split("/").pop() ?? "";
+  if (!/[*?[]/.test(base) || /[$`{]/.test(base)) return false;
+  const re = new RegExp(
+    "^" +
+      base
+        .replace(/[.+^()|\\]/g, "\\$&")
+        .replace(/\*/g, ".*")
+        .replace(/\?/g, ".") +
+      "$",
+    "i",
+  );
+  try {
+    return [...RECORD_FILES].some((name) => re.test(name));
+  } catch {
+    return true;
+  }
+}
+
+function isRecordTarget(text: string): boolean {
+  const clean = text.replace(/\\/g, "");
+  const base = clean.split("/").pop()?.toLowerCase() ?? "";
+  return RECORD_FILES.has(base);
+}
+
+/**
+ * Write targets on this line that are, or may be, the analysis record. A
+ * model of the common shapes -- redirections, `tee`, in-place `sed`/`perl`,
+ * `cp`/`mv`/`rm`/`truncate`, `dd of=` -- not of every program that can open a
+ * file: a script it runs is out of reach, as it is for every check here.
+ */
+export function scanRecordWrite(command: string): { targets: string[]; uncertain: boolean } {
+  const mentioned = RECORD_MENTION.test(command.replace(/\\/g, ""));
+  const targets: string[] = [];
+  let uncertain = false;
+  const consider = (text: string) => {
+    if (isRecordTarget(text)) targets.push(text);
+    else if (globCouldMatchRecord(text)) uncertain = true;
+    else if (mentioned && EXPANDS.test(text)) uncertain = true;
+  };
+  let segment: string[] = [];
+  const flush = () => {
+    const words = unwrap(segment.filter((w, i) => i > 0 || !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)));
+    segment = [];
+    if (words.length === 0) return;
+    const verb = words[0].split("/").pop() ?? "";
+    const args = words.slice(1).filter((w) => !w.startsWith("-"));
+    if (ALL_ARGS_WRITE.has(verb)) args.forEach(consider);
+    else if (LAST_ARG_WRITE.has(verb) && args.length > 0) consider(args[args.length - 1]);
+    else if (
+      (verb === "sed" || verb === "perl") &&
+      words.some((w) => /^-[^-]*i|^--in-place/.test(w))
+    ) {
+      args.forEach(consider);
+    } else if (verb === "dd") {
+      for (const w of words) if (w.startsWith("of=")) consider(w.slice(3));
+    } else if (verb === "git" && (args[0] === "checkout" || args[0] === "restore")) {
+      // Puts an older notebook back over the one the gate has been judging.
+      args.slice(1).forEach(consider);
+    }
+  };
+  const tokens = shellTokens(command);
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if ("op" in t) {
+      // `>`, `>>`, `>|`, `&>`, `<>`: the next word is opened for writing. `2>&1`
+      // duplicates a descriptor and names no file.
+      if (t.op.includes(">") && !/>&$/.test(t.op)) {
+        const next = tokens[i + 1];
+        if (next && "word" in next) {
+          consider(wordText(next.word));
+          i++;
+        }
+        continue;
+      }
+      if (SEGMENT_OPS.has(t.op) || /^[;&|]+$/.test(t.op)) flush();
+      continue;
+    }
+    if ("word" in t) segment.push(wordText(t.word));
+  }
+  flush();
+  return { targets, uncertain };
+}
+
 // The checks above judge each path as written, so `cd ~/.loom && echo x > a`
 // carried no `.loom/` after the write verb and sailed through. What follows
 // tracks the working directory across one command line -- `cd`, `pushd`,
@@ -1214,6 +1317,17 @@ export function classifyBash(commandRaw: string, home = "", cwd = ""): BashClass
   };
   for (const [re, why] of CATASTROPHIC) {
     if (re.test(command)) return { kind: "catastrophic", reason: why, readPaths: [], ...base };
+  }
+  const record = scanRecordWrite(command);
+  if (record.targets.length > 0 || record.uncertain) {
+    return {
+      kind: "catastrophic",
+      reason:
+        "write to the analysis record (notebook.md or activity.jsonl) from the shell; " +
+        "edit the notebook with the edit/write tools instead",
+      readPaths: [],
+      ...base,
+    };
   }
   if (loom.catastrophic || cd.catastrophic) {
     return {
