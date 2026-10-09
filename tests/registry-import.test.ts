@@ -44,6 +44,16 @@ describe("applyImportRule (v3 §10)", () => {
     expect(got.submission?.check).toEqual({ outcome: "unchecked", mode: "warn" });
   });
 
+  it("forgets a reconcile check: it has to be made again in the importing session", () => {
+    const a = eligibleAttempt();
+    a.approval!.status = "restored";
+    a.approval!.by = "restored";
+    a.submission!.check = { outcome: "conformant_by_reconcile", mode: "deny" };
+    const got = applyImportRule(registryOf(a), SERVER).registry.attempts[a.attempt_id];
+    expect(got.submission?.check).toEqual({ outcome: "unchecked", mode: "deny" });
+    expect(got.handoff_eligible).toBe(false);
+  });
+
   it("keeps a revoked approval revoked", () => {
     const a = eligibleAttempt();
     a.approval!.status = "revoked";

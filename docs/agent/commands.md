@@ -76,7 +76,7 @@ Saving a large response is normal output handling, not a model context failure.
 | `/profiles`               | List saved Galaxy server profiles                                                                                                                 |
 | `/execute` (alias `/run`) | Tell the agent to run the next pending step in the latest plan section                                                                            |
 | `/reconcile`              | Check the bound Galaxy history against the notebook: record runs no block claims as unattributed, and fetch details for finished runs now         |
-| `/override <step> <why>`  | User-only. Clear the evidence gate for one plan step, once, with the reason recorded                                                              |
+| `/override <step> <why>`  | User-only. Clear the evidence gate for one plan step, with the reason recorded (in the registry when the registry holds the step)                 |
 | `/pending`                | List run proposals waiting for approval, and why each is waiting                                                                                  |
 | `/approve <proposal-id>`  | User-only. Freeze a `loom_propose` proposal against Galaxy's template and record the approval                                                     |
 | `/revoke <proposal-id>`   | User-only. Withdraw an approval                                                                                                                   |
@@ -88,9 +88,11 @@ Saving a large response is normal output handling, not a model context failure.
 
 `/override` is the user's, not yours. Bare `/override` lists the plan
 steps the evidence gate is currently holding and the anchor to address
-each one by. A clearance covers one step and the invocation that was in
-flight when it was granted, and is spent by the next write it lets
-through.
+each one by. On a step the registry holds, the clearance is an exception
+recorded in the registry for the runs it was held for; a new run on the
+step is held again. On the block path it covers one step and the
+invocation that was in flight when it was granted, and is spent by the
+next write it lets through.
 
 `/approve` and `/revoke` are the user's too. Propose a run with
 `loom_propose`, show the table it returns, and ask for `/approve

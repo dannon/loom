@@ -68,6 +68,21 @@ export interface BlockDriftNote {
   to: string;
 }
 
+/**
+ * The registry's evaluation of the run, as rendered onto its block. A
+ * projection only: the gate reads the registry, never this, so a hand edit
+ * here changes nothing but what a reader sees until the next pass re-renders
+ * it.
+ */
+export interface BlockEvaluation {
+  execution: string;
+  conformity: string;
+  check: string;
+  predicate: string;
+  integrity: string;
+  authority: string;
+}
+
 export interface HarnessBlockFields {
   /** ULID minted at submission dispatch; the join key for the provenance file. */
   attemptId?: string;
@@ -83,6 +98,10 @@ export interface HarnessBlockFields {
   enrichmentError?: string;
   jobs?: BlockJobSummary[];
   drift?: BlockDriftNote[];
+  /** The registry's verdict for this run's attempt, and the revision it was read at. */
+  evaluation?: BlockEvaluation;
+  handoffEligible?: boolean;
+  registryRevision?: number;
 }
 
 /**
@@ -98,6 +117,9 @@ export const HARNESS_FIELD_KEYS = [
   "enrichmentError",
   "jobs",
   "drift",
+  "evaluation",
+  "handoffEligible",
+  "registryRevision",
 ] as const;
 
 /**
@@ -369,6 +391,13 @@ export function renderHarnessFieldLines(fields: HarnessBlockFields): string[] {
   if (fields.drift && fields.drift.length > 0) {
     lines.push(`drift: ${JSON.stringify(fields.drift.map(driftToWire))}`);
   }
+  if (fields.evaluation) lines.push(`evaluation: ${JSON.stringify(fields.evaluation)}`);
+  if (fields.handoffEligible !== undefined) {
+    lines.push(`handoff_eligible: ${fields.handoffEligible ? "true" : "false"}`);
+  }
+  if (fields.registryRevision !== undefined && Number.isSafeInteger(fields.registryRevision)) {
+    lines.push(`registry_revision: ${fields.registryRevision}`);
+  }
   return lines;
 }
 
@@ -413,7 +442,42 @@ export function parseHarnessFields(get: (key: string) => string | undefined): Ha
   const drift = parseJsonArray(get("drift"), driftFromWire);
   if (drift) fields.drift = drift;
 
+  const evaluation = parseEvaluation(get("evaluation"));
+  if (evaluation) fields.evaluation = evaluation;
+
+  const eligible = get("handoff_eligible");
+  if (eligible === "true" || eligible === "false") fields.handoffEligible = eligible === "true";
+
+  const revision = Number(get("registry_revision"));
+  if (get("registry_revision") && Number.isSafeInteger(revision))
+    fields.registryRevision = revision;
+
   return fields;
+}
+
+const EVALUATION_KEYS = [
+  "execution",
+  "conformity",
+  "check",
+  "predicate",
+  "integrity",
+  "authority",
+] as const;
+
+function parseEvaluation(raw: string | undefined): BlockEvaluation | undefined {
+  if (!raw) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const o = parsed as Record<string, unknown>;
+  if (!EVALUATION_KEYS.every((k) => typeof o[k] === "string")) return undefined;
+  return Object.fromEntries(
+    EVALUATION_KEYS.map((k) => [k, o[k] as string]),
+  ) as unknown as BlockEvaluation;
 }
 
 /** Longest `enrichment_error` the block carries; the full text is in the activity row. */

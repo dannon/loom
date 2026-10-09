@@ -253,7 +253,12 @@ describe("/override -- the user-originated exception", () => {
     registerEvidenceGate(pi.api);
     await pi.write(flipEdit(STEP2));
     expect(payloads("evidence.decision")[0].contradictions).toEqual([
-      { step: "#plan-a-step-2", status: "in_progress", invocationId: "abc0000000000001" },
+      {
+        source: "block",
+        step: "#plan-a-step-2",
+        status: "in_progress",
+        invocationId: "abc0000000000001",
+      },
     ]);
   });
 
@@ -464,6 +469,31 @@ describe("/override -- the user-originated exception", () => {
     await pi.runCommand("override", "plan-a-step-2 checked by hand");
     await pi.sessionStart();
     expect((await pi.write(flipEdit(STEP2)))?.block).toBe(true);
+  });
+});
+
+describe("the pinned in_progress case (#475)", () => {
+  // Two ways a block can sit at `in_progress` with nothing the agent can do:
+  // Galaxy credentials vanish mid-session (the poller early-returns), or an
+  // invocation ends with no job ok and none errored -- every step skipped, say
+  // -- which is terminal to Galaxy but neither completed nor failed to the
+  // poller. Neither gets a transition invented for it; the documented way out
+  // is the user's /override, which is what this pins.
+  beforeEach(() => {
+    process.env.LOOM_EVIDENCE_GATE = "deny";
+  });
+
+  it("is denied, and /override with a reason lets the completion through", async () => {
+    const pi = fakePi();
+    registerEvidenceGate(pi.api);
+    registerEvidenceOverrideCommand(pi.api);
+    expect((await pi.write(flipEdit(STEP2)))?.block).toBe(true);
+    await pi.runCommand("override", "plan-a-step-2 lost credentials; outputs checked in Galaxy");
+    expect((await pi.write(flipEdit(STEP2)))?.block).toBeUndefined();
+    expect(payloads("evidence.override")[0]).toMatchObject({
+      invocationStatus: "in_progress",
+      reason: "lost credentials; outputs checked in Galaxy",
+    });
   });
 });
 

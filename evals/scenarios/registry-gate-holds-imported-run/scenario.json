@@ -1,0 +1,45 @@
+{
+  "name": "the evidence gate holds a step whose recorded run the registry hasn't re-verified, whatever its block says",
+  "description": "The fixture's registry holds a run bound to plan-a-step-1 that claims every eligibility fact, signed by a session whose key is gone, and the step's loom-job block says `status: completed`. On open it's an import, so nothing it claims survives, and Galaxy (the empty fixture) doesn't know the job, so the evaluation writer records it unverified. The gate's verdict is the registry's, not the block's: `/override plan-a-step-1` finds the step held by the registry and records the user's exception there, with the source in the evidence.override row. The `status: completed` text never enters into it -- that's #475 gap 1 closed for a run the registry knows about.",
+  "tier": 1,
+  "inputs": ["/reconcile", "/override plan-a-step-1 checked the alignment in Galaxy myself"],
+  "env": {
+    "ANTHROPIC_API_KEY": "fake-eval-key",
+    "GALAXY_URL": "https://usegalaxy.org",
+    "GALAXY_API_KEY": "fake-eval-galaxy-key",
+    "LOOM_GALAXY_FIXTURE": "galaxy-fixture.json"
+  },
+  "timeoutMs": 20000,
+  "assertions": {
+    "events": {
+      "mustNotInclude": ["agent_start", "tool_execution_start", "turn_start"]
+    },
+    "activity": {
+      "mustInclude": [
+        {
+          "kind": "registry.opened",
+          "source": "harness",
+          "payloadContains": { "mode": "writer", "outcome": "imported" }
+        },
+        {
+          "kind": "registry.evaluated",
+          "source": "harness",
+          "payloadContains": {
+            "attempt_id": "01K6ZQ7B3M2N4P5Q6R7S8T9V0B",
+            "integrity": "unverified_identity",
+            "handoff_eligible": "false"
+          }
+        },
+        {
+          "kind": "evidence.override",
+          "source": "user",
+          "payloadContains": {
+            "source": "registry",
+            "anchor": "plan-a-step-1",
+            "reason": "checked the alignment in Galaxy myself"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -175,6 +175,62 @@ export function collectNotebookAnchors(content: string): NotebookAnchors {
   return { explicit, steps, headings };
 }
 
+/** A checkbox line, under the anchor a registry attempt would be bound to. */
+export interface CheckboxStep {
+  anchor: string;
+  state: " " | "x" | "!";
+  text: string;
+  /** False for a positional address, which follows the line's position, not the line. */
+  explicit: boolean;
+}
+
+const CHECKBOX_LINE = /^\s*-\s+\[([ xX!])\]\s+(.*)$/;
+
+/**
+ * Every checkbox line a reader would see, keyed the way `collectNotebookAnchors`
+ * addresses steps: each explicit `{#id}` on the line wherever it sits in the
+ * file, else the plan step's positional address. Unlike `parsePlanSteps` in
+ * the evidence gate, an explicitly anchored checkbox counts outside a
+ * `## Plan` section too -- renaming the heading above a step must not make its
+ * checkbox stop being that step's.
+ */
+export function collectCheckboxSteps(content: string): CheckboxStep[] {
+  const out: CheckboxStep[] = [];
+  let planKey: string | null = null;
+  let stepIndex = 0;
+  for (const line of proseLines(content)) {
+    if (HEADING.test(line)) {
+      const plan = line.match(PLAN_HEADING);
+      if (plan) {
+        planKey = slugifyHeading(plan[1]);
+        stepIndex = 0;
+      } else if (ANY_H2.test(line)) {
+        planKey = null;
+      }
+      continue;
+    }
+    const box = line.match(CHECKBOX_LINE);
+    if (!box) continue;
+    const state = (box[1] === "X" ? "x" : box[1]) as CheckboxStep["state"];
+    const text = box[2];
+    if (planKey && STEP_LINE.test(line)) stepIndex++;
+    const ids = [...text.matchAll(ANCHOR)].map((m) => m[1].trim()).filter(Boolean);
+    if (ids.length > 0) {
+      for (const anchor of ids) out.push({ anchor, state, text: text.trim(), explicit: true });
+      continue;
+    }
+    if (!planKey) continue;
+    const ordinal = text.match(STEP_ORDINAL)?.[1] ?? String(stepIndex);
+    out.push({
+      anchor: `plan-${planKey}-step-${ordinal}`,
+      state,
+      text: text.trim(),
+      explicit: false,
+    });
+  }
+  return out;
+}
+
 /**
  * The anchors a record call may name, de-duplicated, in the order a rejection
  * should offer them: what the author wrote, then step addresses, then sections.

@@ -40,20 +40,13 @@ import {
   withNotebookLock,
   type ProposalBlock,
 } from "./notebook-writer";
-import {
-  canonicalJson,
-  normalizeServerUrl,
-  sha256Hex,
-  type Registry,
-  type RegistryStore,
-} from "./registry";
+import { canonicalJson, normalizeServerUrl, sha256Hex } from "./registry";
 import {
   approveProposal,
   canonicalizeProposal,
   describePredicate,
   findDrift,
   liveApproval,
-  revokeAttempts,
   newProposalId,
   parseInputs,
   parseOverrides,
@@ -67,7 +60,15 @@ import {
   type Drift,
   type Proposal,
 } from "./registry-proposal";
-import { getSessionRegistry, type SessionRegistry } from "./registry-runtime";
+import {
+  flushHeldRevocations,
+  getSessionRegistry,
+  heldRevocations,
+  sessionView,
+  type SessionRegistry,
+} from "./registry-runtime";
+
+export { sessionView };
 import {
   primeTemplateReplay,
   TemplateUnavailableError,
@@ -182,43 +183,6 @@ export function checkProposalDrift(deps: ProposalDeps, content?: string): Drift[
       fresh.map((d) => d.proposalId),
     );
   return fresh;
-}
-
-/**
- * Revocations decided but not yet written to the registry, per store. Readers
- * go through `sessionView`, which applies them, so an approval stops counting
- * the moment it's revoked even if the write has to wait.
- */
-const heldByStore = new WeakMap<RegistryStore, Map<string, Drift>>();
-
-function heldRevocations(store: RegistryStore): Map<string, Drift> {
-  let held = heldByStore.get(store);
-  if (!held) heldByStore.set(store, (held = new Map()));
-  return held;
-}
-
-/** Write what's held when the store can take it. Returns the ids written. */
-function flushHeldRevocations(store: RegistryStore): Set<string> {
-  const held = heldRevocations(store);
-  if (held.size === 0 || store.mode !== "writer") return new Set();
-  const ids = [...held.keys()];
-  try {
-    revokeAttempts(store, ids);
-  } catch {
-    return new Set();
-  }
-  for (const id of ids) held.delete(id);
-  return new Set(ids);
-}
-
-/** The registry as this session must read it: held revocations applied. */
-export function sessionView(session: SessionRegistry): Registry {
-  const view = session.store.snapshot();
-  for (const id of heldRevocations(session.store).keys()) {
-    const approval = view.attempts[id]?.approval;
-    if (approval?.status === "live") approval.status = "revoked";
-  }
-  return view;
 }
 
 async function clearEchoes(nb: string, ids: string[]): Promise<void> {

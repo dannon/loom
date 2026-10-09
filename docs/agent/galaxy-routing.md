@@ -120,20 +120,33 @@ marked `- [x]`.
 ### The evidence gate checks that
 
 This is no longer only advice. Loom watches every `Edit`/`Write` to
-`notebook.md` and reads the file as it stood _before_ the write. A plan
-step going `- [ ]` → `- [x]` while the `loom-invocation` block bound to
-its anchor still reads `status: in_progress` is a contradiction: a
-verified result claimed for a run Galaxy says has not finished. That
-status is written by the poller from Galaxy job state, not by you, so
-rewriting it in the same edit does not clear the contradiction.
+`notebook.md`, and every Page pull that replaces it.
+
+When the approval registry holds a run for the step, the verdict is the
+registry's: Loom writes whether that run is eligible to hand off from
+Galaxy's own answers, and nothing in the notebook changes it. Completing
+the step is refused until the run is eligible, whatever its block says,
+and so is removing or renaming the step's checkbox. Marking it `- [!]` is
+always allowed.
+
+For a run the registry doesn't know, the check is the block: a plan step
+going `- [ ]` → `- [x]` while the `loom-invocation` block bound to its
+anchor still reads `status: in_progress` is a contradiction. That status
+is written by the poller from Galaxy job state, not by you, and the file
+is read as it stood _before_ the write, so rewriting it in the same edit
+does not clear the contradiction.
+
+On the desktop the shell cannot write `notebook.md` at all. Edit it with
+the edit and write tools.
 
 The gate ships in `warn` mode -- the write goes through and the decision
 is recorded to `activity.jsonl` as an `evidence.decision` event. In
 `deny` mode the write is refused, and the way forward is one of: leave
 the step pending while the run is going, mark it `- [!]` and record what
 failed, or -- if Galaxy has actually finished and the block is stale --
-call `galaxy_invocation_check_all`, inspect the outputs, record that
-evidence, and then flip the checkbox.
+call `galaxy_invocation_check_all` (or, for a run the registry holds,
+wait for the next poll or ask the user to run `/reconcile`), inspect the
+outputs, record that evidence, and then flip the checkbox.
 
 Deliberately narrow, so it does not fire on honest work: a flip with no
 bound invocation gets no opinion, a `failed` block is never gated (it is
@@ -143,9 +156,9 @@ beside a `completed` one for the same anchor is not a contradiction.
 A refused write stays refused for as long as the contradiction stands.
 Do not retry it unchanged. The exception belongs to the user, not to
 you: if you think the gate is wrong, say so and ask them to run
-`/override <step-anchor> <reason>`, which clears that one step for one
-write and records the reason. Repeating the write is not a way to get
-past it.
+`/override <step-anchor> <reason>`, which records the reason and clears
+that step -- for the runs the registry held it for, or for one write on
+the block path. Repeating the write is not a way to get past it.
 
 ## Artifact verification
 

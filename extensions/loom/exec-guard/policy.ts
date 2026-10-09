@@ -6,6 +6,7 @@ import {
   isCredentialStore,
   isProtectedWritePath,
   isLoomStatePath,
+  isRecordStorePath,
 } from "./sensitive-read";
 import type { PolicyDeps, PolicyRequest, PolicyResult } from "./types";
 import {
@@ -39,6 +40,13 @@ function shown(p: string, home: string): string {
 }
 
 const FILE_WRITE_TOOLS = new Set(["write", "edit"]);
+// Tools that write a local file they're handed a path for. Readers that take a
+// path (the local uploader) are left alone: reading the notebook is fine.
+const LOCAL_WRITER_TOOL = /download/i;
+// Parameter names those tools use for the destination.
+const LOCAL_PATH_KEY = /^(?:file_?path|path|output_?path|dest(?:ination)?(?:_path)?|out_?file)$/i;
+// The record files only the hooked file tools may write.
+const RECORD_BASENAMES = new Set(["notebook.md", "activity.jsonl"]);
 // Read-like pi tools that take an optional `path`. grep reads file CONTENTS, so
 // `grep <pat> ~/.ssh/id_rsa` is a credential-leak vector; ls/find/glob enumerate
 // names under a path. All face the sensitive-path floor AND the workspace jail --
@@ -183,7 +191,10 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     // floor above, and it never covers a command run after a cd into Loom's own
     // state or a credential store -- trusting the workspace says nothing about
     // those directories.
-    if (req.config.trustedWorkspaces.includes(req.cwd) && !c.guardedCwd) {
+    // Nor a line that names the analysis record or the registry: what an
+    // interpreter or script does with them is beyond this classifier, and the
+    // shell write forms it does model are denied above.
+    if (req.config.trustedWorkspaces.includes(req.cwd) && !c.guardedCwd && !c.namesRecord) {
       if (req.modelTier === "trusted") {
         return {
           decision: "allow",
@@ -264,6 +275,19 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     // is itself a symlink (onto a bigger disk, say) realpaths to somewhere with
     // no state segment, and since it is also a jail root the write would
     // otherwise pass silently.
+    // The registry and provenance are a floor, not an ask: approving the
+    // model's write to its own approval record would make the approval mean
+    // nothing.
+    for (const t of targets) {
+      const lexical = path.resolve(req.cwd, expandHome(t.raw, deps.home));
+      if (isRecordStorePath(t.resolved) || isRecordStorePath(lexical)) {
+        return {
+          decision: "deny",
+          category: "write:record-store",
+          reason: `write to Loom's harness-owned record ${t.raw} (approvals, run evaluations, provenance) blocked for all models`,
+        };
+      }
+    }
     for (const t of targets) {
       const lexical = path.resolve(req.cwd, expandHome(t.raw, deps.home));
       if (isProtectedWritePath(t.resolved, deps.home) || isProtectedWritePath(lexical, deps.home)) {
@@ -276,6 +300,28 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
       }
     }
     return { decision: "allow", category: "write:in-jail", reason: "write inside workspace" };
+  }
+
+  // A tool that writes a local file it is handed a path for -- galaxy-mcp's
+  // download_dataset with `file_path` is the one that exists -- must not land
+  // on the analysis record or the harness-owned registry, any more than the
+  // shell may. Lexical and resolved both, as for the write tools.
+  for (const [key, value] of LOCAL_WRITER_TOOL.test(toolName)
+    ? Object.entries(req.toolInput)
+    : []) {
+    if (typeof value !== "string" || !LOCAL_PATH_KEY.test(key) || value.length === 0) continue;
+    const lexical = path.resolve(req.cwd, expandHome(value, deps.home));
+    const { resolved } = deps.resolver.contains(value);
+    const recordFile = [lexical, resolved].some((p) =>
+      RECORD_BASENAMES.has(path.basename(p).toLowerCase()),
+    );
+    if (recordFile || isRecordStorePath(lexical) || isRecordStorePath(resolved)) {
+      return {
+        decision: "deny",
+        category: "write:record-store",
+        reason: `${req.toolName} would write ${value}, part of the analysis record`,
+      };
+    }
   }
 
   // Destructive Galaxy MCP operations (whole-history delete/purge) -- called directly or

@@ -22,18 +22,23 @@
  * to pass back.
  */
 
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { appendActivityEvent } from "./activity.js";
 import { getNotebookPath } from "./state.js";
 import {
+  currentRegistryView,
   grantEvidenceOverride,
   outstandingContradictions,
   resolveMode,
   resolveStepKey,
   type PlanStep,
 } from "./evidence-gate.js";
+import type { Registry } from "./registry.js";
+import { NO_APPROVAL_REVISION } from "./registry-evaluation.js";
+import { getSessionRegistry, type SessionRegistry } from "./registry-runtime.js";
 
 const USAGE =
   "Usage: /override <step-key> <reason>  (e.g. /override plan-a-step-2 job finished, block is stale)";
@@ -45,20 +50,24 @@ export type OverrideResult =
  * Decide what `/override` does for one set of arguments against one notebook.
  * Pure: the caller grants the token, writes the activity row, and notifies.
  */
-export function planOverride(content: string, args: string): OverrideResult {
+export function planOverride(
+  content: string,
+  args: string,
+  registry: Registry | null = null,
+): OverrideResult {
   const raw = args.trim();
-  if (!raw) return { ok: false, message: renderStatus(content) };
+  if (!raw) return { ok: false, message: renderStatus(content, registry) };
 
   // Split on the LONGEST leading token that names a real step, not on the first
   // space. `ANCHOR` is `\{#([^}]+)\}`, so an anchor may legitimately contain
   // spaces, and splitting at the first one would lock the user out of
   // overriding exactly those steps -- the gate failing closed with no way
   // through, which is the failure mode this command exists to prevent.
-  const split = splitKeyAndReason(content, raw);
+  const split = splitKeyAndReason(content, raw, registry);
   if (split.kind === "none") {
     return {
       ok: false,
-      message: `No plan step matches '${raw.split(/\s/)[0]}'.\n${renderStatus(content)}`,
+      message: `No plan step matches '${raw.split(/\s/)[0]}'.\n${renderStatus(content, registry)}`,
     };
   }
   if (split.kind === "ambiguous") {
@@ -78,13 +87,38 @@ export function planOverride(content: string, args: string): OverrideResult {
   // Only a standing contradiction can be overridden. Pre-authorizing one that
   // does not exist yet would hand out a token the gate might spend on a
   // different contradiction later, which is not what the user agreed to.
-  const outstanding = outstandingContradictions(content).find((c) => c.step.key === step.key);
+  const outstanding = outstandingContradictions(content, registry).find(
+    (c) => c.step.key === step.key || (!!step.anchor && c.step.anchor === step.anchor),
+  );
   if (!outstanding) {
     return {
       ok: false,
       message:
-        `Nothing to override on "${step.text}": no in-flight Galaxy invocation is bound to it. ` +
-        `The evidence gate is not holding this step.`,
+        `Nothing to override on "${step.text}": no in-flight Galaxy invocation is bound to it, ` +
+        `and the registry isn't holding it. The evidence gate is not holding this step.`,
+    };
+  }
+
+  if (outstanding.source === "registry") {
+    // Written into the registry as an evidence-gate exception on each run it
+    // holds the step for: the user's call, on the record, for these runs only.
+    // A later run on the step is a new attempt and is held again.
+    return {
+      ok: true,
+      message:
+        `Override recorded for "${step.text}" in the registry (${outstanding.hold.missing.join("; ")}). ` +
+        `Completing this step goes through for the run(s) it was held for; a new run on it is ` +
+        `held again until it's eligible.`,
+      event: {
+        source: "registry",
+        step: outstanding.step.key,
+        anchor: outstanding.hold.anchor,
+        stepState: step.state,
+        attempts: outstanding.hold.attemptIds,
+        missing: outstanding.hold.missing,
+        mode: resolveMode(),
+        reason,
+      },
     };
   }
 
@@ -127,10 +161,14 @@ export type KeySplit =
  * says which, rather than picking. Offsets come from the original string, so
  * an anchor with a double space or a tab survives the round trip.
  */
-export function splitKeyAndReason(content: string, raw: string): KeySplit {
+export function splitKeyAndReason(
+  content: string,
+  raw: string,
+  registry: Registry | null = null,
+): KeySplit {
   const quoted = raw.match(/^(["'])([^"']*)\1\s*([\s\S]*)$/);
   if (quoted) {
-    const step = resolveStepKey(content, quoted[2]);
+    const step = resolveStepKey(content, quoted[2], registry);
     return step ? { kind: "ok", step, reason: quoted[3].trim() } : { kind: "none" };
   }
 
@@ -143,7 +181,7 @@ export function splitKeyAndReason(content: string, raw: string): KeySplit {
   const hits: { step: PlanStep; end: number }[] = [];
   const seen = new Set<string>();
   for (const end of boundaries) {
-    const step = resolveStepKey(content, raw.slice(0, end));
+    const step = resolveStepKey(content, raw.slice(0, end), registry);
     if (!step || seen.has(step.key)) continue;
     seen.add(step.key);
     hits.push({ step, end });
@@ -155,20 +193,52 @@ export function splitKeyAndReason(content: string, raw: string): KeySplit {
 }
 
 /** What the gate is holding right now, and how to address it. */
-export function renderStatus(content: string): string {
-  const outstanding = outstandingContradictions(content);
+export function renderStatus(content: string, registry: Registry | null = null): string {
+  const outstanding = outstandingContradictions(content, registry);
   const mode = resolveMode();
   if (outstanding.length === 0) {
-    return `Evidence gate: ${mode}. No plan step is currently contradicted by an in-flight invocation.\n${USAGE}`;
+    return `Evidence gate: ${mode}. No plan step is currently held, by the registry or by an in-flight invocation.\n${USAGE}`;
   }
-  const lines = outstanding.map(
-    (c) => `  ${c.step.anchor ?? c.step.key}  ${c.invocation.status}  ${c.step.text}`,
+  const lines = outstanding.map((c) =>
+    c.source === "block"
+      ? `  ${c.step.anchor ?? c.step.key}  ${c.invocation.status}  ${c.step.text}`
+      : `  ${c.step.anchor ?? c.step.key}  registry: ${c.hold.missing.join("; ")}  ${c.step.text}`,
   );
-  return (
-    `Evidence gate: ${mode}. Steps an in-flight invocation contradicts:\n` +
-    lines.join("\n") +
-    `\n${USAGE}`
-  );
+  return `Evidence gate: ${mode}. Steps the gate is holding:\n` + lines.join("\n") + `\n${USAGE}`;
+}
+
+/**
+ * Record a registry override: one evidence-gate exception per held run, in
+ * one signed write. Returns why it couldn't, or null.
+ */
+export function writeRegistryOverride(
+  session: SessionRegistry | null,
+  attemptIds: readonly string[],
+  reason: string,
+  now: string,
+): string | null {
+  if (!session || session.unavailable) return "the approval registry isn't open in this session";
+  if (session.store.mode !== "writer") return "the approval registry is read-only in this session";
+  try {
+    session.store.update((draft) => {
+      for (const id of attemptIds) {
+        const attempt = draft.attempts[id];
+        if (!attempt) continue;
+        draft.exceptions.push({
+          id: `override-${randomBytes(8).toString("hex")}`,
+          attempt_id: id,
+          spec_revision: attempt.approval?.spec_revision ?? NO_APPROVAL_REVISION,
+          scope: "evidence_gate",
+          by: "user",
+          at: now,
+          reason,
+        });
+      }
+    });
+  } catch (err) {
+    return (err as Error).message;
+  }
+  return null;
 }
 
 export function registerEvidenceOverrideCommand(pi: ExtensionAPI): void {
@@ -191,13 +261,27 @@ export function registerEvidenceOverrideCommand(pi: ExtensionAPI): void {
         return;
       }
 
-      const result = planOverride(content, args ?? "");
+      const registry = currentRegistryView();
+      const result = planOverride(content, args ?? "", registry);
       if (!result.ok) {
         ctx.ui.notify(result.message, "info");
         return;
       }
 
-      grantEvidenceOverride(String(result.event.step), String(result.event.invocationId));
+      if (result.event.source === "registry") {
+        const failed = writeRegistryOverride(
+          getSessionRegistry(),
+          result.event.attempts as string[],
+          String(result.event.reason),
+          new Date().toISOString(),
+        );
+        if (failed) {
+          ctx.ui.notify(`Override not recorded: ${failed}.`, "warning");
+          return;
+        }
+      } else {
+        grantEvidenceOverride(String(result.event.step), String(result.event.invocationId));
+      }
       appendActivityEvent(path.dirname(nbPath), {
         timestamp: new Date().toISOString(),
         kind: "evidence.override",

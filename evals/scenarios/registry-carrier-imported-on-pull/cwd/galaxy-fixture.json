@@ -1,0 +1,23 @@
+{
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/pages/aaaa000000000001",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "id": "aaaa000000000001",
+            "slug": null,
+            "title": "Variant calling",
+            "latest_revision_id": "r2",
+            "revision_ids": ["r1", "r2"],
+            "history_id": "0a248a1f62a0cc04",
+            "content": "# Variant calling\n\n## Plan A: Call variants [galaxy]\n\n- [ ] 1. **Align reads** {#plan-a-step-1} \u2014 bwa mem\n- [ ] 2. **Call variants** {#plan-a-step-2} \u2014 freebayes\n\n[loom-registry:v3]: #loom \"H4sIAAAAAAAAE6VVwY7bNhC99yuKOcsbSrYsS7futWjRtEEPCQJhRI4s1jKpkJTXxtb/XgyltZ1NjAZYniRyOPNm3pvhM6DB/uS1r7WCCkT66/rj++Jx+Vv2++qP/P36z+KvzYfyb/ELJIAh0H4IHqrn+4aPfIrD4OwB+/gdoIJMZOuFKBdZ/iHNKiEqIR6EEB8hgeYEFYyeHCQwODtYj/0Ehv8WKSTgB5K1o4P22pqIsmzadSGxyCWuJGZ5KVf5cpVtipw2WUl5JoXYpGmxLklmRbspm3WrsrVKKc+VeHHpDQ6+syHC9J5c0NZ4qD59TqDTPlh3mpCodtNSrhSqpl1iw5i0GUYuxadniCarZk1Zm2IplyqngmM4+jJqRwqq4EZKwPccaroZ03ISKugUwvlzAvZAzmlFk88BHe6hgi8jOU2+Fv/Gaxm7RYaJPUEFnqQ16udW9wQJHLAfeXcjU7WkvC2wbITM0uh/cKS0xECcLR0ZScBm7JELv9OGk6Cj9sHXTzp0NZsksNemlnY0Aar0nIAndyBXj65n5CEMvnr3bvS0xR6PpwfrtpBAQLelWNTZbbC2531rZ2YlxgIcyM2Mpg/iQcA5AVZYj4FqRy17UHpLnrHiGxck0FKQHan6G0WmVV7eKPIbWJx4wDB6qKDXB2KgczP8T9s8ssC1UdpsOZvGjuY78V91hA801GhkZx13QY9mgQveXKQcmZjmqIHXun1mXGPorNOBu4p8wKbXviMFCUhrWuv209H8g4ZJnj1+rzRZJfIbaHQkOU6hwY9SkvexFwJt55h2Bzdaqx35sWenA3rP6Ds0yrZtTb3e6oZF3GLv6VXDCcxWG0zbdYZCSrG6SnTWEs8XMmhklPP9pC/6kW9cnLxxWnZ7MtGf3Q89BYp9HqU6AW+XVGIqs2al1rQprsAVBvQUopoccSNdOFTaDxhkNw+bOPMmkzuUiEqkV7XEngY/NnsdAin40T6NN7yfQciO5I4/9laxP0XmBAnYMUi7p68kUzenWlrjgxtlzOGcXHNwdPF0F3o+QVfUaqPZQz3xVNvdy7C8DIJXJ+cE/rHNVClEcbvSeeay+YX35o0LLsU8kNOtvhnnLwW/R1F2oehiGR+7Dp3hxjmzFOgoabh5d67PXPGjNFLksPZ6y/J/44pwB3IvKJ4BZdAHqjHUvhuDsk+GkZ5v5uQygSenA7k62B3xbECzIHS9JreY4cH5p/8AGG3F720IAAA=\"\n",
+            "content_format": "markdown"
+          }
+        }
+      ]
+    }
+  ]
+}

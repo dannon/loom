@@ -29,6 +29,7 @@ import { RegistryLock, renameReplacing, type LockRecord, type RegistryFs } from 
 import {
   CURRENT_REGISTRY_VERSION,
   DIGEST_RE,
+  MAX_REGISTRY_REVISION,
   RegistryFormatError,
   assertNoDuplicateKeys,
   canonicalJson,
@@ -46,6 +47,9 @@ export { computeHandoffEligible } from "./registry-eligibility";
 export { applyImportRule } from "./registry-import";
 export { STALE_LOCK_MS, type RegistryFs, type LockRecord } from "./registry-lock";
 export type { Submitter, SubmitOutcome, TemplateSnapshot } from "./registry-submitter";
+
+/** Writes an imported registry must still have room for. */
+const REVISION_HEADROOM = 2 ** 20;
 
 /** Past this, a registry file or carrier is rejected unread. */
 export const MAX_REGISTRY_BYTES = 4 * 1024 * 1024;
@@ -225,9 +229,14 @@ export class RegistryStore {
     // Replacing this session's own state with a foreign document would let
     // whoever wrote it wipe live approvals (agy's carrier-wipe). How a foreign
     // Page carrier merges into live state is the pull-merge rule's job; until
-    // then it is refused. A read-only session has no state of its own to lose.
-    if (this.#ownState && this.#mode === "writer") {
-      const reason = "a registry this session did not write arrived while it holds its own";
+    // then it is refused. A read-only session has no state of its own, but
+    // what it holds is what the writer wrote, and a carrier mustn't replace
+    // that either: only the file, which is the writer's, may.
+    if ((this.#ownState && this.#mode === "writer") || (!fromFile && this.#mode !== "writer")) {
+      const reason =
+        this.#mode === "writer"
+          ? "a registry this session did not write arrived while it holds its own"
+          : "a carrier can't replace the registry in a read-only session";
       this.notices.push(`Ignored ${reason}.`);
       return { kind: "ignored", reason };
     }
@@ -237,6 +246,11 @@ export class RegistryStore {
       imported = parseRegistry(migrateToCurrent(raw));
     } catch (err) {
       return this.reject((err as Error).message, fromFile);
+    }
+    // Leave room to keep counting: a document at the ceiling would make every
+    // later write fail validation.
+    if (imported.revision > MAX_REGISTRY_REVISION - REVISION_HEADROOM) {
+      return this.reject("revision too close to the ceiling to keep writing", fromFile);
     }
     const { registry, quarantined } = applyImportRule(imported, this.serverUrl);
     // Keep revisions monotonic across the import, so an older own copy that
@@ -433,8 +447,8 @@ export class RegistryStore {
 
   private reject(reason: string, fromFile: boolean): LoadOutcome {
     this.notices.push(
-      this.#ownState && this.#mode === "writer"
-        ? `Registry file rejected (${reason}); keeping this session's own state.`
+      (this.#ownState && this.#mode === "writer") || !fromFile
+        ? `Registry ${fromFile ? "file" : "carrier"} rejected (${reason}); keeping what this session holds.`
         : `Registry rejected (${reason}); starting with an empty registry.`,
     );
     if (fromFile && this.#mode === "writer" && this.#fs.existsSync(this.registryPath)) {
@@ -446,9 +460,9 @@ export class RegistryStore {
         // leave it; the next write replaces it
       }
     }
-    if (this.#ownState && this.#mode === "writer") {
-      // The file was damaged under us; what we hold is still ours and signed,
-      // and the next write puts it back.
+    if ((this.#ownState && this.#mode === "writer") || !fromFile) {
+      // The file was damaged under us, or a carrier didn't parse: what we hold
+      // stays. A rejected carrier must never be a way to clear the registry.
       return { kind: "rejected", reason };
     }
     const empty = this.emptyRegistry(this.#registry.analysis_id);

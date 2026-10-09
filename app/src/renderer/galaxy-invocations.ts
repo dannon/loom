@@ -42,6 +42,8 @@ export interface Invocation {
   enrichmentError?: string;
   jobs?: BlockJobSummary[];
   drift?: BlockDriftNote[];
+  /** The approval registry's verdict, when the run is one it knows about. */
+  handoffEligible?: boolean;
 }
 
 /**
@@ -64,6 +66,7 @@ export interface UnattributedJob {
   enrichmentAttempts?: number;
   enrichmentError?: string;
   jobs?: BlockJobSummary[];
+  handoffEligible?: boolean;
 }
 
 /** What the brain writes for a run no plan step claims. */
@@ -249,6 +252,7 @@ export function parseInvocationBlocks(content: string): Invocation[] {
       enrichmentError: quotedText(rawFields.enrichment_error),
       jobs: jsonArrayField<BlockJobSummary>(rawFields.jobs),
       drift: jsonArrayField<BlockDriftNote>(rawFields.drift),
+      handoffEligible: verifiedField(rawFields.handoff_eligible),
     });
   }
   return out;
@@ -286,6 +290,7 @@ export function parseUnattributedJobBlocks(content: string): UnattributedJob[] {
       enrichmentAttempts: numberField(fields, "enrichment_attempts"),
       enrichmentError: quotedText(raw.enrichment_error),
       jobs: jsonArrayField<BlockJobSummary>(raw.jobs),
+      handoffEligible: verifiedField(raw.handoff_eligible),
     });
   }
   return out;
@@ -336,6 +341,7 @@ function provenanceParts(block: {
   enrichmentAttempts?: number;
   drift?: BlockDriftNote[];
   notebookAnchor?: string;
+  handoffEligible?: boolean;
 }): string[] {
   // An unrecorded or agent-recorded run says so rather than borrowing the
   // harness's word: "recorded by agent" and a missing marker are different
@@ -354,6 +360,10 @@ function provenanceParts(block: {
   } else if (block.enrichment === "complete") parts.push("details recorded");
   else if (block.enrichment === "unavailable") parts.push("details unavailable");
   if (block.drift && block.drift.length > 0) parts.push(`${block.drift.length} version drift`);
+  // Only a run the registry knows about carries this; silence means no record,
+  // not "not eligible".
+  if (block.handoffEligible === true) parts.push("eligible to hand off");
+  else if (block.handoffEligible === false) parts.push("not eligible to hand off");
   return parts;
 }
 

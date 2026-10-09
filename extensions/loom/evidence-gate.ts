@@ -22,14 +22,42 @@
  * evidence may sit in a results section, and the honest sequence spans two
  * edits.
  *
- * What *is* decidable is **contradiction** -- two claims in the same file that
- * disagree, where one of them is machine-owned. When a plan step flips to
- * `- [x]` while the `loom-invocation` block bound to that step still reads
- * `in_progress` or `failed`, the agent is claiming a verified result for a run
- * Galaxy says has not succeeded. That status is written by the poller
- * (`galaxy-poller.ts` / `checkInvocations`), not by the model, so the check
- * cannot be satisfied by writing a convincing sentence -- which is the failure
- * mode that makes an evidence gate theater.
+ * What *is* decidable is **contradiction**: a claim in the notebook that a
+ * record the model can't author disagrees with. There are two such records,
+ * so there are two verdict paths.
+ *
+ * ## The registry path: steps with a recorded run
+ *
+ * When the approval registry (`registry.ts`) holds an attempt bound to the
+ * step that has a submission -- a run the registry knows about -- the verdict
+ * is the registry's. The step is held while none of its runs is
+ * `handoff_eligible` (recomputed here, so a revocation held in memory counts)
+ * and the user hasn't overridden any of them. The evaluation writer
+ * (`registry-evaluator.ts`) sets that flag from Galaxy's own answers, and the
+ * registry is signed by the session, so nothing in the notebook moves it.
+ * Only checkbox states are read from the notebook, by anchor, anywhere in the
+ * file:
+ *
+ * - a held step arriving at `- [x]` is denied, whatever its block's `status:`
+ *   says (the old two-edit split);
+ * - a held step whose checkbox disappears -- an anchor renamed, the line
+ *   fenced, the box broken -- is denied, which is what stops a rename from
+ *   carrying a completion past the check in one edit or two;
+ * - a plan-heading rename doesn't hide a step, because anchored checkboxes are
+ *   found outside `## Plan` sections too.
+ *
+ * Marking a held step `- [!]` is always allowed. An approval nothing has been
+ * submitted for yet is not a run and leaves the step to the legacy path.
+ *
+ * ## The legacy path: runs the registry doesn't know
+ *
+ * Until `loom_submit` (registry slice 3) records gated submissions, that is
+ * every raw submission. When a plan step flips to `- [x]` while the
+ * `loom-invocation` block bound to it still reads `in_progress`, the agent is
+ * claiming a verified result for a run Galaxy says has not finished. That
+ * status is written by the poller, so it can't be satisfied by writing a
+ * convincing sentence -- but it is notebook text, and so is the step's
+ * identity, which leaves the three gaps listed below.
  *
  * Everything else is recorded, not blocked. A flip with no invocation binding
  * (a local step, say) gets no opinion at all: guessing there produces the false
@@ -37,52 +65,49 @@
  *
  * ## Modes
  *
- * Default is `warn`: allow, record to `activity.jsonl`, so the real-world rate
- * can be measured before anyone makes this a hard failure. `deny` exists but is
- * **not validated** and must not become the default until that data exists --
- * adversarial review found one residual case where a deny would be
- * unactionable: an invocation can be pinned at `in_progress` forever, because
- * the `completed` transition requires `summary.ok > 0` and the poller
- * early-returns when Galaxy credentials disappear mid-session. There is no
- * agent action that clears that, and a gate whose remediation cannot be
- * executed is the gate people switch off.
+ * `off | warn | deny`, from `LOOM_EVIDENCE_GATE` or `evidenceGate.mode` in the
+ * config. Every decision that involves a completion is recorded to
+ * `activity.jsonl` as `evidence.decision`, with the contradiction's source,
+ * so `scripts/evidence-gate-audit.mjs` can tabulate what deny would have done;
+ * `docs/evidence-gate-audit.md` holds the result the default rests on.
  *
  * ## The exception is the user's, not the model's
  *
- * The first cut of this gate kept a `denied` set and let the second attempt on
- * a step through, reasoning that an unwinnable retry loop is worse than an
- * unevidenced claim. That is true of a loop and false of this: it made the
- * decision advisory, since a model that disagrees only has to ask twice. So the
- * deny now persists for as long as the contradiction does, and the escape hatch
- * is `/override <step-key> <reason>` (`evidence-override-command.ts`) -- a
- * person, a named step, a recorded reason, one write. A contradiction that
- * recurs on the same step is denied again.
+ * The first cut of this gate let the second attempt on a step through, which
+ * made the decision advisory: a model that disagrees only has to ask twice. So
+ * the deny persists for as long as the contradiction does, and the escape
+ * hatch is `/override <step-key> <reason>` (`evidence-override-command.ts`) --
+ * a person, a named step, a recorded reason. On the registry path it is
+ * written into the registry as an evidence-gate exception on the runs it held
+ * the step for; a later run on the step is held again. On the legacy path it
+ * is a one-shot token for the run in flight. It is also the way out of the
+ * pinned-`in_progress` case: credentials that vanish mid-session, or an
+ * invocation that ends with nothing ok and nothing failed.
  *
- * ## Known gaps, recorded rather than papered over
+ * ## What remains
  *
- * All of these share one root: step identity and the poller's status both live
- * in text the model is allowed to rewrite. They close together, when the
- * poller's verdict is held out of band in a record the model cannot author --
- * the approval/attempt registry, not here. Each has a test pinning current
- * behaviour so it stays visible rather than forgotten.
- *
- * 1. **The two-edit split.** Rewrite `status:` in one edit, flip the checkbox
- *    in the next. The pre-image of the second edit already says `completed`.
- * 2. **Anchor rename plus flip, in one edit.** The post-image step key is no
- *    longer the pre-image's, so it does not read as a flip at all.
- * 3. **Plan-heading rename plus flip, in one edit.** The step leaves the
- *    `## Plan X:` section and stops parsing as a plan step.
- * 4. **Anything that is not a file tool.** `WRITE_TOOLS` is `write` and `edit`;
- *    a `bash` heredoc or `sed -i` against `notebook.md` never reaches this
- *    hook. Same class as the `.loom/` bash hole tracked separately; the right
- *    home for it is the exec-guard's write policy, not a second gate here.
- * 5. **`activity.jsonl` is writable by the model.** The audit trail this gate
- *    appends to is an ordinary file in the workspace, so a sufficiently
- *    motivated model can forge an `evidence.override` row or rewrite a past
- *    decision. Also an exec-guard deny-floor question rather than one this
- *    module can answer, and the reason the durable record has to be the
- *    registry rather than the sidecar.
- */
+ * 1. **Legacy path, two-edit split.** Rewrite `status:` in one edit, flip the
+ *    checkbox in the next: the pre-image already says `completed`.
+ * 2. **Legacy path, anchor rename plus flip.** The post-image step key is not
+ *    the pre-image's, so it does not read as a flip.
+ * 3. **Legacy path, plan-heading rename plus flip.** The step stops parsing.
+ *    All three have tests pinning them, and close for raw submissions only
+ *    when slice 3 records them in the registry.
+ * 4. **Bash.** `WRITE_TOOLS` is `write` and `edit`. On the desktop the
+ *    exec-guard denies shell writes to `notebook.md`, `activity.jsonl` and the
+ *    registry and provenance directories outright (a floor, not an ask), and
+ *    never auto-allows a line that names them, so an interpreter one-liner
+ *    asks the user. A script that finds the files itself still can, and is out
+ *    of scope for a command-string classifier.
+ * 5. **`activity.jsonl` through the file tools.** Not floored there: the
+ *    activity log is an audit trail, not an input to any verdict, now that the
+ *    verdict lives in the signed registry.
+ * 6. **Positional anchors.** A step with no `{#id}` is addressed by position
+ *    (`plan-a-step-2`), so inserting a step above it moves its address onto
+ *    another line. On the registry path, different text at a held positional
+ *    address is treated as that move and refused, which also means a held
+ *    positional step can't be retitled until it's eligible; explicit anchors
+ *    don't have the problem. */
 
 import fs from "node:fs";
 import os from "node:os";
@@ -94,6 +119,10 @@ import { appendActivityEvent } from "./activity";
 import { findInvocationBlocks, type InvocationYaml } from "./notebook-writer";
 import { findJobBlocks, type JobYaml } from "./galaxy-job-block";
 import { attemptOwns, readAttemptRecordSync } from "./galaxy-provenance";
+import { collectCheckboxSteps } from "./notebook-anchors";
+import { computeHandoffEligible, type Attempt, type Registry } from "./registry";
+import { NO_APPROVAL_REVISION } from "./registry-evaluation";
+import { getSessionRegistry, sessionView } from "./registry-runtime";
 import { readEnv } from "../../shared/orbit-env.js";
 
 /** pi emits its built-in file tools lowercase; mirrors exec-guard's FILE_WRITE_TOOLS. */
@@ -225,10 +254,27 @@ export function detectCompletions(before: string, after: string): PlanStep[] {
   return flips;
 }
 
-export interface Contradiction {
+/** A flip the step's own `loom-invocation` block contradicts (the legacy path). */
+export interface BlockContradiction {
+  source: "block";
   step: PlanStep;
   invocation: InvocationYaml;
 }
+
+/**
+ * A write the registry contradicts: the step has a recorded run, and the
+ * record says that run is not eligible to hand off. `flip` is the step arriving
+ * at `- [x]`; `vanished` is the write removing the step's checkbox altogether,
+ * which is how a rename would otherwise carry the completion past the check.
+ */
+export interface RegistryContradiction {
+  source: "registry";
+  step: PlanStep;
+  kind: "flip" | "vanished";
+  hold: RegistryHold;
+}
+
+export type Contradiction = BlockContradiction | RegistryContradiction;
 
 /**
  * Flips that contradict machine-owned state: the step's own `loom-invocation`
@@ -259,7 +305,7 @@ export interface Contradiction {
  *    failing open there is the difference between a gate people keep and a
  *    gate people switch off.
  */
-export function findContradictions(before: string, flips: PlanStep[]): Contradiction[] {
+export function findContradictions(before: string, flips: PlanStep[]): BlockContradiction[] {
   const blocks = findInvocationBlocks(before);
   if (blocks.length === 0) return [];
   const byAnchor = new Map<string, InvocationYaml[]>();
@@ -269,16 +315,179 @@ export function findContradictions(before: string, flips: PlanStep[]): Contradic
     list.push(b);
     byAnchor.set(b.notebookAnchor, list);
   }
-  const out: Contradiction[] = [];
+  const out: BlockContradiction[] = [];
   for (const step of flips) {
     if (!step.anchor) continue;
     const list = byAnchor.get(step.anchor);
     if (!list || list.length === 0) continue;
     if (list.some((b) => b.status === "completed")) continue; // a run for this step did finish
     const pending = list.find((b) => b.status === "in_progress");
-    if (pending) out.push({ step, invocation: pending });
+    if (pending) out.push({ source: "block", step, invocation: pending });
   }
   return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The registry path
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A step the registry holds: it has a recorded run, and nothing lets it through. */
+export interface RegistryHold {
+  anchor: string;
+  /** Attempts bound to the step that have a submission. */
+  attemptIds: string[];
+  /** What the record says is missing, for the reason and the activity row. */
+  missing: string[];
+}
+
+/** The user's `/override`, recorded as an evidence-gate exception on the attempt. */
+export function gateExcepted(attempt: Attempt, exceptions: Registry["exceptions"]): boolean {
+  const revision = attempt.approval?.spec_revision ?? NO_APPROVAL_REVISION;
+  return exceptions.some(
+    (x) =>
+      x.attempt_id === attempt.attempt_id &&
+      x.by === "user" &&
+      x.scope === "evidence_gate" &&
+      x.assertion_id === undefined &&
+      x.spec_revision === revision,
+  );
+}
+
+function missingFacts(a: Attempt): string[] {
+  const ev = a.evaluation;
+  if (!ev) return ["not evaluated yet"];
+  const out: string[] = [];
+  if (ev.authority !== "established" || a.provenance?.authority !== "established") {
+    out.push("not re-verified against Galaxy in this session");
+  }
+  if (ev.execution !== "success") out.push(`execution ${ev.execution}`);
+  if (ev.conformity !== "conformant" && ev.conformity !== "excepted") {
+    out.push(`conformity ${ev.conformity}`);
+  }
+  if (ev.predicate_result !== "pass" && ev.predicate_result !== "attested") {
+    out.push(`predicate ${ev.predicate_result}`);
+  }
+  if (ev.integrity !== "ok") out.push(`integrity ${ev.integrity}`);
+  return out.length > 0 ? out : ["the record's checks don't line up"];
+}
+
+/**
+ * Which steps the registry has an opinion on, and which of those it holds.
+ *
+ * A step has an opinion when an attempt bound to it has a submission -- a run
+ * the registry knows about. An approval nothing has been submitted for yet is
+ * not a run, so it leaves the step to the legacy path. A step is held when
+ * none of its runs is eligible and the user hasn't overridden any of them; one
+ * eligible run is enough, the same fail-open the legacy path gives a step with
+ * one completed block beside stale ones.
+ *
+ * `handoff_eligible` is recomputed here rather than read off the attempt, so a
+ * revocation the session holds in memory (`sessionView`) counts at once.
+ */
+export function registryHolds(registry: Registry | null | undefined): {
+  bound: Set<string>;
+  held: Map<string, RegistryHold>;
+} {
+  const bound = new Set<string>();
+  const held = new Map<string, RegistryHold>();
+  if (!registry) return { bound, held };
+  const byAnchor = new Map<string, Attempt[]>();
+  for (const a of Object.values(registry.attempts)) {
+    if (!a.submission || a.binding.step_anchor === "unattributed") continue;
+    const list = byAnchor.get(a.binding.step_anchor) ?? [];
+    list.push(a);
+    byAnchor.set(a.binding.step_anchor, list);
+  }
+  for (const [anchor, attempts] of byAnchor) {
+    bound.add(anchor);
+    const through = attempts.some(
+      (a) => computeHandoffEligible(a, registry.exceptions) || gateExcepted(a, registry.exceptions),
+    );
+    if (through) continue;
+    held.set(anchor, {
+      anchor,
+      attemptIds: attempts.map((a) => a.attempt_id),
+      missing: [...new Set(attempts.flatMap(missingFacts))],
+    });
+  }
+  return { bound, held };
+}
+
+/** Checkbox states by anchor; a step written twice is complete if either copy says so. */
+function checkboxesByAnchor(content: string): Map<string, PlanStep & { positional?: true }> {
+  const out = new Map<string, PlanStep & { positional?: true }>();
+  for (const box of collectCheckboxSteps(content)) {
+    const prior = out.get(box.anchor);
+    if (prior?.state === "x") continue;
+    out.set(box.anchor, {
+      key: `#${box.anchor}`,
+      anchor: box.anchor,
+      state: box.state,
+      text: box.text,
+      ...(box.explicit ? {} : { positional: true as const }),
+    });
+  }
+  return out;
+}
+
+/** A step's text with the ordinal, the state and the spacing taken out. */
+function stepIdentity(text: string): string {
+  return text
+    .replace(/^\d+\.\s*/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Writes the registry contradicts. Reads only checkbox states from the
+ * notebook -- the verdict is the registry's -- so rewriting a block's
+ * `status:` first changes nothing (gap 1), and because steps are found by
+ * anchor anywhere in the file, renaming the plan heading doesn't hide one
+ * (gap 3). Removing a held step's checkbox is refused outright, which is what
+ * keeps a rename from carrying a completion past the check in one edit or two
+ * (gap 2): mark it `- [!]` instead, or ask for `/override`.
+ */
+export function findRegistryContradictions(
+  before: string,
+  after: string,
+  registry: Registry | null | undefined,
+  opts: { newStepsCount?: boolean } = {},
+): RegistryContradiction[] {
+  const newStepsCount = opts.newStepsCount ?? true;
+  const { held } = registryHolds(registry);
+  if (held.size === 0) return [];
+  const pre = checkboxesByAnchor(before);
+  const post = checkboxesByAnchor(after);
+  const out: RegistryContradiction[] = [];
+  for (const [anchor, hold] of held) {
+    const was = pre.get(anchor);
+    const now = post.get(anchor);
+    // A step the notebook never had arriving complete counts for an edit (the
+    // model wrote it). A pull or resume replacing the notebook wholesale --
+    // a fresh container resuming its Page -- brings steps in whatever state
+    // they were left, and judging those before reconcile has re-checked them
+    // would refuse the honest resume.
+    if (now?.state === "x" && was?.state !== "x" && (was || newStepsCount)) {
+      out.push({ source: "registry", step: now, kind: "flip", hold });
+    } else if (was && !now) {
+      out.push({ source: "registry", step: was, kind: "vanished", hold });
+    } else if (was?.positional && now && stepIdentity(was.text) !== stepIdentity(now.text)) {
+      // A step with no `{#id}` is addressed by position, so a line inserted
+      // above it moves its address onto another step -- and the original could
+      // then be completed under an address nothing holds. Different text at a
+      // held positional address is that move, and is refused like a removal.
+      out.push({ source: "registry", step: was, kind: "vanished", hold });
+    }
+  }
+  return out;
+}
+
+/** The registry as this session reads it, or null when there is none. */
+export function currentRegistryView(): Registry | null {
+  const session = getSessionRegistry();
+  if (!session || session.unavailable) return null;
+  return sessionView(session);
 }
 
 /**
@@ -289,8 +498,26 @@ export function findContradictions(before: string, flips: PlanStep[]): Contradic
  * answer off the checkbox would report nothing. Same predicate, applied to
  * every step in the file.
  */
-export function outstandingContradictions(content: string): Contradiction[] {
-  return findContradictions(content, [...parsePlanSteps(content).values()]);
+export function outstandingContradictions(
+  content: string,
+  registry: Registry | null = null,
+): Contradiction[] {
+  const { bound, held } = registryHolds(registry);
+  const steps = [...parsePlanSteps(content).values()].filter(
+    (s) => !s.anchor || !bound.has(s.anchor),
+  );
+  const out: Contradiction[] = findContradictions(content, steps);
+  const boxes = checkboxesByAnchor(content);
+  for (const [anchor, hold] of held) {
+    const step = boxes.get(anchor) ?? {
+      key: `#${anchor}`,
+      anchor,
+      state: " " as const,
+      text: anchor,
+    };
+    out.push({ source: "registry", step, kind: "flip", hold });
+  }
+  return out;
 }
 
 /**
@@ -300,17 +527,36 @@ export function outstandingContradictions(content: string): Contradiction[] {
  * copied out of the notebook by hand, and a gate whose override is hard to
  * address is a gate people work around.
  */
-export function resolveStepKey(content: string, input: string): PlanStep | null {
-  const steps = parsePlanSteps(content);
+export function resolveStepKey(
+  content: string,
+  input: string,
+  registry: Registry | null = null,
+): PlanStep | null {
   const raw = input.trim();
   if (!raw) return null;
-  for (const candidate of [raw, `#${raw}`]) {
-    const hit = steps.get(candidate);
-    if (hit) return hit;
-  }
-  const lowered = raw.toLowerCase();
-  for (const [key, step] of steps) {
-    if (key.toLowerCase() === lowered || key.toLowerCase() === `#${lowered}`) return step;
+  // Plan steps first, then any anchored checkbox (a step whose heading was
+  // renamed is still that step to the registry), then a step the registry holds
+  // that the notebook no longer shows at all.
+  const boxes = checkboxesByAnchor(content);
+  const held = registryHolds(registry).held;
+  const sources: Map<string, PlanStep>[] = [
+    parsePlanSteps(content),
+    boxes,
+    new Map(
+      [...held.keys()]
+        .filter((a) => !boxes.has(a))
+        .map((a) => [`#${a}`, { key: `#${a}`, anchor: a, state: " " as const, text: a }]),
+    ),
+  ];
+  for (const steps of sources) {
+    for (const candidate of [raw, `#${raw}`]) {
+      const hit = steps.get(candidate);
+      if (hit) return hit;
+    }
+    const lowered = raw.toLowerCase();
+    for (const [key, step] of steps) {
+      if (key.toLowerCase() === lowered || key.toLowerCase() === `#${lowered}`) return step;
+    }
   }
   return null;
 }
@@ -445,6 +691,7 @@ export function computeAfterContent(
 }
 
 export function contradictionReason(c: Contradiction): string {
+  if (c.source === "registry") return registryReason(c);
   return (
     `Marking "${c.step.text}" complete contradicts its own Galaxy invocation ` +
     `block, which reads \`status: ${c.invocation.status}\`. That status is written ` +
@@ -460,6 +707,30 @@ export function contradictionReason(c: Contradiction): string {
     `believe the gate is wrong, say so and ask the user to run ` +
     `\`/override ${c.step.anchor ?? c.step.key} <reason>\`; only they can clear it, ` +
     `and the reason is recorded.`
+  );
+}
+
+function registryReason(c: RegistryContradiction): string {
+  const address = c.step.anchor ?? c.step.key;
+  const record =
+    `The approval registry holds a recorded run for this step that is not eligible to ` +
+    `hand off (${c.hold.missing.join("; ")}). Loom writes that record from Galaxy's own ` +
+    `answers; nothing in the notebook changes it.`;
+  const head =
+    c.kind === "flip"
+      ? `Marking "${c.step.text}" complete contradicts the registry. ${record}`
+      : `This edit removes the step "${c.step.text}" ({#${address}}) from the notebook while ` +
+        `its recorded run isn't eligible. ${record} A step with a recorded run can't be ` +
+        `renamed or removed until it is; if the step failed or was abandoned, mark it ` +
+        `\`- [!]\` and say why instead.`;
+  return (
+    `${head}\n` +
+    `If the run is still going, leave the step pending. If it failed, mark it \`- [!]\` and ` +
+    `record what failed. If Galaxy has finished, the next poll or \`/reconcile\` re-checks ` +
+    `it against Galaxy; inspect the outputs and record that evidence meanwhile.\n` +
+    `Do not retry this write unchanged -- it will be refused again. If you believe the ` +
+    `record is wrong, say so and ask the user to run \`/override ${address} <reason>\`; only ` +
+    `they can clear it, and it is recorded in the registry.`
   );
 }
 
@@ -482,15 +753,46 @@ export function decideNotebookWrite(
   toolName: string,
   input: Record<string, unknown>,
   mode: EvidenceGateMode,
+  registry: Registry | null = null,
 ): GateDecision {
   const none: GateDecision = { gated: false, mode, completions: [], contradictions: [] };
   if (mode === "off") return none;
   const after = computeAfterContent(before, toolName, input);
   if (after === null) return none;
-  const completions = detectCompletions(before, after);
+  return decideTransition(before, after, mode, registry);
+}
+
+/**
+ * The decision for a notebook going from `before` to `after`, whatever wrote
+ * it: a file tool, or a Page pull replacing the body.
+ */
+export function decideTransition(
+  before: string,
+  after: string,
+  mode: EvidenceGateMode,
+  registry: Registry | null = null,
+  opts: { newStepsCount?: boolean } = {},
+): GateDecision {
+  const none: GateDecision = { gated: false, mode, completions: [], contradictions: [] };
+  if (mode === "off") return none;
+  const { bound } = registryHolds(registry);
+  const fromRegistry = findRegistryContradictions(before, after, registry, opts);
+  // A step the registry has an opinion on is the registry's to judge; the
+  // block text beside it is not consulted.
+  const flips = detectCompletions(before, after);
+  const completions = [...flips];
+  for (const c of fromRegistry) {
+    if (!completions.some((s) => s.key === c.step.key)) completions.push(c.step);
+  }
   if (completions.length === 0) return none;
   // Pre-image, deliberately: see findContradictions.
-  const contradictions = findContradictions(before, completions);
+  const contradictions: Contradiction[] = [
+    ...fromRegistry,
+    ...findContradictions(
+      before,
+      flips.filter((s) => !s.anchor || !bound.has(s.anchor)),
+    ),
+  ];
   if (contradictions.length === 0) return { ...none, completions };
   return {
     gated: mode === "deny",
@@ -700,11 +1002,22 @@ export function adjudicateNotebookWrite(
   input: Record<string, unknown>,
   mode: EvidenceGateMode,
   granted: ReadonlySet<string>,
+  registry: Registry | null = null,
 ): GateAdjudication {
-  const decision = decideNotebookWrite(before, toolName, input, mode);
+  return adjudicate(decideNotebookWrite(before, toolName, input, mode, registry), granted);
+}
+
+/**
+ * Apply the user's standing clearances to a decision. A block contradiction is
+ * cleared by its one-shot token; a registry contradiction only by the
+ * evidence-gate exception `/override` writes into the registry, which the
+ * decision has already taken into account.
+ */
+export function adjudicate(decision: GateDecision, granted: ReadonlySet<string>): GateAdjudication {
   const cleared = decision.gated
-    ? decision.contradictions.filter((c) =>
-        granted.has(overrideToken(c.step.key, c.invocation.invocationId)),
+    ? decision.contradictions.filter(
+        (c) =>
+          c.source === "block" && granted.has(overrideToken(c.step.key, c.invocation.invocationId)),
       )
     : [];
   const unresolved = decision.contradictions.filter((c) => !cleared.includes(c));
@@ -766,6 +1079,46 @@ function resolvesToNotebook(raw: string, cwd: string, nbPath: string): boolean {
   return false;
 }
 
+/** One `evidence.decision` row: what was claimed, what contradicted it, and the outcome. */
+export function recordDecision(
+  analysisDir: string,
+  toolName: string,
+  adjudication: GateAdjudication,
+): void {
+  const { decision } = adjudication;
+  appendActivityEvent(analysisDir, {
+    timestamp: new Date().toISOString(),
+    kind: "evidence.decision",
+    source: "evidence-gate",
+    payload: {
+      mode: decision.mode,
+      toolName,
+      completions: decision.completions.map((s) => s.key),
+      contradictions: decision.contradictions.map((c) =>
+        c.source === "block"
+          ? {
+              source: "block",
+              step: c.step.key,
+              status: c.invocation.status,
+              // The id is what makes a row adjudicable: warn mode records the
+              // would-block decision, and deciding later whether it was a false
+              // positive means going and looking at this invocation in Galaxy.
+              invocationId: c.invocation.invocationId,
+            }
+          : {
+              source: "registry",
+              step: c.step.key,
+              kind: c.kind,
+              attempts: c.hold.attemptIds,
+              missing: c.hold.missing,
+            },
+      ),
+      overridden: adjudication.block ? [] : adjudication.cleared.map((c) => c.step.key),
+      outcome: adjudication.outcome,
+    },
+  });
+}
+
 export function registerEvidenceGate(pi: ExtensionAPI): void {
   // A clearance the user granted and the gate never spent must not outlive the
   // session it was granted in. Registered here rather than in
@@ -802,44 +1155,39 @@ export function registerEvidenceGate(pi: ExtensionAPI): void {
     const touchesNotebook = targets.some((t) => resolvesToNotebook(t, ctx.cwd, nbPath));
     if (!touchesNotebook) return;
 
+    const registry = currentRegistryView();
     let before: string;
     try {
       before = fs.readFileSync(nbPath, "utf-8");
     } catch {
-      return; // no notebook on disk yet -- nothing to compare against
+      // No notebook on disk yet. Nothing to compare against -- unless the
+      // registry holds a step, in which case a notebook written from scratch
+      // with that step complete is still a completion.
+      if (registryHolds(registry).held.size === 0) return;
+      before = "";
     }
 
-    const adjudication = adjudicateNotebookWrite(before, event.toolName, input, mode, overrides);
+    const adjudication = adjudicateNotebookWrite(
+      before,
+      event.toolName,
+      input,
+      mode,
+      overrides,
+      registry,
+    );
     const { decision } = adjudication;
     if (decision.completions.length === 0) return;
 
     // Spend the tokens only on the write they actually let through.
     if (!adjudication.block) {
       for (const c of adjudication.cleared) {
-        overrides.delete(overrideToken(c.step.key, c.invocation.invocationId));
+        if (c.source === "block") {
+          overrides.delete(overrideToken(c.step.key, c.invocation.invocationId));
+        }
       }
     }
 
-    appendActivityEvent(path.dirname(nbPath), {
-      timestamp: new Date().toISOString(),
-      kind: "evidence.decision",
-      source: "evidence-gate",
-      payload: {
-        mode: decision.mode,
-        toolName: event.toolName,
-        completions: decision.completions.map((s) => s.key),
-        contradictions: decision.contradictions.map((c) => ({
-          step: c.step.key,
-          status: c.invocation.status,
-          // The id is what makes a row adjudicable: warn mode records the
-          // would-block decision, and deciding later whether it was a false
-          // positive means going and looking at this invocation in Galaxy.
-          invocationId: c.invocation.invocationId,
-        })),
-        overridden: adjudication.block ? [] : adjudication.cleared.map((c) => c.step.key),
-        outcome: adjudication.outcome,
-      },
-    });
+    recordDecision(path.dirname(nbPath), event.toolName, adjudication);
 
     const warnings = findEnrichmentWarnings(before, decision.completions, path.dirname(nbPath));
     if (warnings.length > 0) {

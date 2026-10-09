@@ -249,13 +249,13 @@ describe.each(WORKSPACE_STATE_DIR_NAMES)(
     it("an ordinary write inside the analysis workspace is not catastrophic", () => {
       for (const c of [
         `echo x > ${ANALYSIS}/out.txt`,
-        `echo x >> ${ANALYSIS}/notebook.md`,
+        `echo x >> ${ANALYSIS}/notes.md`,
         `echo x > ~/${D}/analyses/proj/out.txt`,
         `echo x > $HOME/${D}/analyses/proj/out.txt`,
         `echo x > \${HOME}/${D}/analyses/proj/out.txt`,
         `cp results.csv ${ANALYSIS}/results.csv`,
         `mv ${ANALYSIS}/a.txt ${ANALYSIS}/b.txt`,
-        `sed -i 's/a/b/' ${ANALYSIS}/notebook.md`,
+        `sed -i 's/a/b/' ${ANALYSIS}/notes.md`,
         `python3 run.py | tee ${ANALYSIS}/log.txt`,
         `cp "${ANALYSIS}/a.txt" "${ANALYSIS}/b.txt"`,
       ])
@@ -661,5 +661,59 @@ describe("classifyBash -- a cd changes what relative operands mean", () => {
   });
   it("a comment does not swallow the newline that ends it", () => {
     expect(classifyBash("cd ~/.loom # go\necho x > a", H, C).kind).toBe("catastrophic");
+  });
+});
+
+// The analysis record (#475 gaps 4-5): the notebook the evidence gate judges
+// and the activity log every gate writes to. The file tools reach them through
+// hooks that see the write; the shell would reach them through nothing.
+describe("classifyBash -- the analysis record is a floor for the shell", () => {
+  it("denies every common way of writing the notebook or the activity log", () => {
+    for (const c of [
+      "echo '- [x] done' >> notebook.md",
+      "cat > notebook.md <<'EOF'\n- [x] step\nEOF",
+      "printf x > ./notebook.md",
+      "echo x >| notebook.md",
+      "echo x &> /work/a/notebook.md",
+      "sed -i 's/- \\[ \\]/- [x]/' notebook.md",
+      "sed -i.bak 's/a/b/' notebook.md",
+      "perl -pi -e 's/a/b/' notebook.md",
+      "python3 make.py | tee notebook.md",
+      "tee -a activity.jsonl < forged.jsonl",
+      "cp forged.md notebook.md",
+      "mv forged.md notebook.md",
+      "mv notebook.md /tmp/x",
+      "rm notebook.md",
+      "truncate -s 0 activity.jsonl",
+      "dd if=forged.md of=notebook.md",
+      "git checkout -- notebook.md",
+      "git restore notebook.md",
+      "echo x > NOTEBOOK.MD",
+      "echo x > note\\book.md",
+      "cd sub && echo x >> ../notebook.md",
+      "NB=notebook.md; echo x >> $NB",
+      "echo x > notebook.m*",
+      "true; echo x > activity.jsonl",
+    ])
+      expect(classifyBash(c).kind, c).toBe("catastrophic");
+  });
+
+  it("reads, copies out and unrelated writes are left alone", () => {
+    for (const c of [
+      "cat notebook.md",
+      "grep -n Plan notebook.md",
+      "tail -5 activity.jsonl | jq .",
+      "cp notebook.md notebook.bak",
+      "cat notebook.md > /tmp/review.md",
+      "wc -l notebook.md activity.jsonl",
+      "git add notebook.md",
+      "git diff notebook.md",
+      "echo x > out.txt",
+    ])
+      expect(classifyBash(c).kind, c).not.toBe("catastrophic");
+  });
+
+  it("says what to do instead", () => {
+    expect(classifyBash("echo x >> notebook.md").reason).toMatch(/edit\/write tools/);
   });
 });
