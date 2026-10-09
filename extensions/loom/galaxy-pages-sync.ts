@@ -23,6 +23,20 @@ import {
   stripGalaxyPageBlocks,
   type GalaxyPageBindingYaml,
 } from "./galaxy-page-binding";
+import {
+  adjudicate,
+  currentRegistryView,
+  decideTransition,
+  recordDecision,
+  resolveMode,
+} from "./evidence-gate";
+import {
+  ingestPulledCarrier,
+  registryCarrierForPush,
+  type CarrierSource,
+} from "./registry-page-carrier";
+import { followThrough } from "./galaxy-reconcile";
+import * as path from "path";
 
 // Defense-in-depth: Galaxy Page content can be authored by other users (or a
 // malicious instance) and flows into notebook.md -> the model's context. Wrap
@@ -48,6 +62,39 @@ export function stripUntrustedMarkers(body: string): string {
 export function wrapUntrustedRemoteBody(body: string): string {
   const clean = stripUntrustedMarkers(body);
   return `${UNTRUSTED_BEGIN}\n${clean}\n${UNTRUSTED_END}`;
+}
+
+/**
+ * A pull replaces the notebook wholesale, which no file-tool hook sees -- and
+ * the Page is editable in Galaxy by the model's own Pages tools. So the pulled
+ * notebook gets the same evidence-gate decision an edit would: in deny mode a
+ * pull that completes a step the record holds is refused, in warn it is
+ * recorded.
+ */
+function gatePulledNotebook(nbPath: string, before: string, after: string, tool: string): void {
+  const decision = decideTransition(before, after, resolveMode(), currentRegistryView());
+  if (decision.completions.length === 0) return;
+  const adjudication = adjudicate(decision, new Set());
+  recordDecision(path.dirname(nbPath), tool, adjudication);
+  if (adjudication.block) {
+    throw new Error(
+      `the Page's notebook would complete steps the evidence gate is holding, so it was not pulled.\n` +
+        (adjudication.decision.reason ?? ""),
+    );
+  }
+}
+
+/** Reconcile after a pull or resume, without making the caller wait on Galaxy. */
+function reconcileAfter(trigger: CarrierSource): void {
+  void followThrough(trigger).catch((err) => {
+    console.error(`[reconcile] after ${trigger} failed:`, err);
+  });
+}
+
+/** Page content for a push: the projected notebook, then the registry carrier. */
+function withCarrier(projected: string): string {
+  const carrier = registryCarrierForPush();
+  return carrier ? `${projected.replace(/\s+$/, "")}\n\n${carrier}\n` : projected;
 }
 
 export interface PushOptions {
@@ -126,6 +173,8 @@ export interface ResumeResult {
   pageId: string;
   latestRevisionId: string;
   action: "linked" | "refreshed";
+  /** What happened to the registry the Page carried, when worth saying. */
+  registry?: string;
 }
 
 /**
@@ -173,7 +222,8 @@ export async function resumeGalaxyPage(
       );
     }
 
-    const remoteBody = wrapUntrustedRemoteBody(galaxyMarkdownToLoom(page.content ?? ""));
+    const pulled = ingestPulledCarrier(page.content ?? "", "page_resume");
+    const remoteBody = wrapUntrustedRemoteBody(galaxyMarkdownToLoom(pulled.body));
     const binding: GalaxyPageBindingYaml = {
       pageId: page.id,
       pageSlug: page.slug ?? null,
@@ -182,11 +232,15 @@ export async function resumeGalaxyPage(
       lastSyncedRevision: page.latest_revision_id,
       boundAt: existing?.boundAt ?? new Date().toISOString(),
     };
-    await writeNotebook(nbPath, upsertGalaxyPageBlock(remoteBody, binding));
+    const next = upsertGalaxyPageBlock(remoteBody, binding);
+    gatePulledNotebook(nbPath, localBefore, next, "notebook_resume_from_galaxy");
+    await writeNotebook(nbPath, next);
+    reconcileAfter("page_resume");
     return {
       pageId: page.id,
       latestRevisionId: page.latest_revision_id,
       action: existing ? "refreshed" : "linked",
+      ...(pulled.notice ? { registry: pulled.notice } : {}),
     };
   });
 }
@@ -194,6 +248,8 @@ export async function resumeGalaxyPage(
 export interface PullResult {
   pageId: string;
   latestRevisionId: string;
+  /** What happened to the registry the Page carried, when worth saying. */
+  registry?: string;
 }
 
 export async function pullNotebookFromGalaxy(): Promise<PullResult> {
@@ -216,14 +272,22 @@ export async function pullNotebookFromGalaxy(): Promise<PullResult> {
       );
     }
     const page = await getPage(existing.pageId);
-    const remoteBody = wrapUntrustedRemoteBody(galaxyMarkdownToLoom(page.content ?? ""));
+    const pulled = ingestPulledCarrier(page.content ?? "", "page_pull");
+    const remoteBody = wrapUntrustedRemoteBody(galaxyMarkdownToLoom(pulled.body));
     const refreshed: GalaxyPageBindingYaml = {
       ...existing,
       pageSlug: page.slug ?? existing.pageSlug,
       lastSyncedRevision: page.latest_revision_id,
     };
-    await writeNotebook(nbPath, upsertGalaxyPageBlock(remoteBody, refreshed));
-    return { pageId: existing.pageId, latestRevisionId: page.latest_revision_id };
+    const next = upsertGalaxyPageBlock(remoteBody, refreshed);
+    gatePulledNotebook(nbPath, content, next, "notebook_pull_from_galaxy");
+    await writeNotebook(nbPath, next);
+    reconcileAfter("page_pull");
+    return {
+      pageId: existing.pageId,
+      latestRevisionId: page.latest_revision_id,
+      ...(pulled.notice ? { registry: pulled.notice } : {}),
+    };
   });
 }
 
@@ -251,7 +315,7 @@ export async function pushNotebookToGalaxy(opts: PushOptions = {}): Promise<Push
         );
       }
       const updated = await updatePage(existing.pageId, {
-        content: await loomToGalaxyMarkdownRich(stripped, galaxyDirectiveValidators),
+        content: withCarrier(await loomToGalaxyMarkdownRich(stripped, galaxyDirectiveValidators)),
         content_format: "markdown",
         edit_source: "agent",
       });
@@ -277,7 +341,7 @@ export async function pushNotebookToGalaxy(opts: PushOptions = {}): Promise<Push
       title: opts.title ?? "Untitled notebook",
       slug: opts.slug,
       annotation: opts.annotation,
-      content: await loomToGalaxyMarkdownRich(stripped, galaxyDirectiveValidators),
+      content: withCarrier(await loomToGalaxyMarkdownRich(stripped, galaxyDirectiveValidators)),
       content_format: "markdown",
     });
     const binding: GalaxyPageBindingYaml = {
