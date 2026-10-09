@@ -1,0 +1,30 @@
+{
+  "name": "a registry carried in a Page another session wrote comes in as an import",
+  "description": "`/sync pull` fetches a Page whose content ends in a [loom-registry:v3] carrier signed by some other session. The carrier is taken out of the body before the notebook is written, so it never lands in notebook.md, and the store's signature check makes it an import: its approval is restored, its check unchecked, and its run counts only once reconcile re-verifies it. A carrier this session wrote would be a continuation instead; that half needs the session's own key and is pinned in the unit tests.",
+  "tier": 1,
+  "inputs": ["/sync pull"],
+  "env": {
+    "ANTHROPIC_API_KEY": "fake-eval-key",
+    "GALAXY_URL": "https://usegalaxy.org",
+    "GALAXY_API_KEY": "fake-eval-galaxy-key",
+    "LOOM_GALAXY_FIXTURE": "galaxy-fixture.json"
+  },
+  "timeoutMs": 20000,
+  "assertions": {
+    "events": {
+      "mustNotInclude": ["agent_start", "tool_execution_start", "turn_start"]
+    },
+    "activity": {
+      "mustInclude": [
+        {
+          "kind": "registry.carrier_ingested",
+          "source": "harness",
+          "payloadContains": { "source": "page_pull", "outcome": "imported" }
+        }
+      ]
+    },
+    "notebook": {
+      "mustNotContain": ["registry:v3"]
+    }
+  }
+}

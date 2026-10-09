@@ -1,0 +1,37 @@
+{
+  "name": "the evaluation writer evaluates a mapped-over invocation across every job it ran",
+  "description": "The registry holds an approved workflow run bound to plan-a-step-2 whose invocation ran one step mapped over three jobs (the capture fixture). After reconcile the evaluation writer asks Galaxy about the invocation, walks its steps, fetches every job, and records execution success. The answers came from the fixture, so the evaluation is never established and the run is not eligible -- a Tier-1 run can show the path, never grant the flag. A workflow can't be re-checked against its Spec yet (the invocation doesn't say which version ran), so its check comes back unverified.",
+  "tier": 1,
+  "inputs": ["/reconcile"],
+  "env": {
+    "ANTHROPIC_API_KEY": "fake-eval-key",
+    "GALAXY_URL": "https://usegalaxy.org",
+    "GALAXY_API_KEY": "fake-eval-galaxy-key",
+    "LOOM_GALAXY_FIXTURE": "galaxy-fixture.json"
+  },
+  "timeoutMs": 20000,
+  "assertions": {
+    "events": {
+      "mustNotInclude": ["agent_start", "tool_execution_start", "turn_start"]
+    },
+    "activity": {
+      "mustInclude": [
+        {
+          "kind": "registry.evaluated",
+          "source": "harness",
+          "payloadContains": {
+            "attempt_id": "01K6ZQ7B3M2N4P5Q6R7S8T9V0C",
+            "execution": "success",
+            "check": "unverified",
+            "authority": "historical",
+            "fixture": "true",
+            "handoff_eligible": "false"
+          }
+        }
+      ]
+    },
+    "notebook": {
+      "contains": ["handoff_eligible: false", "\"execution\":\"success\""]
+    }
+  }
+}
