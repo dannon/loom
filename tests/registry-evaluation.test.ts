@@ -36,7 +36,6 @@ function facts(over: Partial<RunFacts> = {}): RunFacts {
         outputs: [{ name: "out_file1", id: "0f3e9a1c2b4d6e87", ext: "tabular", state: "ok" }],
       },
     ],
-    fetched_at: "2026-09-25T12:05:00.000Z",
     source: "galaxy",
     ...over,
   };

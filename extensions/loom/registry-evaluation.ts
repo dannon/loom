@@ -64,7 +64,6 @@ export interface RunFacts {
   jobs: RunJob[];
   /** Invocation only: the workflow inputs Galaxy recorded, by step index. */
   workflow_inputs?: Record<string, { id: string; src?: string }>;
-  fetched_at: string;
   /** `fixture` when the Tier-1 seam answered instead of a server. */
   source: "galaxy" | "fixture";
 }

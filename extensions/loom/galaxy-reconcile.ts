@@ -80,6 +80,7 @@ import {
   writeNotebook,
   type InvocationYaml,
 } from "./notebook-writer";
+import { evaluateRegistryAttempts, type EvaluationPass } from "./registry-evaluator";
 import { getNotebookPath } from "./state";
 import { ulid } from "./ulid";
 
@@ -108,7 +109,8 @@ const STAMP_MARGIN_MS = 10 * 60_000;
 /** Direct existence checks per run, so a long notebook costs a bounded number of GETs. */
 const MAX_VERIFY_PER_RUN = 100;
 
-export type ReconcileTrigger = "session_start" | "galaxy_connect" | "tick" | "command";
+export type ReconcileTrigger =
+  "session_start" | "galaxy_connect" | "tick" | "command" | "page_pull" | "page_resume";
 
 export interface ReconcileDeps {
   listJobs: typeof galaxyListHistoryJobs;
@@ -858,17 +860,31 @@ function enqueue<T>(work: () => Promise<T>): Promise<T> {
 export function followThrough(trigger: ReconcileTrigger | "enrich"): Promise<{
   reconcile?: ReconcileResult;
   enrichment: Awaited<ReturnType<typeof runEnrichmentPass>>;
+  evaluation?: EvaluationPass;
 }> {
   return enqueue(async () => {
     const reconciled = trigger === "enrich" ? undefined : await runReconcile(trigger);
     const enrichment = await runEnrichmentPass({ force: trigger === "command" });
-    return { ...(reconciled ? { reconcile: reconciled } : {}), enrichment };
+    // Last, so it reads what this pass just learned. A failure here must not
+    // cost the reconcile and enrichment results above.
+    let evaluation: EvaluationPass | undefined;
+    try {
+      evaluation = await evaluateRegistryAttempts(trigger);
+    } catch (err) {
+      console.error("[registry] evaluation pass failed:", err);
+    }
+    return {
+      ...(reconciled ? { reconcile: reconciled } : {}),
+      enrichment,
+      ...(evaluation ? { evaluation } : {}),
+    };
   });
 }
 
 function summarize(result: {
   reconcile?: ReconcileResult;
   enrichment: Awaited<ReturnType<typeof runEnrichmentPass>>;
+  evaluation?: EvaluationPass;
 }): string {
   const r = result.reconcile;
   const lines: string[] = [];
@@ -895,6 +911,13 @@ function summarize(result: {
     e.unavailable.length > 0 ? `${e.unavailable.length} unavailable` : "",
   ].filter(Boolean);
   if (enriched.length > 0) lines.push(`Run details: ${enriched.join(", ")}.`);
+  const v = result.evaluation;
+  if (v && v.evaluated.length > 0) {
+    lines.push(`Re-evaluated ${v.evaluated.length} approved run(s) against Galaxy.`);
+  }
+  if (v && v.unreachable.length > 0) {
+    lines.push(`${v.unreachable.length} approved run(s) couldn't be checked; will try again.`);
+  }
   return lines.join("\n");
 }
 
