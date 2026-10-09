@@ -37,7 +37,6 @@ import {
 import { parseDatasetRefs, versionFromToolId, walkInvocationJobs } from "./galaxy-enrich";
 import { isTerminalJobState } from "./galaxy-job-block";
 import { attemptOwns, listAttemptRecords, type AttemptRecord } from "./galaxy-provenance";
-import { sessionView } from "./proposal-commands";
 import {
   canonicalJson,
   computeHandoffEligible,
@@ -52,7 +51,7 @@ import {
   type RunFacts,
   type RunJob,
 } from "./registry-evaluation";
-import { getSessionRegistry, type SessionRegistry } from "./registry-runtime";
+import { getSessionRegistry, sessionView, type SessionRegistry } from "./registry-runtime";
 
 export type EvaluationTrigger =
   "session_start" | "galaxy_connect" | "tick" | "enrich" | "command" | "page_pull" | "page_resume";

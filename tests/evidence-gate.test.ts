@@ -314,10 +314,15 @@ describe("adversarial: the bypasses that define the acceptance bar", () => {
     expect(d.gated).toBe(true);
   });
 
-  it("KNOWN GAP: renaming the anchor in the same edit evades the flip check", () => {
+  // The three KNOWN GAP tests below pin the legacy path: a run the registry
+  // doesn't know about, which until loom_submit (registry slice 3) means every
+  // raw submission. Out of scope here on purpose: step identity and status are
+  // both notebook text on this path, and nothing here can be made un-forgeable.
+  // A step whose run the registry knows is judged from the record instead, and
+  // these same edits are denied there (evidence-gate-registry.test.ts).
+  it("KNOWN GAP (legacy path): renaming the anchor in the same edit evades the flip check", () => {
     // Step identity comes from the same model-editable text as the claim, so a
     // renamed anchor reads as a different step and the flip is never detected.
-    // Closed by the registry, not here.
     const before = withInvocation(invocation({ status: "in_progress" }));
     const d = decideNotebookWrite(
       before,
@@ -337,7 +342,7 @@ describe("adversarial: the bypasses that define the acceptance bar", () => {
     expect(d.completions).toHaveLength(0);
   });
 
-  it("KNOWN GAP: renaming the plan heading takes the step out of scope entirely", () => {
+  it("KNOWN GAP (legacy path): renaming the plan heading takes the step out of scope entirely", () => {
     const before = withInvocation(invocation({ status: "in_progress" }));
     const forged = flip(before, STEP2).replace(
       "## Plan A: chrM Variant Calling [hybrid]",
@@ -352,10 +357,9 @@ describe("adversarial: the bypasses that define the acceptance bar", () => {
     expect(d.gated).toBe(false);
   });
 
-  it("KNOWN GAP: splitting the forgery across two edits evades the pre-image check", () => {
-    // Documented, not fixed. Closing it needs the poller's status held out of
-    // band where the model cannot author it. This test pins the current
-    // behaviour so the gap is visible rather than forgotten.
+  it("KNOWN GAP (legacy path): splitting the forgery across two edits evades the pre-image check", () => {
+    // The block's status is the poller's word only until the model edits it.
+    // The registry holds the verdict out of band; this path has no record.
     const before = withInvocation(invocation({ status: "in_progress" }));
     const afterStatusRewrite = before.replace("status: in_progress", "status: completed");
     const call = editCall(`- [ ] ${STEP2}`, `- [x] ${STEP2}`);
