@@ -72,7 +72,7 @@ The Loom brain is loaded as a Pi extension from [`extensions/loom/`](../extensio
 - [`iwc-plan-check.ts`](../extensions/loom/iwc-plan-check.ts) -- enforces IWC-first for plan drafts: when a turn ends with a drafted plan, Galaxy is connected, and nothing in the session has consulted IWC, it queues one follow-up (through the auto-resume delivery, so Stop and the turn cap apply) asking the model to check the registry and revise. Once per session; logged as `plan.iwc_check`. Print/json runs exit before follow-ups are delivered, so evals only see the prompt-only rate.
 - [`teams/tool.ts`](../extensions/loom/teams/tool.ts) -- `team_dispatch` (gated by `LOOM_TEAM_DISPATCH=1`).
 - [`session-index/tools.ts`](../extensions/loom/session-index/tools.ts) -- `chat_search`, `chat_session_context`, `chat_find_tool_calls` (gated by `LOOM_SESSION_INDEX=1`).
-- [`activity.ts`](../extensions/loom/activity.ts) + [`activity-hooks.ts`](../extensions/loom/activity-hooks.ts) -- streams user prompts and tool calls into `<cwd>/activity.jsonl`. The file is git-ignored by Loom's auto-`.gitignore`; it's a per-session sidecar, not durable record.
+- [`activity.ts`](../extensions/loom/activity.ts) + [`activity-hooks.ts`](../extensions/loom/activity-hooks.ts) -- streams user prompts and tool calls into `<cwd>/activity.jsonl`. The file is git-ignored by Loom's auto-`.gitignore`; it's a per-session sidecar, not durable record, and no gate's verdict reads it (the shell can't write it on the desktop; the file tools can).
 - [`context.ts`](../extensions/loom/context.ts) -- assembles the system-prompt context (Galaxy posture, notebook digest, skill router).
 - [`ui-bridge.ts`](../extensions/loom/ui-bridge.ts) -- forwards notebook changes from the chokidar watcher to the shell as `Notebook` widget payloads.
 - [`profiles.ts`](../extensions/loom/profiles.ts) -- Galaxy server profile persistence; resolves plaintext vs encrypted API keys (encrypted-only profiles fail loud unless the shell has injected `GALAXY_API_KEY`).
@@ -157,7 +157,19 @@ agent calls galaxy_invocation_record({ invocationId, notebookAnchor, label })
    (status: in_progress → completed | failed; deterministic, all-jobs-ok rules)
 ```
 
-The notebook is the only authority. There is no external invocation store.
+The notebook is the durable, human-readable record and the only file the agent edits.
+Approvals, run identity and evaluations live in a harness-owned registry under
+`.loom/state/` ([`docs/registry.md`](registry.md)), signed by the session that wrote it,
+rendered into the notebook's typed blocks, and reconciled against Galaxy on every session
+start and Page pull. Gated submissions will be made by the harness from the approved
+specification through `loom_submit` (not built yet; today the model submits with the
+ordinary tools and capture records it). The registry is authoritative for whether an
+attempt is eligible to hand off -- the evidence gate reads `handoff_eligible` from it for any
+step whose run it knows about; the notebook is authoritative for what the analysis says;
+Galaxy is authoritative for what ran. Anything not signed by the current session is
+historical until re-verified, and approvals never survive a session. The registry travels
+inside the Galaxy Page as a carrier line, and on the desktop it sits beside the notebook
+under an exec-guard floor the model can't write through.
 
 ## Session lifecycle
 
