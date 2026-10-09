@@ -214,6 +214,30 @@ describe("symlinked directories", () => {
     expect(fs.existsSync(path.join(elsewhere, "beta.md"))).toBe(false);
   });
 
+  it("refuses a lessons directory that is itself a link, with no override set", () => {
+    const elsewhere = path.join(tmp, "elsewhere");
+    fs.mkdirSync(elsewhere, { recursive: true });
+    fs.mkdirSync(path.join(tmp, ".loom"), { recursive: true });
+    fs.symlinkSync(elsewhere, lessonsDir());
+    const result = writeNoClobber(lessonFilePath("stats", "x"), "text");
+    expect(result.ok).toBe(false);
+    expect(fs.existsSync(path.join(elsewhere, "stats", "x.md"))).toBe(false);
+    // The guard runs before mkdir, so a refused write leaves nothing behind
+    // through the link, not even an empty namespace directory.
+    expect(fs.readdirSync(elsewhere)).toEqual([]);
+  });
+
+  it("refuses a dangling link where a namespace directory should be", () => {
+    fs.mkdirSync(lessonsDir(), { recursive: true });
+    fs.symlinkSync(path.join(tmp, "not-there"), path.join(lessonsDir(), "stats"));
+    expect(writeNoClobber(lessonFilePath("stats", "x"), "text")).toEqual({
+      ok: false,
+      reason: "error",
+      detail: "symlinked directory",
+    });
+    expect(fs.existsSync(path.join(tmp, "not-there"))).toBe(false);
+  });
+
   it("refuses to stage a draft through a symlinked drafts directory", () => {
     const elsewhere = path.join(tmp, "elsewhere");
     fs.mkdirSync(elsewhere, { recursive: true });

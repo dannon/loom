@@ -15,6 +15,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { isLessonsEnabled } from "./lessons/enabled";
 import { getActivityEvents, onActivityChange, type ActivityEvent } from "./activity.js";
 import { armLessonProposal } from "./lessons/propose.js";
 
@@ -47,12 +48,17 @@ export function isCorrectionObservation(event: ActivityEvent): boolean {
 }
 
 let nudged = false;
+// Unknown until session_start says otherwise. With no UI, lesson_propose
+// refuses before showing anything, so a nudge would only buy a proposal that
+// cannot be approved.
+let hasUI = false;
 let cursor = 0;
 let seen: ActivityEvent[] | null = null;
 let unsubscribe: (() => void) | null = null;
 
 export function resetLessonNudge(): void {
   nudged = false;
+  hasUI = false;
   cursor = 0;
   seen = null;
   unsubscribe?.();
@@ -76,7 +82,9 @@ export function registerLessonNudge(pi: ExtensionAPI): void {
     }
     const fresh = events.slice(cursor);
     cursor = events.length;
-    if (nudged || !fresh.some(isCorrectionObservation)) return;
+    if (nudged || !hasUI || !fresh.some(isCorrectionObservation)) return;
+    // Arming here would only hand the model a /lesson it is then refused.
+    if (!isLessonsEnabled()) return;
     // Once per session. A correction loop -- the user pushing back three times
     // on one thing -- is where nagging is likeliest and least welcome.
     nudged = true;
@@ -91,7 +99,8 @@ export function registerLessonNudge(pi: ExtensionAPI): void {
     });
   });
 
-  pi.on("session_start", async () => {
+  pi.on("session_start", async (_event, ctx) => {
     nudged = false;
+    hasUI = ctx?.hasUI === true;
   });
 }

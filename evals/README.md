@@ -159,6 +159,19 @@ first -- a notebook produced this way carries provenance claiming
 `submitted_by: harness`, and that row is what keeps it distinguishable from one
 produced by real submissions.
 
+## Replaying tool results into the lesson matcher (Tier 1, no model)
+
+`LOOM_LESSON_REPLAY` is the same seam for the lesson hint, which fires on
+`tool_result` and so has the same model-turn problem. It reads the same JSONL
+format, resolves inside the session directory the same way, writes a
+`lesson.replay` activity row before anything else, and prints the hint each
+replayed result would have carried to stderr.
+
+The scenario also has to plant the lesson it expects to fire, and the runner
+points `HOME` at a temp dir fixtures cannot reach, so `LOOM_LESSONS_DIR`
+replaces the user-local lessons directory with one inside the scenario's `cwd/`.
+Lessons read from it are validated and wrapped exactly like `~/.loom/lessons`.
+
 ## Out of scope (for now)
 
 LLM-judge plan-_quality_ scoring (the same scenarios with a rubric pass),

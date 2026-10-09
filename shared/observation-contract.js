@@ -75,8 +75,10 @@ export const VERSION_MAX = 40;
 // payload the intake route would refuse.
 export const UNKNOWN_SIGNATURE = "unknown";
 
-// Locked order. The lesson validator and the lesson matcher reuse this exact
-// sequence, so a change here is a change to the shared contract first.
+// Locked order. The lesson matcher imports this function; lessons/validate.mjs
+// keeps its own copy (it runs before anything is built), held to this one by
+// tests/observation-signature.test.ts. A change here is a change to the shared
+// contract first.
 //
 // URL before path is the reason the order is written down at all: paths-first
 // turned `https://host/a/b` into `https:<path>`, which left the scheme behind

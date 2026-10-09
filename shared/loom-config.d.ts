@@ -44,6 +44,7 @@ export interface LoomConfig {
    * hard-disables it for a managed deployment; no env value can turn it on.
    */
   observations?: {
+    /** Off by default, and off whatever this says while `lessons.enabled` is not true. */
     mode?: "off" | "ask" | "auto";
     /**
      * 32 lowercase hex, random, generated on first need. Pseudonymous, not a
@@ -172,6 +173,25 @@ export interface LoomConfig {
    */
   evidenceGate?: {
     mode?: "off" | "warn" | "deny";
+  };
+  /**
+   * Recorded lessons -- short notes on situations that go wrong -- read from
+   * the corpus shipped with Loom plus `~/.loom/lessons/<namespace>/<slug>.md`.
+   * Retrieval is entirely local, so no query ever leaves the machine.
+   *
+   * Off unless `enabled` is exactly `true` (the `/lessons on` command writes
+   * it after a confirm). Off means every lesson surface is silent -- no inline
+   * hints, no /execute note, no reproduction index, no `lessons_search`
+   * results, /lesson and lesson_propose refuse -- and the observation
+   * collector is off whatever `observations.mode` says. `LOOM_LESSONS=off`
+   * wins over the config; `LOOM_LESSONS=on` stands in for `enabled: true`
+   * where nobody can write the config (CI, the eval runner) and enables
+   * reading only. `suppress` is the per-lesson version -- a suppressed id is
+   * never matched, searched or listed.
+   */
+  lessons?: {
+    enabled?: boolean;
+    suppress?: string[];
   };
   guardian?: {
     /** Master switch. When false the gate is fully off (advanced escape hatch). */

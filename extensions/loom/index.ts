@@ -29,6 +29,7 @@ import { registerDashboardTools } from "./dashboard-tools";
 import { registerDashboardCommands } from "./dashboard-commands";
 import { registerFeedbackCommand } from "./feedback-command";
 import { registerLessonProposals } from "./lesson-command";
+import { registerLessonsCommand } from "./lessons-command";
 import { registerTesterIdCommand } from "./tester-id-command";
 import { registerInstructionsCommand } from "./instructions-command";
 import { registerTeamTools } from "./teams/tool";
@@ -45,6 +46,10 @@ import { registerExecGuard } from "./exec-guard";
 import { registerSandbox } from "./sandbox";
 import { isLocalExecDisabled } from "./local-exec";
 import { registerSecretRedaction } from "./secret-redaction";
+import { registerLessonHint } from "./lesson-hint";
+import { withoutAppendedLessonHints } from "./lessons/pi-event-contract";
+import { registerLessonsSearchTool } from "./lessons/search-tool";
+import { isLessonReplayEnabled, registerLessonReplay } from "./lessons/replay";
 import { registerObservationTriggers } from "./observation-triggers";
 import { registerObservationsCommand } from "./observations-command";
 import { registerMcpOutputRecovery } from "./mcp-output";
@@ -122,6 +127,15 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // collector reads the content the model actually gets -- reading the raw
   // result would put an API key one normalization away from the wire.
   registerObservationTriggers(pi);
+  // AFTER redaction and after the observation triggers. pi feeds each
+  // tool_result handler the previous one's content, so anything registered
+  // after the hint reads it as part of the result -- a Galaxy error with no
+  // text of its own would get Loom's hint as its error signature (the triggers
+  // also drop hint blocks themselves, so this is the first line of defence).
+  // Lesson text is redacted where it is rendered, so it needs nothing from the
+  // redactor. After the oversized-output recovery, so it lands after the
+  // preview the model actually reads.
+  registerLessonHint(pi);
 
   registerLoomMcpServers(pi);
 
@@ -139,6 +153,11 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // unless LOOM_SUBMISSION_REPLAY names a file inside the session directory.
   if (isSubmissionReplayEnabled()) {
     registerSubmissionReplay(pi);
+  }
+  // The same eval-only seam for the lesson hint, which fires on tool_result and
+  // so needs a model turn that Tier-1 scenarios don't have.
+  if (isLessonReplayEnabled()) {
+    registerLessonReplay(pi);
   }
   // Eval-only seam, same shape and the same containment rule as the submission
   // replay above. Registered here rather than with the triggers because its
@@ -167,10 +186,12 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerSkillsCommand(pi);
   registerExecutionCommands(pi);
   registerDashboardTools(pi);
+  registerLessonsSearchTool(pi);
   registerDashboardCommands(pi);
   registerFeedbackCommand(pi);
   registerObservationsCommand(pi);
   registerLessonProposals(pi);
+  registerLessonsCommand(pi);
   registerTesterIdCommand(pi);
   registerInstructionsCommand(pi);
   registerSkillTriggers(pi);
@@ -547,8 +568,10 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
     try {
       const name = galaxyCall(event.toolName, event.input)?.name;
       const failed = event.isError || Boolean((event.details as { error?: unknown })?.error);
+      // Without Loom's own hint: lesson prose is not the tool's error text, but
+      // a tool that happens to open a block with the marker still is.
       const resultText = failed
-        ? event.content
+        ? withoutAppendedLessonHints(event.content)
             .filter((c) => c.type === "text")
             .map((c) => c.text)
             .join("\n")

@@ -18,11 +18,12 @@ import {
   hasAcknowledgedAuto,
   isObservationsHardDisabled,
   markAutoAcknowledged,
+  observationsModeChangeBlocker,
   peekInstallToken,
-  resolveObservationsMode,
   setObservationsMode,
 } from "./observations-config.js";
 import type { ObservationsMode, ObservationsModeState } from "./observations-config.js";
+import { LESSONS_OFF_POINTER } from "./lessons/enabled.js";
 import {
   SENT_LOG_FILE,
   appendSentLog,
@@ -72,6 +73,18 @@ export function formatObservationsStatus(info: {
       "  shows the sample payload and turns auto on once you confirm.",
     );
   }
+  if (info.override === "lessons-off") {
+    lines.push(
+      "  Lessons are off, so nothing is collected or sent whatever the mode says.",
+      "  /lessons on turns the loop on; then pick a mode here.",
+    );
+  }
+  if (info.override === "lessons-env") {
+    lines.push(
+      "  Lessons are on from the environment only, which never turns reporting on.",
+      "  /lessons on writes the config; then pick a mode here.",
+    );
+  }
   if (info.hardDisabled) {
     lines.push("  ORBIT_OBSERVATIONS=off is set, so collection is disabled for this install");
     lines.push("  and the mode can't be changed from here.");
@@ -81,8 +94,8 @@ export function formatObservationsStatus(info: {
     `  ${info.counts.sent} sent, ${info.counts.queued} queued, ${info.counts.retracted} retracted, ${info.counts.cancelled} cancelled`,
     `  log: ${info.sentLogPath}`,
     "",
-    "  off  -- collect nothing",
-    "  ask  -- show the exact payload, error text and description included, and send only on a confirm (default)",
+    "  off  -- collect nothing (default)",
+    "  ask  -- show the exact payload, error text and description included, and send only on a confirm",
     "  auto -- send without asking, structured fields only: no error text, no description",
     "",
     OBSERVATIONS_USAGE,
@@ -189,6 +202,13 @@ async function showStatus(ctx: ExtensionContext): Promise<void> {
 async function changeMode(ctx: ExtensionContext, requested: string): Promise<void> {
   if (requested !== "off" && requested !== "ask" && requested !== "auto") {
     ctx.ui.notify(`Unknown mode "${requested}".\n${OBSERVATIONS_USAGE}`, "warning");
+    return;
+  }
+  // Before the sample payload and its acknowledgement: a change the writer
+  // would refuse must not leave the acknowledgement behind in the config.
+  const blocked = observationsModeChangeBlocker(requested);
+  if (blocked) {
+    ctx.ui.notify(blocked, "warning");
     return;
   }
   // Turning collection ON is the one transition that needs the payload shown
@@ -307,9 +327,14 @@ async function doObserve(args: string | undefined, ctx: ExtensionContext): Promi
     );
     return;
   }
-  if (resolveObservationsMode() === "off") {
+  const state = describeObservationsMode();
+  if (state.mode === "off") {
     ctx.ui.notify(
-      "Observations are off, so there is nowhere to send this. /observations mode ask turns them on.",
+      state.override === "lessons-off"
+        ? `${LESSONS_OFF_POINTER} Then /observations mode ask turns reporting on.`
+        : state.override === "lessons-env"
+          ? "Lessons are on from the environment only, which never turns reporting on. /lessons on writes the config; then /observations mode ask."
+          : "Observations are off, so there is nowhere to send this. /observations mode ask turns them on.",
       "info",
     );
     return;

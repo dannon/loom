@@ -31,8 +31,13 @@ function configPath(): string {
   return path.join(tmpHome, ".loom", "config.json");
 }
 
-function writeConfig(obj: unknown): void {
-  fs.writeFileSync(configPath(), JSON.stringify(obj), "utf-8");
+/**
+ * Lessons on in the CONFIG unless the case says otherwise (`lessons: {}` for
+ * "no switch written"): reporting never follows the env spelling.
+ */
+function writeConfig(obj: Record<string, unknown>): void {
+  const withSwitch = "lessons" in obj ? obj : { lessons: { enabled: true }, ...obj };
+  fs.writeFileSync(configPath(), JSON.stringify(withSwitch), "utf-8");
 }
 
 function readConfig(): Record<string, any> {
@@ -44,10 +49,57 @@ async function load() {
 }
 
 describe("resolveObservationsMode", () => {
-  it("defaults to ask with no config", async () => {
+  it("defaults to off with no config", async () => {
     writeConfig({});
     const m = await load();
-    expect(m.resolveObservationsMode()).toBe("ask");
+    expect(m.resolveObservationsMode()).toBe("off");
+    expect(m.describeObservationsMode()).toEqual({ mode: "off" });
+  });
+
+  it("is off whatever the config says while the lesson switch is off", async () => {
+    process.env.LOOM_LESSONS = "off";
+    try {
+      writeConfig({
+        observations: { mode: "auto", autoAcknowledgedAt: "2026-01-01T00:00:00Z" },
+        lessons: { enabled: true },
+      });
+      const m = await load();
+      expect(m.describeObservationsMode()).toEqual({ mode: "off", override: "lessons-off" });
+    } finally {
+      delete process.env.LOOM_LESSONS;
+    }
+  });
+
+  it("reads the mode only once the config switch is on", async () => {
+    writeConfig({ observations: { mode: "ask" }, lessons: {} });
+    let m = await load();
+    expect(m.describeObservationsMode()).toEqual({ mode: "off", override: "lessons-off" });
+    vi.resetModules();
+    writeConfig({ observations: { mode: "ask" }, lessons: { enabled: true } });
+    m = await load();
+    expect(m.describeObservationsMode()).toEqual({ mode: "ask" });
+  });
+
+  it("stays off when lessons are on from the env alone, and says why a change is refused", async () => {
+    process.env.LOOM_LESSONS = "on";
+    try {
+      writeConfig({ observations: { mode: "ask" }, lessons: {} });
+      const m = await load();
+      expect(m.describeObservationsMode()).toEqual({ mode: "off", override: "lessons-env" });
+      expect(m.observationsModeChangeBlocker("ask")).toMatch(/environment only.*LOOM_LESSONS=on/);
+      expect(m.observationsModeChangeBlocker("auto")).toMatch(/never turns reporting on/);
+      expect(m.observationsModeChangeBlocker("off")).toBeNull();
+    } finally {
+      delete process.env.LOOM_LESSONS;
+    }
+  });
+
+  it("blocks nothing once the config switch is on", async () => {
+    writeConfig({});
+    const m = await load();
+    for (const mode of ["off", "ask", "auto"] as const) {
+      expect(m.observationsModeChangeBlocker(mode)).toBeNull();
+    }
   });
 
   it("reads the configured mode", async () => {
@@ -92,10 +144,10 @@ describe("resolveObservationsMode", () => {
     expect(m.resolveObservationsMode()).toBe("auto");
   });
 
-  it("falls back to ask on a junk configured mode", async () => {
+  it("falls back to off on a junk configured mode", async () => {
     writeConfig({ observations: { mode: "yolo" } });
     const m = await load();
-    expect(m.resolveObservationsMode()).toBe("ask");
+    expect(m.resolveObservationsMode()).toBe("off");
   });
 
   it("hard-disables on either env spelling", async () => {
@@ -157,6 +209,20 @@ describe("setObservationsMode", () => {
     const m = await load();
     expect(() => m.setObservationsMode("auto")).toThrow(/couldn't be read/i);
     expect(fs.readFileSync(configPath(), "utf-8")).toBe("{ not json");
+  });
+
+  it("refuses to turn collection on while the lesson switch is off, but allows off", async () => {
+    process.env.LOOM_LESSONS = "off";
+    try {
+      writeConfig({ observations: { mode: "ask" } });
+      const m = await load();
+      expect(() => m.setObservationsMode("auto")).toThrow(/\/lessons on/);
+      expect(() => m.setObservationsMode("ask")).toThrow(/\/lessons on/);
+      m.setObservationsMode("off");
+      expect(JSON.parse(fs.readFileSync(configPath(), "utf-8")).observations.mode).toBe("off");
+    } finally {
+      delete process.env.LOOM_LESSONS;
+    }
   });
 
   it("refuses to change the mode while the env hard-disable is set", async () => {

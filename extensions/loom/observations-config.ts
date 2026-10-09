@@ -2,9 +2,13 @@
  * Mode and install-token state for the observation collector.
  *
  * Split out of observations.ts so the privacy gate is one small file that can
- * be read end to end. Four rules hold here:
+ * be read end to end. Five rules hold here:
  *
- *  - `ask` is the default. A fresh install collects nothing silently.
+ *  - The lesson switch comes first. While `lessons.enabled` is off (the
+ *    default), collection is off whatever this block says: the loop is one
+ *    opt-in, and reporting is its contributing half.
+ *  - `off` is the default once lessons are on. A fresh install collects
+ *    nothing and asks nothing until the user picks `ask` or `auto`.
  *  - `auto` in the config is not enough on its own: it takes effect only with
  *    the recorded acknowledgement of the sample payload, else it runs as `ask`.
  *  - The env var is a ONE-WAY hard disable. `ORBIT_OBSERVATIONS=off` wins over
@@ -21,10 +25,11 @@ import fs from "node:fs";
 import { randomBytes } from "node:crypto";
 import { getConfigPath, loadConfig, saveConfig } from "./config.js";
 import { envNames } from "../../shared/orbit-env.js";
+import { describeLessonsSwitch, LESSONS_OFF_POINTER } from "./lessons/enabled.js";
 
 export type ObservationsMode = "off" | "ask" | "auto";
 
-const DEFAULT_MODE: ObservationsMode = "ask";
+const DEFAULT_MODE: ObservationsMode = "off";
 const INSTALL_TOKEN_RE = /^[0-9a-f]{32}$/;
 
 /**
@@ -42,10 +47,12 @@ export interface ObservationsModeState {
   mode: ObservationsMode;
   /**
    * Why `mode` differs from what the config says, when it does:
-   * `hard-disabled` for the env kill switch, `auto-unacknowledged` for an
-   * `auto` nobody confirmed on this install.
+   * `hard-disabled` for the env kill switch, `lessons-off` while the lesson
+   * switch is off, `lessons-env` while it is on from the environment alone
+   * (which never turns reporting on), `auto-unacknowledged` for an `auto`
+   * nobody confirmed on this install.
    */
-  override?: "hard-disabled" | "auto-unacknowledged";
+  override?: "hard-disabled" | "lessons-off" | "lessons-env" | "auto-unacknowledged";
 }
 
 /**
@@ -57,6 +64,11 @@ export interface ObservationsModeState {
  */
 export function describeObservationsMode(): ObservationsModeState {
   if (isObservationsHardDisabled()) return { mode: "off", override: "hard-disabled" };
+  const lessons = describeLessonsSwitch();
+  if (!lessons.enabled) return { mode: "off", override: "lessons-off" };
+  // LOOM_LESSONS=on is for CI and the eval runner: it reads lessons, and that
+  // is all. Reporting needs the config the user wrote.
+  if (lessons.source === "env") return { mode: "off", override: "lessons-env" };
   const block = loadConfig().observations;
   const mode = block?.mode;
   if (mode === "auto") {
@@ -77,18 +89,30 @@ export function resolveObservationsMode(): ObservationsMode {
  * parsed. Shared by every writer here so none of them can clobber keys.
  */
 function loadConfigForWrite(): ReturnType<typeof loadConfig> {
-  const configPath = getConfigPath();
-  if (fs.existsSync(configPath)) {
-    try {
-      JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    } catch (err) {
-      throw new Error(
-        "The Loom config couldn't be read, so it wasn't changed -- fix or remove the file and try again.",
-        { cause: err },
-      );
-    }
-  }
+  const problem = configReadProblem();
+  if (problem) throw new Error(problem);
   return loadConfig();
+}
+
+/**
+ * Why the config can't be written back, or null. loadConfig() turns an
+ * unparseable file, or one that isn't an object, into {} -- and that is also
+ * what makes the lesson switch read as off, so this is asked before the gate:
+ * "fix the file" is the answer, not "/lessons on".
+ */
+function configReadProblem(): string | null {
+  const configPath = getConfigPath();
+  if (!fs.existsSync(configPath)) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  } catch {
+    return "The Loom config couldn't be read, so it wasn't changed -- fix or remove the file and try again.";
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return "The Loom config isn't a JSON object, so it wasn't changed -- fix or remove the file and try again.";
+  }
+  return null;
 }
 
 function persist(
@@ -108,12 +132,31 @@ function persist(
   }
 }
 
-export function setObservationsMode(mode: ObservationsMode): void {
+/**
+ * Why a change to `mode` would be refused, or null when it would go through.
+ * The command asks this BEFORE it shows the sample payload and records the
+ * acknowledgement, so a refused `/observations mode auto` writes nothing.
+ */
+export function observationsModeChangeBlocker(mode: ObservationsMode): string | null {
   if (isObservationsHardDisabled()) {
-    throw new Error(
-      "Observations are hard-disabled for this install (ORBIT_OBSERVATIONS=off), so the mode can't be changed here.",
-    );
+    return "Observations are hard-disabled for this install (ORBIT_OBSERVATIONS=off), so the mode can't be changed here.";
   }
+  // Turning collection on under an off lesson switch would write a mode that
+  // does nothing; `off` is always allowed so the finer control can be reset.
+  if (mode === "off") return null;
+  const problem = configReadProblem();
+  if (problem) return problem;
+  const lessons = describeLessonsSwitch();
+  if (!lessons.enabled) return `${LESSONS_OFF_POINTER} Then pick an observations mode.`;
+  if (lessons.source === "env") {
+    return `Lessons are on from the environment only (${lessons.via}=on), which never turns reporting on. /lessons on writes the config; then pick a mode.`;
+  }
+  return null;
+}
+
+export function setObservationsMode(mode: ObservationsMode): void {
+  const blocked = observationsModeChangeBlocker(mode);
+  if (blocked) throw new Error(blocked);
   persist((block) => {
     block.mode = mode;
   });

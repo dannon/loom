@@ -17,6 +17,7 @@ RUN cd web && npm ci
 COPY CHANGELOG.md README.md ./
 COPY bin ./bin
 COPY extensions ./extensions
+COPY lessons ./lessons
 COPY shared ./shared
 COPY app ./app
 COPY web ./web
@@ -45,6 +46,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY --from=builder /app/bin ./bin
 COPY --from=builder /app/extensions ./extensions
+COPY --from=builder /app/lessons ./lessons
 COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/web/build ./web/build
 COPY --from=builder /app/web/dist ./web/dist

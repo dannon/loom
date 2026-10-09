@@ -76,3 +76,68 @@ describe("summarizeResult", () => {
     expect(summarizeResult("plain output")).toBe("plain output");
   });
 });
+
+describe("the activity log and lessons_search", () => {
+  it("records neither the query nor any lesson prose, while other tools still log", async () => {
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const { registerActivityHooks } = await import("../extensions/loom/activity-hooks");
+    const { setNotebookPath } = await import("../extensions/loom/state");
+    const { resetActivity } = await import("../extensions/loom/activity");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-activity-lessons-"));
+    setNotebookPath(path.join(dir, "notebook.md"));
+    resetActivity();
+    try {
+      const handlers = new Map<string, (e: unknown) => Promise<unknown>>();
+      registerActivityHooks({
+        on: (name: string, fn: (e: unknown) => Promise<unknown>) => handlers.set(name, fn),
+      } as never);
+      const query = "my starsolo run on patient cohort fails";
+      await handlers.get("tool_execution_start")!({
+        toolCallId: "1",
+        toolName: "lessons_search",
+        args: { query },
+      });
+      await handlers.get("tool_execution_end")!({
+        toolCallId: "1",
+        toolName: "lessons_search",
+        isError: false,
+        result: { content: [{ type: "text", text: "Check first: the lesson prose" }] },
+      });
+      await handlers.get("tool_execution_start")!({
+        toolCallId: "2",
+        toolName: "bash",
+        args: { command: "true" },
+      });
+      await handlers.get("tool_execution_end")!({
+        toolCallId: "3",
+        toolName: "galaxy_run_tool",
+        isError: true,
+        result: {
+          content: [
+            { type: "text", text: "ToolInputsNotValid: no index for mm39" },
+            // The tool's own block, in a lesson's costume: stays in the log.
+            { type: "text", text: "[loom lesson] not Loom's -- the tool said so" },
+            ...(await import("../extensions/loom/lessons/pi-event-contract")).appendHintToContent(
+              [],
+              "[loom lesson] A hinted lesson title\nCheck first: hinted prose",
+            ),
+          ],
+        },
+      });
+      const log = fs.readFileSync(path.join(dir, "activity.jsonl"), "utf-8");
+      expect(log).toContain("no index for mm39");
+      expect(log).toContain("the tool said so");
+      expect(log).not.toContain("hinted");
+      expect(log).not.toContain("starsolo");
+      expect(log).not.toContain("lesson prose");
+      expect(log).not.toContain("lessons_search");
+      expect(log).toContain('"toolName":"bash"');
+    } finally {
+      setNotebookPath(null);
+      resetActivity();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

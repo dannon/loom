@@ -25,6 +25,7 @@ import type {
   ObservationKind,
   ObservationTrigger,
 } from "../../shared/observation-contract.js";
+import { withoutAppendedLessonHints } from "./lessons/pi-event-contract";
 import {
   appendSentLog,
   appendToObservationOutbox,
@@ -492,7 +493,9 @@ export function liveDeliverDeps(
 }
 
 function errorTextOf(content: ReadonlyArray<{ type: string; text?: string }>): string {
-  return content
+  // A hint Loom appended is Loom's prose, not the tool's error, wherever it
+  // sits. A block the TOOL opened with the marker is still the tool's error.
+  return withoutAppendedLessonHints(content)
     .filter((c) => c.type === "text" && typeof c.text === "string")
     .map((c) => c.text as string)
     .join("\n");

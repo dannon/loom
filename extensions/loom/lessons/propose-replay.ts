@@ -19,9 +19,22 @@
  * with the session's real ctx, so the approval step still runs and still
  * refuses when there is nobody to ask. A seam that could write a lesson
  * without a human would be a hole, not a fixture.
+ *
+ * It also keeps the session_start ctx past the handler's return, which pi
+ * asks extensions not to do: the approval dialog is left pending (see below)
+ * and its answer comes back through that ctx. If the session is replaced
+ * while the dialog is open (/new, a fork, a resume), pi's RPC mode still
+ * delivers the answer to the old dialog, so a Save can still write the lesson
+ * -- and its lesson.saved row lands in the new session's activity log with no
+ * lesson.replay row ahead of it. Only a ctx.ui call made after the replacement
+ * throws (the stale-ctx error), and the .catch swallows that. Tolerable only
+ * because this runs behind ORBIT_LESSON_PROPOSAL_REPLAY (or its LOOM_ alias)
+ * in evals, where nothing replaces the session; nothing user-facing should
+ * copy it.
  */
 
 import * as fs from "fs";
+import { isLessonsEnabled } from "./enabled";
 import * as path from "path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readEnv } from "../../../shared/orbit-env.js";
@@ -39,6 +52,8 @@ export function registerLessonProposalReplay(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx: ExtensionContext) => {
     const configured = readEnv("LESSON_PROPOSAL_REPLAY")?.trim();
     if (!configured) return;
+    // Same answer the live surface gives: nothing read, written or armed while off.
+    if (!isLessonsEnabled()) return;
 
     const notebookPath = getNotebookPath();
     if (!notebookPath) return;

@@ -80,6 +80,7 @@ Saving a large response is normal output handling, not a model context failure.
 | `/pending`                | List run proposals waiting for approval, and why each is waiting                                                                                  |
 | `/approve <proposal-id>`  | User-only. Freeze a `loom_propose` proposal against Galaxy's template and record the approval                                                     |
 | `/revoke <proposal-id>`   | User-only. Withdraw an approval                                                                                                                   |
+| `/lessons [sub]`          | User-only. The switch for the whole lesson loop: `status`, `on` (asks once), `off`. Off by default; off means no lesson surfaces and no reporting |
 | `/observations [sub]`     | User-only. Show or change Galaxy-failure reporting: `status`, `mode <off\|ask\|auto>`, `sent`, `retract <id>`                                     |
 | `/observe [note]`         | User-only. Report something that went wrong, as one generic line. The payload is shown before it is sent                                          |
 | `/dashboard [sub]`        | Show the dashboard layout; `preset <name>`, `reset`, `undo` change it. User-only                                                                  |
@@ -98,8 +99,11 @@ the Spec frozen at approval time, and only in the session that recorded it:
 editing the proposal block afterwards revokes it, and after a restart it
 comes back restored, not live, until the user approves it again.
 
-`/observations` and `/observe` are the user's, not yours. In `ask`, the
-default, the signature and description are shown to the user in full and
+`/lessons`, `/observations` and `/observe` are the user's, not yours. The
+lesson loop is off until the user runs `/lessons on`; while it is off,
+`lessons_search` and `lesson_propose` say so and nothing is reported. Once
+on, reporting still starts `off` until they pick a mode. In `ask` the
+signature and description are shown to the user in full and
 sent only if they confirm; an error line that still looks identifying after
 scrubbing is withheld and only the rest is offered. In `auto` no free text is sent at all -- only the
 structured fields, never an error line or a description -- and `auto` runs

@@ -13,10 +13,14 @@ import { getNotebookPath } from "./state";
 import { appendActivityEvent } from "./activity";
 import { collectSecretValues, redactSecrets } from "./secret-redaction";
 import { loadConfig } from "../../shared/loom-config.js";
+import { withoutAppendedLessonHints } from "./lessons/pi-event-contract";
 
 // Read-only / filesystem-traversal tools clutter the log without telling the
-// user anything they'd want to re-read later. Omit them.
-const NOISY_TOOLS = new Set(["read", "grep", "glob", "ls", "find"]);
+// user anything they'd want to re-read later. Omit them. lessons_search is
+// here for a different reason: its query says what the user is stuck on and
+// its result is lesson prose, and the lesson.surfaced row already records
+// which lesson surfaced.
+const NOISY_TOOLS = new Set(["read", "grep", "glob", "ls", "find", "lessons_search"]);
 
 // Tools whose argument shape is known to carry credentials. activity.jsonl
 // lives in the project cwd and users may share the dir (commit it, send it
@@ -80,6 +84,15 @@ export function summarizeResult(result: unknown, secrets: string[] = []): string
   );
 }
 
+// The end event carries the result after the tool_result hooks, so a lesson
+// hint rides along. It is Loom's prose, not the tool's output, and this log
+// ships with /feedback; the lesson.surfaced row already says which one fired.
+function withoutHintBlocks(result: unknown): unknown {
+  const content = (result as { content?: unknown } | null)?.content;
+  if (!Array.isArray(content)) return result;
+  return { ...(result as object), content: withoutAppendedLessonHints(content) };
+}
+
 export function registerActivityHooks(pi: ExtensionAPI): void {
   pi.on("input", async (event) => {
     const dir = sessionDir();
@@ -122,7 +135,7 @@ export function registerActivityHooks(pi: ExtensionAPI): void {
         toolCallId: event.toolCallId,
         toolName: event.toolName,
         isError: event.isError,
-        resultSummary: summarizeResult(event.result, secrets),
+        resultSummary: summarizeResult(withoutHintBlocks(event.result), secrets),
       },
     });
   });

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -15,6 +15,17 @@ import {
 import type { DeliverDeps } from "../extensions/loom/observation-triggers.js";
 import type { Observation } from "../shared/observation-contract.js";
 import type { ObservationFacts } from "../extensions/loom/observations.js";
+
+// The lesson switch is off by default; these suites are about what happens
+// once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.
+const prevLessonsSwitch = process.env.LOOM_LESSONS;
+beforeAll(() => {
+  process.env.LOOM_LESSONS = "on";
+});
+afterAll(() => {
+  if (prevLessonsSwitch === undefined) delete process.env.LOOM_LESSONS;
+  else process.env.LOOM_LESSONS = prevLessonsSwitch;
+});
 
 const KEY = { mcpTool: "galaxy_run_tool", signature: "ToolExecutionError: dataset <id> failed" };
 
@@ -608,7 +619,7 @@ describe("registerObservationTriggers", () => {
     fs.mkdirSync(path.join(tmpHome, ".loom"), { recursive: true });
     fs.writeFileSync(
       path.join(tmpHome, ".loom", "config.json"),
-      JSON.stringify({ observations: { mode: "ask" } }),
+      JSON.stringify({ lessons: { enabled: true }, observations: { mode: "ask" } }),
     );
     process.env.HOME = tmpHome;
     process.env.USERPROFILE = tmpHome;
@@ -680,7 +691,11 @@ describe("registerObservationTriggers", () => {
   });
 
   async function settleOneFailure(config: unknown) {
-    fs.writeFileSync(path.join(tmpHome, ".loom", "config.json"), JSON.stringify(config));
+    // Reporting needs the switch in the CONFIG: the env spelling reads lessons only.
+    fs.writeFileSync(
+      path.join(tmpHome, ".loom", "config.json"),
+      JSON.stringify({ lessons: { enabled: true }, ...(config as object) }),
+    );
     const { registerObservationTriggers } =
       await import("../extensions/loom/observation-triggers.js");
     const fetchMock = vi.fn().mockResolvedValue({
@@ -805,6 +820,70 @@ describe("registerObservationTriggers", () => {
     await pi.emit("session_start", {}, {});
     await pi.emit("tool_result", failure, {});
     expect(pendingObservationCount()).toBe(0);
+  });
+
+  it("never reads an appended lesson hint as the tool's error", async () => {
+    const { registerObservationTriggers, pendingObservationCount } =
+      await import("../extensions/loom/observation-triggers.js");
+    const { LESSON_HINT_MARKER } = await import("../shared/lesson-hint-marker.js");
+    const { appendHintToContent } = await import("../extensions/loom/lessons/pi-event-contract");
+    const pi = fakePi();
+    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
+    await pi.emit("session_start", {}, {});
+    // No text of its own: without the filter the hint becomes the signature.
+    const content = appendHintToContent(
+      [{ type: "text", text: "" }],
+      `${LESSON_HINT_MARKER} A lesson title the matcher found`,
+    );
+    await pi.emit("tool_result", { ...failure, content }, {});
+    expect(pendingObservationCount()).toBe(0);
+  });
+
+  it("reads a block the TOOL opened with the marker as the tool's own error", async () => {
+    // A hostile output cannot hide its error from the collector by dressing
+    // it up as a lesson: only hints Loom itself appended are left out.
+    const { registerObservationTriggers, pendingObservationCount } =
+      await import("../extensions/loom/observation-triggers.js");
+    const { LESSON_HINT_MARKER } = await import("../shared/lesson-hint-marker.js");
+    const pi = fakePi();
+    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
+    await pi.emit("session_start", {}, {});
+    const dressed = { type: "text", text: `${LESSON_HINT_MARKER} ${failure.content[0].text}` };
+    await pi.emit("tool_result", { ...failure, content: [dressed] }, {});
+    expect(pendingObservationCount()).toBe(1);
+  });
+
+  it("takes the signature from the tool's text even when a hint block comes first", async () => {
+    const { registerObservationTriggers, pendingObservationCount } =
+      await import("../extensions/loom/observation-triggers.js");
+    const { LESSON_HINT_MARKER } = await import("../shared/lesson-hint-marker.js");
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      json: async () => ({ ok: true, id: "x", retractToken: "b".repeat(32) }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const ctx = {
+      hasUI: true,
+      ui: {
+        confirm: vi.fn().mockResolvedValue(true),
+        input: vi.fn().mockResolvedValue(""),
+        notify: vi.fn(),
+      },
+    };
+    const pi = fakePi();
+    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
+    await pi.emit("session_start", {}, ctx);
+    const { appendHintToContent } = await import("../extensions/loom/lessons/pi-event-contract");
+    const [hint] = appendHintToContent(
+      [],
+      `${LESSON_HINT_MARKER} A lesson title the matcher found`,
+    );
+    await pi.emit("tool_result", { ...failure, content: [hint, ...failure.content] }, ctx);
+    expect(pendingObservationCount()).toBe(1);
+    await pi.emit("agent_settled", {}, ctx);
+    const sent = JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    expect(sent.signature).toBe("ToolExecutionError: Job <n> refused a header-only table");
   });
 
   it("ignores a successful result and a non-galaxy failure", async () => {

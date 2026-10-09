@@ -11,6 +11,7 @@ let mode = "ask";
 let override: string | undefined;
 let hardDisabled = false;
 let acknowledged = false;
+let blocker: string | null = null;
 let sentRows: any[] = [];
 let token: string | undefined = "b".repeat(32);
 let lastFacts: any = null;
@@ -20,6 +21,7 @@ vi.mock("../extensions/loom/observations-config.js", () => ({
   describeObservationsMode: () => ({ mode, ...(override ? { override } : {}) }),
   isObservationsHardDisabled: () => hardDisabled,
   setObservationsMode: (m: string) => setObservationsMode(m),
+  observationsModeChangeBlocker: () => blocker,
   peekInstallToken: () => "a".repeat(32),
   getOrCreateInstallToken: () => "a".repeat(32),
   hasAcknowledgedAuto: () => acknowledged,
@@ -84,6 +86,7 @@ beforeEach(() => {
   mode = "ask";
   hardDisabled = false;
   acknowledged = false;
+  blocker = null;
   sentRows = [];
   override = undefined;
   token = "b".repeat(32);
@@ -284,6 +287,19 @@ describe("/observations", () => {
     await commands.get("observations")!.handler("mode auto", { hasUI: true, ui });
     expect(ui.confirm).not.toHaveBeenCalled();
     expect(setObservationsMode).toHaveBeenCalledWith("auto");
+  });
+
+  it("refuses a blocked change before the sample, recording nothing", async () => {
+    blocker =
+      "Lessons are off on this install. /lessons on turns them on. Then pick an observations mode.";
+    const { pi, commands } = makeApi();
+    registerObservationsCommand(pi as any);
+    const ui = uiMock();
+    await commands.get("observations")!.handler("mode auto", { hasUI: true, ui });
+    expect(ui.confirm).not.toHaveBeenCalled();
+    expect(markAutoAcknowledged).not.toHaveBeenCalled();
+    expect(setObservationsMode).not.toHaveBeenCalled();
+    expect(ui.notify).toHaveBeenCalledWith(expect.stringContaining("/lessons on"), "warning");
   });
 
   it("refuses mode auto with no UI to show the sample in", async () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -8,6 +8,17 @@ import {
   parseObservationReplayFile,
   resolveObservationReplayPath,
 } from "../extensions/loom/observation-replay.js";
+
+// The lesson switch is off by default; these suites are about what happens
+// once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.
+const prevLessonsSwitch = process.env.LOOM_LESSONS;
+beforeAll(() => {
+  process.env.LOOM_LESSONS = "on";
+});
+afterAll(() => {
+  if (prevLessonsSwitch === undefined) delete process.env.LOOM_LESSONS;
+  else process.env.LOOM_LESSONS = prevLessonsSwitch;
+});
 
 let tmp: string;
 

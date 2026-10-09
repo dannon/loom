@@ -5,7 +5,9 @@
  *
  * - Lessons go under getConfigDir(), which is ~/.loom today and ~/.orbit after
  *   the rename (shared/state-dir.js). Nothing here joins homedir() with
- *   ".loom" itself, so the move stays one switch.
+ *   ".loom" itself, so the move stays one switch. LOOM_LESSONS_DIR replaces
+ *   that directory for the writer and the store alike (./user-dir), so a
+ *   lesson saved here is a lesson the store loads.
  * - Staged drafts go in a SIBLING directory, not inside lessons/. A draft the
  *   user has not approved must not be loadable as a lesson, and a separate
  *   directory guarantees that without the lesson store having to know the
@@ -17,6 +19,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { getConfigDir } from "../../../shared/loom-config.js";
+import { userLessonsDir } from "./user-dir";
 import {
   LESSON_NAMESPACES,
   MAX_FILE_BYTES,
@@ -33,7 +36,7 @@ export interface LocalLesson {
 }
 
 export function lessonsDir(): string {
-  return path.join(getConfigDir(), "lessons");
+  return userLessonsDir();
 }
 
 export function draftsDir(): string {
@@ -151,22 +154,49 @@ function errorDetail(err: unknown): string {
 }
 
 /**
- * True when no directory between the state dir and `filePath` is a symlink.
- * lstat on the file only covers its last component; a linked lessons/ or
- * namespace directory would otherwise send reads and writes somewhere else.
+ * The directory a path under the lessons tree is measured from. With
+ * LOOM_LESSONS_DIR set, the directory the user named is the root for anything
+ * under it -- itself possibly a link, wherever it sits, the same as the store
+ * reads it. Otherwise the state dir, so a linked lessons/ inside it is refused.
  * The state dir itself may be a link (dotfile setups do that).
  */
+function rootOf(p: string): string | undefined {
+  const stateDir = getConfigDir();
+  const overridden = lessonsDir() !== path.join(stateDir, "lessons");
+  const roots = overridden ? [lessonsDir(), stateDir] : [stateDir];
+  return roots.find((r) => {
+    const rel = path.relative(r, p);
+    return !rel.startsWith("..") && !path.isAbsolute(rel);
+  });
+}
+
+/** True when `p` exists and nothing between its root and it is a link. */
+function resolvesInPlace(root: string, p: string): boolean {
+  return fs.realpathSync(p) === path.join(fs.realpathSync(root), path.relative(root, p));
+}
+
+/**
+ * True when no directory between the root and `filePath` is a symlink.
+ * lstat on the file only covers its last component; a linked lessons/ or
+ * namespace directory would otherwise send reads and writes somewhere else.
+ * A directory that does not exist yet is judged by its nearest existing
+ * ancestor, so the check can run before mkdir creates anything through a link.
+ */
 function parentIsReal(filePath: string): boolean {
-  const root = getConfigDir();
   const dir = path.dirname(filePath);
-  const rel = path.relative(root, dir);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) return false;
-  try {
-    return fs.realpathSync(dir) === path.join(fs.realpathSync(root), rel);
-  } catch (err) {
-    // Nothing there yet means nothing to follow; the caller's own fs call
-    // reports the missing file.
-    return (err as NodeJS.ErrnoException)?.code === "ENOENT";
+  const root = rootOf(dir);
+  if (!root) return false;
+  for (let probe = dir; ; probe = path.dirname(probe)) {
+    try {
+      return resolvesInPlace(root, probe);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") return false;
+      // A dangling link is something there, not nothing.
+      if (fs.lstatSync(probe, { throwIfNoEntry: false })) return false;
+      // Nothing there yet means nothing to follow; the caller's own fs call
+      // reports the missing file.
+      if (probe === root) return true;
+    }
   }
 }
 
@@ -194,17 +224,32 @@ function writeTemp(filePath: string, text: string): string {
  * id that is taken is a new slug's problem, not an overwrite.
  */
 export function writeNoClobber(filePath: string, text: string): WriteResult {
+  const refused: WriteResult = { ok: false, reason: "error", detail: "symlinked directory" };
   let tmp: string;
   try {
+    if (!parentIsReal(filePath)) return refused;
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    if (!parentIsReal(filePath))
-      return { ok: false, reason: "error", detail: "symlinked directory" };
+    if (!parentIsReal(filePath)) return refused;
     tmp = writeTemp(filePath, text);
   } catch (err) {
     return { ok: false, reason: "error", detail: errorDetail(err) };
   }
   try {
     fs.linkSync(tmp, filePath);
+    // The checks above run before the write, so a directory swapped for a
+    // link in between would carry the lesson out of the tree. Look at where
+    // it actually landed and take it back if that is somewhere else.
+    const root = rootOf(filePath);
+    let inPlace = false;
+    try {
+      inPlace = root !== undefined && resolvesInPlace(root, filePath);
+    } catch {
+      /* unresolvable counts as not in place */
+    }
+    if (!inPlace) {
+      fs.unlinkSync(filePath);
+      return refused;
+    }
     return { ok: true };
   } catch (err) {
     if ((err as NodeJS.ErrnoException)?.code === "EEXIST") return { ok: false, reason: "exists" };
@@ -224,6 +269,7 @@ export function writeOverwrite(
   text: string,
 ): { ok: true } | { ok: false; detail: string } {
   try {
+    if (!parentIsReal(filePath)) return { ok: false, detail: "symlinked directory" };
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     if (!parentIsReal(filePath)) return { ok: false, detail: "symlinked directory" };
     const tmp = writeTemp(filePath, text);

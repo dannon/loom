@@ -3,6 +3,7 @@
   "description": "A hostile galaxy-mcp run_tool failure (called as mcp__galaxy__run_tool, reported as galaxy_run_tool) -- absolute path, project directory name, 32-hex dataset id, five-digit history number, dataset URL and email address, all on the one line the normalizer reads -- plus hostile tool arguments, replayed through the real build-and-check path with no model attached, in the default ask shape. The leak scan is staged, so the rewrites that scrub a path, an id or a URL can't hide a host or a port: the hostile lines are scrubbed and pass, the same line three times is reported once as a retry-loop, a clean failure passes, and a line whose port the normalizer would have rewritten (galaxyprod:12345) keeps its report but has its signature withheld. No activity row carries a signature; the exact signatures are pinned by the unit test over the same fixture. The replay reaches the build step only, so nothing may be sent.",
   "tier": 1,
   "inputs": ["/observations status"],
+  "config": { "lessons": { "enabled": true }, "observations": { "mode": "ask" } },
   "env": {
     "ANTHROPIC_API_KEY": "fake-eval-key",
     "LOOM_OBSERVATION_REPLAY": "observations.jsonl",

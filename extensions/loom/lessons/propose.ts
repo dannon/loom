@@ -24,6 +24,7 @@
  */
 
 import * as fs from "fs";
+import { isLessonsEnabled, LESSONS_OFF_POINTER } from "./enabled";
 import * as path from "path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { appendActivityEvent } from "../activity.js";
@@ -60,7 +61,14 @@ export const DISCARD_OPTION = "Discard it";
 export type ProposalReason = "explicit" | "user_correction";
 
 export type RejectReason =
-  "unarmed" | "validator" | "exists" | "no-ui" | "declined" | "staged" | "write-failed";
+  | "lessons-off"
+  | "unarmed"
+  | "validator"
+  | "exists"
+  | "no-ui"
+  | "declined"
+  | "staged"
+  | "write-failed";
 
 export type ProposeOutcome =
   | { ok: true; id: string; path: string }
@@ -298,6 +306,12 @@ export async function proposeLesson(
   const namespace = input?.namespace;
   const slug = input?.slug;
   const id = safeId(namespace, slug);
+
+  // Before the arming check: an off switch is the user's standing answer, and
+  // no /lesson or nudge should have armed anything while it is off.
+  if (!isLessonsEnabled()) {
+    return reject(id, "lessons-off", `${LESSONS_OFF_POINTER} Nothing was written; tell the user.`);
+  }
 
   const arming = armed;
   if (!arming || !arming.live) {

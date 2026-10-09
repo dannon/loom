@@ -37,6 +37,10 @@ import {
   takeShadowNotices,
 } from "./user-instructions.js";
 import { readEnv } from "../../shared/orbit-env.js";
+import {
+  buildReproductionLessonsContext,
+  LOOM_LESSONS_CONTEXT_TYPE,
+} from "./lessons/reproduction-index";
 
 const NOTEBOOK_HEAD_MAX_CHARS = 2000;
 const NOTEBOOK_TAIL_MAX_CHARS = 4000;
@@ -1279,6 +1283,30 @@ function isLlama4Family(model: { id?: string; provider?: string } | undefined): 
   return /llama-?4|maverick|scout/.test(id);
 }
 
+/**
+ * The text of the most recent user message: a plain string or an array of
+ * content blocks.
+ */
+function lastUserText(messages: readonly { role: string; content?: unknown }[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role !== "user") continue;
+    if (typeof msg.content === "string") return msg.content;
+    if (!Array.isArray(msg.content)) return "";
+    return msg.content
+      .filter(
+        (c): c is { type: string; text: string } =>
+          !!c &&
+          typeof c === "object" &&
+          (c as { type?: unknown }).type === "text" &&
+          typeof (c as { text?: unknown }).text === "string",
+      )
+      .map((c) => c.text)
+      .join("\n");
+  }
+  return "";
+}
+
 export function setupContextInjection(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (_event, ctx) => {
     // The system prompt is sent as one cached block (Anthropic cache_control
@@ -1340,7 +1368,8 @@ export function setupContextInjection(pi: ExtensionAPI): void {
         !(
           m.role === "custom" &&
           (m.customType === LOOM_NOTEBOOK_CONTEXT_TYPE ||
-            m.customType === LOOM_WORKSPACE_INSTRUCTIONS_TYPE)
+            m.customType === LOOM_WORKSPACE_INSTRUCTIONS_TYPE ||
+            m.customType === LOOM_LESSONS_CONTEXT_TYPE)
         ),
     );
 
@@ -1369,7 +1398,12 @@ export function setupContextInjection(pi: ExtensionAPI): void {
       else messages.splice(lastUser, 0, msg);
     };
 
-    // Workspace LOOM.md first, so the notebook -- and then the user's own turn
+    // Lessons first, furthest from the user's turn: an index of titles written
+    // by other people is the weakest claim on attention of the three.
+    const lessons = buildReproductionLessonsContext(lastUserText(messages));
+    if (lessons) insert(LOOM_LESSONS_CONTEXT_TYPE, lessons);
+
+    // Workspace LOOM.md next, so the notebook -- and then the user's own turn
     // -- sit closer to the end than anything a cloned folder shipped.
     const workspace = buildWorkspaceInstructionsContext();
     if (workspace) insert(LOOM_WORKSPACE_INSTRUCTIONS_TYPE, workspace);
