@@ -220,6 +220,30 @@ describe("decideTransition on the registry path", () => {
   });
 });
 
+describe("a run bound to a positional address", () => {
+  const plan = "# N\n\n## Plan A: Test\n\n- [ ] Original held step\n- [ ] Another step\n";
+  const held = registryOf(boundAttempt({ eligible: false, anchor: "plan-a-step-1" }));
+
+  it("can't be moved by inserting a step above it, then completed (Codex, slice 4)", () => {
+    const after = plan.replace(
+      "- [ ] Original held step",
+      "- [ ] Newly inserted step\n- [x] Original held step",
+    );
+    const d = decideTransition(plan, after, "deny", held);
+    expect(d.gated).toBe(true);
+    expect(d.contradictions[0]).toMatchObject({ source: "registry", kind: "vanished" });
+  });
+
+  it("is still held for a plain flip, and free to be marked failed", () => {
+    expect(
+      decideTransition(plan, plan.replace("- [ ] Orig", "- [x] Orig"), "deny", held).gated,
+    ).toBe(true);
+    expect(
+      decideTransition(plan, plan.replace("- [ ] Orig", "- [!] Orig"), "deny", held).gated,
+    ).toBe(false);
+  });
+});
+
 describe("/override on the registry path", () => {
   it("plans an exception on each held run", () => {
     const a = boundAttempt({ eligible: false });

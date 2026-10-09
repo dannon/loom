@@ -30,12 +30,14 @@ import {
   recordDecision,
   resolveMode,
 } from "./evidence-gate";
+import { extractRegistryCarrier } from "./registry-carrier";
 import {
   ingestPulledCarrier,
   registryCarrierForPush,
   type CarrierSource,
 } from "./registry-page-carrier";
 import { followThrough } from "./galaxy-reconcile";
+import type { Registry } from "./registry";
 import * as path from "path";
 
 // Defense-in-depth: Galaxy Page content can be authored by other users (or a
@@ -71,8 +73,26 @@ export function wrapUntrustedRemoteBody(body: string): string {
  * pull that completes a step the record holds is refused, in warn it is
  * recorded.
  */
-function gatePulledNotebook(nbPath: string, before: string, after: string, tool: string): void {
-  const decision = decideTransition(before, after, resolveMode(), currentRegistryView());
+function gatePulledNotebook(
+  nbPath: string,
+  before: string,
+  after: string,
+  tool: string,
+  priorRegistry: Registry | null,
+): void {
+  // Judged against the registry both before and after the Page's carrier was
+  // ingested, so whatever the carrier did to the registry, it can't lift a
+  // hold the session had when the pull began.
+  const mode = resolveMode();
+  const opts = { newStepsCount: false };
+  const decisions = [
+    decideTransition(before, after, mode, priorRegistry, opts),
+    decideTransition(before, after, mode, currentRegistryView(), opts),
+  ];
+  const decision =
+    decisions.find((d) => d.gated) ??
+    decisions.find((d) => d.contradictions.length > 0) ??
+    decisions[1];
   if (decision.completions.length === 0) return;
   const adjudication = adjudicate(decision, new Set());
   recordDecision(path.dirname(nbPath), tool, adjudication);
@@ -93,8 +113,11 @@ function reconcileAfter(trigger: CarrierSource): void {
 
 /** Page content for a push: the projected notebook, then the registry carrier. */
 function withCarrier(projected: string): string {
+  // Only the harness writes a carrier: any carrier-shaped line already in the
+  // body (typed into the notebook, say) is dropped before ours goes on.
+  const body = extractRegistryCarrier(projected).body;
   const carrier = registryCarrierForPush();
-  return carrier ? `${projected.replace(/\s+$/, "")}\n\n${carrier}\n` : projected;
+  return carrier ? `${body.replace(/\s+$/, "")}\n\n${carrier}\n` : body;
 }
 
 export interface PushOptions {
@@ -222,6 +245,7 @@ export async function resumeGalaxyPage(
       );
     }
 
+    const priorRegistry = currentRegistryView();
     const pulled = ingestPulledCarrier(page.content ?? "", "page_resume");
     const remoteBody = wrapUntrustedRemoteBody(galaxyMarkdownToLoom(pulled.body));
     const binding: GalaxyPageBindingYaml = {
@@ -233,7 +257,7 @@ export async function resumeGalaxyPage(
       boundAt: existing?.boundAt ?? new Date().toISOString(),
     };
     const next = upsertGalaxyPageBlock(remoteBody, binding);
-    gatePulledNotebook(nbPath, localBefore, next, "notebook_resume_from_galaxy");
+    gatePulledNotebook(nbPath, localBefore, next, "notebook_resume_from_galaxy", priorRegistry);
     await writeNotebook(nbPath, next);
     reconcileAfter("page_resume");
     return {
@@ -272,6 +296,7 @@ export async function pullNotebookFromGalaxy(): Promise<PullResult> {
       );
     }
     const page = await getPage(existing.pageId);
+    const priorRegistry = currentRegistryView();
     const pulled = ingestPulledCarrier(page.content ?? "", "page_pull");
     const remoteBody = wrapUntrustedRemoteBody(galaxyMarkdownToLoom(pulled.body));
     const refreshed: GalaxyPageBindingYaml = {
@@ -280,7 +305,7 @@ export async function pullNotebookFromGalaxy(): Promise<PullResult> {
       lastSyncedRevision: page.latest_revision_id,
     };
     const next = upsertGalaxyPageBlock(remoteBody, refreshed);
-    gatePulledNotebook(nbPath, content, next, "notebook_pull_from_galaxy");
+    gatePulledNotebook(nbPath, content, next, "notebook_pull_from_galaxy", priorRegistry);
     await writeNotebook(nbPath, next);
     reconcileAfter("page_pull");
     return {

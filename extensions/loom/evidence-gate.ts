@@ -95,15 +95,19 @@
  *    when slice 3 records them in the registry.
  * 4. **Bash.** `WRITE_TOOLS` is `write` and `edit`. On the desktop the
  *    exec-guard denies shell writes to `notebook.md`, `activity.jsonl` and the
- *    registry and provenance directories outright (a floor, not an ask), so a
- *    heredoc can't reach the notebook either; a script it runs still can, and
- *    is out of scope for a command-string classifier.
+ *    registry and provenance directories outright (a floor, not an ask), and
+ *    never auto-allows a line that names them, so an interpreter one-liner
+ *    asks the user. A script that finds the files itself still can, and is out
+ *    of scope for a command-string classifier.
  * 5. **`activity.jsonl` through the file tools.** Not floored there: the
  *    activity log is an audit trail, not an input to any verdict, now that the
  *    verdict lives in the signed registry.
  * 6. **Positional anchors.** A step with no `{#id}` is addressed by position
- *    (`plan-a-step-2`), so inserting a step above it can move its address onto
- *    another line. Explicit anchors don't have the problem. */
+ *    (`plan-a-step-2`), so inserting a step above it moves its address onto
+ *    another line. On the registry path, different text at a held positional
+ *    address is treated as that move and refused, which also means a held
+ *    positional step can't be retitled until it's eligible; explicit anchors
+ *    don't have the problem. */
 
 import fs from "node:fs";
 import os from "node:os";
@@ -410,8 +414,8 @@ export function registryHolds(registry: Registry | null | undefined): {
 }
 
 /** Checkbox states by anchor; a step written twice is complete if either copy says so. */
-function checkboxesByAnchor(content: string): Map<string, PlanStep> {
-  const out = new Map<string, PlanStep>();
+function checkboxesByAnchor(content: string): Map<string, PlanStep & { positional?: true }> {
+  const out = new Map<string, PlanStep & { positional?: true }>();
   for (const box of collectCheckboxSteps(content)) {
     const prior = out.get(box.anchor);
     if (prior?.state === "x") continue;
@@ -420,9 +424,19 @@ function checkboxesByAnchor(content: string): Map<string, PlanStep> {
       anchor: box.anchor,
       state: box.state,
       text: box.text,
+      ...(box.explicit ? {} : { positional: true as const }),
     });
   }
   return out;
+}
+
+/** A step's text with the ordinal, the state and the spacing taken out. */
+function stepIdentity(text: string): string {
+  return text
+    .replace(/^\d+\.\s*/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 /**
@@ -438,7 +452,9 @@ export function findRegistryContradictions(
   before: string,
   after: string,
   registry: Registry | null | undefined,
+  opts: { newStepsCount?: boolean } = {},
 ): RegistryContradiction[] {
+  const newStepsCount = opts.newStepsCount ?? true;
   const { held } = registryHolds(registry);
   if (held.size === 0) return [];
   const pre = checkboxesByAnchor(before);
@@ -447,9 +463,20 @@ export function findRegistryContradictions(
   for (const [anchor, hold] of held) {
     const was = pre.get(anchor);
     const now = post.get(anchor);
-    if (now?.state === "x" && was?.state !== "x") {
+    // A step the notebook never had arriving complete counts for an edit (the
+    // model wrote it). A pull or resume replacing the notebook wholesale --
+    // a fresh container resuming its Page -- brings steps in whatever state
+    // they were left, and judging those before reconcile has re-checked them
+    // would refuse the honest resume.
+    if (now?.state === "x" && was?.state !== "x" && (was || newStepsCount)) {
       out.push({ source: "registry", step: now, kind: "flip", hold });
     } else if (was && !now) {
+      out.push({ source: "registry", step: was, kind: "vanished", hold });
+    } else if (was?.positional && now && stepIdentity(was.text) !== stepIdentity(now.text)) {
+      // A step with no `{#id}` is addressed by position, so a line inserted
+      // above it moves its address onto another step -- and the original could
+      // then be completed under an address nothing holds. Different text at a
+      // held positional address is that move, and is refused like a removal.
       out.push({ source: "registry", step: was, kind: "vanished", hold });
     }
   }
@@ -744,11 +771,12 @@ export function decideTransition(
   after: string,
   mode: EvidenceGateMode,
   registry: Registry | null = null,
+  opts: { newStepsCount?: boolean } = {},
 ): GateDecision {
   const none: GateDecision = { gated: false, mode, completions: [], contradictions: [] };
   if (mode === "off") return none;
   const { bound } = registryHolds(registry);
-  const fromRegistry = findRegistryContradictions(before, after, registry);
+  const fromRegistry = findRegistryContradictions(before, after, registry, opts);
   // A step the registry has an opinion on is the registry's to judge; the
   // block text beside it is not consulted.
   const flips = detectCompletions(before, after);

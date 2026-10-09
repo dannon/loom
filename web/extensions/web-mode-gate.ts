@@ -132,13 +132,10 @@ export const TRUSTED_RECORD_ALLOWED: ReadonlySet<string> = new Set([
   "mcp__galaxy__recommend_iwc_workflows",
   "mcp__galaxy__import_workflow_from_iwc",
   "mcp__galaxy__upload_file_from_url",
-  "mcp__galaxy__create_page",
   "mcp__galaxy__get_page",
-  "mcp__galaxy__update_page",
   "mcp__galaxy__list_pages",
   "mcp__galaxy__list_page_revisions",
   "mcp__galaxy__get_page_revision",
-  "mcp__galaxy__revert_page_revision",
   "mcp__galaxy__create_user_tool",
   "mcp__galaxy__list_user_tools",
   "mcp__galaxy__download_dataset",
@@ -153,6 +150,12 @@ export const TRUSTED_RECORD_EXCLUDED: Readonly<Record<string, string>> = {
   mcp__galaxy__delete_user_tool: "not reviewed yet",
   mcp__galaxy__cancel_workflow_invocation: "not reviewed yet",
   mcp__galaxy__upload_file: "reads a file on the Loom host",
+  mcp__galaxy__create_page:
+    "Page content carries the registry; notebook_push_to_galaxy is the one writer",
+  mcp__galaxy__update_page:
+    "Page content carries the registry; notebook_push_to_galaxy is the one writer",
+  mcp__galaxy__revert_page_revision:
+    "Page content carries the registry; notebook_push_to_galaxy is the one writer",
   galaxy_upload_local_file: "reads a file on the Loom host",
   lesson_propose: "writes the local lesson bank, which the registry profile doesn't review",
   dashboard_read: "dashboards are not part of the guaranteed surface",

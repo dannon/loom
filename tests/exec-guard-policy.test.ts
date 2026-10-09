@@ -834,6 +834,23 @@ describe.each(WORKSPACE_STATE_DIR_NAMES)("decide -- %s state dir", (D) => {
     ).toBe("allow");
   });
 
+  it("a trusted workspace doesn't auto-allow an interpreter line that names the record (Codex, slice 4)", () => {
+    const trusted = { ...baseCfg, trustedWorkspaces: [CWD] };
+    for (const command of [
+      `python3 -c 'from pathlib import Path; Path("notebook.md").write_text("- [x] done")'`,
+      `node -e 'require("fs").writeFileSync(".${D.slice(1)}/state/registry.json","{}")'`,
+      `perl -e 'open F,">activity.jsonl"; print F "{}"'`,
+      `python3 rewrite.py ${D}/provenance/a.json`,
+    ]) {
+      const r = decide(req({ toolInput: { command }, config: trusted }), deps);
+      expect(r.decision, command).not.toBe("allow");
+    }
+    expect(
+      decide(req({ toolInput: { command: "python3 analyse.py data.csv" }, config: trusted }), deps)
+        .decision,
+    ).toBe("allow");
+  });
+
   it("bash writes into the registry stay catastrophic", () => {
     for (const command of [
       `echo '{}' > ${CWD}/${D}/state/registry.json`,

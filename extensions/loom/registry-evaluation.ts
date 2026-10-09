@@ -157,6 +157,17 @@ export function checkConformity(spec: Spec, facts: RunFacts): ConformityCheck {
   if (facts.kind !== "job") {
     return { outcome: "unverifiable", reason: "a tool approval recorded against an invocation" };
   }
+  // Where it ran is part of what was approved: a matching job in some other
+  // history is some other run.
+  if (facts.history_id === undefined) {
+    return { outcome: "unverifiable", reason: "history not reported" };
+  }
+  if (facts.history_id !== spec.history_id) {
+    return {
+      outcome: "mismatch",
+      diff: [{ path: "history_id", approved: spec.history_id, observed: facts.history_id }],
+    };
+  }
   // One job for a plain run, many when it mapped over. A job whose details
   // never came could have run anything.
   const jobs = facts.jobs;
@@ -287,7 +298,16 @@ export function evaluateAttempt(
   attempt: Attempt,
   facts: RunFacts,
   exceptions: readonly Exception[],
-  opts: { now: string; factsRef: string },
+  opts: {
+    now: string;
+    factsRef: string;
+    /**
+     * Whether the template the approval froze is in this registry's store and
+     * hashes to its name. A Spec that arrived without one -- in a carrier, say
+     * -- was never checked against anything, so a run matching it shows nothing.
+     */
+    templateFrozen?: boolean;
+  },
 ): EvaluationResult {
   const submission = attempt.submission;
   if (!submission) throw new Error(`attempt ${attempt.attempt_id} has no submission`);
@@ -303,7 +323,20 @@ export function evaluateAttempt(
   const spec = attempt.approval?.spec_snapshot;
   if (check.outcome !== "conformant_by_construction" && spec && execution !== "unknown") {
     const c = checkConformity(spec, facts);
-    if (c.outcome === "match") check = { outcome: "conformant_by_reconcile", mode: check.mode };
+    const attemptHistory =
+      facts.history_id !== undefined && facts.history_id !== attempt.history_id
+        ? [{ path: "attempt.history_id", approved: attempt.history_id, observed: facts.history_id }]
+        : [];
+    if (attemptHistory.length > 0) {
+      check = {
+        outcome: "mismatch",
+        mode: check.mode,
+        diff: [...attemptHistory, ...(c.outcome === "mismatch" ? c.diff : [])],
+      };
+    } else if (c.outcome === "match" && !opts.templateFrozen) {
+      check = { outcome: "unverified", mode: check.mode };
+    } else if (c.outcome === "match")
+      check = { outcome: "conformant_by_reconcile", mode: check.mode };
     else if (c.outcome === "mismatch")
       check = { outcome: "mismatch", mode: check.mode, diff: c.diff };
     else check = { outcome: "unverified", mode: check.mode };

@@ -191,7 +191,10 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     // floor above, and it never covers a command run after a cd into Loom's own
     // state or a credential store -- trusting the workspace says nothing about
     // those directories.
-    if (req.config.trustedWorkspaces.includes(req.cwd) && !c.guardedCwd) {
+    // Nor a line that names the analysis record or the registry: what an
+    // interpreter or script does with them is beyond this classifier, and the
+    // shell write forms it does model are denied above.
+    if (req.config.trustedWorkspaces.includes(req.cwd) && !c.guardedCwd && !c.namesRecord) {
       if (req.modelTier === "trusted") {
         return {
           decision: "allow",

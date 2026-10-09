@@ -819,10 +819,23 @@ export function approveProposal(store: RegistryStore, req: ApproveRequest): Appr
 
 /** Revoke every live approval of a proposal. Returns the attempts revoked. */
 export function revokeProposal(store: RegistryStore, proposalId: string): AttemptId[] {
-  return revokeAttempts(
-    store,
-    liveOf(store.snapshot(), (a) => a.approval?.proposal_id === proposalId),
-  );
+  // A restored approval can't submit anything, but a reconcile check made
+  // against it can still make its run eligible, so the user can withdraw it.
+  const ids = Object.values(store.snapshot().attempts)
+    .filter(
+      (a) =>
+        a.approval?.proposal_id === proposalId &&
+        (a.approval.status === "live" || a.approval.status === "restored"),
+    )
+    .map((a) => a.attempt_id);
+  if (ids.length === 0) return [];
+  store.update((draft) => {
+    for (const id of ids) {
+      const approval = draft.attempts[id]?.approval;
+      if (approval && approval.status !== "revoked") approval.status = "revoked";
+    }
+  });
+  return ids;
 }
 
 function liveOf(registry: Registry, pick: (a: Attempt) => boolean): AttemptId[] {

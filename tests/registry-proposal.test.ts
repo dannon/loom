@@ -390,6 +390,17 @@ describe("edit after approve revokes (v3 §13)", () => {
     expect(revokeProposal(s, "prop-abc123")).toEqual([]);
     if (other.ok) expect(s.snapshot().attempts[other.attemptId].approval?.status).toBe("live");
   });
+
+  it("/revoke also withdraws a restored approval a reconcile check could rely on (Codex, slice 4)", () => {
+    const { s, attemptId } = approved();
+    s.close();
+    // A new session: what the first one wrote comes back restored.
+    const next = store("s-b");
+    expect(next.snapshot().attempts[attemptId].approval?.status).toBe("restored");
+    expect(revokeProposal(next, "prop-abc123")).toEqual([attemptId]);
+    expect(next.snapshot().attempts[attemptId].approval?.status).toBe("revoked");
+    next.close();
+  });
 });
 
 describe("/pending (v3 §13)", () => {

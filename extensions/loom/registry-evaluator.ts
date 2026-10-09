@@ -140,7 +140,7 @@ async function jobFacts(
   jobId: string,
   records: readonly AttemptRecord[],
   stepVersion?: string,
-): Promise<RunJob> {
+): Promise<RunJob & { history_id?: string }> {
   let details: GalaxyJobDetailsResponse;
   try {
     details = await deps.getJob(jobId);
@@ -166,6 +166,7 @@ async function jobFacts(
       : undefined;
   return {
     job_id: jobId,
+    ...(str(details.history_id) ? { history_id: str(details.history_id) } : {}),
     ...(toolId ? { tool_id: toolId } : {}),
     ...(toolVersion ? { tool_version: toolVersion } : {}),
     ...(str(details.state) ? { state: str(details.state) } : {}),
@@ -236,7 +237,10 @@ export async function gatherRunFacts(
       }
       const steps = await walkInvocationJobs(inv, deps.getInvocation);
       const jobs: RunJob[] = [];
-      for (const s of steps) jobs.push(await jobFacts(deps, s.jobId, records, s.toolVersion));
+      for (const s of steps) {
+        const { history_id: _h, ...job } = await jobFacts(deps, s.jobId, records, s.toolVersion);
+        jobs.push(job);
+      }
       const done = INVOCATION_SCHEDULING_DONE.has(inv.state);
       const states = jobs.map(jobRunState);
       let state: RunFacts["state"];
@@ -269,7 +273,7 @@ export async function gatherRunFacts(
     }
     const id = submission.job_id;
     if (!id) return null;
-    const job = await jobFacts(deps, id, records);
+    const { history_id: history, ...job } = await jobFacts(deps, id, records);
     if (job.unavailable) {
       return { kind: "job", run_id: id, verified: false, state: "unknown", jobs: [], source };
     }
@@ -278,6 +282,7 @@ export async function gatherRunFacts(
       run_id: id,
       verified: true,
       state: jobRunState(job),
+      ...(history ? { history_id: history } : {}),
       jobs: [job],
       source,
     };
@@ -355,7 +360,14 @@ async function runPass(trigger: EvaluationTrigger, deps: EvaluatorDeps): Promise
       `${sha256Hex(canonicalJson(facts))}.json`,
     );
     const now = new Date(deps.now()).toISOString();
-    const result = evaluateAttempt(attempt, facts, view.exceptions, { now, factsRef });
+    const spec = attempt.approval?.spec_snapshot;
+    const templateFrozen =
+      !!spec && session.store.getTemplate(spec.template_ref.digest) !== undefined;
+    const result = evaluateAttempt(attempt, facts, view.exceptions, {
+      now,
+      factsRef,
+      templateFrozen,
+    });
     if (sameOutcome(attempt, result)) {
       out.unchanged.push(attempt.attempt_id);
       continue;

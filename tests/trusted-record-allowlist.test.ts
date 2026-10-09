@@ -57,7 +57,7 @@ describe("trusted-record profile", () => {
       "galaxy_job_record",
       "notebook_pull_from_galaxy",
       "mcp__galaxy__get_tool_details",
-      "mcp__galaxy__update_page",
+      "mcp__galaxy__get_page",
     ])
       expect(block(tool), tool).toBeUndefined();
   });
@@ -68,6 +68,10 @@ describe("trusted-record profile", () => {
       "mcp__galaxy__invoke_workflow",
       "mcp__galaxy__run_user_tool",
       "mcp__galaxy__run_galaxy_tool",
+      // Page content carries the registry; only the harness push writes it.
+      "mcp__galaxy__update_page",
+      "mcp__galaxy__create_page",
+      "mcp__galaxy__revert_page_revision",
     ]) {
       const d = block(tool);
       expect(d?.block, tool).toBe(true);

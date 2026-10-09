@@ -261,4 +261,36 @@ describe("the carrier through the store and the Page", () => {
     await expect(pullNotebookFromGalaxy()).rejects.toThrow(/evidence gate is holding/);
     expect(fs.readFileSync(nbPath, "utf-8")).toBe(before);
   });
+
+  it("resuming onto a fresh notebook isn't refused for steps the Page already had complete", async () => {
+    // A new container's notebook has no plan yet; the Page brings the steps in
+    // whatever state they were left, and reconcile re-checks them afterwards.
+    fs.writeFileSync(nbPath, "# Notebook\n");
+    openSession();
+    pageWith(
+      `${PLAN.replace("- [ ] 2. **Align**", "- [x] 2. **Align**")}\n\n${foreignCarrier(liveAttempt())}\n`,
+    );
+    await expect(resumeGalaxyPage("p1")).resolves.toMatchObject({ action: "linked" });
+    expect(fs.readFileSync(nbPath, "utf-8")).toContain("- [x] 2. **Align**");
+  });
+
+  it("a carrier typed into the notebook never goes out beside the harness's own", async () => {
+    const session = openSession();
+    session.store.update((d) => {
+      const a = liveAttempt();
+      d.attempts[a.attempt_id] = a;
+    });
+    fs.appendFileSync(nbPath, `\n${foreignCarrier()}\n`);
+    vi.mocked(pagesApi.updatePage).mockResolvedValue({
+      id: "p1",
+      slug: null,
+      latest_revision_id: "r1",
+    } as never);
+    await pushNotebookToGalaxy();
+    const pushed = vi.mocked(pagesApi.updatePage).mock.calls.at(-1)![1].content as string;
+    expect(pushed.match(/^\[loom-registry:v3\]/gm)).toHaveLength(1);
+    pageWith(pushed);
+    await pullNotebookFromGalaxy();
+    expect(Object.values(session.store.snapshot().attempts)[0].approval?.status).toBe("live");
+  });
 });

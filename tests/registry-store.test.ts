@@ -391,13 +391,13 @@ describe("review follow-ups", () => {
     const a = addAttempt(s);
     const ownText = fs.readFileSync(s.registryPath, "utf-8");
     s.close();
-    // read-only now, so a foreign document replaces what we hold
+    // read-only now, so a foreign file (the writer's) replaces what we hold
     const foreign = JSON.parse(ownText);
     foreign.revision = 0;
     foreign.session_sig = "0".repeat(64);
-    expect(s.ingestText(JSON.stringify(foreign)).kind).toBe("imported");
+    expect(s.ingestText(JSON.stringify(foreign), true).kind).toBe("imported");
     expect(s.snapshot().revision).toBe(1);
-    expect(s.ingestText(ownText).kind).toBe("stale");
+    expect(s.ingestText(ownText, true).kind).toBe("stale");
     expect(s.snapshot().attempts[a.attempt_id].approval?.status).toBe("restored");
   });
 
@@ -522,5 +522,37 @@ describe("atomic write on Windows", () => {
     });
     s.open();
     expect(() => addAttempt(s)).toThrow(/ENOSPC/);
+  });
+
+  describe("a carrier can't clear what a session holds (Codex, slice 4)", () => {
+    it("a read-only session ignores a foreign carrier, valid or not", () => {
+      const s = store();
+      s.open();
+      const a = addAttempt(s);
+      const text = fs.readFileSync(s.registryPath, "utf-8");
+      s.close();
+      const empty = { ...JSON.parse(text), attempts: {}, session_sig: "0".repeat(64) };
+      expect(s.ingestText(JSON.stringify(empty)).kind).toBe("ignored");
+      expect(s.ingestText("{not json").kind).toBe("rejected");
+      expect(s.snapshot().attempts[a.attempt_id]).toBeDefined();
+    });
+
+    it("refuses an import with no room left to keep writing", () => {
+      const s = store();
+      const doc = {
+        version: 3,
+        revision: 2 ** 48,
+        writer_token: "x",
+        session_sig: "0".repeat(64),
+        analysis_id: "an",
+        server_url: SERVER,
+        attempts: {},
+        exceptions: [],
+        supervision: { active_at_shutdown: [] },
+      };
+      s.open();
+      expect(s.ingestText(JSON.stringify(doc)).kind).toBe("rejected");
+      expect(() => s.update(() => undefined)).not.toThrow();
+    });
   });
 });

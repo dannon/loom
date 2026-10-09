@@ -180,6 +180,8 @@ export interface CheckboxStep {
   anchor: string;
   state: " " | "x" | "!";
   text: string;
+  /** False for a positional address, which follows the line's position, not the line. */
+  explicit: boolean;
 }
 
 const CHECKBOX_LINE = /^\s*-\s+\[([ xX!])\]\s+(.*)$/;
@@ -214,12 +216,17 @@ export function collectCheckboxSteps(content: string): CheckboxStep[] {
     if (planKey && STEP_LINE.test(line)) stepIndex++;
     const ids = [...text.matchAll(ANCHOR)].map((m) => m[1].trim()).filter(Boolean);
     if (ids.length > 0) {
-      for (const anchor of ids) out.push({ anchor, state, text: text.trim() });
+      for (const anchor of ids) out.push({ anchor, state, text: text.trim(), explicit: true });
       continue;
     }
     if (!planKey) continue;
     const ordinal = text.match(STEP_ORDINAL)?.[1] ?? String(stepIndex);
-    out.push({ anchor: `plan-${planKey}-step-${ordinal}`, state, text: text.trim() });
+    out.push({
+      anchor: `plan-${planKey}-step-${ordinal}`,
+      state,
+      text: text.trim(),
+      explicit: false,
+    });
   }
   return out;
 }

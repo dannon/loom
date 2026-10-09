@@ -14,7 +14,13 @@ import {
   openSessionRegistry,
   recordActiveAtShutdown,
 } from "../extensions/loom/registry-runtime";
-import { canonicalJson, type Attempt, type Registry } from "../extensions/loom/registry-schema";
+import {
+  canonicalJson,
+  sha256Hex,
+  specRevision,
+  type Attempt,
+  type Registry,
+} from "../extensions/loom/registry-schema";
 import { eligibleAttempt, makeSpec, SERVER, tmpAnalysisDir } from "./registry-fixtures";
 
 let dir: string;
@@ -33,8 +39,22 @@ function rows(kind: string): Array<Record<string, any>> {
     .filter((r) => r.kind === kind);
 }
 
+/** Freeze a template for the attempt's Spec on disk, as /approve would have. */
+function freezeTemplate(a: Attempt): Attempt {
+  const body = { tool: "cat1", inputs: ["input1"] };
+  const text = canonicalJson(body);
+  const digest = sha256Hex(text);
+  const dirT = path.join(dir, ".loom", "state", "templates");
+  fs.mkdirSync(dirT, { recursive: true });
+  fs.writeFileSync(path.join(dirT, `${digest}.json`), text);
+  a.approval!.spec_snapshot.template_ref.digest = digest;
+  a.approval!.spec_revision = specRevision(a.approval!.spec_snapshot);
+  return a;
+}
+
 /** A registry another session wrote: on open it is an import. */
 function plantForeignRegistry(...attempts: Attempt[]): void {
+  for (const a of attempts) if (a.approval) freezeTemplate(a);
   const reg: Registry = {
     version: 3,
     revision: 4,

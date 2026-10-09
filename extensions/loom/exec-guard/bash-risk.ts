@@ -27,6 +27,10 @@ export interface BashClass {
   /** Read targets resolved against a directory a `cd` reached. Kept apart from
    *  sensitiveReadPaths so a command with no cd is judged exactly as before. */
   cdReadPaths: string[];
+  /** The line names the analysis record or the harness's registry/provenance.
+   *  An interpreter (`python3 -c`, `node -e`, a script) can write those in ways
+   *  this classifier doesn't model, so such a line is never auto-allowed. */
+  namesRecord: boolean;
 }
 
 // Never-legitimate, irreversible-system-damage patterns. Order matters; first match wins.
@@ -482,6 +486,11 @@ const RECORD_MENTION = /notebook\.md|activity\.jsonl/i;
 // brace, a substitution. Unresolvable, so it is presumed to be the record when
 // the line names one anywhere (`NB=notebook.md; echo x >> $NB`).
 const EXPANDS = /[$`*?[{]/;
+// The record by name, including the harness's own record stores.
+const NAMES_RECORD = new RegExp(
+  String.raw`notebook\.md|activity\.jsonl|\.(?:${STATE_DIR_ALT})\/+(?:state|provenance)(?![\w.-])`,
+  "i",
+);
 const SEGMENT_OPS = new Set([";", "&&", "||", "|", "&", "(", ")", "\n", "|&", ";;"]);
 // Every argument is a write target (the source of a `mv` is removed).
 const ALL_ARGS_WRITE = new Set(["tee", "mv", "rm", "unlink", "truncate", "shred"]);
@@ -1314,6 +1323,7 @@ export function classifyBash(commandRaw: string, home = "", cwd = ""): BashClass
     loomWriteTargets: [...loom.targets, ...cd.writeTargets],
     guardedCwd: cd.guarded,
     cdReadPaths: cd.readPaths,
+    namesRecord: NAMES_RECORD.test(command.replace(/\\/g, "")),
   };
   for (const [re, why] of CATASTROPHIC) {
     if (re.test(command)) return { kind: "catastrophic", reason: why, readPaths: [], ...base };

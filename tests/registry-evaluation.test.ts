@@ -53,7 +53,11 @@ function importedAttempt(): Attempt {
   return a;
 }
 
-const opts = { now: "2026-09-25T12:06:00.000Z", factsRef: ".loom/state/templates/x.json" };
+const opts = {
+  now: "2026-09-25T12:06:00.000Z",
+  factsRef: ".loom/state/templates/x.json",
+  templateFrozen: true,
+};
 
 function apply(a: Attempt, f: RunFacts, exceptions = [] as Parameters<typeof evaluateAttempt>[2]) {
   const r = evaluateAttempt(a, f, exceptions, opts);
@@ -171,6 +175,25 @@ describe("evaluateAttempt", () => {
       authority: "established",
     });
     expect(eligible).toBe(true);
+  });
+
+  it("won't re-check against a Spec whose template was never frozen here (Codex, slice 4)", () => {
+    const r = evaluateAttempt(importedAttempt(), facts(), [], { ...opts, templateFrozen: false });
+    expect(r.check.outcome).toBe("unverified");
+    expect(r.evaluation.conformity).toBe("unverified");
+  });
+
+  it("a matching job in another history is another run (Codex, slice 4)", () => {
+    const { result, eligible } = apply(
+      importedAttempt(),
+      facts({ history_id: "ffffffffffffffff" }),
+    );
+    expect(result.check.outcome).toBe("mismatch");
+    expect(result.check.diff?.map((d) => d.path)).toContain("history_id");
+    expect(eligible).toBe(false);
+    const noHistory = facts();
+    delete noHistory.history_id;
+    expect(apply(importedAttempt(), noHistory).result.check.outcome).toBe("unverified");
   });
 
   it("records a mismatch as nonconformant, never eligible", () => {

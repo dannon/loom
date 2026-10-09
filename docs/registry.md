@@ -214,9 +214,12 @@ what it claimed.
 - **execution** is `success` when Galaxy is done and every job is ok, `failed` when
   something errored, was cancelled or Galaxy failed it, `unknown` otherwise.
 - **conformity** for a submission that isn't by construction is a re-check of the run
-  against the frozen Spec: tools are compared job by job on tool id, version, every
-  approved hda input and every override (Galaxy's flat param paths, read through its habit
-  of JSON-encoding values). A match writes `conformant_by_reconcile`, a definite
+  against the frozen Spec: tools are compared job by job on tool id, version, history,
+  every approved hda input and every override (Galaxy's flat param paths, read through its
+  habit of JSON-encoding values). The run's history has to be both the Spec's and the
+  attempt's, and the template the approval froze has to be in this registry's
+  `templates/` and hash to its name -- a Spec that arrived without one was never checked
+  against anything. A match writes `conformant_by_reconcile`, a definite
   difference `mismatch` with the diff, anything it couldn't read exactly `unverified`.
   Workflows, collection inputs and user-defined tools come back `unverified` for now: an
   invocation doesn't say which workflow version ran, a mapped-over job sees an element
@@ -263,7 +266,15 @@ one line, `[loom-registry:v3]: #loom "<base64 gzip>"`, a link-reference definiti
 renders to nothing. Pull and resume take it out of the body before the notebook is written
 and hand it to `ingestText`, so the import rule above decides what it is worth: this
 session's own carrier is a continuation, anything else an import (or ignored while the
-session holds its own state). Two carriers, a malformed one, one that decompresses past
+session holds its own state, and always in a read-only session, which takes the registry
+only from the writer's file). A rejected carrier never clears what the session holds. The
+pulled notebook is gated against the registry as it stood both before and after the
+carrier was ingested, and a step the local notebook never had doesn't count as a
+completion on a pull, so a fresh container resuming its Page isn't refused before
+reconcile has re-checked anything. Push drops any carrier-shaped line from the body
+before appending its own. Frozen templates don't travel in the carrier, so an attempt
+imported from a Page can't reach `conformant_by_reconcile` on another machine; it needs a
+user `submission_check` exception there. Two carriers, a malformed one, one that decompresses past
 4 MiB, or one past `MAX_CARRIER_CHARS` (512 KiB encoded; measured sizes are next to the
 constant) is rejected with one notice. Reconcile runs after every pull and resume.
 
@@ -273,14 +284,18 @@ On the desktop the exec-guard denies, for every model and without asking: a file
 under `<state dir>/state/` or `<state dir>/provenance/`; a shell write to either, or to
 `notebook.md` or `activity.jsonl` (redirects, `tee`, in-place `sed` and `perl`,
 `cp`/`mv`/`rm`/`truncate`/`dd`, `git checkout`/`restore`, and a variable or glob that could
-land there); and a download tool handed a `file_path` onto any of them. The notebook stays
+land there); and a download tool handed a `file_path` onto any of them. A command line that
+names any of them is also never auto-allowed in a trusted workspace, since an interpreter
+(`python3 -c`, a script) can write them in ways the classifier doesn't model. The notebook stays
 writable through the file tools, whose hooks the evidence gate sees. `activity.jsonl` is
 not floored for the file tools: no verdict reads it.
 
 In the web shell and the interactive tool, `LOOM_TRUSTED_RECORD=1` replaces the web-mode
 gate's prefix allowlist with an exact list of reviewed tools (`TRUSTED_RECORD_ALLOWED` in
 `web/extensions/web-mode-gate.ts`), with the raw submission tools, code mode and host-file
-readers excluded and `download_dataset` allowed only without a `file_path`. A test fails
+readers excluded, the direct Page writers excluded (Page content carries the registry, so
+`notebook_push_to_galaxy` is its one writer), and `download_dataset` allowed only without a
+`file_path`. A test fails
 when a registered tool is neither allowed nor excluded. It stays off until `loom_submit`
 exists, since nothing could run a tool under it; the schema-digest pinning and the exact
 galaxy-mcp pin come with turning it on.
@@ -396,6 +411,7 @@ can't check, it can count toward `handoff_eligible`, but always under its own la
   time. The assertion stays `excepted`, not `pass`, so the notebook shows what was waived.
 - **Revoking withdraws eligibility.** A revoked approval no longer makes a run conformant,
   even one it already submitted. Handing that run off takes a fresh user exception.
+  `/revoke` works on a restored approval too, since a reconcile check can rely on one.
 - **Ungated attempts need an attestation as well.** Without an approval there is no frozen
   predicate to hold the evaluation to, so the user attests the result (`attested`) as well
   as excusing the submission.
