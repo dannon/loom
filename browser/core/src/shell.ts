@@ -50,7 +50,7 @@ const absolute = (url: string) => new URL(url, document.baseURI).href;
 /** Where a conversation starts, and what the page says about it once the agent is ready. */
 export interface LaunchContext {
   historyId?: string;
-  /** A saved session the page was opened on: said as "Opened a saved <name> session." */
+  /** A saved session the page was opened on: said as "Opened a saved conversation." */
   saved?: { id: string; document: SessionDocument };
   /** Why a saved session could not be opened, as a whole line, said before the ready line. */
   savedProblem?: string;
@@ -382,8 +382,8 @@ export async function mountOrbitBrowser(
         refreshControls();
         if (message.unkept) {
           chat.addErrorMessage(
-            `${name} is not keeping this conversation in the browser (${message.unkept}), so it ends when ` +
-              "the page closes." +
+            `This browser can't keep conversations (${message.unkept}), so this one ends when the ` +
+              "page closes." +
               (sessions?.keepHint ? ` ${sessions.keepHint}` : ""),
           );
         }
@@ -395,15 +395,15 @@ export async function mountOrbitBrowser(
         }
         if (message.recordsProblem) {
           chat.addErrorMessage(
-            `Could not look for earlier ${name} sessions on this history (${message.recordsProblem}), ` +
-              "so this is a new session.",
+            `Could not look for notebooks on this history (${message.recordsProblem}), so this ` +
+              "starts a new one.",
           );
         }
         if (launch.savedProblem) {
           chat.addErrorMessage(launch.savedProblem);
         }
         if (launch.saved) {
-          info(`Opened a saved ${name} session.`);
+          info("Opened a saved conversation.");
         }
         if (continuing) {
           info(continuing);
@@ -412,7 +412,7 @@ export async function mountOrbitBrowser(
           launch.saved
             ? `${name} ready.`
             : view.turns
-              ? `Resumed this history's conversation. ${name} ready.`
+              ? `Restored this history's conversation from this browser. ${name} ready.`
               : `${name} ready. Ask me to run something.`,
         );
         if (launch.greeting) {
@@ -421,8 +421,9 @@ export async function mountOrbitBrowser(
       } else if (message.type === "recoverable") {
         // The browser kept nothing of a session here; the user says which, if any, this is.
         const line = info(
-          `This browser keeps no ${name} conversation for this history. Continue one of its records, ` +
-            "or start new." +
+          "This browser has no conversation for this history. Start a new one, with a new notebook " +
+            "or adding to one of this history's notebooks. Adding to a notebook starts a fresh chat " +
+            "without its earlier transcript." +
             (sessions?.reopenHint ? ` ${sessions.reopenHint}` : ""),
         );
         const choices = document.createElement("div");
@@ -435,18 +436,18 @@ export async function mountOrbitBrowser(
         for (const record of message.records) {
           const button = document.createElement("button");
           button.className = "plan-btn";
-          button.textContent = `Continue the record ${record.title} (updated ${localTime(record.updated)})`;
+          button.textContent = `New conversation, add to ${record.title} (updated ${localTime(record.updated)})`;
           button.addEventListener("click", () => {
             continuing =
-              `Continuing the record ${record.title}: new entries go to that page. Its ` +
-              "conversation is not in this browser, so this chat starts empty.";
+              `New conversation, without the earlier transcript. Notes go to the notebook ` +
+              `${record.title}.`;
             choose(record.pageId);
           });
           choices.append(button);
         }
         const fresh = document.createElement("button");
         fresh.className = "plan-btn";
-        fresh.textContent = "Start new";
+        fresh.textContent = "New conversation, new notebook";
         fresh.addEventListener("click", () => choose());
         choices.append(fresh);
       } else if (message.type === "waiting") {
@@ -558,8 +559,8 @@ export async function mountOrbitBrowser(
     sessions?.savedState(true);
     el.artifactContent.innerHTML = "";
     afterReset =
-      "Started a new conversation. The previous one stays in this browser but is no longer " +
-      "reachable from here unless you saved it; its record on Galaxy is untouched.";
+      "Started a new conversation. The previous one can't be reopened here unless you saved it; " +
+      "its notebook is unchanged.";
     agent.reset();
   });
   el.input.addEventListener("keydown", (e) => {
