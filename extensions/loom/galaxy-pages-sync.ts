@@ -25,6 +25,8 @@ import {
 } from "./galaxy-page-binding";
 import {
   adjudicate,
+  evidenceOverrides,
+  spendClearances,
   currentRegistryView,
   decideTransition,
   recordDecision,
@@ -94,7 +96,10 @@ function gatePulledNotebook(
     decisions.find((d) => d.contradictions.length > 0) ??
     decisions[1];
   if (decision.completions.length === 0) return;
-  const adjudication = adjudicate(decision, new Set());
+  // The user's /override counts here as it does for an edit: without it a
+  // cleared step stayed refused on a pull, with nothing else to clear it.
+  const adjudication = adjudicate(decision, evidenceOverrides());
+  spendClearances(adjudication);
   recordDecision(path.dirname(nbPath), tool, adjudication);
   if (adjudication.block) {
     throw new Error(

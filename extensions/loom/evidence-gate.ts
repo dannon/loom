@@ -930,6 +930,20 @@ export function grantEvidenceOverride(stepKey: string, invocationId: string): vo
   overrides.add(overrideToken(stepKey, invocationId));
 }
 
+/** The standing clearances, for a write path the tool_call hook doesn't see (a Page pull). */
+export function evidenceOverrides(): ReadonlySet<string> {
+  return overrides;
+}
+
+/** Spend the tokens a write actually used -- only when it went through. */
+export function spendClearances(adjudication: GateAdjudication): void {
+  if (adjudication.block) return;
+  for (const c of adjudication.cleared) {
+    if (c.source === "block")
+      overrides.delete(overrideToken(c.step.key, c.invocation.invocationId));
+  }
+}
+
 /** Session boundary / test reset. */
 export function resetEvidenceOverrides(): void {
   overrides.clear();
@@ -1178,14 +1192,7 @@ export function registerEvidenceGate(pi: ExtensionAPI): void {
     const { decision } = adjudication;
     if (decision.completions.length === 0) return;
 
-    // Spend the tokens only on the write they actually let through.
-    if (!adjudication.block) {
-      for (const c of adjudication.cleared) {
-        if (c.source === "block") {
-          overrides.delete(overrideToken(c.step.key, c.invocation.invocationId));
-        }
-      }
-    }
+    spendClearances(adjudication);
 
     recordDecision(path.dirname(nbPath), event.toolName, adjudication);
 

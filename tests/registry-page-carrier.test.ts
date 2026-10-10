@@ -30,6 +30,12 @@ import { resetRegistryPageCarrier } from "../extensions/loom/registry-page-carri
 import { canonicalJson, type Attempt } from "../extensions/loom/registry-schema";
 import { renderGalaxyPageBlock } from "../extensions/loom/galaxy-page-binding";
 import { eligibleAttempt, SERVER, tmpAnalysisDir } from "./registry-fixtures";
+import { renderInvocationYaml } from "../extensions/loom/notebook-writer";
+import {
+  evidenceOverrides,
+  grantEvidenceOverride,
+  resetEvidenceOverrides,
+} from "../extensions/loom/evidence-gate";
 
 vi.mock("../extensions/loom/galaxy-pages-api");
 vi.mock("../extensions/loom/galaxy-api", async (importOriginal) => {
@@ -185,6 +191,7 @@ describe("the carrier through the store and the Page", () => {
     vi.mocked(galaxyApi.getGalaxyConfig).mockReturnValue({ url: SERVER, apiKey: "k" } as never);
     vi.mocked(reconcile.followThrough).mockClear();
     resetRegistryPageCarrier();
+    resetEvidenceOverrides();
     process.env.LOOM_EVIDENCE_GATE = "deny";
   });
   afterEach(() => {
@@ -260,6 +267,28 @@ describe("the carrier through the store and the Page", () => {
     pageWith(PLAN.replace("- [ ] 2. **Align**", "- [x] 2. **Align**"));
     await expect(pullNotebookFromGalaxy()).rejects.toThrow(/evidence gate is holding/);
     expect(fs.readFileSync(nbPath, "utf-8")).toBe(before);
+  });
+
+  it("a pull the legacy path refuses goes through after /override, and spends the clearance", async () => {
+    // No registry run: the block's in_progress status is what holds step 2.
+    const block = renderInvocationYaml({
+      invocationId: "abc0000000000001",
+      galaxyServerUrl: SERVER,
+      notebookAnchor: "plan-a-step-2",
+      label: "Align",
+      submittedAt: "2026-10-01T00:00:00Z",
+      status: "in_progress",
+    });
+    fs.writeFileSync(nbPath, `${PLAN}\n${block}\n${binding()}\n`);
+    openSession();
+    const page = `${PLAN.replace("- [ ] 2. **Align**", "- [x] 2. **Align**")}\n${block}\n`;
+    pageWith(page);
+    await expect(pullNotebookFromGalaxy()).rejects.toThrow(/evidence gate is holding/);
+
+    grantEvidenceOverride("#plan-a-step-2", "abc0000000000001");
+    await pullNotebookFromGalaxy();
+    expect(fs.readFileSync(nbPath, "utf-8")).toContain("- [x] 2. **Align**");
+    expect(evidenceOverrides().size).toBe(0);
   });
 
   it("resuming onto a fresh notebook isn't refused for steps the Page already had complete", async () => {
