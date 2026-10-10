@@ -236,6 +236,25 @@ export function readModelScript(sessionDir: string, configured: string): ScriptR
   try {
     const stat = fs.fstatSync(fd);
     if (!stat.isFile()) return { file: null, parsed: empty, rejected: "not-a-file" };
+    // O_NOFOLLOW covers the last component only. A parent directory swapped
+    // for a symlink between the realpath and the open would still be
+    // followed, so check that what was opened is the file the containment
+    // check approved, and that its path still resolves inside the session.
+    let again: string;
+    try {
+      again = fs.realpathSync(real);
+    } catch {
+      return { file: null, parsed: empty, rejected: "outside-session-dir" };
+    }
+    const checked = fs.statSync(again);
+    if (
+      again !== real ||
+      checked.dev !== stat.dev ||
+      checked.ino !== stat.ino ||
+      !again.startsWith(fs.realpathSync(sessionDir) + path.sep)
+    ) {
+      return { file: null, parsed: empty, rejected: "outside-session-dir" };
+    }
     if (stat.size > MAX_SCRIPT_BYTES) {
       return { file: null, parsed: empty, rejected: "too-large" };
     }

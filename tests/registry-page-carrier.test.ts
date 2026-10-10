@@ -291,6 +291,31 @@ describe("the carrier through the store and the Page", () => {
     expect(evidenceOverrides().size).toBe(0);
   });
 
+  it("keeps the clearance when the pulled notebook can't be written", async () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const block = renderInvocationYaml({
+      invocationId: "abc0000000000001",
+      galaxyServerUrl: SERVER,
+      notebookAnchor: "plan-a-step-2",
+      label: "Align",
+      submittedAt: "2026-10-01T00:00:00Z",
+      status: "in_progress",
+    });
+    fs.writeFileSync(nbPath, `${PLAN}\n${block}\n${binding()}\n`);
+    openSession();
+    pageWith(`${PLAN.replace("- [ ] 2. **Align**", "- [x] 2. **Align**")}\n${block}\n`);
+    grantEvidenceOverride("#plan-a-step-2", "abc0000000000001");
+    fs.chmodSync(nbPath, 0o444);
+    fs.chmodSync(dir, 0o555);
+    try {
+      await expect(pullNotebookFromGalaxy()).rejects.toThrow();
+    } finally {
+      fs.chmodSync(dir, 0o755);
+      fs.chmodSync(nbPath, 0o644);
+    }
+    expect(evidenceOverrides().size).toBe(1);
+  });
+
   it("resuming onto a fresh notebook isn't refused for steps the Page already had complete", async () => {
     // A new container's notebook has no plan yet; the Page brings the steps in
     // whatever state they were left, and reconcile re-checks them afterwards.

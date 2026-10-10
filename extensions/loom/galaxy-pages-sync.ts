@@ -27,6 +27,7 @@ import {
   adjudicate,
   evidenceOverrides,
   spendClearances,
+  type GateAdjudication,
   currentRegistryView,
   decideTransition,
   recordDecision,
@@ -81,7 +82,7 @@ function gatePulledNotebook(
   after: string,
   tool: string,
   priorRegistry: Registry | null,
-): void {
+): GateAdjudication | null {
   // Judged against the registry both before and after the Page's carrier was
   // ingested, so whatever the carrier did to the registry, it can't lift a
   // hold the session had when the pull began.
@@ -95,11 +96,11 @@ function gatePulledNotebook(
     decisions.find((d) => d.gated) ??
     decisions.find((d) => d.contradictions.length > 0) ??
     decisions[1];
-  if (decision.completions.length === 0) return;
+  if (decision.completions.length === 0) return null;
   // The user's /override counts here as it does for an edit: without it a
   // cleared step stayed refused on a pull, with nothing else to clear it.
+  // The caller spends it, once the pulled notebook is actually written.
   const adjudication = adjudicate(decision, evidenceOverrides());
-  spendClearances(adjudication);
   recordDecision(path.dirname(nbPath), tool, adjudication);
   if (adjudication.block) {
     throw new Error(
@@ -107,6 +108,7 @@ function gatePulledNotebook(
         (adjudication.decision.reason ?? ""),
     );
   }
+  return adjudication;
 }
 
 /** Reconcile after a pull or resume, without making the caller wait on Galaxy. */
@@ -262,8 +264,15 @@ export async function resumeGalaxyPage(
       boundAt: existing?.boundAt ?? new Date().toISOString(),
     };
     const next = upsertGalaxyPageBlock(remoteBody, binding);
-    gatePulledNotebook(nbPath, localBefore, next, "notebook_resume_from_galaxy", priorRegistry);
+    const gated = gatePulledNotebook(
+      nbPath,
+      localBefore,
+      next,
+      "notebook_resume_from_galaxy",
+      priorRegistry,
+    );
     await writeNotebook(nbPath, next);
+    if (gated) spendClearances(gated);
     reconcileAfter("page_resume");
     return {
       pageId: page.id,
@@ -310,8 +319,15 @@ export async function pullNotebookFromGalaxy(): Promise<PullResult> {
       lastSyncedRevision: page.latest_revision_id,
     };
     const next = upsertGalaxyPageBlock(remoteBody, refreshed);
-    gatePulledNotebook(nbPath, content, next, "notebook_pull_from_galaxy", priorRegistry);
+    const gated = gatePulledNotebook(
+      nbPath,
+      content,
+      next,
+      "notebook_pull_from_galaxy",
+      priorRegistry,
+    );
     await writeNotebook(nbPath, next);
+    if (gated) spendClearances(gated);
     reconcileAfter("page_pull");
     return {
       pageId: existing.pageId,
