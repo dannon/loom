@@ -3,7 +3,7 @@
 #475 sets the rule for every gate: it ships `off | warn | deny`, and a `deny`
 default needs an audit of the recorded `evidence.decision` rows, adjudicated by
 hand, saying the gate doesn't fire on honest work. This is that note. The
-default stays `warn` until it can say so.
+default is `deny` since 2026-10-10; that section says what it rests on.
 
 ## 2026-10-08 (registry slice 4)
 
@@ -143,3 +143,15 @@ and the check tool between them didn't leave one.
   corpus, but it is the case to weigh before `deny` is the default.
 - **Gaps 1-3 on the legacy path are false allows**, not false denies, so
   they don't argue against `deny`; they are what `deny` still misses.
+
+### Decision
+
+The default moves to `deny`. On this corpus every deny is a true positive
+and both honest completions go through, and the honest sequence they model
+is the one Loom's prompt teaches, which is the standard set for the legacy
+path. The two things to weigh before merging are the ones above: the rows
+are scripted, and on the registry path an imported run that can't be
+re-verified (one from another machine, or any workflow) is now refused
+until the user runs `/override`, where before it was a warning. Anyone who
+wants the old behavior sets `evidenceGate.mode: "warn"` or
+`LOOM_EVIDENCE_GATE=warn`.

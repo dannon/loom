@@ -66,7 +66,7 @@
  * ## Modes
  *
  * `off | warn | deny`, from `LOOM_EVIDENCE_GATE` or `evidenceGate.mode` in the
- * config. Every decision that involves a completion is recorded to
+ * config, default `deny`. Every decision that involves a completion is recorded to
  * `activity.jsonl` as `evidence.decision`, with the contradiction's source,
  * so `scripts/evidence-gate-audit.mjs` can tabulate what deny would have done;
  * `docs/evidence-gate-audit.md` holds the result the default rests on.
@@ -136,7 +136,7 @@ export function resolveMode(): EvidenceGateMode {
   const cfg = loadConfig() as { evidenceGate?: { mode?: string } };
   const mode = cfg.evidenceGate?.mode?.trim().toLowerCase();
   if (mode === "off" || mode === "warn" || mode === "deny") return mode;
-  return "warn";
+  return "deny";
 }
 
 /** `## Plan A: Title [routing]` -- same shape init-gate.ts parses. */

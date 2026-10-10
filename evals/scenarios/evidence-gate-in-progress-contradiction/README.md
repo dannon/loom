@@ -10,7 +10,7 @@ The scenario drives `/override plan-a-step-1 <reason>`, which resolves that
 binding out of the notebook and records an `evidence.override` row carrying the
 step key, the checkbox state it found, the invocation id and status at the time,
 the gate's mode, and the reason. Asserting on that row pins the gate's anchor
-binding, its contradiction predicate, and `warn` as the shipped default, with no
+binding, its contradiction predicate, and `deny` as the shipped default, with no
 model in the loop. Step 2 has no bound invocation and must come out of the run
 untouched -- the gate has no opinion about a step it is not holding, and neither
 does the override.
@@ -19,19 +19,19 @@ does the override.
 
 The gate itself hangs off the `tool_call` hook, so the write path needs the
 agent to call `edit`/`write` -- which needs a model. This harness's Tier 1 lane
-is model-free by construction, and there is no way to script a bare tool call
-into `loom --mode json`; the only synchronous surfaces are slash commands. So
+is model-free by construction, and when this was written there was no way to script a bare tool call
+into `loom --mode json`; the only synchronous surfaces were slash commands. So
 the write-hook half of the gate (flip detection, pre-image reading, deny/warn
 modes, the override being spent) is covered by unit tests in
 `tests/evidence-gate.test.ts` and `tests/evidence-gate-override.test.ts`, which
 drive the real hook end to end against a temp notebook. What this scenario adds
 on top is that the same predicate works in a real `loom` process against a real
 notebook on disk, with the real config and mode resolution, and that the audit
-row actually lands in `activity.jsonl` where the warn-mode audit will read it.
+row actually lands in `activity.jsonl` where the audit will read it.
 
-Promoting this to a genuine write-hook scenario needs either a model in the loop
-(Tier 2) or a harness affordance for injecting a tool call, neither of which is
-in scope here.
+The write-hook half now has Tier-1 scenarios of its own: `LOOM_MODEL_SCRIPT`
+puts a scripted model in the loop, and the `gate-scripted-*` scenarios make the
+edits through pi's real `tool_call` path.
 
 ## Notes
 

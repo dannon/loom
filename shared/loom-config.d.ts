@@ -147,11 +147,11 @@ export interface LoomConfig {
    * block bound to that step still reads `status: in_progress` -- a verified
    * result claimed for a run Galaxy says has not finished.
    *
-   * `warn` (default) allows the write and records the decision to
-   * `activity.jsonl`, so the real-world false-positive rate can be measured
-   * before anyone turns this into a hard failure. `deny` blocks the write and
-   * tells the agent to leave the step pending, mark it `- [!]`, or re-poll.
-   * `off` disables it. Also settable per-session via `LOOM_EVIDENCE_GATE`.
+   * `deny` (default) blocks the write and tells the agent to leave the step
+   * pending, mark it `- [!]`, or re-poll; the user clears a step with
+   * `/override`. `warn` allows the write. Both record the decision to
+   * `activity.jsonl` (see docs/evidence-gate-audit.md). `off` disables it.
+   * Also settable per-session via `LOOM_EVIDENCE_GATE`.
    */
   evidenceGate?: {
     mode?: "off" | "warn" | "deny";
@@ -160,20 +160,6 @@ export interface LoomConfig {
    * Local-execution safety gate (exec-guard). Secure by default: the gate is
    * enabled, never bypassed, and trusts nothing until the user says otherwise.
    */
-  /**
-   * Evidence gate for plan-step completion. Watches writes to `notebook.md`
-   * for a *bare* completion flip -- turning `- [ ]` into `- [x]` on a plan step
-   * while adding no evidence anywhere in the same write.
-   *
-   * `warn` (default) allows the write and records the decision to
-   * `activity.jsonl`, so the real-world false-positive rate can be measured
-   * before anyone turns this into a hard failure. `deny` blocks the write and
-   * tells the agent to record evidence and flip in one edit. `off` disables it.
-   * Also settable per-session via `LOOM_EVIDENCE_GATE`.
-   */
-  evidenceGate?: {
-    mode?: "off" | "warn" | "deny";
-  };
   /**
    * Recorded lessons -- short notes on situations that go wrong -- read from
    * the corpus shipped with Loom plus `~/.loom/lessons/<namespace>/<slug>.md`.

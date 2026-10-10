@@ -185,13 +185,13 @@ For a run the registry doesn't know -- today, any raw submission -- it falls bac
 
 It's deliberately narrow. Absence of evidence isn't decidable from a single write (the honest sequence Loom teaches spans two edits), so absence is never gated -- only contradiction is. A flip with no bound run gets no opinion, a `failed` block is never gated because it's sticky and can't be re-polled, and a rerun that leaves a stale block beside a `completed` one for the same anchor reads as fine.
 
-Modes are `off | warn | deny`, default **warn**: the write goes through and the decision lands in `activity.jsonl` as an `evidence.decision` event. The default moves to `deny` only with an audit of real decisions behind it, and [`docs/evidence-gate-audit.md`](docs/evidence-gate-audit.md) says why it hasn't yet. Set it in `~/.loom/config.json`:
+Modes are `off | warn | deny`, default **deny**: a contradicted write is refused, and the user can clear one step with `/override <step> <reason>`. In `warn` the write goes through. Either way the decision lands in `activity.jsonl` as an `evidence.decision` event. [`docs/evidence-gate-audit.md`](docs/evidence-gate-audit.md) has the audit the default rests on, and what it doesn't cover. Set it in `~/.loom/config.json`:
 
 ```json
 { "evidenceGate": { "mode": "warn" } }
 ```
 
-or per session with `LOOM_EVIDENCE_GATE=deny`.
+or per session with `LOOM_EVIDENCE_GATE=warn`.
 
 In `deny` the refusal stands for as long as the contradiction does. An earlier cut let the model's second attempt through, but that made the decision advisory, since a model that disagrees only has to ask twice. The exception is yours instead: `/override <step-anchor> <reason>`. On a step the registry holds, it records your exception in the registry for the runs it was held for, so a new run on the step is held again. On the block path it clears one named step for one write and the run in flight when you granted it, held in memory for the session. Either way the step, what held it and your reason go to `activity.jsonl` as an `evidence.override` event. Bare `/override` lists what the gate is currently holding; if a key you type could name two steps, the command asks you to quote the one you mean.
 

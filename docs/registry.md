@@ -256,8 +256,8 @@ a held step's checkbox is refused. `/override <step> <reason>` on a held step wr
 `evidence_gate` exception into the registry for the runs it was held for; a later run is a
 new attempt and is held again. An approval with nothing submitted yet is not a run and
 leaves the step to the legacy block-status path. A Page pull is judged the same way as an
-edit. See `evidence-gate.ts` for the rest, and `docs/evidence-gate-audit.md` for why the
-default is still `warn`.
+edit. See `evidence-gate.ts` for the rest, and `docs/evidence-gate-audit.md` for the audit the
+`deny` default rests on.
 
 ## The Page carrier
 
@@ -384,7 +384,7 @@ real import graph to hold that line.
 | `loom_submit`, reservation, `submission_unknown`, `/attribute`, ungated auto-registration | next (slice 3)                                                              |
 | Evaluation writer, block rendering, `active_at_shutdown`                                  | built (slice 4)                                                             |
 | `conformant_by_reconcile` for imported attempts                                           | built for tools (slice 4); workflows, collections, UDTs stay `unverified`   |
-| Evidence gate reads `handoff_eligible`; `/override` as a registry exception               | built (slice 4); default still `warn` (`docs/evidence-gate-audit.md`)       |
+| Evidence gate reads `handoff_eligible`; `/override` as a registry exception               | built (slice 4); default `deny` since the 2026-10-10 audit                  |
 | Desktop floors                                                                            | built (slice 4)                                                             |
 | `trustedRecord` allowlist                                                                 | built, opt-in (slice 4); schema-digest pinning and enabling wait on slice 3 |
 | Page carrier, reconcile after pull and resume                                             | built (slice 4); cap not measured against usegalaxy.eu                      |

@@ -139,9 +139,10 @@ does not clear the contradiction.
 On the desktop the shell cannot write `notebook.md` at all. Edit it with
 the edit and write tools.
 
-The gate ships in `warn` mode -- the write goes through and the decision
-is recorded to `activity.jsonl` as an `evidence.decision` event. In
-`deny` mode the write is refused, and the way forward is one of: leave
+The gate ships in `deny` mode: the write is refused, and the decision is
+recorded to `activity.jsonl` as an `evidence.decision` event either way
+(in `warn` mode, if the user set it, the write goes through). When it is
+refused, the way forward is one of: leave
 the step pending while the run is going, mark it `- [!]` and record what
 failed, or -- if Galaxy has actually finished and the block is stale --
 call `galaxy_invocation_check_all` (or, for a run the registry holds,

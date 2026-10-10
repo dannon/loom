@@ -21,7 +21,7 @@
             "stepState": "x",
             "invocationId": "abc0000000000001",
             "invocationStatus": "in_progress",
-            "mode": "warn",
+            "mode": "deny",
             "reason": "checked the BAM in the Galaxy UI, the block is stale"
           }
         }

@@ -145,13 +145,13 @@ afterEach(() => {
 });
 
 describe("resolveMode", () => {
-  it("defaults to warn", () => {
-    expect(resolveMode()).toBe("warn");
+  it("defaults to deny", () => {
+    expect(resolveMode()).toBe("deny");
   });
 
   it("takes the env override", () => {
-    process.env.LOOM_EVIDENCE_GATE = "deny";
-    expect(resolveMode()).toBe("deny");
+    process.env.LOOM_EVIDENCE_GATE = "warn";
+    expect(resolveMode()).toBe("warn");
   });
 });
 
@@ -218,7 +218,7 @@ describe("/override -- the user-originated exception", () => {
       invocationStatus: "in_progress",
       invocationId: "abc0000000000001",
       reason: "job finished on .eu, block is stale",
-      mode: "warn",
+      mode: "deny",
     });
     expect(activityRows("evidence.override")[0].source).toBe("user");
   });
@@ -338,7 +338,7 @@ describe("/override -- the user-originated exception", () => {
     const pi = fakePi();
     registerEvidenceOverrideCommand(pi.api);
     await pi.runCommand("override", "");
-    expect(pi.notices[0]).toMatch(/Evidence gate: warn/);
+    expect(pi.notices[0]).toMatch(/Evidence gate: deny/);
     expect(pi.notices[0]).toMatch(/plan-a-step-2\s+in_progress\s+2\. \*\*Align reads\*\*/);
   });
 
@@ -498,6 +498,10 @@ describe("the pinned in_progress case (#475)", () => {
 });
 
 describe("warn mode is untouched by any of this", () => {
+  beforeEach(() => {
+    process.env.LOOM_EVIDENCE_GATE = "warn";
+  });
+
   it("records `warned` on every attempt and blocks none of them", async () => {
     const pi = fakePi();
     registerEvidenceGate(pi.api);
