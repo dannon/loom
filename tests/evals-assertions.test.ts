@@ -386,7 +386,8 @@ describe("evals assertions: activity log", () => {
       expectRow({ outcome: "blocked", contradictions: [{ source: "registry", kind: "flip" }] }),
     ).toHaveLength(0);
     expect(expectRow({ contradictions: [{ source: "block" }] })).toHaveLength(1);
-    expect(expectRow({ contradictions: [] })).toHaveLength(0);
+    // Empty means empty, so a row with contradictions doesn't match it.
+    expect(expectRow({ contradictions: [] })).toHaveLength(1);
     expect(expectRow({ mode: { nested: "x" } })).toHaveLength(1);
   });
 

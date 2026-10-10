@@ -199,11 +199,9 @@
           "status": 200,
           "body": {
             "id": "e100000000000003",
-            "state": "ok",
+            "state": "running",
             "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
-            "exit_code": 0,
             "create_time": "2026-10-07T10:00:00",
-            "update_time": "2026-10-07T10:05:00",
             "command_version": "",
             "history_id": "0a248a1f62a0cc04",
             "params": {

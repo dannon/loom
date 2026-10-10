@@ -37,8 +37,16 @@
         }
       ]
     },
+    "toolResults": {
+      "mustSucceed": [
+        {
+          "name": "edit",
+          "textContains": "Successfully replaced"
+        }
+      ]
+    },
     "notebook": {
-      "contains": ["- [ ] 1. **Align reads** {#plan-a-step-1}"]
+      "contains": ["- [ ] 1. **Align reads** {#plan-a-step-1}", "status: completed"]
     }
   }
 }

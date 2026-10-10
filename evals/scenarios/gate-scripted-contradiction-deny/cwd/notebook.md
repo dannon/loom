@@ -4,6 +4,6 @@
 
 ### Steps
 
-- [ ] 1. **Read alignment** {#plan-a-step-1} -- bwa mem against the chrM reference
+- [ ] 1. **Trim reads** {#plan-a-step-1} -- fastp workflow over the three samples
   - Routing: Galaxy
-  - Verification: poll the jobs to ok and inspect the BAM outputs
+  - Verification: poll the jobs to ok and check each sample has a trimmed FASTQ

@@ -1,4 +1,4 @@
-{"tool": "edit", "input": {"path": "notebook.md", "edits": [{"oldText": "- [ ] 1. **Read alignment** {#plan-a-step-1}", "newText": "- [x] 1. **Read alignment** {#plan-a-step-1}"}]}, "text": "Marking it complete."}
+{"tool": "edit", "input": {"path": "notebook.md", "edits": [{"oldText": "- [ ] 1. **Trim reads** {#plan-a-step-1}", "newText": "- [x] 1. **Trim reads** {#plan-a-step-1}"}]}, "text": "Marking it complete."}
 {"text": "The gate refused that; the run is still in progress. You can /override if you've checked it."}
-{"tool": "edit", "input": {"path": "notebook.md", "edits": [{"oldText": "- [ ] 1. **Read alignment** {#plan-a-step-1}", "newText": "- [x] 1. **Read alignment** {#plan-a-step-1}"}]}, "text": "Trying again."}
+{"tool": "edit", "input": {"path": "notebook.md", "edits": [{"oldText": "- [ ] 1. **Trim reads** {#plan-a-step-1}", "newText": "- [x] 1. **Trim reads** {#plan-a-step-1}"}]}, "text": "Trying again."}
 {"text": "Done."}

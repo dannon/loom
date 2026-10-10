@@ -32,7 +32,7 @@
       "mustNotIncludeKinds": ["evidence.decision"]
     },
     "notebook": {
-      "contains": ["- [ ] 1. **Read alignment** {#plan-a-step-1}"]
+      "contains": ["- [ ] 1. **Trim reads** {#plan-a-step-1}"]
     }
   }
 }

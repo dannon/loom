@@ -1,2 +1,2 @@
-{"tool": "edit", "input": {"path": "notebook.md", "edits": [{"oldText": "- [ ] 1. **Read alignment** {#plan-a-step-1}", "newText": "- [x] 1. **Read alignment** {#read-alignment}"}]}, "text": "Marking it complete."}
+{"tool": "edit", "input": {"path": "notebook.md", "edits": [{"oldText": "- [ ] 1. **Trim reads** {#plan-a-step-1}", "newText": "- [x] 1. **Trim reads** {#trim-reads}"}]}, "text": "Marking it complete."}
 {"text": "Done."}

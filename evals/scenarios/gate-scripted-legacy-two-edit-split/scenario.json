@@ -25,13 +25,22 @@
           "source": "evidence-gate",
           "payloadContains": {
             "mode": "deny",
-            "outcome": "recorded"
+            "outcome": "recorded",
+            "contradictions": []
           }
         }
       ]
     },
+    "toolResults": {
+      "mustSucceed": [
+        {
+          "name": "edit",
+          "textContains": "Successfully replaced"
+        }
+      ]
+    },
     "notebook": {
-      "contains": ["- [x] 1. **Read alignment** {#plan-a-step-1}", "status: completed"]
+      "contains": ["- [x] 1. **Trim reads** {#plan-a-step-1}", "status: completed"]
     }
   }
 }

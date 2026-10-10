@@ -39,7 +39,7 @@
       ]
     },
     "notebook": {
-      "contains": ["- [ ] 1. **Read alignment** {#plan-a-step-1}", "status: in_progress"]
+      "contains": ["- [ ] 1. **Trim reads** {#plan-a-step-1}", "status: in_progress"]
     }
   }
 }

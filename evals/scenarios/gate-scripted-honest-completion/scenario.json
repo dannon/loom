@@ -27,14 +27,27 @@
             "mode": "warn",
             "toolName": "edit",
             "outcome": "recorded",
-            "completions": ["#plan-a-step-1"]
+            "completions": ["#plan-a-step-1"],
+            "contradictions": []
           }
+        }
+      ]
+    },
+    "toolResults": {
+      "mustSucceed": [
+        {
+          "name": "galaxy_invocation_check_all",
+          "textContains": "\"priorStatus\": \"in_progress\""
+        },
+        {
+          "name": "galaxy_invocation_check_all",
+          "textContains": "\"newStatus\": \"completed\""
         }
       ]
     },
     "notebook": {
       "contains": [
-        "- [x] 1. **Read alignment** {#plan-a-step-1}",
+        "- [x] 1. **Trim reads** {#plan-a-step-1}",
         "- Evidence: invocation ff1e2d3c4b5a6978 completed, fastp ran on 3 samples, all jobs ok; trimmed-0/1/2.fq are fastqsanger",
         "status: completed"
       ]

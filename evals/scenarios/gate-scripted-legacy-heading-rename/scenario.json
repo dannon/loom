@@ -24,7 +24,7 @@
       "mustNotIncludeKinds": ["evidence.decision"]
     },
     "notebook": {
-      "contains": ["## chrM work", "- [x] 1. **Read alignment** {#plan-a-step-1}"]
+      "contains": ["## chrM work", "- [x] 1. **Trim reads** {#plan-a-step-1}"]
     }
   }
 }

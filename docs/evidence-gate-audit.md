@@ -124,6 +124,16 @@ judged against that. This is the shape a false deny on the legacy path
 would have to take -- a flip judged against a stale block -- and the poller
 and the check tool between them didn't leave one.
 
+An adversarial review caught that the first version of the honest
+scenarios flipped an alignment step on evidence from a trimming workflow,
+which made them weaker controls than this table claimed. The step now names
+the fastp workflow the fixture runs, its evidence says what that workflow
+produced, and the scenario asserts the check tool's own answer
+(`priorStatus: in_progress`, `newStatus: completed`) as well as the row. The
+two-edit scenarios now also assert that the status rewrite landed, and the
+contradiction fixtures answer the job-details call with the job still
+running, so every answer the fixture gives agrees. The rows came out the same.
+
 ### What this corpus can't say
 
 - **It is scripted.** Every edit is one I wrote down, in the order the

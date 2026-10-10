@@ -163,15 +163,17 @@ function evaluateToolResults(
  * A string compares against the payload value stringified, which is how every
  * scalar has always been asserted. Anything else is a deep subset: an object
  * needs each of its keys to match, an array needs each of its elements to
- * match some element of the actual array -- enough to say "a contradiction
+ * match some element of the actual array (and an empty one means empty) -- enough to say "a contradiction
  * with source registry" without spelling out the whole row.
  */
 export function payloadValueMatches(actual: unknown, expected: unknown): boolean {
   if (typeof expected === "string") return String(actual) === expected;
   if (Array.isArray(expected)) {
-    return (
-      Array.isArray(actual) && expected.every((x) => actual.some((y) => payloadValueMatches(y, x)))
-    );
+    if (!Array.isArray(actual)) return false;
+    // An empty expectation means empty, not "any array": otherwise
+    // `contradictions: []` would pass on a row full of them.
+    if (expected.length === 0) return actual.length === 0;
+    return expected.every((x) => actual.some((y) => payloadValueMatches(y, x)));
   }
   if (expected && typeof expected === "object") {
     if (!actual || typeof actual !== "object" || Array.isArray(actual)) return false;
