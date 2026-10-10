@@ -172,6 +172,41 @@ points `HOME` at a temp dir fixtures cannot reach, so `LOOM_LESSONS_DIR`
 replaces the user-local lessons directory with one inside the scenario's `cwd/`.
 Lessons read from it are validated and wrapped exactly like `~/.loom/lessons`.
 
+## A scripted model (Tier 1, no real model)
+
+The replay seams hand one hook a recorded result. Some things can only be
+seen with a model in the loop -- the evidence gate judges a model's edit to
+the notebook, and the deny that counts is the one pi's own `tool_call` path
+honours, after every other handler and the exec-guard have had their say.
+`LOOM_MODEL_SCRIPT` puts pi's faux provider in for the model and tells it
+exactly what to say. It names a JSONL file, one model turn per line, in the
+order the model would make them:
+
+```json
+{"tool": "galaxy_invocation_check_all", "input": {}, "text": "Checking the run first."}
+{"tool": "edit", "input": {"path": "notebook.md", "edits": [{"oldText": "- [ ] 1.", "newText": "- [x] 1."}]}}
+{"text": "Step 1 is verified."}
+```
+
+A tool line ends its turn with `toolUse`, so pi runs the call and asks for the
+next line; a text line ends the prompt. A script that runs out answers every
+later turn with nothing, which ends the prompt cleanly. Lines that aren't a
+turn are skipped and counted. The scenario's `inputs` need a plain prompt (not
+only slash commands) for a turn to happen at all.
+
+Same rules as the replay seams: off unless the variable is set, the file must
+resolve inside the session directory, and a `model.script` activity row
+(`file`, `entries`, `skipped`, and `rejected` if the file was refused) is
+written before the first turn. The file is read once, at the first session
+start, so nothing the session does can add lines to it. And when the variable
+is set the scripted model is selected even if the file was refused -- a bad
+script gives a model that says nothing, never the configured real one.
+
+Nothing in the script is trusted: it is the model. Combine it with
+`LOOM_SUBMISSION_REPLAY` and `LOOM_GALAXY_FIXTURE` to give the scripted model a
+recorded run to verify; the `gate-scripted-*` scenarios do that to produce the
+`evidence.decision` rows `docs/evidence-gate-audit.md` adjudicates.
+
 ## Out of scope (for now)
 
 LLM-judge plan-_quality_ scoring (the same scenarios with a rubric pass),

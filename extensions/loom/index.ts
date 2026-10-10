@@ -24,6 +24,7 @@ import { isSubmissionReplayEnabled, registerSubmissionReplay } from "./submissio
 import { isObservationReplayEnabled, registerObservationReplay } from "./observation-replay";
 import { registerCaptureFollowThrough } from "./galaxy-reconcile";
 import { isGalaxyFixtureEnabled, registerGalaxyFixture } from "./galaxy-fixture";
+import { isModelScriptEnabled, registerModelScript } from "./model-script";
 import { registerExecutionCommands } from "./execution-commands";
 import { registerDashboardTools } from "./dashboard-tools";
 import { registerDashboardCommands } from "./dashboard-commands";
@@ -176,6 +177,12 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // LOOM_GALAXY_FIXTURE names a file inside the session directory.
   if (isGalaxyFixtureEnabled()) {
     registerGalaxyFixture(pi);
+  }
+  // Eval-only seam: a scripted model, so a Tier-1 scenario can make the tool
+  // calls a model would and pi's own tool_call path decides them. Off unless
+  // LOOM_MODEL_SCRIPT names a file inside the session directory.
+  if (isModelScriptEnabled()) {
+    registerModelScript(pi);
   }
   // ── end capture, part two ─────────────────────────────────────────────────
 
