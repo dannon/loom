@@ -1,0 +1,30 @@
+{
+  "name": "KNOWN GAP (legacy path): renaming the plan heading while flipping takes the step out of scope",
+  "description": "#475 gap 3, pinned as current behavior. The run is still going; in one edit the model renames the plan heading so it no longer parses as a plan and flips the checkbox. The legacy path only reads steps inside plan sections, so it sees no completion and writes no evidence.decision row, even in deny mode. Closes for raw submissions with loom_submit; the registry-path twin is refused.",
+  "tier": 1,
+  "inputs": ["Mark step 1 complete."],
+  "env": {
+    "ANTHROPIC_API_KEY": "fake-eval-key",
+    "GALAXY_URL": "https://usegalaxy.org",
+    "GALAXY_API_KEY": "fake-eval-galaxy-key",
+    "LOOM_SUBMISSION_REPLAY": "submissions.jsonl",
+    "LOOM_GALAXY_FIXTURE": "galaxy-fixture.json",
+    "LOOM_MODEL_SCRIPT": "model-script.jsonl",
+    "LOOM_EVIDENCE_GATE": "deny"
+  },
+  "timeoutMs": 30000,
+  "assertions": {
+    "activity": {
+      "mustInclude": [
+        {
+          "kind": "model.script",
+          "source": "model-script"
+        }
+      ],
+      "mustNotIncludeKinds": ["evidence.decision"]
+    },
+    "notebook": {
+      "contains": ["## chrM work", "- [x] 1. **Read alignment** {#plan-a-step-1}"]
+    }
+  }
+}

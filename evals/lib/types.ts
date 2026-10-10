@@ -114,9 +114,11 @@ export interface ActivityExpectation {
   /**
    * Each key must be present in the row's payload with this value. Compared
    * as strings so a scenario file doesn't have to mirror the payload's JSON
-   * types -- same coarseness as `toolCalls.argsContains`.
+   * types -- same coarseness as `toolCalls.argsContains`. A non-string value
+   * (an object or array) is matched as a deep subset instead, for rows that
+   * carry structure, like the evidence gate's `contradictions`.
    */
-  payloadContains?: Record<string, string>;
+  payloadContains?: Record<string, unknown>;
 }
 
 export interface NotebookAssertions {

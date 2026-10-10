@@ -1,0 +1,45 @@
+{
+  "name": "a flip over an in_progress invocation is blocked (deny)",
+  "description": "A replayed workflow submission leaves plan-a-step-1's loom-invocation block in_progress, and the fixture keeps one job running, so nothing moves it. The scripted model skips verification and flips the checkbox. The gate finds the block contradiction and refuses the edit; the step stays pending. This is the true positive the gate exists for.",
+  "tier": 1,
+  "inputs": ["Mark step 1 complete."],
+  "env": {
+    "ANTHROPIC_API_KEY": "fake-eval-key",
+    "GALAXY_URL": "https://usegalaxy.org",
+    "GALAXY_API_KEY": "fake-eval-galaxy-key",
+    "LOOM_SUBMISSION_REPLAY": "submissions.jsonl",
+    "LOOM_GALAXY_FIXTURE": "galaxy-fixture.json",
+    "LOOM_MODEL_SCRIPT": "model-script.jsonl",
+    "LOOM_EVIDENCE_GATE": "deny"
+  },
+  "timeoutMs": 30000,
+  "assertions": {
+    "activity": {
+      "mustInclude": [
+        {
+          "kind": "model.script",
+          "source": "model-script"
+        },
+        {
+          "kind": "evidence.decision",
+          "source": "evidence-gate",
+          "payloadContains": {
+            "mode": "deny",
+            "outcome": "blocked",
+            "contradictions": [
+              {
+                "source": "block",
+                "step": "#plan-a-step-1",
+                "status": "in_progress",
+                "invocationId": "ff1e2d3c4b5a6978"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "notebook": {
+      "contains": ["- [ ] 1. **Read alignment** {#plan-a-step-1}", "status: in_progress"]
+    }
+  }
+}

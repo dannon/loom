@@ -1,0 +1,343 @@
+{
+  "routes": [
+    {
+      "path": "/api/version",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "version_major": "26.0",
+            "version_minor": "0"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/invocations",
+      "query": {
+        "history_id": "0a248a1f62a0cc04"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "body": [
+            {
+              "id": "ff1e2d3c4b5a6978",
+              "state": "scheduled",
+              "workflow_id": "c0ffee1234567890",
+              "history_id": "0a248a1f62a0cc04",
+              "create_time": "2026-10-07T10:00:00"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/api/jobs",
+      "query": {
+        "history_id": "0a248a1f62a0cc04"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "body": [
+            {
+              "id": "e100000000000001",
+              "state": "ok",
+              "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+              "create_time": "2026-10-07T10:01:00"
+            },
+            {
+              "id": "e100000000000002",
+              "state": "ok",
+              "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+              "create_time": "2026-10-07T10:01:00"
+            },
+            {
+              "id": "e100000000000003",
+              "state": "ok",
+              "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+              "create_time": "2026-10-07T10:01:00"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/api/invocations/ff1e2d3c4b5a6978",
+      "query": {
+        "step_details": "true"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "id": "ff1e2d3c4b5a6978",
+            "state": "scheduled",
+            "history_id": "0a248a1f62a0cc04",
+            "workflow_id": "c0ffee1234567890",
+            "model_class": "WorkflowInvocation",
+            "steps": [
+              {
+                "id": "5000000000000000",
+                "order_index": 0,
+                "workflow_step_label": "reads",
+                "jobs": []
+              },
+              {
+                "id": "5000000000000001",
+                "order_index": 1,
+                "workflow_step_label": "fastp",
+                "state": "ok",
+                "jobs": [
+                  {
+                    "id": "e100000000000001",
+                    "state": "ok",
+                    "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+                    "model_class": "Job"
+                  },
+                  {
+                    "id": "e100000000000002",
+                    "state": "ok",
+                    "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+                    "model_class": "Job"
+                  },
+                  {
+                    "id": "e100000000000003",
+                    "state": "ok",
+                    "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+                    "model_class": "Job"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/jobs/e100000000000001",
+      "query": {
+        "full": "true"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "id": "e100000000000001",
+            "state": "ok",
+            "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+            "exit_code": 0,
+            "create_time": "2026-10-07T10:00:00",
+            "update_time": "2026-10-07T10:05:00",
+            "command_version": "",
+            "history_id": "0a248a1f62a0cc04",
+            "params": {
+              "qualified_quality_phred": "20"
+            },
+            "inputs": {
+              "in1": {
+                "id": "d0000000000000a0",
+                "src": "hda"
+              }
+            },
+            "outputs": {
+              "out1": {
+                "id": "d000000000000100",
+                "src": "hda"
+              }
+            },
+            "output_collections": {}
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/jobs/e100000000000002",
+      "query": {
+        "full": "true"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "id": "e100000000000002",
+            "state": "ok",
+            "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+            "exit_code": 0,
+            "create_time": "2026-10-07T10:00:00",
+            "update_time": "2026-10-07T10:05:00",
+            "command_version": "",
+            "history_id": "0a248a1f62a0cc04",
+            "params": {
+              "qualified_quality_phred": "20"
+            },
+            "inputs": {
+              "in1": {
+                "id": "d0000000000000a0",
+                "src": "hda"
+              }
+            },
+            "outputs": {
+              "out1": {
+                "id": "d000000000000101",
+                "src": "hda"
+              }
+            },
+            "output_collections": {}
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/jobs/e100000000000003",
+      "query": {
+        "full": "true"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "id": "e100000000000003",
+            "state": "ok",
+            "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+            "exit_code": 0,
+            "create_time": "2026-10-07T10:00:00",
+            "update_time": "2026-10-07T10:05:00",
+            "command_version": "",
+            "history_id": "0a248a1f62a0cc04",
+            "params": {
+              "qualified_quality_phred": "20"
+            },
+            "inputs": {
+              "in1": {
+                "id": "d0000000000000a0",
+                "src": "hda"
+              }
+            },
+            "outputs": {
+              "out1": {
+                "id": "d000000000000102",
+                "src": "hda"
+              }
+            },
+            "output_collections": {}
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/datasets/d0000000000000a0",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "id": "d0000000000000a0",
+            "name": "reads.fq",
+            "extension": "fastqsanger",
+            "genome_build": "?",
+            "state": "ok",
+            "create_time": "2026-10-07T10:05:00"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/datasets/d000000000000100",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "id": "d000000000000100",
+            "name": "trimmed-0.fq",
+            "extension": "fastqsanger",
+            "genome_build": "?",
+            "state": "ok",
+            "create_time": "2026-10-07T10:05:00"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/datasets/d000000000000101",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "id": "d000000000000101",
+            "name": "trimmed-1.fq",
+            "extension": "fastqsanger",
+            "genome_build": "?",
+            "state": "ok",
+            "create_time": "2026-10-07T10:05:00"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/datasets/d000000000000102",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "id": "d000000000000102",
+            "name": "trimmed-2.fq",
+            "extension": "fastqsanger",
+            "genome_build": "?",
+            "state": "ok",
+            "create_time": "2026-10-07T10:05:00"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/invocations/ff1e2d3c4b5a6978",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "id": "ff1e2d3c4b5a6978",
+            "state": "scheduled",
+            "history_id": "0a248a1f62a0cc04",
+            "workflow_id": "c0ffee1234567890",
+            "model_class": "WorkflowInvocation",
+            "steps": [
+              {
+                "id": "5000000000000000",
+                "order_index": 0,
+                "workflow_step_label": "reads",
+                "jobs": []
+              },
+              {
+                "id": "5000000000000001",
+                "order_index": 1,
+                "workflow_step_label": "fastp",
+                "state": "ok",
+                "jobs": [
+                  {
+                    "id": "e100000000000001",
+                    "state": "ok",
+                    "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+                    "model_class": "Job"
+                  },
+                  {
+                    "id": "e100000000000002",
+                    "state": "ok",
+                    "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+                    "model_class": "Job"
+                  },
+                  {
+                    "id": "e100000000000003",
+                    "state": "ok",
+                    "tool_id": "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0",
+                    "model_class": "Job"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

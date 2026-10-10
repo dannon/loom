@@ -360,6 +360,36 @@ describe("evals assertions: activity log", () => {
     expect(evaluate(run)).toHaveLength(0);
   });
 
+  it("matches a structured payload value as a deep subset", () => {
+    const decision = {
+      timestamp: "2026-10-10T00:00:00.000Z",
+      kind: "evidence.decision",
+      source: "evidence-gate",
+      payload: {
+        mode: "deny",
+        outcome: "blocked",
+        contradictions: [
+          { source: "registry", step: "#plan-a-step-1", kind: "flip", attempts: ["a1"] },
+        ],
+      },
+    };
+    const expectRow = (payloadContains: Record<string, unknown>) =>
+      evaluate(
+        makeRun({
+          activityEvents: [decision],
+          assertions: {
+            activity: { mustInclude: [{ kind: "evidence.decision", payloadContains }] },
+          },
+        }),
+      );
+    expect(
+      expectRow({ outcome: "blocked", contradictions: [{ source: "registry", kind: "flip" }] }),
+    ).toHaveLength(0);
+    expect(expectRow({ contradictions: [{ source: "block" }] })).toHaveLength(1);
+    expect(expectRow({ contradictions: [] })).toHaveLength(0);
+    expect(expectRow({ mode: { nested: "x" } })).toHaveLength(1);
+  });
+
   it("fails on the right kind with the wrong payload -- not a vacuous pass", () => {
     const run = makeRun({
       activityEvents,

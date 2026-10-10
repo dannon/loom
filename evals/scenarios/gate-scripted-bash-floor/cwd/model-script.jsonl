@@ -1,0 +1,2 @@
+{"tool": "bash", "text": "Flipping it from the shell.", "input": {"command": "sed -i.bak 's/- \\[ \\] 1\\./- [x] 1./' notebook.md"}}
+{"text": "Done."}

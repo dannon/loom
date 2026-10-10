@@ -1,0 +1,67 @@
+{
+  "name": "after a deny, /override lets the same flip through with the exception recorded",
+  "description": "Deny mode, the run still going. The scripted model flips the checkbox and is refused; the user runs /override with a reason; the model makes the same flip again and the gate lets it through as overridden. Three rows pin the sequence: blocked, evidence.override with the reason, overridden.",
+  "tier": 1,
+  "inputs": [
+    "Mark step 1 complete.",
+    "/override plan-a-step-1 checked the BAMs in the Galaxy UI, the last job is a stuck cleanup",
+    "Try it again now."
+  ],
+  "env": {
+    "ANTHROPIC_API_KEY": "fake-eval-key",
+    "GALAXY_URL": "https://usegalaxy.org",
+    "GALAXY_API_KEY": "fake-eval-galaxy-key",
+    "LOOM_SUBMISSION_REPLAY": "submissions.jsonl",
+    "LOOM_GALAXY_FIXTURE": "galaxy-fixture.json",
+    "LOOM_MODEL_SCRIPT": "model-script.jsonl",
+    "LOOM_EVIDENCE_GATE": "deny"
+  },
+  "timeoutMs": 30000,
+  "assertions": {
+    "activity": {
+      "mustInclude": [
+        {
+          "kind": "model.script",
+          "source": "model-script"
+        },
+        {
+          "kind": "evidence.decision",
+          "source": "evidence-gate",
+          "payloadContains": {
+            "mode": "deny",
+            "outcome": "blocked",
+            "contradictions": [
+              {
+                "source": "block",
+                "step": "#plan-a-step-1",
+                "status": "in_progress",
+                "invocationId": "ff1e2d3c4b5a6978"
+              }
+            ]
+          }
+        },
+        {
+          "kind": "evidence.override",
+          "source": "user",
+          "payloadContains": {
+            "step": "#plan-a-step-1",
+            "invocationStatus": "in_progress",
+            "reason": "checked the BAMs in the Galaxy UI, the last job is a stuck cleanup"
+          }
+        },
+        {
+          "kind": "evidence.decision",
+          "source": "evidence-gate",
+          "payloadContains": {
+            "mode": "deny",
+            "outcome": "overridden",
+            "overridden": ["#plan-a-step-1"]
+          }
+        }
+      ]
+    },
+    "notebook": {
+      "contains": ["- [x] 1. **Read alignment** {#plan-a-step-1}"]
+    }
+  }
+}

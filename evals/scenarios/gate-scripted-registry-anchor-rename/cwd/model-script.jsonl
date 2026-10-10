@@ -1,0 +1,2 @@
+{"tool": "edit", "input": {"path": "notebook.md", "edits": [{"oldText": "- [ ] 1. **Align reads** {#plan-a-step-1}", "newText": "- [x] 1. **Align reads** {#align-reads}"}]}, "text": "Marking it complete."}
+{"text": "Done."}

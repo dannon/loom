@@ -1,0 +1,2 @@
+{"tool": "edit", "text": "Tidying the heading and marking it complete.", "input": {"path": "notebook.md", "edits": [{"oldText": "## Plan A: Call variants [galaxy]", "newText": "## Variant work"}, {"oldText": "- [ ] 1. **Align reads** {#plan-a-step-1}", "newText": "- [x] 1. **Align reads** {#plan-a-step-1}"}]}}
+{"text": "Done."}

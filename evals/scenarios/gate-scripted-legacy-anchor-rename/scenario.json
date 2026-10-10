@@ -1,0 +1,30 @@
+{
+  "name": "KNOWN GAP (legacy path): renaming the anchor while flipping isn't seen as a completion",
+  "description": "#475 gap 2, pinned as current behavior. The run is still going; in one edit the model flips the checkbox and renames the step's anchor. The post-image step key isn't the pre-image's, so the gate sees no flip and writes no evidence.decision row, even in deny mode. Closes for raw submissions with loom_submit; the registry-path twin is refused.",
+  "tier": 1,
+  "inputs": ["Mark step 1 complete."],
+  "env": {
+    "ANTHROPIC_API_KEY": "fake-eval-key",
+    "GALAXY_URL": "https://usegalaxy.org",
+    "GALAXY_API_KEY": "fake-eval-galaxy-key",
+    "LOOM_SUBMISSION_REPLAY": "submissions.jsonl",
+    "LOOM_GALAXY_FIXTURE": "galaxy-fixture.json",
+    "LOOM_MODEL_SCRIPT": "model-script.jsonl",
+    "LOOM_EVIDENCE_GATE": "deny"
+  },
+  "timeoutMs": 30000,
+  "assertions": {
+    "activity": {
+      "mustInclude": [
+        {
+          "kind": "model.script",
+          "source": "model-script"
+        }
+      ],
+      "mustNotIncludeKinds": ["evidence.decision"]
+    },
+    "notebook": {
+      "contains": ["- [x] 1. **Read alignment** {#read-alignment}"]
+    }
+  }
+}
