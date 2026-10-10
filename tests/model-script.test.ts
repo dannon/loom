@@ -10,9 +10,12 @@ import {
   createScriptedModel,
   isModelScriptEnabled,
   parseModelScript,
+  modelScriptRefusal,
   registerModelScript,
+  resetModelScriptState,
   turnToMessage,
 } from "../extensions/loom/model-script";
+import { execFileSync } from "child_process";
 import { resetActivity } from "../extensions/loom/activity";
 import { resetState, setNotebookPath } from "../extensions/loom/state";
 
@@ -20,6 +23,7 @@ let dir: string;
 let cwd: string;
 
 beforeEach(() => {
+  resetModelScriptState();
   resetState();
   resetActivity();
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-model-script-"));
@@ -40,31 +44,38 @@ interface FakePi {
   pi: ExtensionAPI;
   providers: unknown[];
   models: Model<string>[];
+  /** What setModel answers, in order; true once it runs out. */
+  answers: boolean[];
+  aborts: number;
   start: () => Promise<void>;
+  emit: (name: string, event: unknown, ctx?: unknown) => Promise<void>;
 }
 
 function fakePi(): FakePi {
-  const starts: (() => Promise<unknown>)[] = [];
-  const providers: unknown[] = [];
-  const models: Model<string>[] = [];
-  const pi = {
-    on: (name: string, h: () => Promise<unknown>) => {
-      if (name === "session_start") starts.push(h);
-    },
-    registerProvider: (p: unknown) => providers.push(p),
-    setModel: async (m: Model<string>) => {
-      models.push(m);
-      return true;
-    },
-  } as unknown as ExtensionAPI;
-  return {
-    pi,
-    providers,
-    models,
-    start: async () => {
-      for (const h of starts) await h();
+  const handlers = new Map<string, ((e: unknown, c: unknown) => Promise<unknown>)[]>();
+  const f: FakePi = {
+    pi: undefined as unknown as ExtensionAPI,
+    providers: [],
+    models: [],
+    answers: [],
+    aborts: 0,
+    start: async () => f.emit("session_start", {}),
+    emit: async (name, event, ctx = {}) => {
+      for (const h of handlers.get(name) ?? []) await h(event, ctx);
     },
   };
+  f.pi = {
+    on: (name: string, h: (e: unknown, c: unknown) => Promise<unknown>) => {
+      handlers.set(name, [...(handlers.get(name) ?? []), h]);
+    },
+    registerProvider: (p: unknown) => f.providers.push(p),
+    setModel: async (m: Model<string>) => {
+      const ok = f.answers.length > 0 ? f.answers.shift()! : true;
+      if (ok) f.models.push(m);
+      return ok;
+    },
+  } as unknown as ExtensionAPI;
+  return f;
 }
 
 const rows = (): Record<string, unknown>[] => {
@@ -210,6 +221,7 @@ describe("registerModelScript", () => {
           entries: 1,
           skipped: 1,
           model: `${MODEL_SCRIPT_PROVIDER}/${MODEL_SCRIPT_MODEL_ID}`,
+          selected: true,
         },
       }),
     ]);
@@ -256,19 +268,119 @@ describe("registerModelScript", () => {
     expect(rows()[0].payload).toEqual(expect.objectContaining({ entries: 0, rejected: "missing" }));
   });
 
-  it("reads the script once, so lines written to it mid-session never reach the model", async () => {
+  it("reads the script once per process, even across a fresh extension instance", async () => {
+    // pi reruns extension factories on /new, resume and fork; a new instance
+    // must not pick up lines an earlier scripted turn wrote into the file.
     const file = path.join(cwd, "model-script.jsonl");
     fs.writeFileSync(file, JSON.stringify({ text: "one" }));
+    process.env.LOOM_MODEL_SCRIPT = "model-script.jsonl";
+    const first = fakePi();
+    registerModelScript(first.pi);
+    await first.start();
+    fs.writeFileSync(file, JSON.stringify({ tool: "bash", input: { command: "rm -rf x" } }));
+    const second = fakePi();
+    registerModelScript(second.pi);
+    await second.start();
+    expect(rows().filter((r) => r.kind === "model.script")).toHaveLength(1);
+    // The new instance still selects the scripted model.
+    expect(second.models[0].provider).toBe(MODEL_SCRIPT_PROVIDER);
+  });
+
+  it("refuses a named pipe instead of waiting on it", async () => {
+    if (process.platform === "win32") return;
+    execFileSync("mkfifo", [path.join(cwd, "model-script.jsonl")]);
+    process.env.LOOM_MODEL_SCRIPT = "model-script.jsonl";
+    const f = fakePi();
+    registerModelScript(f.pi);
+    await f.start(); // would hang here if the pipe were read
+    expect(rows()[0].payload).toEqual(
+      expect.objectContaining({ entries: 0, rejected: "not-a-file" }),
+    );
+  });
+
+  it("retries a selection pi refused, and says so when it never takes", async () => {
+    fs.writeFileSync(path.join(cwd, "model-script.jsonl"), JSON.stringify({ text: "hi" }));
+    process.env.LOOM_MODEL_SCRIPT = "model-script.jsonl";
+    const once = fakePi();
+    once.answers = [false];
+    registerModelScript(once.pi);
+    await once.start();
+    expect(once.models).toHaveLength(1);
+    expect(rows()[0].payload).toEqual(expect.objectContaining({ selected: true }));
+
+    resetModelScriptState();
+    fs.rmSync(path.join(cwd, "activity.jsonl"));
+    const never = fakePi();
+    never.answers = [false, false];
+    registerModelScript(never.pi);
+    await never.start();
+    expect(rows()[0].payload).toEqual(expect.objectContaining({ selected: false }));
+  });
+
+  it("moves the session back when something selects another model", async () => {
+    fs.writeFileSync(path.join(cwd, "model-script.jsonl"), JSON.stringify({ text: "hi" }));
     process.env.LOOM_MODEL_SCRIPT = "model-script.jsonl";
     const f = fakePi();
     registerModelScript(f.pi);
     await f.start();
-    fs.writeFileSync(
-      file,
-      [JSON.stringify({ tool: "bash", input: { command: "rm -rf x" } })].join("\n"),
+    await f.emit("model_select", {
+      model: { provider: MODEL_SCRIPT_PROVIDER, id: MODEL_SCRIPT_MODEL_ID },
+      source: "set",
+    });
+    expect(f.models).toHaveLength(1);
+    await f.emit("model_select", {
+      model: { provider: "anthropic", id: "claude-opus-5-5" },
+      source: "set",
+    });
+    expect(f.models).toHaveLength(2);
+    expect(f.models[1].provider).toBe(MODEL_SCRIPT_PROVIDER);
+    expect(rows().find((r) => r.kind === "model.script.reselected")?.payload).toEqual({
+      from: "anthropic/claude-opus-5-5",
+      source: "set",
+      selected: true,
+    });
+  });
+
+  it("aborts any request that reaches a real provider", async () => {
+    process.env.LOOM_MODEL_SCRIPT = "model-script.jsonl";
+    const f = fakePi();
+    registerModelScript(f.pi);
+    await f.start();
+    let aborted = 0;
+    await f.emit(
+      "before_provider_request",
+      { payload: {} },
+      { abort: () => aborted++, model: { provider: "anthropic", id: "claude-opus-5-5" } },
     );
-    await f.start(); // a /new or a resume
-    expect(rows().filter((r) => r.kind === "model.script")).toHaveLength(1);
+    expect(aborted).toBe(1);
+    expect(rows().find((r) => r.kind === "model.script.blocked")?.payload).toEqual({
+      model: "anthropic/claude-opus-5-5",
+    });
+  });
+
+  it("the scripted model itself never reaches that hook", async () => {
+    // The backstop above relies on it: the faux provider ignores onPayload.
+    const scripted = createScriptedModel();
+    scripted.load([{ text: "hi" }]);
+    let payloads = 0;
+    const stream = scripted.faux.provider.streamSimple(
+      scripted.faux.getModel(),
+      { messages: [] } as unknown as TranscriptContext,
+      {
+        onPayload: async (p: unknown) => {
+          payloads++;
+          return p;
+        },
+      } as never,
+    );
+    await stream.result();
+    expect(payloads).toBe(0);
+  });
+
+  it("refuses tools that call a model directly", () => {
+    expect(modelScriptRefusal("team_dispatch")).toBeNull();
+    process.env.LOOM_MODEL_SCRIPT = "model-script.jsonl";
+    expect(modelScriptRefusal("team_dispatch")).toMatch(/team_dispatch is unavailable/);
   });
 });
 
@@ -307,5 +419,38 @@ describe("the extension entry", () => {
     expect(await load({ LOOM_MODEL_SCRIPT: "model-script.jsonl" })).toContain(
       MODEL_SCRIPT_PROVIDER,
     );
+  });
+});
+
+describe("team_dispatch under the seam", () => {
+  it("refuses before resolving or calling any model", async () => {
+    let execute: ((...a: unknown[]) => Promise<{ content: { text: string }[] }>) | undefined;
+    const pi = {
+      registerTool: (def: { name: string; execute: typeof execute }) => {
+        if (def.name === "team_dispatch") execute = def.execute;
+      },
+    } as unknown as ExtensionAPI;
+    const { registerTeamTools } = await import("../extensions/loom/teams/tool");
+    registerTeamTools(pi);
+    process.env.LOOM_MODEL_SCRIPT = "model-script.jsonl";
+    const spec = {
+      description: "check it",
+      model: "anthropic:claude-opus-5-5",
+      roles: [
+        { name: "a", system_prompt: "p" },
+        { name: "b", system_prompt: "c" },
+      ],
+    };
+    // A ctx that throws if the tool tries to look a model up.
+    const ctx = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error("model lookup");
+        },
+      },
+    );
+    const result = await execute!("id", spec, undefined, () => undefined, ctx);
+    expect(result.content[0].text).toMatch(/unavailable while LOOM_MODEL_SCRIPT is set/);
   });
 });

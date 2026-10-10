@@ -30,12 +30,14 @@
  * turn, so a log produced this way says so. Two more, because this one stands
  * in for the model:
  *
- * - the file is read once, at the first session start, so nothing the
- *   scripted session does -- a write to the script, a tool result, a notebook
- *   edit -- can add lines to it;
+ * - the file is read once per process, at the first session start, through
+ *   one descriptor on a regular file, so nothing the scripted session does --
+ *   a write to the script, a tool result, a notebook edit, `/new` -- can add
+ *   lines to it;
  * - when the variable is set, the scripted model is selected whether or not
- *   the file was usable. A rejected file gives a model that says nothing; it
- *   never falls through to the configured real one.
+ *   the file was usable, moved back to if anything selects another, and any
+ *   request that reaches a real provider anyway is aborted and logged.
+ *   `team_dispatch`, which calls a model directly, refuses to run.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -54,7 +56,6 @@ import * as path from "path";
 import { readEnv } from "../../shared/orbit-env.js";
 import { appendActivityEvent } from "./activity";
 import { getNotebookPath } from "./state";
-import { resolveReplayPath } from "./submission-replay";
 
 export const MODEL_SCRIPT_PROVIDER = "loom-script";
 export const MODEL_SCRIPT_MODEL_ID = "scripted";
@@ -128,10 +129,36 @@ export function turnToMessage(turn: ScriptTurn | undefined): AssistantMessage {
 }
 
 /**
+ * What the process has read of the script. Process-wide rather than held by
+ * one extension instance: pi rebuilds the runtime and reruns extension
+ * factories on `/new`, resume and fork, and a fresh instance that re-read the
+ * file would run whatever an earlier scripted turn wrote into it. On
+ * `globalThis` for the same reason -- a re-imported module would start over.
+ */
+interface ScriptState {
+  loaded: boolean;
+  turns: ScriptTurn[];
+}
+
+const STATE_KEY = Symbol.for("loom.modelScript.state");
+
+function processState(): ScriptState {
+  const g = globalThis as { [STATE_KEY]?: ScriptState };
+  return (g[STATE_KEY] ??= { loaded: false, turns: [] });
+}
+
+/** Test reset: forget what this process read. */
+export function resetModelScriptState(): void {
+  const state = processState();
+  state.loaded = false;
+  state.turns = [];
+}
+
+/**
  * The faux provider plus the queue it reads from. Every model call takes the
  * next turn and queues itself again, so the provider never runs dry.
  */
-export function createScriptedModel(): {
+export function createScriptedModel(state: ScriptState = { loaded: false, turns: [] }): {
   faux: FauxProviderHandle;
   load: (turns: ScriptTurn[]) => void;
   remaining: () => number;
@@ -150,64 +177,163 @@ export function createScriptedModel(): {
       },
     ],
   });
-  let queue: ScriptTurn[] = [];
   const step = (): AssistantMessage => {
     faux.appendResponses([step]);
-    return turnToMessage(queue.shift());
+    return turnToMessage(state.turns.shift());
   };
   faux.setResponses([step]);
   return {
     faux,
     load: (turns) => {
-      queue = turns.map((t) => structuredClone(t));
+      state.turns = turns.map((t) => structuredClone(t));
     },
-    remaining: () => queue.length,
+    remaining: () => state.turns.length,
   };
 }
 
+/** Big enough for any scenario, small enough that a mistake can't stall startup. */
+const MAX_SCRIPT_BYTES = 1 << 20;
+
+export interface ScriptRead {
+  /** Relative to the real session directory; null when refused. */
+  file: string | null;
+  parsed: ParsedScript;
+  rejected?: "missing" | "outside-session-dir" | "not-a-file" | "too-large" | "unreadable";
+}
+
+/**
+ * Read the script once, through one file descriptor, from a regular file that
+ * really is inside the session directory.
+ *
+ * Resolved before it is opened, then opened with `O_NOFOLLOW`, so swapping the
+ * checked file for a symlink between the containment check and the read fails
+ * the open instead of reading elsewhere; the content comes from that same
+ * descriptor. `O_NONBLOCK` and the `isFile` check refuse a named pipe, which
+ * would otherwise let a writer supply lines after startup, or never close and
+ * hang it. (On Windows neither flag exists and both are 0; the check on the
+ * descriptor still refuses anything that isn't a file.)
+ */
+export function readModelScript(sessionDir: string, configured: string): ScriptRead {
+  const empty: ParsedScript = { turns: [], skipped: 0 };
+  const root = fs.realpathSync(sessionDir);
+  let real: string;
+  try {
+    real = fs.realpathSync(path.resolve(sessionDir, configured));
+  } catch {
+    return { file: null, parsed: empty, rejected: "missing" };
+  }
+  if (!real.startsWith(root + path.sep)) {
+    return { file: null, parsed: empty, rejected: "outside-session-dir" };
+  }
+  const flags =
+    fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0);
+  let fd: number;
+  try {
+    fd = fs.openSync(real, flags);
+  } catch {
+    return { file: null, parsed: empty, rejected: "unreadable" };
+  }
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) return { file: null, parsed: empty, rejected: "not-a-file" };
+    if (stat.size > MAX_SCRIPT_BYTES) {
+      return { file: null, parsed: empty, rejected: "too-large" };
+    }
+    return {
+      file: path.relative(root, real),
+      parsed: parseModelScript(fs.readFileSync(fd, "utf-8")),
+    };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+const SCRIPTED_REF = `${MODEL_SCRIPT_PROVIDER}/${MODEL_SCRIPT_MODEL_ID}`;
+
+function logRow(kind: string, payload: Record<string, unknown>): void {
+  const notebookPath = getNotebookPath();
+  if (!notebookPath) return;
+  appendActivityEvent(path.dirname(notebookPath), {
+    timestamp: new Date().toISOString(),
+    kind,
+    source: "model-script",
+    payload,
+  });
+}
+
 export function registerModelScript(pi: ExtensionAPI): void {
-  const scripted = createScriptedModel();
+  const state = processState();
+  const scripted = createScriptedModel(state);
   pi.registerProvider(scripted.faux.provider);
-  let loaded = false;
+  const isScripted = (m: { provider?: string; id?: string } | undefined) =>
+    m?.provider === MODEL_SCRIPT_PROVIDER && m?.id === MODEL_SCRIPT_MODEL_ID;
+
+  const select = async (): Promise<boolean> => {
+    try {
+      if (await pi.setModel(scripted.faux.getModel())) return true;
+      // A native provider's auth state can lag its registration by a tick.
+      await new Promise((resolve) => setImmediate(resolve));
+      return await pi.setModel(scripted.faux.getModel());
+    } catch {
+      return false;
+    }
+  };
 
   pi.on("session_start", async () => {
     const configured = readEnv("MODEL_SCRIPT")?.trim();
     if (!configured) return;
     // Selected before anything can go wrong with the file, so a bad script
     // never leaves the session on a real model.
-    await pi.setModel(scripted.faux.getModel());
-    if (loaded) return;
-    loaded = true;
+    const selected = await select();
+    if (state.loaded) {
+      if (!selected) logRow("model.script.unselected", { model: SCRIPTED_REF });
+      return;
+    }
+    state.loaded = true;
 
     const notebookPath = getNotebookPath();
     if (!notebookPath) return;
-    const sessionDir = path.dirname(notebookPath);
-    const realRoot = fs.realpathSync(sessionDir);
-
-    // Missing before outside: a file that isn't there can't be realpath'd, so
-    // the containment check would call it outside and hide the plainer answer.
-    const exists = fs.existsSync(path.resolve(sessionDir, configured));
-    const file = exists ? resolveReplayPath(sessionDir, configured) : null;
-    let parsed: ParsedScript = { turns: [], skipped: 0 };
-    let rejected: string | undefined;
-    if (!exists) rejected = "missing";
-    else if (!file) rejected = "outside-session-dir";
-    else parsed = parseModelScript(fs.readFileSync(file, "utf-8"));
-    scripted.load(parsed.turns);
-
-    appendActivityEvent(sessionDir, {
-      timestamp: new Date().toISOString(),
-      kind: "model.script",
-      source: "model-script",
-      payload: {
-        // Never the configured spelling of a rejected path: it can name
-        // somewhere outside the session.
-        file: file ? path.relative(realRoot, file) : null,
-        entries: parsed.turns.length,
-        skipped: parsed.skipped,
-        ...(rejected ? { rejected } : {}),
-        model: `${MODEL_SCRIPT_PROVIDER}/${MODEL_SCRIPT_MODEL_ID}`,
-      },
+    const read = readModelScript(path.dirname(notebookPath), configured);
+    scripted.load(read.parsed.turns);
+    logRow("model.script", {
+      // Never the configured spelling of a refused path: it can name
+      // somewhere outside the session.
+      file: read.file,
+      entries: read.parsed.turns.length,
+      skipped: read.parsed.skipped,
+      ...(read.rejected ? { rejected: read.rejected } : {}),
+      model: SCRIPTED_REF,
+      selected,
     });
   });
+
+  // Anything that moves the session off the scripted model -- the picker, an
+  // RPC, a restore -- is moved back.
+  pi.on("model_select", async (event) => {
+    if (isScripted(event.model)) return;
+    const selected = await select();
+    logRow("model.script.reselected", {
+      from: `${event.model?.provider}/${event.model?.id}`,
+      source: event.source,
+      selected,
+    });
+  });
+
+  // The backstop. The faux provider never calls `onPayload`, so while the
+  // seam is on, a provider request reaching this hook is a real one, however
+  // it got selected. Abort it before it is sent.
+  pi.on("before_provider_request", async (_event, ctx) => {
+    ctx.abort();
+    logRow("model.script.blocked", {
+      model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : null,
+    });
+  });
+}
+
+/** For tools that call a provider directly, outside the session's model. */
+export function modelScriptRefusal(tool: string): string | null {
+  return readEnv("MODEL_SCRIPT")?.trim()
+    ? `${tool} is unavailable while LOOM_MODEL_SCRIPT is set: it calls a model directly, ` +
+        `and the scripted session must never reach a real one.`
+    : null;
 }

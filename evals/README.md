@@ -197,10 +197,15 @@ only slash commands) for a turn to happen at all.
 Same rules as the replay seams: off unless the variable is set, the file must
 resolve inside the session directory, and a `model.script` activity row
 (`file`, `entries`, `skipped`, and `rejected` if the file was refused) is
-written before the first turn. The file is read once, at the first session
-start, so nothing the session does can add lines to it. And when the variable
-is set the scripted model is selected even if the file was refused -- a bad
-script gives a model that says nothing, never the configured real one.
+written before the first turn. The file is read once per process, at the
+first session start, through one descriptor on a regular file (a symlink
+swapped in after the check, or a named pipe, is refused), so nothing the
+session does -- including `/new` or a resume -- can add lines to it. And when
+the variable is set the scripted model stays selected: it is selected even if
+the file was refused, selected again if anything picks another model
+(`model.script.reselected`), and any request that still reaches a real
+provider is aborted and logged (`model.script.blocked`). `team_dispatch`,
+which calls a model directly, refuses to run.
 
 Nothing in the script is trusted: it is the model. Combine it with
 `LOOM_SUBMISSION_REPLAY` and `LOOM_GALAXY_FIXTURE` to give the scripted model a

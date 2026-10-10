@@ -7,6 +7,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { Model } from "@earendil-works/pi-ai/compat";
 import { runTeamDispatch } from "./dispatcher";
+import { modelScriptRefusal } from "../model-script";
 import { validateTeamSpec } from "./validate";
 import type { DispatchDeps, RoleTurnResult, TeamSpec, RoleSpec } from "./types";
 import { TEAM_DISPATCH_KIND } from "../../../shared/team-dispatch-contract.js";
@@ -39,6 +40,8 @@ export function registerTeamTools(pi: ExtensionAPI): void {
     parameters: TeamSpecSchema,
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const spec = params as TeamSpec;
+      const scripted = modelScriptRefusal("team_dispatch");
+      if (scripted) return errorResult(new Error(scripted));
 
       // 1. Spec validation (fail fast).
       try {
