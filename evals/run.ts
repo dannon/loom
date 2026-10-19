@@ -40,6 +40,8 @@ interface CliArgs {
   scenarioFilter?: string;
   modelFilter?: string[];
   galaxyCleanup?: boolean;
+  runs?: number;
+  tag?: string;
 }
 
 async function main() {
@@ -82,7 +84,8 @@ async function main() {
     }
     for (const model of cells) {
       if (model !== null) modelCellsRun++;
-      const runCount = scenario.requiresModel ? (scenario.runs ?? 3) : (scenario.runs ?? 1);
+      const runCount =
+        args.runs ?? (scenario.requiresModel ? (scenario.runs ?? 3) : (scenario.runs ?? 1));
       for (let i = 0; i < runCount; i++) {
         const run = await runScenario(dir, model);
         run.runIndex = i;
@@ -114,7 +117,7 @@ async function main() {
   }
 
   const resultsDir = path.join(evalsDir, "results");
-  const written = writeResultsJsonl(runs, resultsDir);
+  const written = writeResultsJsonl(runs, resultsDir, args.tag);
   if (written) console.log(`\nresults: ${path.relative(process.cwd(), written)}`);
 
   const anyDimFailed = cells.some((c) => Object.values(c.dimensions).some((d) => d && !d.verdict));
@@ -158,6 +161,20 @@ function parseArgs(argv: string[]): CliArgs {
         .filter(Boolean);
     } else if (a === "--galaxy-cleanup") {
       out.galaxyCleanup = true;
+    } else if (a === "--runs") {
+      const n = Number(argv[++i]);
+      if (!Number.isInteger(n) || n < 1) {
+        console.error("--runs requires a positive integer");
+        process.exit(2);
+      }
+      out.runs = n;
+    } else if (a === "--tag") {
+      const next = argv[++i];
+      if (!next || !/^[\w.-]+$/.test(next)) {
+        console.error("--tag requires a name of letters, digits, '.', '_' or '-'");
+        process.exit(2);
+      }
+      out.tag = next;
     } else if (!a.startsWith("--") && !out.scenarioFilter) {
       out.scenarioFilter = a;
     } else {

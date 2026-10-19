@@ -34,4 +34,14 @@ describe("evals persist", () => {
     expect(first.failedDimensions).toContain("routing");
     expect(typeof first.durationMs).toBe("number");
   });
+
+  it("a tag gives concurrent runs on one commit their own file", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "evals-persist-"));
+    const a = writeResultsJsonl([run("tacc:a", 0)], dir, "a");
+    const b = writeResultsJsonl([run("tacc:b", 0)], dir, "b");
+    expect(a).not.toBe(b);
+    expect(path.basename(a!)).toMatch(/-a\.jsonl$/);
+    expect(fs.readFileSync(a!, "utf-8")).toContain("tacc:a");
+    expect(fs.readFileSync(b!, "utf-8")).toContain("tacc:b");
+  });
 });

@@ -24,11 +24,16 @@ function turnUsage(run: ScenarioRun): unknown {
   return (turnEnd as { usage?: unknown } | undefined)?.usage ?? null;
 }
 
-export function writeResultsJsonl(runs: ScenarioRun[], outDir: string): string | null {
+export function writeResultsJsonl(
+  runs: ScenarioRun[],
+  outDir: string,
+  tag?: string,
+): string | null {
   if (runs.length === 0) return null;
   fs.mkdirSync(outDir, { recursive: true });
   const date = new Date().toISOString().slice(0, 10);
-  const file = path.join(outDir, `${date}-${gitShortSha()}.jsonl`);
+  // A tag keeps concurrent runs on one commit (one process per model) from overwriting each other.
+  const file = path.join(outDir, `${date}-${gitShortSha()}${tag ? `-${tag}` : ""}.jsonl`);
 
   const lines = runs.map((r) =>
     JSON.stringify({

@@ -115,6 +115,26 @@ describe("evals toolResults assertions", () => {
     expect(failures).toEqual([]);
   });
 
+  it("detailsPresent asks only that a dotted key is there", () => {
+    const spilled = end("get_iwc_workflows", "[loom Galaxy output]", {
+      details: { galaxy: { tool: "get_iwc_workflows", outputId: "01ABC" } },
+    });
+    const grade = (detailsPresent: string[], detailsContains?: Record<string, string>) =>
+      evaluate(
+        run([spilled], {
+          toolResults: {
+            mustSucceed: [{ name: "get_iwc_workflows", detailsPresent, detailsContains }],
+          },
+        }),
+      ).map((f) => f.assertion);
+    expect(grade(["details.galaxy.outputId"])).toEqual([]);
+    expect(grade(["galaxy.outputId"], { "details.galaxy.tool": "get_iwc_workflows" })).toEqual([]);
+    expect(grade(["details.galaxy.missing"])).toEqual(["toolResults.mustSucceed"]);
+    expect(grade(["details.galaxy.outputId"], { "details.galaxy.tool": "x" })).toEqual([
+      "toolResults.mustSucceed",
+    ]);
+  });
+
   it("mustNotSucceed tolerates a blocked call but not a successful one", () => {
     const blocked = end("update_history", "Destructive op denied", { isError: true });
     const ok = end("update_history", '{"data":{"deleted":true}}');
@@ -159,6 +179,18 @@ describe("evals scenario selection", () => {
 
   it("no filter selects everything", () => {
     expect(filterScenarioDirs(dirs, undefined)).toEqual(dirs);
+  });
+
+  it("a comma list unions its terms, each exact-or-prefix, in directory order", () => {
+    expect(filterScenarioDirs(dirs, "galaxy, galaxy-tools-b")).toEqual([
+      "/s/galaxy-tools-b",
+      "/s/galaxy",
+    ]);
+    expect(filterScenarioDirs(dirs, "routing,galaxy-tools")).toEqual([
+      "/s/galaxy-tools-a",
+      "/s/galaxy-tools-b",
+      "/s/routing-clear-galaxy",
+    ]);
   });
 });
 
@@ -249,6 +281,8 @@ describe("evals live Galaxy scenarios", () => {
     "iwc-find-from-question-tools",
     "plan-consults-iwc-tools",
     "execution-after-approval-tools",
+    "execution-after-slash-approve-tools",
+    "execution-after-chat-approve-tools",
   ];
   // Snapshot: allOperations is one mutable array shared by both galaxy-ops entries.
   const ops = new Set([...allOperations].map((o) => o.name));
@@ -272,7 +306,8 @@ describe("evals live Galaxy scenarios", () => {
       expect(c.tier).toBe(2);
       expect(c.requiresModel).toBe(true);
       expect(c.requiresGalaxy).toBe(true);
-      expect(c.env).toBeUndefined();
+      // Only eval knobs (a poller drain, seeded proposal ids); never a Galaxy pathway switch.
+      expect(Object.keys(c.env ?? {}).filter((k) => !/^ORBIT_EVAL_/.test(k))).toEqual([]);
       expect(JSON.stringify(c)).not.toContain("mcp__galaxy__");
       expect(JSON.stringify(c)).not.toContain("mcp_read_output");
     });
@@ -290,7 +325,21 @@ describe("evals live Galaxy scenarios", () => {
     });
   }
 
-  it("the job-capture clone grades a bare run_tool result by its nested details", () => {
+  it("large-output drives get_iwc_workflows past the spill threshold", () => {
+    const c = load("galaxy-tools-large-output");
+    expect(c.assertions.toolResults?.mustSucceed).toContainEqual({
+      name: "get_iwc_workflows",
+      detailsContains: { "details.galaxy.tool": "get_iwc_workflows" },
+      detailsPresent: ["details.galaxy.outputId"],
+      textContains: "[loom Galaxy output]",
+    });
+    expect(c.assertions.toolCalls?.mustInclude?.map((m) => m.name)).toEqual(
+      expect.arrayContaining(["get_iwc_workflows", "galaxy_read_output"]),
+    );
+    expect(c.description).not.toMatch(/Provisional/);
+  });
+
+  it("job-capture grades a bare run_tool result by its nested details", () => {
     const c = load("galaxy-tools-job-capture");
     const toolResults = c.assertions.toolResults!;
     const result = (details: object) =>
