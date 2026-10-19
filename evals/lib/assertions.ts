@@ -11,6 +11,7 @@
 import { parseLatestPlan } from "./notebook-parser.js";
 import type {
   ActivityAssertions,
+  ActivityExpectation,
   ActivityEvent,
   AnyEvent,
   Assertions,
@@ -126,6 +127,7 @@ function evaluateToolResults(
         Object.entries(expected.detailsContains ?? {}).every(
           ([k, v]) => String(detailsValue(r.details, k)) === v,
         ) &&
+        (expected.detailsPresent ?? []).every((k) => detailsValue(r.details, k) !== undefined) &&
         (expected.textContains === undefined || r.text.includes(expected.textContains)),
     );
     if (!hit) {
@@ -214,20 +216,36 @@ function evaluateActivity(
 ): void {
   if (!a) return;
 
+  const matches = (e: ActivityEvent, expected: ActivityExpectation) => {
+    if (e.kind !== expected.kind) return false;
+    if (expected.source && e.source !== expected.source) return false;
+    return Object.entries(expected.payloadContains ?? {}).every(([k, v]) =>
+      payloadValueMatches((e.payload ?? {})[k], v),
+    );
+  };
+
   for (const expected of a.mustInclude ?? []) {
-    const hit = events.some((e) => {
-      if (e.kind !== expected.kind) return false;
-      if (expected.source && e.source !== expected.source) return false;
-      return Object.entries(expected.payloadContains ?? {}).every(([k, v]) =>
-        payloadValueMatches((e.payload ?? {})[k], v),
-      );
-    });
+    const hit = events.some((e) => matches(e, expected));
     if (!hit) {
       failures.push({
         assertion: "activity.mustInclude",
         detail:
           `no activity row matched ${JSON.stringify(expected)}; saw ` +
           `[${events.map((e) => e.kind).join(", ") || "nothing"}]`,
+        dimension: "other",
+      });
+    }
+  }
+
+  for (const { before, after } of a.ordered ?? []) {
+    const first = events.findIndex((e) => matches(e, before));
+    const early = events.findIndex((e, i) => (first === -1 || i < first) && matches(e, after));
+    if (early !== -1) {
+      failures.push({
+        assertion: "activity.ordered",
+        detail:
+          `a row matching ${JSON.stringify(after)} came before any row matching ` +
+          `${JSON.stringify(before)}`,
         dimension: "other",
       });
     }

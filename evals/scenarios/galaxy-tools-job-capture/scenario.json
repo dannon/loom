@@ -7,6 +7,9 @@
   "inputs": [
     "Create a new Galaxy history named exactly `loom-eval-job-{{RUN_ID}}`. Upload this BED file into it by URL: https://raw.githubusercontent.com/galaxyproject/galaxy/release_24.0/test-data/1.bed . Then run the Galaxy tool `wc_gnu` (Line/Word/Character count) on that dataset with default settings. Wait until the wc_gnu job has finished -- check on it every so often -- and then tell me how many lines the BED file has according to the tool's output. Skip the formal plan; this is a quick check."
   ],
+  "env": {
+    "ORBIT_EVAL_POLLER_DRAIN_MS": "120000"
+  },
   "timeoutMs": 600000,
   "assertions": {
     "toolCalls": {

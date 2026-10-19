@@ -85,6 +85,12 @@ export interface ActivityAssertions {
   mustInclude?: ActivityExpectation[];
   /** No row may carry any of these `kind`s. */
   mustNotIncludeKinds?: string[];
+  /**
+   * No row matching `after` may come before the first row matching `before`
+   * (file order is append order). Whether an `after` row exists at all is
+   * mustInclude's job.
+   */
+  ordered?: { before: ActivityExpectation; after: ActivityExpectation }[];
 }
 
 export interface ToolResultAssertions {
@@ -109,6 +115,8 @@ export interface ToolResultExpectation {
    * and `galaxy.tool` both reach the in-process Galaxy tools' nested facts.
    */
   detailsContains?: Record<string, string>;
+  /** Each key, read the same way, must be present with any value (an outputId, say). */
+  detailsPresent?: string[];
   /** The result's text content must contain this substring. */
   textContains?: string;
 }
