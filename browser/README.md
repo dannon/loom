@@ -95,6 +95,14 @@ npm run stale      # where the pinned upstreams stand
 `npm run typecheck` and `npm run test:unit` in `core/` also need the repo root installed (`npm ci`
 at the top level; CI does both). Neither package is a dependency of this workspace.
 
+The agent worker can also boot Orbit's own brain (`extensions/loom`) in place of the browser's,
+behind a build-time flag: `VITE_ORBIT_BRAIN=orbit` (default `browser`). Orbit-brain builds also
+need the repo root installed. `npm run preflight:orbit` builds a worker that boots the brain
+through the production config and loads it in a browser-worker realm;
+`e2e/orbit-preflight-drive.cjs` does the same in a real browser, built and dev.
+`node scripts/compare-default-bundle.mjs <ref>` checks that the default bundle is byte-identical
+to `<ref>`'s.
+
 `npm run dev` against a local Galaxy and a model:
 
 ```bash
