@@ -26,6 +26,8 @@ import { isDesktopShell, readEnv } from "./orbit-env.js";
  * @property {boolean} mcpServers pi's MCP layer, for the servers Loom brings
  *   (brc-analytics)
  * @property {"desktop" | "terminal" | "worker"} ui the surface a human answers prompts on
+ * @property {boolean} [python] an in-brain Python runtime (the browser's Pyodide), apart from
+ *   whatever the local shell offers; no Node shell has one
  */
 
 /**
@@ -40,6 +42,7 @@ export function profileFromEnv(env = process.env) {
     network: true,
     mcpServers: true,
     ui: isDesktopShell(env) ? "desktop" : "terminal",
+    python: false,
   };
 }
 
@@ -50,7 +53,9 @@ let installed = null;
  * @param {CapabilityProfile | null} profile
  */
 export function setCapabilityProfile(profile) {
-  installed = profile ? { ...profile } : null;
+  // A shell that predates a field gets the Node shells' value for it, so adding one changes no
+  // existing caller.
+  installed = profile ? { python: false, ...profile } : null;
 }
 
 /**

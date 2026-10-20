@@ -516,10 +516,10 @@ describe("Orbit on pi-host", () => {
       // policy's shown-page reset (session_start) and the Galaxy version capture (session_start,
       // tool_result), which is where observations get the Galaxy version.
       on: 71 + 7 + 1 + 2,
-      // Orbit's own tools; the Galaxy family (the browser entry's 42 operations, the shell's three
-      // extras, and Loom's list_jobs and get_job_logs bridges); galaxy_read_output beside it; and
-      // the probe. mcp_read_output is MCP-only.
-      tools: 15 + 47 + 1 + 1,
+      // Orbit's own tools (ena_runs among them); the Galaxy family (the browser entry's 42
+      // operations, the shell's three extras, and Loom's list_jobs and get_job_logs bridges);
+      // galaxy_read_output beside it; and the probe. mcp_read_output is MCP-only.
+      tools: 16 + 47 + 1 + 1,
       // The real /reconcile, in the stub's place.
       commands: 21,
     });
