@@ -15,6 +15,8 @@
  *   - session_shutdown → stopGalaxyPoller(): clear timer.
  *   - Multiple session_start (brain restart) → start() stops any prior
  *     timer first; idempotent.
+ *   - Under the browser worker (`ui: "worker"`) start() arms nothing: the
+ *     worker's durable watch calls pollGalaxyNow() and reads its TickResult.
  *
  * Why "always running" instead of stopping on idle:
  *   If we stopped at "no in-flight blocks", the next time the agent
@@ -60,12 +62,15 @@ import {
   type JobYaml,
 } from "./galaxy-job-block.js";
 import { appendActivityEvent } from "./activity.js";
+import { recoverSubmissions } from "./galaxy-submission-capture.js";
 import {
+  isClosedSubmission,
   submissionLedger,
   terminalEventKey,
   type TerminalEvent,
   type TerminalEventInput,
 } from "./submission-ledger.js";
+import { capabilityProfile } from "../../shared/capability-profile.js";
 
 // 15s — ~4 polls/min × a few in-flight invocations stays well under
 // usegalaxy.org's per-user rate budget while still feeling live. Background
@@ -79,7 +84,46 @@ let timer: ReturnType<typeof setInterval> | null = null;
  * would otherwise let the interval pile them up -- and holding the promise
  * rather than a boolean lets a caller wait for the one already in flight.
  */
-let inFlightTick: Promise<void> | null = null;
+let inFlightTick: Promise<TickRun> | null = null;
+/**
+ * Bumped by every startGalaxyPoller. A tick that spans a session switch still
+ * writes by the record key it pinned, but finds this moved and leaves the new
+ * session's tracking, toasts and follow-ups alone.
+ */
+let generation = 0;
+
+/** Under the browser worker the durable watch drives every tick; nothing here keeps time. */
+function underWorker(): boolean {
+  return capabilityProfile().ui === "worker";
+}
+
+export interface PollOptions {
+  /** Wait for this tick's enrichment (and reconcile, when asked) instead of leaving it running. */
+  awaitEnrichment?: boolean;
+  /** Run a reconcile pass inside this tick. */
+  reconcile?: boolean;
+  /** Capture answered submissions that never got a block before polling. */
+  recover?: boolean;
+}
+
+/** What one tick left behind, for a caller that drives the polling itself. */
+export interface TickResult {
+  /** The record this tick ran against; a caller for another record should discard the result. */
+  recordKey: string | null;
+  /** The record's undelivered terminal events: this tick's, and any a dead tick never announced. */
+  transitions: TerminalEvent[];
+  inProgress: number;
+  pendingEnrichment: number;
+  /** Submissions sent and not yet captured or reconciled. */
+  openSubmissions: number;
+  /** The follow-up turn for those transitions, when any of them warrants one. */
+  resumePrompt?: string;
+}
+
+interface TickRun {
+  recordKey: string | null;
+  transitions: TerminalEvent[];
+}
 
 /** Surface a toast to the shell when a background invocation finishes. */
 type PollerNotify = (text: string, level: "info" | "warning" | "error") => void;
@@ -112,8 +156,13 @@ export function getPollTickHook(): PollTickHook | null {
  * landed, so a run that just finished is enriched on the same tick -- and
  * because the live panel already owns that slot. Not awaited, for the same
  * reason the panel hook isn't: a slow details fetch must not hold up polling.
+ * The exception is a caller that drives the ticks itself and asks to wait
+ * (`wait`), or asks for a reconcile inside the tick (`reconcile`).
  */
-type CaptureTickHook = (tickNumber: number) => Promise<void>;
+type CaptureTickHook = (
+  tickNumber: number,
+  options: { reconcile: boolean; wait: boolean },
+) => Promise<void>;
 let captureHook: CaptureTickHook | null = null;
 let tickCount = 0;
 
@@ -131,6 +180,11 @@ export function setCaptureTickHook(hook: CaptureTickHook | null): void {
  */
 type PollerResume = (text: string) => void;
 let resume: PollerResume | null = null;
+
+/** Whether a finished run will be handed back: by resume here, or by the worker's durable watch. */
+function followUpsOn(): boolean {
+  return resume !== null || underWorker();
+}
 
 function notifySafely(text: string, level: "info" | "warning" | "error"): void {
   try {
@@ -162,9 +216,7 @@ interface PollResultEntry {
  * and a rewritten block — used to leave no row behind at all. This is the audit
  * trail for work that advances between turns, with nobody watching.
  */
-function logTransition(payload: Record<string, unknown>): void {
-  const nbPath = getNotebookPath();
-  if (!nbPath) return;
+function logTransition(nbPath: string, payload: Record<string, unknown>): void {
   appendActivityEvent(path.dirname(nbPath), {
     timestamp: new Date().toISOString(),
     kind: "poll.transition",
@@ -257,21 +309,22 @@ async function isStillLive(block: TrackedBlock): Promise<{ live: boolean; state?
 }
 
 /** Say once, in the activity log and in the UI, that a live run left the notebook. */
-function announceMissingBlock(block: TrackedBlock, state: string | undefined): void {
-  const nbPath = getNotebookPath();
-  if (nbPath) {
-    appendActivityEvent(path.dirname(nbPath), {
-      timestamp: new Date().toISOString(),
-      kind: "poll.block_missing",
-      source: "galaxy-poller",
-      payload: {
-        blockKind: block.kind,
-        id: block.id,
-        label: block.label,
-        galaxyState: state ?? null,
-      },
-    });
-  }
+function announceMissingBlock(
+  nbPath: string,
+  block: TrackedBlock,
+  state: string | undefined,
+): void {
+  appendActivityEvent(path.dirname(nbPath), {
+    timestamp: new Date().toISOString(),
+    kind: "poll.block_missing",
+    source: "galaxy-poller",
+    payload: {
+      blockKind: block.kind,
+      id: block.id,
+      label: block.label,
+      galaxyState: state ?? null,
+    },
+  });
   if (notify) {
     notify(
       `⚠️ Galaxy: "${block.label}" is still ${state ?? "running"} on Galaxy, but its ${block.kind} block is gone from the notebook — Loom has stopped tracking it.`,
@@ -286,7 +339,11 @@ function announceMissingBlock(block: TrackedBlock, state: string | undefined): v
  * disappeared after its run finished is unremarkable: it costs one GET and
  * nothing else.
  */
-async function reportMissingBlocks(content: string): Promise<void> {
+async function reportMissingBlocks(
+  nbPath: string,
+  content: string,
+  current: () => boolean,
+): Promise<void> {
   if (trackedActive.size === 0) return;
   const present = new Set<string>();
   for (const inv of findInvocationBlocks(content)) {
@@ -308,6 +365,7 @@ async function reportMissingBlocks(content: string): Promise<void> {
       // unreachable id must not cost the others their check. A few attempts in,
       // stop asking -- the answer isn't coming.
       console.error(`[galaxy-poller] ${block.kind} ${block.id} liveness check failed:`, err);
+      if (!current()) return;
       const failures = (block.checkFailures ?? 0) + 1;
       if (failures >= MAX_MISSING_CHECK_ATTEMPTS) trackedActive.delete(key);
       else trackedActive.set(key, { ...block, checkFailures: failures });
@@ -315,8 +373,10 @@ async function reportMissingBlocks(content: string): Promise<void> {
     }
     // One verdict per id, either way: the block is gone, so there is nothing
     // left to re-examine. Recording it again re-arms the tracking.
+    // The answer came back to a different session's poller: its tracking isn't ours to touch.
+    if (!current()) return;
     trackedActive.delete(key);
-    if (result.live) announceMissingBlock(block, result.state);
+    if (result.live) announceMissingBlock(nbPath, block, result.state);
   }
 }
 
@@ -392,8 +452,7 @@ function jobFinishedToast(
 }
 
 /** The notebook as it is right now, or null if there isn't one to read. */
-async function readNotebookOrNull(): Promise<string | null> {
-  const nbPath = getNotebookPath();
+async function readNotebookOrNull(nbPath: string | null): Promise<string | null> {
   if (!nbPath) return null;
   try {
     return await readNotebook(nbPath);
@@ -413,7 +472,7 @@ function hasInProgressInvocations(content: string): boolean {
  * still running, so an idle notebook costs nothing beyond the scan the
  * invocation path already does.
  */
-async function tickJobs(nbPath: string, content: string): Promise<void> {
+async function tickJobs(nbPath: string, content: string, current: () => boolean): Promise<void> {
   const pending = findJobBlocks(content).filter((j) => j.status === "in_progress");
   if (pending.length === 0) return;
   const currentServer = getGalaxyConfig()?.url;
@@ -500,7 +559,7 @@ async function tickJobs(nbPath: string, content: string): Promise<void> {
     }
     await settle(event, "confirm");
 
-    logTransition({
+    logTransition(nbPath, {
       blockKind: "job",
       id: job.jobId,
       label,
@@ -510,7 +569,8 @@ async function tickJobs(nbPath: string, content: string): Promise<void> {
       galaxyState: state ?? null,
       lastPolledAt: polledAt,
     });
-    const willResume = resume !== null && isResumableOutcome(status);
+    if (!current()) continue;
+    const willResume = followUpsOn() && isResumableOutcome(status);
     notifySafely(...jobFinishedToast(status, label, state, willResume));
   }
 }
@@ -568,7 +628,7 @@ async function settleLeftovers(nbPath: string, content: string): Promise<void> {
     const landed = status === event.to && event.outcome !== "failing";
     await settle(event, landed ? "confirm" : "void");
     if (landed) {
-      logTransition({
+      logTransition(nbPath, {
         blockKind: event.kind,
         id: event.id,
         label: event.label,
@@ -648,9 +708,9 @@ function invocationHooks(nbPath: string): InvocationPersistHooks {
 }
 
 /** Run a poll tick now, or hand back the one already running. */
-function tick(): Promise<void> {
+function tick(options: PollOptions = {}): Promise<TickRun> {
   if (inFlightTick) return inFlightTick;
-  inFlightTick = runTick().finally(() => {
+  inFlightTick = runTick(options).finally(() => {
     inFlightTick = null;
   });
   return inFlightTick;
@@ -658,18 +718,87 @@ function tick(): Promise<void> {
 
 /**
  * Poll once and wait for it. Exported so a caller that wants fresh counters
- * right now doesn't have to sit out the interval.
+ * right now doesn't have to sit out the interval, and so a shell with no
+ * interval (the browser worker) can drive every tick itself.
  */
-export function pollGalaxyNow(): Promise<void> {
-  return tick();
+export async function pollGalaxyNow(options: PollOptions = {}): Promise<TickResult> {
+  // A tick already running was started without these asks: wait it out, then run one that has them.
+  if (options.awaitEnrichment || options.reconcile || options.recover) {
+    while (inFlightTick) await inFlightTick;
+  }
+  return tickResult(await tick(options));
 }
 
-async function runTick(): Promise<void> {
-  const tickNotebook = getNotebookPath();
+/** Resolves once no tick is running. */
+export async function pollerIdle(): Promise<void> {
+  while (inFlightTick) await inFlightTick;
+}
+
+async function tickResult(run: TickRun): Promise<TickResult> {
+  const result: TickResult = {
+    recordKey: run.recordKey,
+    transitions: run.transitions,
+    inProgress: 0,
+    pendingEnrichment: 0,
+    openSubmissions: 0,
+  };
+  const followUps = run.transitions.filter(followsUp).map(asFollowUp);
+  if (followUps.length > 0) result.resumePrompt = buildResumePrompt(followUps);
+  if (!run.recordKey) return result;
+  // What can't be read counts as still open, so a caller waiting for quiet doesn't stop on a fault.
   try {
+    const content = await readNotebook(run.recordKey);
+    const blocks = [...findJobBlocks(content), ...findInvocationBlocks(content)];
+    result.inProgress = blocks.filter((b) => b.status === "in_progress").length;
+    // What galaxy-enrich would still try: ended, not yet enriched, and on this server.
+    const server = getGalaxyConfig()?.url;
+    result.pendingEnrichment = server
+      ? blocks.filter(
+          (b) =>
+            b.status !== "in_progress" &&
+            b.enrichment === "pending" &&
+            sameGalaxyServer(b.galaxyServerUrl, server),
+        ).length
+      : 0;
+  } catch (err) {
+    // A record that's gone took its blocks with it; only a present one we couldn't read stays open.
+    if (await statNotebook(run.recordKey).catch(() => true)) {
+      console.error("[galaxy-poller] record not read for the tick result:", err);
+      result.inProgress = 1;
+    }
+  }
+  try {
+    const open = await submissionLedger().open(run.recordKey);
+    result.openSubmissions = open.filter((e) => !isClosedSubmission(e)).length;
+  } catch (err) {
+    console.error("[galaxy-poller] open submissions not read:", err);
+    result.openSubmissions = 1;
+  }
+  return result;
+}
+
+async function runTick(options: PollOptions): Promise<TickRun> {
+  // Everything this tick writes goes by this key, so a tick that outlives a
+  // session switch still lands in its own record.
+  const tickNotebook = getNotebookPath();
+  const tickGeneration = generation;
+  // Still this tick's to report if no session started since, or the one that did is on the same
+  // record: a replacement on the same notebook would never see these blocks in flight again.
+  const current = () =>
+    tickGeneration === generation || (tickNotebook !== null && getNotebookPath() === tickNotebook);
+  // Returned by reference, so the early returns below still carry what the finally delivers.
+  const run: TickRun = { recordKey: tickNotebook, transitions: [] };
+  try {
+    if (options.recover && tickNotebook) {
+      try {
+        await recoverSubmissions(tickNotebook);
+      } catch (err) {
+        console.error("[galaxy-poller] submission recovery failed:", err);
+      }
+    }
     // One read per tick, shared by everything below: what the notebook says is
     // in flight is the whole of the poller's worklist.
-    const content = await readNotebookOrNull();
+    const content = await readNotebookOrNull(tickNotebook);
     // Before the early returns below: a hook that only ran when the notebook
     // had in-flight blocks would be a hook that stops the moment the analysis
     // goes quiet, which is exactly when a panel still has to say something.
@@ -692,29 +821,35 @@ async function runTick(): Promise<void> {
       // The notebook itself is gone, so every block we were watching went with
       // it -- same silencing, one level up. An unreadable-but-present notebook
       // is a transient we say nothing about; an absent one is not.
-      const nbPath = getNotebookPath();
-      if (nbPath && !(await statNotebook(nbPath))) await reportMissingBlocks("");
-      return;
+      if (tickNotebook && !(await statNotebook(tickNotebook)) && current()) {
+        await reportMissingBlocks(tickNotebook, "", current);
+      }
+      return run;
     }
     if (tickNotebook) await settleLeftovers(tickNotebook, content);
-    trackActiveBlocks(content);
-    await reportMissingBlocks(content);
+    if (current()) {
+      trackActiveBlocks(content);
+      if (tickNotebook) await reportMissingBlocks(tickNotebook, content, current);
+    }
 
     // Tool runs are tracked separately from workflow invocations and are the
     // only thing advancing in a session that never invoked a workflow (#413).
-    if (tickNotebook) await tickJobs(tickNotebook, content);
+    if (tickNotebook) await tickJobs(tickNotebook, content, current);
 
     // Cheap path when nothing's in-flight: scan and return.
-    if (!hasInProgressInvocations(content)) return;
+    if (!tickNotebook || !hasInProgressInvocations(content)) {
+      return run;
+    }
     if (!getGalaxyConfig()) {
       // Credentials disappeared (user disconnected mid-session). Skip
       // this tick; if creds come back the next tick picks up.
-      return;
+      return run;
     }
     const result = await checkInvocations(
       undefined,
       undefined,
-      tickNotebook ? invocationHooks(tickNotebook) : undefined,
+      invocationHooks(tickNotebook),
+      tickNotebook,
     );
     // Fire a completion toast for any invocation that JUST reached a terminal
     // state this tick. The poller only checks blocks that were in_progress, so
@@ -724,7 +859,7 @@ async function runTick(): Promise<void> {
     // Not gated on `notify`: a headless shell has no toast to show but must
     // still hand the finished run back to the agent when auto-resume is on.
     if (Array.isArray(results)) {
-      const willResume = resume !== null;
+      const willResume = followUpsOn();
       for (const r of results) {
         const label = r.label || r.notebookAnchor || r.invocationId;
         // A row for what the block's status actually became, and only when it
@@ -732,7 +867,7 @@ async function runTick(): Promise<void> {
         // only for a transition that landed on disk, and a mid-flight failure
         // deliberately leaves the status where it was.
         if (r.autoAction && r.newStatus && r.newStatus !== r.priorStatus) {
-          logTransition({
+          logTransition(tickNotebook, {
             blockKind: "invocation",
             id: r.invocationId,
             label,
@@ -744,6 +879,7 @@ async function runTick(): Promise<void> {
             lastPolledAt: r.lastPolledAt ?? null,
           });
         }
+        if (!current()) continue;
         if (r.autoAction === "completed") {
           notifySafely(
             `✅ Galaxy: "${label}" finished (${r.jobSummary?.ok ?? 0} jobs ok)${willResume ? " — outputs require verification." : " — automatic follow-up disabled."}`,
@@ -775,39 +911,50 @@ async function runTick(): Promise<void> {
   } finally {
     // Batch jobs and workflows into one turn, even if a later poll request
     // failed. Queuing each finished import separately floods the agent.
-    // Deliver through whoever owns the poller now, not whoever started this
-    // tick: the transitions are already persisted, so a replacement session
-    // on the same notebook would never see them in_progress again. A stopped
-    // poller has no resume, and a different notebook's session isn't ours.
     //
     // What to deliver is what the ledger holds confirmed for this tick's
     // record, so a transition a dead tick persisted but never announced goes
-    // out with this one. Marked delivered whether or not anyone took it: the
-    // desktop has always dropped a follow-up nobody could receive.
-    if (tickNotebook) await deliverEvents(tickNotebook);
+    // out with this one. A tick whose session switched to another record
+    // leaves them there for the next tick on this one.
+    if (tickNotebook && current()) run.transitions = await deliverEvents(tickNotebook);
     tickCount++;
-    if (captureHook) {
+    // Reconcile and enrichment read whichever record is bound when they run, so a tick whose
+    // session moved to another record leaves them to that session's own ticks.
+    if (captureHook && current()) {
+      const wait = !!(options.awaitEnrichment || options.reconcile);
       try {
-        void captureHook(tickCount).catch((err) => {
-          console.error("[galaxy-poller] capture hook failed:", err);
-        });
+        const hook = captureHook(tickCount, { reconcile: !!options.reconcile, wait });
+        if (wait) await hook;
+        else {
+          void hook.catch((err) => {
+            console.error("[galaxy-poller] capture hook failed:", err);
+          });
+        }
       } catch (err) {
         console.error("[galaxy-poller] capture hook threw:", err);
       }
     }
   }
+  return run;
 }
 
-async function deliverEvents(tickNotebook: string): Promise<void> {
+/**
+ * Hand the record's undelivered events to the follow-up, and mark them delivered whether or not
+ * anyone took them: the desktop has always dropped a follow-up nobody could receive. (A tick whose
+ * session moved to another record doesn't get here; its events wait for that record's next tick,
+ * so reopening it later delivers them then.) Under the
+ * worker the durable watch delivers them and marks them itself, so they are only returned.
+ */
+async function deliverEvents(tickNotebook: string): Promise<TerminalEvent[]> {
   const ledger = submissionLedger();
   let events: TerminalEvent[];
   try {
     events = await ledger.undelivered(tickNotebook);
   } catch (err) {
     console.error("[galaxy-poller] undelivered events not read:", err);
-    return;
+    return [];
   }
-  if (events.length === 0) return;
+  if (events.length === 0 || underWorker()) return events;
   const followUps = events.filter(followsUp).map(asFollowUp);
   const deliver = resume;
   if (deliver && followUps.length > 0 && getNotebookPath() === tickNotebook) {
@@ -825,18 +972,23 @@ async function deliverEvents(tickNotebook: string): Promise<void> {
   } catch (err) {
     console.error("[galaxy-poller] events not marked delivered:", err);
   }
+  return events;
 }
 
 export function startGalaxyPoller(notifyFn?: PollerNotify, resumeFn?: PollerResume): void {
   stopGalaxyPoller();
+  generation++;
   // Capture the shell notifier (from the session_start ctx) so a completed
   // background invocation can toast the user. Refreshed each session_start.
   notify = notifyFn ?? null;
   // Null when auto-resume is disabled; the caller decides, so the poller
-  // stays free of config lookups on a 15s timer.
-  resume = resumeFn ?? null;
+  // stays free of config lookups on a 15s timer. Under the worker the durable
+  // watch is the one deliverer, since a follow-up queued here dies with a reload.
+  resume = underWorker() ? null : (resumeFn ?? null);
   announcedFailing.clear();
   trackedActive.clear();
+  // The watch is the worker's only clock: no interval, and no tick until it asks.
+  if (underWorker()) return;
   // Idempotent: a brain restart triggers a new session_start without
   // session_shutdown firing first in some failure modes. Stop any
   // pre-existing timer so we don't double-poll.

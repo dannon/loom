@@ -1001,8 +1001,9 @@ export async function checkInvocations(
   specificId: string | undefined,
   signal?: AbortSignal,
   hooks?: InvocationPersistHooks,
+  /** The record to check; the poller pins its tick's, so a switch mid-check can't redirect it. */
+  notebookPath: string | null = getNotebookPath(),
 ): Promise<CheckInvocationsResult> {
-  const notebookPath = getNotebookPath();
   if (!notebookPath) {
     return {
       content: [

@@ -263,6 +263,8 @@ const notices: Array<[string, string]> = [];
 const notes: HostNote[] = [];
 /** Calls the page record store made for its page, so the run can prove the record came from it. */
 const pageCalls = { GET: 0, PUT: 0 };
+/** GETs of the unfinished job behind d2, which the poll-guard turn reads twice. */
+let jobGets = 0;
 let host: PiHost;
 let harness: Harness;
 let conversation: Awaited<ReturnType<Harness["createConversation"]>>;
@@ -379,6 +381,14 @@ beforeAll(async () => {
         return json({ id: "d1", name: "d1.txt", history_id: "elsewhere", state: "ok" });
       }
       if (path === "/api/histories/hbig/contents") return json(BIG_HISTORY);
+      // A dataset whose creating job is still running, for the poll guard.
+      if (path === "/api/datasets/d2") {
+        return json({ id: "d2", name: "d2.txt", history_id: "h1", state: "running", creating_job: "j2" });
+      }
+      if (path === "/api/jobs/j2") {
+        jobGets++;
+        return json({ id: "j2", state: "running", tool_id: "cat1" });
+      }
       // Everything else, /api/version included: an unknown version refuses nothing and costs no wait.
       return json({});
     },
@@ -579,17 +589,24 @@ describe("Orbit on pi-host", () => {
   });
 
   /**
-   * Orbit launches work at session_start that nothing awaits: the poller's first tick and
-   * reconcile's follow-through, which the tick's capture hook also queues. Run both to completion
-   * so their reaches land in the phase that started them, not in whichever one the test has moved
-   * on to: followThrough enqueues synchronously, so a trailing enrich pass resolves after
-   * everything queued before it.
+   * Under the worker nothing polls on its own: no interval, no tick at session_start, and no
+   * reconcile there either. Drive one tick the way the durable watch will, wait for its
+   * enrichment (and reconcile, when asked), then for anything still queued, so the reaches land
+   * in the phase that started them.
    */
-  async function drain() {
+  async function drain(options: { reconcile?: boolean } = {}) {
     const { pollGalaxyNow } = await import("../../../../extensions/loom/galaxy-poller");
-    await pollGalaxyNow();
-    const { followThrough } = await import("../../../../extensions/loom/galaxy-reconcile");
-    await followThrough("enrich");
+    const { galaxyBackgroundIdle } = await import("../../../../extensions/loom/galaxy-reconcile");
+    const result = await pollGalaxyNow({ awaitEnrichment: true, ...options });
+    await galaxyBackgroundIdle();
+    // Nothing was submitted, so the tick has nothing to report or keep watching.
+    expect(result).toMatchObject({
+      transitions: [],
+      inProgress: 0,
+      pendingEnrichment: 0,
+      openSubmissions: 0,
+    });
+    return result;
   }
 
   it("starts the session and lets the greeting run settle", async () => {
@@ -605,14 +622,16 @@ describe("Orbit on pi-host", () => {
     // The greeting under in-process Galaxy tools: no connect tool to ask for.
     expect(JSON.stringify(requests[0].messages)).toContain("the Galaxy tools are ready to use");
     expect(JSON.stringify(requests[0].messages)).not.toContain("mcp__galaxy__connect");
-    await drain();
+    // No reconcile ran at session_start: the first tick after an attach is where it runs.
+    const { readReconcileState } = await import("../../../../extensions/loom/galaxy-provenance");
+    expect(await readReconcileState(tmp)).toBeNull();
+    await drain({ reconcile: true });
     // The record was served by the page store, not by a file store that happened to resolve
     // from a different key: the absence of record-store-file.ts reaches in the golden is the
     // other half of this.
     expect(pageCalls.GET).toBeGreaterThan(0);
-    // The session-start reconcile ran over the memory provenance fs: it wrote its cursor beside
-    // the record key without a .loom directory appearing on disk.
-    const { readReconcileState } = await import("../../../../extensions/loom/galaxy-provenance");
+    // That tick's reconcile ran over the memory provenance fs: it wrote its cursor beside the
+    // record key without a .loom directory appearing on disk.
     expect(await readReconcileState(tmp)).toMatchObject({ schema: 1 });
     expect(fs.existsSync(join(tmp, ".loom"))).toBe(false);
   });
@@ -788,6 +807,35 @@ describe("Orbit on pi-host", () => {
     const read = last.find((m) => m.toolName === "galaxy_read_output")!;
     expect(read.isError, textOf(read.content)).toBeFalsy();
     expect(textOf(read.content)).toContain(BIG_HISTORY[0].name);
+    // As in the guard turn: let the galaxy-tool status clear inside this phase.
+    await new Promise((r) => setTimeout(r, 3_100));
+  }, 15_000);
+
+  it("refuses a repeated status read of an unfinished job at once, with no Galaxy request", async () => {
+    const results = () =>
+      conversation.context(ctx).then((c) => c.messages.filter((m) => m.role === "toolResult"));
+    const noticesBefore = notices.length;
+    script.push(
+      () => toolCall("get_job_details", { dataset_id: "d2" }, "w1"),
+      () => toolCall("get_job_details", { dataset_id: "d2" }, "w2"),
+      () => text("done"),
+    );
+    const started = Date.now();
+    const s = await host.submit("is the cat job done yet?");
+    await s!.wait(ctx);
+    await until(() => runs.settled >= 7);
+    // No two-minute wait in the brain: the watch is the worker's only clock.
+    expect(Date.now() - started).toBeLessThan(1_000);
+    const last = await results();
+    const first = last.find((m) => m.toolCallId === "w1")!;
+    expect(first.isError, textOf(first.content)).toBeFalsy();
+    expect(textOf(first.content)).toContain("the background monitor checks it without model calls");
+    const repeat = last.find((m) => m.toolCallId === "w2")!;
+    expect(repeat.isError).toBe(true);
+    expect(textOf(repeat.content)).toContain("No Galaxy request was sent");
+    expect(textOf(repeat.content)).not.toContain("Status wait interrupted");
+    expect(jobGets).toBe(1);
+    expect(notices.slice(noticesBefore)).toEqual([]);
     // As in the guard turn: let the galaxy-tool status clear inside this phase.
     await new Promise((r) => setTimeout(r, 3_100));
   }, 15_000);
