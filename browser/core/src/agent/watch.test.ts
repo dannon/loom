@@ -17,12 +17,6 @@ import {
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { describe, expect, it } from "vitest";
 
-import {
-  DATASET_TERMINAL_STATES,
-  INVOCATION_FINISHED_STATES,
-  JOB_SETTLED_STATES,
-} from "@galaxyproject/galaxy-ops/browser";
-
 import { FollowUps } from "./documents";
 import { DEFAULT_BRAND, followUpMark } from "./brand";
 
@@ -105,6 +99,18 @@ describe("watchedFrom", () => {
     }
   });
 });
+
+// galaxy-ops' settled states (src/terminal-states.ts), which it keeps internal.
+const JOB_SETTLED_STATES = ["ok", "skipped", "stopped", "error", "failed", "deleted"];
+const DATASET_TERMINAL_STATES = [
+  "ok",
+  "empty",
+  "error",
+  "deferred",
+  "discarded",
+  "failed_metadata",
+];
+const INVOCATION_FINISHED_STATES = ["cancelled", "failed", "completed"];
 
 describe("what a settled state amounts to", () => {
   it("settles exactly where Galaxy and galaxy-ops call a state final, and at a paused dataset", () => {
