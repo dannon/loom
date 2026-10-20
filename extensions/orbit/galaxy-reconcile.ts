@@ -55,7 +55,7 @@ import {
   type JobYaml,
 } from "./galaxy-job-block";
 import { findGalaxyPageBlocks } from "./galaxy-page-binding";
-import { pollGalaxyNow, setCaptureTickHook } from "./galaxy-poller";
+import { pollerIdle, pollGalaxyNow, setCaptureTickHook } from "./galaxy-poller";
 import {
   UNKNOWN,
   ensureAttemptRecord,
@@ -89,6 +89,7 @@ import {
   type SubmissionEntry,
 } from "./submission-ledger";
 import { ulid } from "./ulid";
+import { capabilityProfile } from "../../shared/capability-profile.js";
 
 /**
  * Every 20th poller tick: five minutes at the poller's 15 s cadence. A reconcile
@@ -879,9 +880,27 @@ export async function runReconcile(
     if (closed.length > 0) result.lostResponses = closed;
   }
 
-  if (result.terminalSeen > 0) void pollGalaxyNow();
+  if (result.terminalSeen > 0) {
+    try {
+      pollWake();
+    } catch (err) {
+      console.error("[reconcile] poll wake failed:", err);
+    }
+  }
   const { newestCreate: _newest, ...rest } = result;
   return rest;
+}
+
+const pollNow = () => void pollGalaxyNow();
+let pollWake: () => void = pollNow;
+
+/**
+ * How a reconcile that saw a run end asks for a poll. By default it polls
+ * right away; the browser worker installs a wake for the conversation's
+ * durable watch instead, so no reconcile path polls outside it.
+ */
+export function setPollWake(wake: (() => void) | null): void {
+  pollWake = wake ?? pollNow;
 }
 
 /**
@@ -943,6 +962,19 @@ function enqueue<T>(work: () => Promise<T>): Promise<T> {
   });
   queue = run.catch(() => undefined);
   return run;
+}
+
+/**
+ * Resolves once no poll tick is running and nothing is queued here. A drain,
+ * not a fence: work that starts after it resolves still can, and the poller's
+ * generation is what keeps such a tick off the next session's state.
+ */
+export async function galaxyBackgroundIdle(): Promise<void> {
+  for (;;) {
+    await pollerIdle();
+    if (queued === 0) return;
+    await queue;
+  }
 }
 
 export function followThrough(trigger: ReconcileTrigger | "enrich"): Promise<{
@@ -1023,6 +1055,10 @@ export function registerCaptureFollowThrough(pi: ExtensionAPI): void {
   pi.on("session_start", async () => {
     resetEnrichmentState();
     resetReconcileState();
+    // Under the worker every switch, reset and resume is a session_start, and
+    // a pass queued here would read whichever record is installed when it
+    // runs. The watch's first tick after an attach reconciles instead.
+    if (capabilityProfile().ui === "worker") return;
     // Not awaited: startup does not wait on Galaxy. `/reconcile` queues
     // behind it, so a person asking right away sees its result.
     void followThrough("session_start").catch((err) => {
@@ -1030,10 +1066,13 @@ export function registerCaptureFollowThrough(pi: ExtensionAPI): void {
     });
   });
 
-  setCaptureTickHook(async (tickNumber) => {
+  setCaptureTickHook(async (tickNumber, { reconcile, wait }) => {
     // A tick never piles onto work already queued; the next one will come.
-    if (queued > 0) return;
-    await followThrough(tickNumber % RECONCILE_EVERY_N_TICKS === 0 ? "tick" : "enrich");
+    // One that waits for it is driven by a caller who wants this tick's answer.
+    if (queued > 0 && !wait) return;
+    await followThrough(
+      reconcile || tickNumber % RECONCILE_EVERY_N_TICKS === 0 ? "tick" : "enrich",
+    );
   });
 
   pi.registerCommand("reconcile", {
