@@ -268,12 +268,13 @@ describe("destructive gate pause and recovery", () => {
     const { boot: first, conversationId, ask } = await bootToPendingAsk(base);
     first.send({ cmd: "close" });
     await first.next("close-called");
-    // close() joins invocations, and this one is parked in the gate's confirm: close cannot finish
-    // until the ask is settled, and nothing withdraws the ask on its own (decision D).
+    // close() joins invocations, and this one is parked in the gate's confirm. The gate hands the
+    // confirm the invocation signal (D), so close withdraws the ask; close still can't finish until
+    // the host settles it, which it does by rejecting -- the close-then-reject contract.
+    await first.next("ask-withdrawn", (w) => w.id === ask.id);
     await sleep(500);
     const closedBeforeReject = first.of("closed").length > 0;
     expect(closedBeforeReject).toBe(false);
-    expect(first.of("ask-withdrawn")).toEqual([]);
     const abortedBeforeReject = first.of("call-signal-aborted").length > 0;
     expect(abortedBeforeReject).toBe(true);
     first.send({ cmd: "answer", id: ask.id, outcome: "reject", message: "paused" });
@@ -395,12 +396,11 @@ describe("destructive gate pause and recovery", () => {
     120_000,
   );
 
-  it("D: the gate's confirm carries no signal, so closing the harness does not withdraw it", async () => {
+  it("D: the gate's confirm carries the invocation signal, so closing the harness withdraws it", async () => {
     const base = experiment();
     const { boot: first, ask } = await bootToPendingAsk(base);
-    // pi-host's ask is handed the confirm's opts.signal; the gate passes {}.
-    expect(ask.hasSignal).toBe(false);
-    // The signal the gate could pass is there: ctx.signal on tool_call is the invocation's.
+    // pi-host's ask is handed the confirm's opts.signal, which the gate fills from ctx.signal.
+    expect(ask.hasSignal).toBe(true);
     const signal = await first.next("call-signal", (s) => s.toolCallId === DELETE_CALL_ID);
     expect(signal).toMatchObject({ present: true, aborted: false });
     first.send({ cmd: "close" });
@@ -417,7 +417,8 @@ describe("destructive gate pause and recovery", () => {
       closedWhileAskPending: first.of("closed").length > 0,
     };
     expect(aborted).toBeDefined();
-    expect(first.of("ask-withdrawn")).toEqual([]);
+    expect(first.of("ask-withdrawn").map((w) => w.id)).toEqual([ask.id]);
+    // Withdrawal tells the host; settling the ask is still the host's job.
     expect(first.of("closed")).toEqual([]);
     first.send({ cmd: "answer", id: ask.id, outcome: "reject", message: "paused" });
     await first.next("closed");
