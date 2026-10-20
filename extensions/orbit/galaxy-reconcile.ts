@@ -67,6 +67,7 @@ import {
 } from "./galaxy-provenance";
 import { idToken } from "./galaxy-submission";
 import { UNATTRIBUTED } from "./galaxy-submission-capture";
+import { GALAXY_DEADLINE_MS } from "./galaxy-tool-wrap";
 import type { HarnessBlockFields } from "./harness-block-fields";
 import {
   NotebookChangedError,
@@ -81,6 +82,12 @@ import {
 } from "./notebook-writer";
 import { evaluateRegistryAttempts, type EvaluationPass } from "./registry-evaluator";
 import { getNotebookPath } from "./state";
+import {
+  isAwaitingAnswer,
+  submissionLedger,
+  type LedgerHistory,
+  type SubmissionEntry,
+} from "./submission-ledger";
 import { ulid } from "./ulid";
 
 /**
@@ -107,6 +114,13 @@ export const INVOCATION_LISTING_LIMIT = 100;
 const STAMP_MARGIN_MS = 10 * 60_000;
 /** Direct existence checks per run, so a long notebook costs a bounded number of GETs. */
 const MAX_VERIFY_PER_RUN = 100;
+/**
+ * A submission whose answer never came back widens the window to its dispatch time, less this:
+ * the time is our clock, and the run's create_time is Galaxy's.
+ */
+const LEDGER_SKEW_MS = 5 * 60_000;
+
+export type HistorySource = "submission" | "ledger" | "page_binding";
 
 export type ReconcileTrigger = "session_start" | "tick" | "command" | "page_pull" | "page_resume";
 
@@ -170,7 +184,8 @@ export function boundHistoryId(
   content: string,
   serverUrl: string,
   records: readonly AttemptRecord[],
-): { historyId: string; source: "submission" | "page_binding" } | null {
+  ledger?: LedgerHistory,
+): { historyId: string; source: HistorySource } | null {
   const submitted = records
     .filter((r) => r.origin === "submission" && !r.fixture)
     .filter((r) => r.history_id !== UNKNOWN && isGalaxyEncodedId(r.history_id))
@@ -178,6 +193,11 @@ export function boundHistoryId(
     .sort((a, b) => a.created_at.localeCompare(b.created_at))
     .pop();
   if (submitted) return { historyId: submitted.history_id, source: "submission" };
+  // Where the harness last sent a submission, whether or not it got to record it: still the
+  // harness's own observation, which is more than the notebook's binding text is.
+  if (ledger && isGalaxyEncodedId(ledger.historyId) && sameGalaxyServer(ledger.server, serverUrl)) {
+    return { historyId: ledger.historyId, source: "ledger" };
+  }
   const binding = findGalaxyPageBlocks(content)
     .filter((b) => sameGalaxyServer(b.galaxyServerUrl, serverUrl))
     .pop();
@@ -230,6 +250,8 @@ export interface ReconcileResult {
   skipped?: string;
   /** Standalone jobs were held back; the cursor stays where it was. */
   incomplete?: boolean;
+  /** Submissions whose answer never came back, looked for in this pass and closed. */
+  lostResponses?: { callId: string; toolName: string; dispatchedAt: string }[];
   error?: string;
 }
 
@@ -435,7 +457,7 @@ export async function reconcile(
   options: {
     trigger: ReconcileTrigger;
     deps?: Partial<ReconcileDeps>;
-    historySource?: "submission" | "page_binding";
+    historySource?: HistorySource;
   },
 ): Promise<ReconcileResult & { newestCreate: number }> {
   const deps: ReconcileDeps = { ...defaultDeps, ...options.deps };
@@ -754,7 +776,20 @@ export async function runReconcile(
     return { ...empty, skipped: "notebook unreadable" };
   }
   const records = await listAttemptRecords(dir);
-  let bound = boundHistoryId(content, server, records);
+  const ledger = submissionLedger();
+  // Past the call's own deadline, so the model was told it timed out and the listing would show it.
+  const settled = (e: SubmissionEntry) => Date.parse(e.dispatchedAt) + GALAXY_DEADLINE_MS < now;
+  // Sent, never answered, and not still on its way in this process: the only submissions left
+  // for reconcile to find. One that is merely slow moves nothing, until its deadline has passed.
+  const lost = (await ledger.open(nbPath)).filter(
+    (e) => e.state === "dispatched" && (settled(e) || !isAwaitingAnswer(e.callId)),
+  );
+  // Galaxy's confirmed history first; failing that, where an unanswered call was sent.
+  const sentTo = [...lost].reverse().find((e) => e.historyId);
+  const ledgerHistory =
+    (await ledger.lastHistory(nbPath)) ??
+    (sentTo?.historyId ? { historyId: sentTo.historyId, server: sentTo.server } : undefined);
+  let bound = boundHistoryId(content, server, records, ledgerHistory);
 
   let state: ReconcileState | null = await readReconcileState(dir);
   let stateDirty = false;
@@ -799,13 +834,20 @@ export async function runReconcile(
             { ...defaultDeps, ...deps },
             trigger,
           );
+    // Nowhere to look, now or later: close them rather than hold them open forever.
+    await closeLost(dir, lost.filter(settled), null, trigger);
     return { ...empty, unverified, skipped: "no history is bound to this analysis yet" };
   }
 
   const key = `${server}|${historyId}`;
   const start = Date.parse(state.analysis_started_at);
   const stamp = Date.parse(state.histories[key]?.stamp ?? "");
-  const sinceMs = Number.isFinite(stamp) ? Math.max(start, stamp - STAMP_MARGIN_MS) : start;
+  let sinceMs = Number.isFinite(stamp) ? Math.max(start, stamp - STAMP_MARGIN_MS) : start;
+  for (const entry of lost) {
+    if (entry.historyId && entry.historyId !== historyId) continue;
+    const sent = Date.parse(entry.dispatchedAt);
+    if (Number.isFinite(sent)) sinceMs = Math.min(sinceMs, sent - LEDGER_SKEW_MS);
+  }
 
   let result: ReconcileResult & { newestCreate: number };
   try {
@@ -832,9 +874,57 @@ export async function runReconcile(
     }
   }
 
+  if (!result.error && !result.incomplete) {
+    const closed = await closeLost(dir, lost.filter(settled), historyId, trigger);
+    if (closed.length > 0) result.lostResponses = closed;
+  }
+
   if (result.terminalSeen > 0) void pollGalaxyNow();
   const { newestCreate: _newest, ...rest } = result;
   return rest;
+}
+
+/**
+ * Close the ledger entries a completed pass looked for. Reconcile finds runs, not calls, so it
+ * never claims which run was whose: whatever it found is written as found on Galaxy, and the row
+ * names the call that went unanswered.
+ */
+async function closeLost(
+  dir: string,
+  entries: readonly SubmissionEntry[],
+  historyId: string | null,
+  trigger: ReconcileTrigger,
+): Promise<{ callId: string; toolName: string; dispatchedAt: string }[]> {
+  const ledger = submissionLedger();
+  const closed: { callId: string; toolName: string; dispatchedAt: string }[] = [];
+  for (const entry of entries) {
+    const note = !historyId
+      ? "no history to look in"
+      : entry.historyId && entry.historyId !== historyId
+        ? `sent to history ${entry.historyId}; reconcile looks in ${historyId}`
+        : `looked for in history ${historyId}`;
+    try {
+      await ledger.reconciled(entry.callId, note);
+    } catch (err) {
+      console.error("[reconcile] ledger entry not closed:", err);
+      continue;
+    }
+    record(dir, "reconcile.lost_response", {
+      call_id: entry.callId,
+      tool: entry.toolName,
+      attempt_id: entry.attemptId,
+      dispatched_at: entry.dispatchedAt,
+      history_id: historyId,
+      trigger,
+      note,
+    });
+    closed.push({
+      callId: entry.callId,
+      toolName: entry.toolName,
+      dispatchedAt: entry.dispatchedAt,
+    });
+  }
+  return closed;
 }
 
 /**
@@ -896,6 +986,12 @@ function summarize(result: {
         : `Every run in history ${r.historyId} since ${r.since} is in the notebook.`,
     );
     if (r.error) lines.push(`Some jobs were held back: ${r.error}`);
+  }
+  if (r?.lostResponses?.length) {
+    const calls = r.lostResponses.map((c) => `${c.toolName} at ${c.dispatchedAt}`).join(", ");
+    lines.push(
+      `Looked for ${r.lostResponses.length} submission(s) whose answer never came back: ${calls}.`,
+    );
   }
   if (r && r.unverified.length > 0) {
     lines.push(

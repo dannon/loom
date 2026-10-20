@@ -16,6 +16,8 @@ import { galaxyOpsContext } from "./galaxy-api";
 import { GALAXY_DEADLINE_TEXT, kindOfEnvelope, type GalaxyCallKind } from "./galaxy-failure";
 import { record, spillPreview } from "./galaxy-output";
 import { galaxyOutputStore } from "./galaxy-output-store";
+import { isSubmissionTool, resolveResultPayload } from "./galaxy-submission";
+import { sendSubmission, type SubmissionAnswer } from "./submission-ledger";
 import type { GalaxyTool } from "./galaxy-tool-source";
 
 /** pi's MCP client gave every request five minutes; so does every in-process op. */
@@ -185,8 +187,19 @@ export function wrapGalaxyTool(def: GalaxyTool, opts: { deadlineMs?: number } = 
     ...def,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const started = Date.now();
-      const outcome = await withDeadline(signal, opts.deadlineMs ?? GALAXY_DEADLINE_MS, (joined) =>
-        Promise.resolve(def.execute(toolCallId, params, joined, onUpdate, ctx)),
+      const outcome = await withDeadline(
+        signal,
+        opts.deadlineMs ?? GALAXY_DEADLINE_MS,
+        (joined) => {
+          const send = () =>
+            Promise.resolve(def.execute(toolCallId, params, joined, onUpdate, ctx));
+          if (!isSubmissionTool(def.name)) return send();
+          const args = (params && typeof params === "object" ? params : {}) as Record<
+            string,
+            unknown
+          >;
+          return sendSubmission(toolCallId, def.name, args, send, extraAnswer, notSent);
+        },
       );
       const elapsedMs = Date.now() - started;
       if (outcome.timedOut) {
@@ -217,6 +230,20 @@ export function wrapGalaxyTool(def: GalaxyTool, opts: { deadlineMs?: number } = 
       };
     },
   };
+}
+
+/**
+ * An extra records no failure kind, so a failed one can't be told from a dropped one: its ledger
+ * entry stays open for reconcile rather than being closed on a guess.
+ */
+function extraAnswer(result: AgentToolResult<unknown>): SubmissionAnswer {
+  return result.isError
+    ? { kind: "unknown" }
+    : { kind: "answered", resolved: resolveResultPayload(result) };
+}
+
+function notSent(text: string): AgentToolResult<unknown> {
+  return { content: [{ type: "text", text }], details: {}, isError: true };
 }
 
 /** `outputSchema` for every in-process Galaxy tool: the envelope, as runWithEnvelope builds it. */
