@@ -6,6 +6,8 @@ export interface CapabilityProfile {
   /** pi's MCP layer, for the servers Orbit brings (brc-analytics). */
   mcpServers: boolean;
   ui: "desktop" | "terminal" | "worker";
+  /** An in-brain Python runtime (the browser's Pyodide); no Node shell has one. */
+  python?: boolean;
 }
 
 export function profileFromEnv(env?: Record<string, string | undefined>): CapabilityProfile;

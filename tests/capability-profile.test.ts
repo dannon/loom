@@ -15,6 +15,7 @@ describe("profileFromEnv", () => {
       network: true,
       mcpServers: true,
       ui: "terminal",
+      python: false,
     });
   });
 
@@ -61,6 +62,14 @@ describe("capabilityProfile", () => {
     expect(installedCapabilityProfile()).toBe(capabilityProfile());
     setCapabilityProfile(null);
     expect(installedCapabilityProfile()).toBeNull();
+  });
+
+  it("gives a profile without python none, and keeps one that says so", () => {
+    const { python: _, ...older } = profileFromEnv({});
+    setCapabilityProfile(older);
+    expect(capabilityProfile().python).toBe(false);
+    setCapabilityProfile({ ...older, python: true });
+    expect(capabilityProfile().python).toBe(true);
   });
 
   it("falls back to env once the profile is cleared", () => {

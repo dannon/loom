@@ -59,6 +59,7 @@ import {
   readBundledRepoFile,
 } from "./vendor-skills";
 import { GTN_API, gtnPageText, gtnTopics, gtnTutorials, gtnUrl } from "../../shared/gtn.js";
+import { enaRuns, RUNS_DEFAULT, RUNS_MAX } from "./ena";
 import type { GalaxyToolFamily } from "../../shared/galaxy-tool-family.js";
 
 /**
@@ -280,6 +281,43 @@ analyses in Galaxy.`,
         return new Text("❌ GTN fetch failed");
       }
       return new Text(`📖 Fetched GTN tutorial (${d?.length || 0} chars)`);
+    },
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Tool: Look up an ENA/SRA accession's sequencing runs and FASTQ URLs
+  // ─────────────────────────────────────────────────────────────────────────────
+  pi.registerTool({
+    name: "ena_runs",
+    label: "ENA Runs",
+    description:
+      "Look up the sequencing runs ENA holds under an accession, with their exact " +
+      "FASTQ download URLs, checksums, sizes and whether each run is paired or single " +
+      "end. Takes a run (SRR/ERR/DRR), experiment (SRX/ERX/DRX), sample (SAM*/SRS), " +
+      "study (PRJ*/SRP) or submission accession. ENA's FASTQ paths cannot be derived " +
+      "from an accession - always read them here rather than constructing or guessing " +
+      "a URL, and never assume a run is paired without checking.",
+    parameters: Type.Object({
+      accession: Type.String({
+        description: "ENA or SRA accession, e.g. 'SRR390728' or 'PRJNA630239'",
+      }),
+      limit: Type.Optional(
+        Type.Integer({
+          description: `Runs to return; defaults to ${RUNS_DEFAULT}, at most ${RUNS_MAX}.`,
+        }),
+      ),
+    }),
+    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+      const answer = await enaRuns(params, signal);
+      return {
+        content: [{ type: "text", text: answer.text }],
+        details: answer.isError ? { error: true } : { count: answer.count },
+      };
+    },
+    renderResult: (result) => {
+      const d = result.details as { count?: number; error?: boolean } | undefined;
+      if (d?.error) return new Text("❌ ENA lookup failed");
+      return new Text(`🧬 ${d?.count || 0} ENA runs`);
     },
   });
 
