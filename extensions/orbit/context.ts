@@ -13,6 +13,7 @@ import { recordStore } from "./record-store";
 import { isTeamDispatchEnabled } from "./teams/is-enabled";
 import { isSessionIndexEnabled } from "./session-index/is-enabled";
 import { loadConfig } from "./config";
+import { buildReadOnlyGalaxyBlock } from "./galaxy-grant";
 import { listEnabledSkillRepos, type ConfiguredSkillRepo } from "./skills";
 import { isBundledRepo } from "./vendor-skills";
 import {
@@ -831,6 +832,7 @@ export function setupContextInjection(pi: ExtensionAPI): void {
       buildChatFormattingBlock(),
       buildNotebookWriteBlock(),
       buildExecutionModeBlock(),
+      buildReadOnlyGalaxyBlock(),
       buildGalaxyContextBlock({ legacyTranscript }),
       galaxyRecoveryGuidance(galaxyToolFamily()),
       galaxyPollGuidance(galaxyToolFamily()),

@@ -28,6 +28,9 @@ import { isDesktopShell, readEnv } from "./orbit-env.js";
  * @property {"desktop" | "terminal" | "worker"} ui the surface a human answers prompts on
  * @property {boolean} [python] an in-brain Python runtime (the browser's Pyodide), apart from
  *   whatever the local shell offers; no Node shell has one
+ * @property {"read" | "write"} [galaxy] whether the brain may change Galaxy. Under "read" it
+ *   registers no tool that writes Galaxy or the analysis record. Every Node shell writes; a shell
+ *   with a local shell couldn't hold to "read" anyway, since bash can reach Galaxy itself.
  */
 
 /**
@@ -43,6 +46,7 @@ export function profileFromEnv(env = process.env) {
     mcpServers: true,
     ui: isDesktopShell(env) ? "desktop" : "terminal",
     python: false,
+    galaxy: "write",
   };
 }
 
@@ -55,7 +59,7 @@ let installed = null;
 export function setCapabilityProfile(profile) {
   // A shell that predates a field gets the Node shells' value for it, so adding one changes no
   // existing caller.
-  installed = profile ? { python: false, ...profile } : null;
+  installed = profile ? { python: false, galaxy: "write", ...profile } : null;
 }
 
 /**

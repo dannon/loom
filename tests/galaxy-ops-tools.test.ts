@@ -18,6 +18,7 @@ import {
   renderOperation,
   snake,
   toolFromOperation,
+  type GalaxyExtra,
 } from "../extensions/orbit/galaxy-ops-tools";
 import { resetGalaxyOpsVersion, setGalaxyTransport } from "../extensions/orbit/galaxy-api";
 import {
@@ -349,11 +350,12 @@ describe("running an operation", () => {
 
 describe("the default source", () => {
   const bare = () => setCapabilityProfile(profileFromEnv({}));
-  const stub = (name: string): GalaxyTool => ({
+  const stub = (name: string): GalaxyExtra => ({
     name,
     label: name,
     description: `stub ${name}`,
     parameters: Type.Object({}),
+    annotations: { readOnlyHint: true },
     execute: async () => ({ content: [{ type: "text", text: "{}" }], details: {} }),
   });
 
