@@ -1,0 +1,23 @@
+{
+  "name": "@galaxyproject/orbit-hosted",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Step-0 spike for the hosted Orbit service: Postgres pi-durable Storage, pg-boss, boot timing and recovery experiments.",
+  "scripts": {
+    "test:unit": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "pg": "8.23.1",
+    "pg-boss": "12.36.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-durable": "https://github.com/guerler/pi/releases/download/durable-v1.0.4-olit.2/earendil-works-pi-durable-1.0.4-olit.2.tgz",
+    "@types/node": "^22.9.0",
+    "@types/pg": "^8.15.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.16"
+  }
+}
