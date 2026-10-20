@@ -8,6 +8,8 @@ export interface CapabilityProfile {
   ui: "desktop" | "terminal" | "worker";
   /** An in-brain Python runtime (the browser's Pyodide); no Node shell has one. */
   python?: boolean;
+  /** Whether the brain may change Galaxy; "read" withholds every Galaxy and record writer. */
+  galaxy?: "read" | "write";
 }
 
 export function profileFromEnv(env?: Record<string, string | undefined>): CapabilityProfile;

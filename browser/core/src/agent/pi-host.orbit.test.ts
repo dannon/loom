@@ -300,6 +300,7 @@ const stub = (name: string) => ({
   label: name,
   description: `stub ${name}`,
   parameters: Type.Object({}, { additionalProperties: true }),
+  annotations: { readOnlyHint: name !== "upload_file" },
   execute: async () => ({ content: [{ type: "text" as const, text: "{}" }], details: {} }),
 });
 
@@ -821,5 +822,41 @@ describe("Orbit on pi-host", () => {
     await expect(JSON.stringify(golden(), null, 2) + "\n").toMatchFileSnapshot(
       "./pi-host.orbit.golden.json",
     );
+  });
+});
+
+// Last, on its own host: it swaps the profile and the registered family, and puts both back.
+describe("Orbit on pi-host under a read-only grant", () => {
+  it("registers the 33 read-only Galaxy tools and none of Orbit's writers", async () => {
+    const loom = await import("../../../../extensions/loom/index");
+    const { setCapabilityProfile } = await import("../../../../shared/capability-profile.js");
+    const source = await import("../../../../extensions/loom/galaxy-tool-source");
+    const { createGalaxyOpsToolSource } =
+      await import("../../../../extensions/loom/galaxy-ops-tools");
+    const { ORBIT_WRITING_TOOLS } = await import("../../../../extensions/loom/galaxy-grant");
+    const install = () =>
+      source.setGalaxyToolSource(createGalaxyOpsToolSource({ extras: EXTRAS.map(stub) }));
+    setCapabilityProfile({ ...PROFILE, galaxy: "read" });
+    install();
+    try {
+      const readHost = createPiHost({ name: "orbit-read", cwd: tmp, ui: { notify: () => {} } });
+      loom.default(readHost.api);
+      const galaxy = source.registeredGalaxyTools();
+      for (const tool of galaxy) expect(tool.annotations?.readOnlyHint, tool.name).toBe(true);
+      // 29 read ops of the browser entry's 42, download_dataset and recommend_biocontainer
+      // (upload_file is a write extra), and the two job bridges; galaxy_read_output beside them.
+      expect(galaxy.map((t) => t.name).filter((n) => n !== "galaxy_read_output")).toHaveLength(33);
+      expect(galaxy.map((t) => t.name)).toContain("galaxy_read_output");
+      // Orbit's own 16 under write, less the record writers this profile registers: the two
+      // invocation checks, both record tools, loom_propose and four of the five notebook tools.
+      const family = new Set(galaxy.map((t) => t.name));
+      const own = readHost.tools.filter((n) => !family.has(n));
+      expect(own).toHaveLength(16 - 9);
+      for (const name of ORBIT_WRITING_TOOLS) expect(own, name).not.toContain(name);
+    } finally {
+      setCapabilityProfile(PROFILE);
+      install();
+      source.registerGalaxyTools({ registerTool: () => undefined } as never);
+    }
   });
 });

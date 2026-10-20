@@ -291,9 +291,12 @@ function bridgeTool(bridge: GalaxyBridge, policy: GalaxyOpPolicy | undefined): G
   });
 }
 
+/** A shell's extra must say whether it writes, so a read-only launch can tell (galaxy-grant.ts). */
+export type GalaxyExtra = GalaxyTool & { annotations: { readOnlyHint: boolean } };
+
 export interface GalaxyOpsToolSourceOptions {
   /** Tools the shell supplies because its galaxy-ops entry lacks them; appended as given. */
-  extras?: readonly GalaxyTool[];
+  extras?: readonly GalaxyExtra[];
   policies?: Record<string, GalaxyOpPolicy>;
 }
 

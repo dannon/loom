@@ -9,6 +9,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPlanTools } from "./tools";
+import { withholdingWriters } from "./galaxy-grant";
 import { registerGalaxyUploadTool } from "./galaxy-upload";
 import { registerNotebookSyncTools } from "./tools-sync";
 import { registerSyncCommand } from "./sync-command";
@@ -213,12 +214,15 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   }
   // ── end capture, part two ─────────────────────────────────────────────────
 
-  registerPlanTools(pi, family);
+  // A read-only launch writes neither Galaxy nor the record, so these registrars lose their
+  // writers there.
+  const writerPi = withholdingWriters(pi);
+  registerPlanTools(writerPi, family);
   // Uploads a LOCAL file; without a file surface there is nothing to upload.
   if (profile.files) {
-    registerGalaxyUploadTool(pi, family);
+    registerGalaxyUploadTool(writerPi, family);
   }
-  registerNotebookSyncTools(pi, family);
+  registerNotebookSyncTools(writerPi, family);
   registerSyncCommand(pi);
   registerSkillsCommand(pi);
   registerExecutionCommands(pi);
@@ -248,7 +252,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // ── Approval registry (#476): the model proposes with loom_propose; the user
   // approves with /approve (or revokes, or lists with /pending). The registry
   // itself is opened and closed by the session lifecycle.
-  registerProposalCommands(pi);
+  registerProposalCommands(writerPi);
   // ── end approval registry
   if (isTeamDispatchEnabled()) {
     registerTeamTools(pi);
