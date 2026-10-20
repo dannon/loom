@@ -885,7 +885,7 @@ galaxy_invocation_check_all. Errors if the invocation isn't recorded in the note
 // Internal: shared poll loop for the two check tools
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface CheckResultEntry {
+export interface CheckResultEntry {
   invocationId: string;
   notebookAnchor: string;
   label: string;
@@ -981,6 +981,17 @@ export function isInvocationLive(inv: InvocationDetail): boolean {
   return rollUpInvocationJobs(inv).activeJobs > 0;
 }
 
+/**
+ * The poller's hold on the persist step: told what this check is about to write before it writes
+ * it, and what landed after. The model's own check tools pass none, so their transitions are
+ * never announced as follow-ups -- the model already saw them.
+ */
+export interface InvocationPersistHooks {
+  before(results: readonly CheckResultEntry[]): Promise<void>;
+  /** Not called when the write threw: what landed is unknown, and the next tick finds out. */
+  after(landed: { applied: ReadonlySet<string>; transitioned: ReadonlySet<string> }): Promise<void>;
+}
+
 interface CheckInvocationsResult {
   content: { type: "text"; text: string }[];
   details: Record<string, unknown>;
@@ -989,6 +1000,7 @@ interface CheckInvocationsResult {
 export async function checkInvocations(
   specificId: string | undefined,
   signal?: AbortSignal,
+  hooks?: InvocationPersistHooks,
 ): Promise<CheckInvocationsResult> {
   const notebookPath = getNotebookPath();
   if (!notebookPath) {
@@ -1225,9 +1237,11 @@ export async function checkInvocations(
   // rename fails the stamp check and is retried against fresh content rather
   // than silently overwriting it.
   if (updates.length > 0) {
+    await hooks?.before(results);
     const { applied, transitioned } = await withNotebookLock(notebookPath, () =>
       persistInvocationUpdates(notebookPath, updates),
     );
+    await hooks?.after({ applied, transitioned });
     // A transition we didn't actually record isn't news. The poller turns
     // "completed"/"failed" straight into a user-facing toast, so leaving the
     // flag on a block that was deleted mid-poll — or that another poller had
