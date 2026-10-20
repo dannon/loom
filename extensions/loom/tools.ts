@@ -334,7 +334,7 @@ relevant, and a wrong path answers with the entry points that do exist.`,
       // Checked before the read, not after a miss, because the bundled tree now
       // holds a whole skills mirror and would answer for paths that belong to it.
       if (params.repo === VENDOR_REPO_NAME && !findSkillRepo(VENDOR_REPO_NAME)) {
-        const res = readBundledRepoFile({ name: VENDOR_REPO_NAME }, cleanPath);
+        const res = await readBundledRepoFile({ name: VENDOR_REPO_NAME }, cleanPath);
         if (res.ok) {
           return {
             content: [{ type: "text", text: res.text }],
@@ -385,7 +385,7 @@ relevant, and a wrong path answers with the entry points that do exist.`,
       // -- a packaging regression, a half-finished install -- falling through to
       // the network is a worse day than usual, not a session with no skills.
       if (isBundledRepo(repo) && hasBundledContent(repo.name)) {
-        const res = readBundledRepoFile(repo, cleanPath);
+        const res = await readBundledRepoFile(repo, cleanPath);
         if (res.ok) {
           return {
             content: [{ type: "text", text: res.text }],
