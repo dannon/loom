@@ -1,0 +1,118 @@
+/**
+ * The browser's own tools as Orbit tools: Pyodide's run_python and the processes built on it,
+ * and the Galaxy extras the browser's galaxy-ops entry lacks (download_dataset, upload_file,
+ * recommend_biocontainer). Each keeps its browser implementation; what changes is that it's
+ * declared as a pi ToolDefinition, so Orbit's guards, capture and grant see it like any other.
+ *
+ * A browser tool reads its conversation's binding and earlier artifacts when it runs. They're
+ * resolved at execute time from the conversation the call runs in, never captured at
+ * registration, since one registration serves every conversation the worker attaches.
+ */
+import { Type } from "@earendil-works/pi-ai";
+import type { ConversationId } from "@earendil-works/pi-durable";
+
+import type { GalaxyExtra } from "../../../../../extensions/loom/galaxy-ops-tools";
+import { wrapGalaxyTool } from "../../../../../extensions/loom/galaxy-tool-wrap";
+import type { GalaxyTool } from "../../../../../extensions/loom/galaxy-tool-source";
+import {
+  claim,
+  fail,
+  Outcome,
+  rendered,
+  type AgentTool,
+  type Artifact,
+  type Binding,
+  type Capability,
+  type Context,
+} from "../tool";
+
+/** What a browser tool reads beyond its arguments, for the conversation a call runs in. */
+export interface ShellToolHost {
+  /** Galaxy clients and Python for one call, ended by its abort signal. */
+  clients(signal: AbortSignal | undefined): Pick<Context, "galaxy" | "web" | "ops" | "python">;
+  /** The conversation the call runs in: the bound one. */
+  conversation(): ConversationId | undefined;
+  binding(id: ConversationId): Promise<Binding>;
+  /** Keep a binding the tool changed (a record page it made, a history it switched to). */
+  rebind(id: ConversationId, binding: Binding): Promise<void>;
+  /** The artifacts the conversation's results carried, newest last. */
+  artifacts(id: ConversationId): Promise<Artifact[]>;
+}
+
+/** Every capability a tool needs. */
+export const needs = (tool: AgentTool): Capability[] =>
+  tool.requires ?? (tool.capability ? [tool.capability] : []);
+
+/** Whether a grant of `capabilities` covers what `tool` needs. */
+export const granted = (tool: AgentTool, capabilities: readonly string[]) =>
+  needs(tool).every((c) => capabilities.includes(c));
+
+/** A browser tool as a pi tool definition, its context resolved for each call. */
+export function adaptTool(tool: AgentTool, host: ShellToolHost): GalaxyTool {
+  return {
+    name: tool.name,
+    label: tool.name,
+    description: tool.description,
+    parameters: Type.Unsafe(tool.parameters),
+    annotations: {
+      readOnlyHint: !needs(tool).includes("write"),
+      destructiveHint: tool.destructive === true,
+    },
+    async execute(_callId: string, params: Record<string, unknown>, signal?: AbortSignal) {
+      const id = host.conversation();
+      if (id === undefined) {
+        return {
+          content: [{ type: "text" as const, text: `${tool.name}: no conversation is open.` }],
+          details: {},
+          isError: true,
+        };
+      }
+      const [bound, prior] = await Promise.all([host.binding(id), host.artifacts(id)]);
+      const before = JSON.stringify(bound);
+      const ctx: Context = {
+        ...host.clients(signal),
+        binding: { ...bound },
+        artifacts: { prior, produced: [] },
+      };
+      let value: unknown;
+      try {
+        value = await tool.run(params, ctx);
+      } catch (err) {
+        if (signal?.aborted) throw err;
+        value = fail(`Tool '${tool.name}' raised: ${(err as Error)?.message ?? err}`);
+      }
+      // The envelope's shape, as a Galaxy tool's text is: capture reads a submission's ids from it.
+      const text =
+        value instanceof Outcome
+          ? value.text
+          : typeof value === "string"
+            ? value
+            : rendered({ data: claim(value, ctx) });
+      if (JSON.stringify(ctx.binding) !== before) await host.rebind(id, ctx.binding);
+      const guard = value instanceof Outcome ? value.guard : undefined;
+      return {
+        content: [{ type: "text" as const, text }],
+        details: {
+          ...(ctx.artifacts.produced.length ? { artifacts: ctx.artifacts.produced } : {}),
+          ...(guard ? { refused: true, guard } : {}),
+        },
+        isError: value instanceof Outcome && value.isError,
+      };
+    },
+  };
+}
+
+/**
+ * The extras as Galaxy tools: wrapped like the source's own, so they get its deadline, its spill,
+ * `details.galaxy`, and for upload_file the submission ledger. One the loaded galaxy-ops entry
+ * already has is left out, so a build that resolves the Node entry can't register a name twice.
+ */
+export function galaxyExtras(
+  tools: readonly AgentTool[],
+  host: ShellToolHost,
+  has: readonly string[],
+): GalaxyExtra[] {
+  return tools
+    .filter((tool) => !has.includes(tool.name))
+    .map((tool) => wrapGalaxyTool(adaptTool(tool, host)) as GalaxyExtra);
+}
