@@ -25,8 +25,10 @@ import type { AgentFlavor } from "../tools";
 export interface LayerHost {
   /** The product name a misroute names the tool's owner by, e.g. "Olit". */
   brandName: string;
-  /** The shell's own tools, by name. */
+  /** Every tool that isn't a Galaxy one, by name: what a Galaxy call is sent back to. */
   shellTools: () => ReadonlySet<string>;
+  /** The non-Galaxy tools whose text arguments take {{artifact}} tokens: the flavor's. */
+  placing?: () => ReadonlySet<string>;
   /** The artifacts the bound conversation's results carried, newest last. */
   artifacts: () => Promise<Artifact[]>;
 }
@@ -61,7 +63,8 @@ export function registerBrowserLayers(api: ExtensionAPI, host: LayerHost): void 
   api.on("tool_call", async (event) => {
     const galaxy = new Set(registeredGalaxyTools().map((t) => t.name));
     const own = host.shellTools();
-    if (!galaxy.has(event.toolName) && !own.has(event.toolName)) return undefined;
+    const placing = galaxy.has(event.toolName) || (host.placing?.().has(event.toolName) ?? false);
+    if (!galaxy.has(event.toolName) && !placing) return undefined;
     const input = event.input as Record<string, unknown>;
 
     if (galaxy.has(event.toolName)) {

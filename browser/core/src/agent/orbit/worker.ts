@@ -18,6 +18,7 @@ import {
 } from "@earendil-works/pi-durable";
 
 import { galaxyOpsEntry } from "../../../../../extensions/loom/galaxy-ops-tools";
+import { registeredGalaxyTools } from "../../../../../extensions/loom/galaxy-tool-source";
 import { createPage, listHistoryPages } from "../../../../../extensions/loom/galaxy-pages-api";
 import { pollGalaxyNow } from "../../../../../extensions/loom/galaxy-poller";
 import { galaxyBackgroundIdle } from "../../../../../extensions/loom/galaxy-reconcile";
@@ -48,7 +49,7 @@ import { setOrbitCwd } from "./env";
 import { orbitGrant } from "./grants";
 import { openLedger, opfsFile } from "./ledger";
 import { ownSkillFiles } from "./skills";
-import { orbitWatch } from "./watch";
+import { ORBIT_WATCH, orbitWatch, wakeups } from "./watch";
 
 /** How long a conversation being left gets to finish its tool calls' end events. */
 const SETTLE_MS = 30_000;
@@ -113,11 +114,7 @@ function decline(id: ConversationId, runOnly = false) {
 const pageKey = (id: ConversationId) => `/orbit/${id}/notebook.md`;
 
 /** A conversation's watch, sleeping between ticks, woken when something asks it to look now. */
-const wakers = new Map<ConversationId, () => void>();
-const wake = (id: ConversationId) => {
-  wakers.get(id)?.();
-  wakers.delete(id);
-};
+const { wake, woken } = wakeups();
 
 let watch: ReturnType<typeof orbitWatch>;
 
@@ -131,7 +128,7 @@ const makeWatch = (pollMs?: number) =>
     settled: (id, settled) => {
       if (conversation?.id === id) post({ type: "settled", settled });
     },
-    woken: (id) => new Promise<void>((resolve) => wakers.set(id, resolve)),
+    woken,
   });
 
 /**
@@ -140,7 +137,12 @@ const makeWatch = (pollMs?: number) =>
  * a reconcile saw a run end.
  */
 async function watchNow(id: ConversationId, recover = false) {
-  await runtime!.harness.commit((tx) => watch.ensure(tx, id, { recover }), context);
+  const harness = runtime!.harness;
+  // An active flag with no live task behind it is a watch that faulted: make a new one.
+  const live = (await harness.inspect(context)).tasks.some(
+    ({ record }) => record.kind === ORBIT_WATCH && record.conversationId === id,
+  );
+  await harness.commit((tx) => watch.ensure(tx, id, { recover, stale: !live }), context);
   wake(id);
 }
 
@@ -294,9 +296,9 @@ async function open(request: OpenRequest) {
     }),
     conversation: () => conversation?.id,
     binding: async (id) => ({ ...((await runtime!.harness.snapshot(Binding, id, context)) ?? {}) }),
-    rebind: async (id, binding) => {
+    rebind: async (id, changed) => {
       await runtime!.harness.commit(async (tx) => {
-        Object.assign(await tx.doc(Binding, id), binding);
+        Object.assign(await tx.doc(Binding, id), changed);
       }, context);
     },
     artifacts: async (id) => {
@@ -305,11 +307,11 @@ async function open(request: OpenRequest) {
     },
   };
   // The core's own tools and the flavor's (Olit's visualizations), as the grant allows.
+  const flavored = (flavor.tools?.() ?? []).filter((t) => granted(t, capabilities));
   const shellTools = [
-    pythonTool(brand.name),
-    ...processTools(),
-    ...(flavor.tools?.() ?? []),
-  ].filter((t) => granted(t, capabilities));
+    ...[pythonTool(brand.name), ...processTools()].filter((t) => granted(t, capabilities)),
+    ...flavored,
+  ];
   const callContext = async () => {
     const id = conversation?.id;
     const [binding, prior] = id
@@ -335,7 +337,13 @@ async function open(request: OpenRequest) {
     shellTools: shellTools.map((t) => adaptTool(t, shell)),
     layers: {
       brandName: brand.name,
-      shellTools: () => new Set(shellTools.map((t) => t.name)),
+      // Every registered tool that isn't Galaxy's: Orbit's own, the core's and the flavor's.
+      shellTools: () => {
+        const galaxy = new Set(registeredGalaxyTools().map((t) => t.name));
+        return new Set(orbit!.host.tools.filter((name) => !galaxy.has(name)));
+      },
+      // As in the browser brain, only the flavor's tools place artifacts besides Galaxy's.
+      placing: () => new Set(flavored.map((t) => t.name)),
       artifacts: () => (conversation ? shell.artifacts(conversation.id) : Promise.resolve([])),
     },
     flavorLayers: {
@@ -372,7 +380,13 @@ async function open(request: OpenRequest) {
       // A submission makes sure its conversation has a watch, in the call's own commit.
       afterExecute: async (name, result, api, id) => {
         if (!isSubmissionTool(name) || result.isError) return;
-        await api.commit((tx) => watch.ensure(tx, id), context);
+        try {
+          await api.commit((tx) => watch.ensure(tx, id), context);
+          wake(id);
+        } catch {
+          // Refused under the run's abort mark (a Stop mid-call): ensure it from outside the run.
+          await watchNow(id);
+        }
       },
       beforeStart: installRecord,
       // Only a submission has anything to capture; any other late call is just finished.

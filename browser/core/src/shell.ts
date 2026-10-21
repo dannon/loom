@@ -333,7 +333,10 @@ export async function mountOrbitBrowser(
     if (record) {
       chat.addErrorMessage(`The record was not updated for ${what} ${w.id}: ${record}.`);
     }
-    if (outcome === "failed") {
+    if (state === "failing") {
+      // Orbit's mid-flight failure: some jobs failed and the invocation runs on.
+      chat.addErrorMessage(`${what} ${w.id} has failed jobs and is still running.`);
+    } else if (outcome === "failed") {
       chat.addErrorMessage(`${what} ${w.id} finished as ${state}.`);
     } else if (outcome === "paused") {
       chat.addErrorMessage(`${what} ${w.id} is paused: it waits on an input that failed.`);

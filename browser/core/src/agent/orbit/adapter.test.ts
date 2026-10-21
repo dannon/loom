@@ -102,7 +102,8 @@ describe("a browser tool as an Orbit tool", () => {
       h,
     );
     expect(textOf(await run(tool))).toBe("made the page");
-    expect(rebound).toEqual([[conv(1), { historyId: "h1", pageId: "p9" }]]);
+    // Only what changed: the history it read stays as whoever last wrote it left it.
+    expect(rebound).toEqual([[conv(1), { pageId: "p9" }]]);
     // A tool that changes nothing writes nothing.
     await run(adaptTool(echo, h));
     expect(rebound).toHaveLength(1);
