@@ -23,7 +23,13 @@ export interface WorkerData {
   readonly galaxyUrl: string;
   /** The Galaxy page holding the conversation's record. */
   readonly pageId: string;
-  readonly model: { readonly baseUrl: string; readonly id: string; readonly apiKey: string };
+  readonly model: {
+    readonly baseUrl: string;
+    readonly id: string;
+    readonly apiKey: string;
+    /** Whose turn this is, sent as each model request's `user` so LiteLLM's spend log is per user. */
+    readonly user: string;
+  };
   readonly limits: {
     /** Model turns per run (pi-durable's maxTurns). */
     readonly maxTurns: number;

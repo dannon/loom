@@ -36,7 +36,7 @@ const host = spawn(process.execPath, [process.env.ORBIT_HOST_BUNDLE ?? join(ROOT
     ORBIT_OIDC_CLIENT_ID: "orbit-dev",
     ORBIT_TOKEN_KEY: Buffer.alloc(32, 1).toString("base64"),
     ORBIT_LITELLM_URL: standIn.origin,
-    ORBIT_LITELLM_ADMIN_KEY: "sk-dev-admin",
+    ORBIT_LITELLM_KEY: "sk-dev-service",
     ORBIT_MODEL: "m",
   },
 });

@@ -5,7 +5,7 @@ import { ConfigError, describeConfig, loadConfig } from "./config";
 const TOKEN_KEY = Buffer.alloc(32, 7).toString("base64");
 const CLIENT_SECRET = "client-secret-value-xyz";
 const DB_PASSWORD = "db-password-value-xyz";
-const ADMIN_KEY = "sk-litellm-admin-value-xyz";
+const MODEL_KEY = "sk-litellm-service-value-xyz";
 
 const DEV = {
   ORBIT_PUBLIC_URL: "http://localhost:7878",
@@ -15,7 +15,7 @@ const DEV = {
   ORBIT_OIDC_CLIENT_ID: "orbit-dev",
   ORBIT_TOKEN_KEY: TOKEN_KEY,
   ORBIT_LITELLM_URL: "https://litellm.galaxyproject.org",
-  ORBIT_LITELLM_ADMIN_KEY: ADMIN_KEY,
+  ORBIT_LITELLM_KEY: MODEL_KEY,
   ORBIT_MODEL: "minimax",
 };
 
@@ -47,7 +47,7 @@ describe("loadConfig", () => {
       "ORBIT_OIDC_CLIENT_ID is not set",
       "ORBIT_TOKEN_KEY is not set",
       "ORBIT_LITELLM_URL is not set",
-      "ORBIT_LITELLM_ADMIN_KEY is not set",
+      "ORBIT_LITELLM_KEY is not set",
       "ORBIT_MODEL is not set",
     ]);
   });
@@ -82,7 +82,7 @@ describe("loadConfig", () => {
     ]);
   });
 
-  it("sends tokens and the admin key only over TLS beyond localhost", () => {
+  it("sends tokens and the model key only over TLS beyond localhost", () => {
     expect(problems({ ...DEV, ORBIT_GALAXY_URL: "http://galaxy.example.org", ORBIT_LITELLM_URL: "http://litellm.example.org" })).toEqual([
       "ORBIT_GALAXY_URL must be https unless it is localhost",
       "ORBIT_LITELLM_URL must be https unless it is localhost",
@@ -116,7 +116,7 @@ describe("loadConfig", () => {
 describe("describeConfig", () => {
   it("names which secrets are set and never shows them", () => {
     const summary = describeConfig(loadConfig(DEPLOYED));
-    for (const secret of [CLIENT_SECRET, DB_PASSWORD, TOKEN_KEY, ADMIN_KEY]) expect(summary).not.toContain(secret);
+    for (const secret of [CLIENT_SECRET, DB_PASSWORD, TOKEN_KEY, MODEL_KEY]) expect(summary).not.toContain(secret);
     expect(summary).toContain("db:5432/orbit (password set)");
     expect(summary).toContain("as orbit (client secret set)");
     expect(summary).toContain("token key   set");

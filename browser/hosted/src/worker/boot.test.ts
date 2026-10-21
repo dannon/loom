@@ -54,7 +54,7 @@ async function workerData(overrides: Partial<WorkerData> = {}): Promise<WorkerDa
     database: `postgres://${userInfo().username}@/${DATABASE}?host=${encodeURIComponent(process.env.PGHOST ?? "/tmp")}`,
     galaxyUrl: standIn.origin,
     pageId: "p1",
-    model: { baseUrl: `${standIn.origin}/v1`, id: "m", apiKey: "model-key-0123456789" },
+    model: { baseUrl: `${standIn.origin}/v1`, id: "m", apiKey: "model-key-0123456789", user: "user-sub-1" },
     limits: { maxTurns: 6, maxToolCalls: 20, outputBytes: 4 * 1024 * 1024 },
     ...overrides,
   };
@@ -99,10 +99,15 @@ describe("the worker bootstrap", () => {
     expect([...ready.env].sort()).toEqual(["ORBIT_ACTIVE_LLM_API_KEY", "ORBIT_FRESH_SESSION"]);
     expect(ready.resuming).toBe(false);
     const before = standIn.galaxyCalls("GET", "/api/histories/h1");
+    const from = standIn.seen.length;
     running.worker.postMessage({ cmd: "submit", text: "READ_H1 please" });
     expect(await running.waitFor("submitted")).toEqual({ type: "submitted", admitted: true });
     await running.waitFor("settled");
     expect(standIn.galaxyCalls("GET", "/api/histories/h1")).toBe(before + 1);
+    // The service key is shared; each request names its user for LiteLLM's spend log.
+    const sent = standIn.seen.slice(from).filter((s) => s.to === "model");
+    expect(sent.length).toBeGreaterThan(0);
+    for (const request of sent) expect(JSON.parse(request.body!).user).toBe("user-sub-1");
     expect(running.messages.filter((m) => m.type === "reach")).toEqual([]);
     expect(running.messages.filter((m) => m.type === "report")).toEqual([]);
     await stopped(running);
