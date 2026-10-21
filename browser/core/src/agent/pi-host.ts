@@ -148,6 +148,7 @@ export type AskRequest =
   | { kind: "editor"; title: string; prefill?: string };
 /** `undefined` means dismissed. */
 export type AskAnswer = boolean | string | undefined;
+export type AskKind = AskRequest["kind"];
 
 /** What a shell gives the brain to reach a person. `ask` present <=> ctx.hasUI. */
 export interface PiHostUi {
@@ -161,6 +162,11 @@ export interface PiHostUi {
     conversationId: ConversationId | undefined,
     signal?: AbortSignal,
   ): Promise<AskAnswer>;
+  /**
+   * The kinds `ask` can put in front of a person; every kind when absent. An ask of any other
+   * kind is noted and answered as dismissed, rather than going to a shell that can't show it.
+   */
+  supports?: readonly AskKind[];
   setStatus?(key: string, text: string | undefined): void;
   setWidget?(key: string, lines: string[] | undefined): void;
 }
@@ -449,30 +455,52 @@ export function createPiHost(options: PiHostOptions): PiHost {
       refused(member);
       return undefined;
     }
+    const supports = options.ui.supports;
+    if (supports && !supports.includes(request.kind)) {
+      refused(member, `this shell can't ask a ${request.kind}`);
+      return undefined;
+    }
     return options.ui.ask(request, conversationId(), signal);
   };
 
-  const ui = {
+  /** Both signals as one: a dialog is withdrawn when its caller gives up or its tool call stops. */
+  const either = (a: AbortSignal | undefined, b: AbortSignal | undefined) =>
+    a && b ? AbortSignal.any([a, b]) : (a ?? b);
+
+  /**
+   * The dialogs and status calls, for a ctx issued with `signal` (the run's, or the tool call's):
+   * a dialog opened under it is withdrawn when it aborts, even when the caller passed no signal
+   * of its own (the destructive gate passes `{}`).
+   */
+  const uiFor = (signal: AbortSignal | undefined) => ({
     notify: (message: string, level: "info" | "warning" | "error" = "info") => {
       if (options.ui?.notify) options.ui.notify(message, level, conversationId());
       else dropped("ctx.ui.notify");
     },
     confirm: async (title: string, message: string, opts?: { signal?: AbortSignal }) =>
-      (await ask({ kind: "confirm", title, message }, "ctx.ui.confirm", opts?.signal)) === true,
+      (await ask(
+        { kind: "confirm", title, message },
+        "ctx.ui.confirm",
+        either(opts?.signal, signal),
+      )) === true,
     select: async (title: string, choices: string[], opts?: { signal?: AbortSignal }) => {
       const answer = await ask(
         { kind: "select", title, options: choices },
         "ctx.ui.select",
-        opts?.signal,
+        either(opts?.signal, signal),
       );
       return typeof answer === "string" ? answer : undefined;
     },
     input: async (title: string, placeholder?: string, opts?: { signal?: AbortSignal }) => {
-      const answer = await ask({ kind: "input", title, placeholder }, "ctx.ui.input", opts?.signal);
+      const answer = await ask(
+        { kind: "input", title, placeholder },
+        "ctx.ui.input",
+        either(opts?.signal, signal),
+      );
       return typeof answer === "string" ? answer : undefined;
     },
     editor: async (title: string, prefill?: string) => {
-      const answer = await ask({ kind: "editor", title, prefill }, "ctx.ui.editor");
+      const answer = await ask({ kind: "editor", title, prefill }, "ctx.ui.editor", signal);
       return typeof answer === "string" ? answer : undefined;
     },
     setStatus: (key: string, text: string | undefined) => {
@@ -528,7 +556,7 @@ export function createPiHost(options: PiHostOptions): PiHost {
     onTerminalInput: () => {
       throw new NotInThisShell("ctx.ui.onTerminalInput");
     },
-  };
+  });
 
   const sessionManager = {
     getBranch: () => bound?.branch ?? [],
@@ -591,9 +619,11 @@ export function createPiHost(options: PiHostOptions): PiHost {
     signal: AbortSignal | undefined,
     assertActive = activeCheck(),
   ): ExtensionContext {
+    let ui: ReturnType<typeof uiFor> | undefined;
     const ctx: ExtensionContext = {
       get ui() {
         assertActive();
+        ui ??= uiFor(signal);
         return ui;
       },
       get mode() {
@@ -654,13 +684,13 @@ export function createPiHost(options: PiHostOptions): PiHost {
       },
       getContextUsage: () => {
         assertActive();
-        refused("ctx.getContextUsage");
+        refused("ctx.getContextUsage", "unsupported in this shell");
         return undefined;
       },
       compact: (opts?: { onError?: (error: Error) => void }) => {
         assertActive();
-        refused("ctx.compact");
-        opts?.onError?.(new NotInThisShell("ctx.compact"));
+        refused("ctx.compact", "unsupported in this shell");
+        opts?.onError?.(new NotInThisShell("ctx.compact", "unsupported in this shell"));
       },
       getSystemPrompt: () => {
         assertActive();
@@ -1657,6 +1687,16 @@ export function createPiHost(options: PiHostOptions): PiHost {
     const b = bound;
     if (!b) throw new Error("pi-host: attach() before submit()");
     const { source = "rpc", deliverAs } = opts;
+    // pi runs a registered /command before the input chain and never sends it to the model,
+    // splitting the name from its arguments at the first space (agent-session.js prompt()).
+    if (text.startsWith("/")) {
+      const space = text.indexOf(" ");
+      const name = space === -1 ? text.slice(1) : text.slice(1, space);
+      if (commands.has(name)) {
+        await command(name, space === -1 ? "" : text.slice(space + 1));
+        return undefined;
+      }
+    }
     const input = await emitInput(text, source, deliverAs);
     if (input.handled) return undefined;
     lastPrompt = input.text;
