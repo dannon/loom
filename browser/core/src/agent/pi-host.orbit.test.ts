@@ -10,7 +10,7 @@ import cp from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
-import { syncBuiltinESMExports } from "node:module";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -263,6 +263,12 @@ const notices: Array<[string, string]> = [];
 const notes: HostNote[] = [];
 /** Calls the page record store made for its page, so the run can prove the record came from it. */
 const pageCalls = { GET: 0, PUT: 0 };
+/** The record page as Galaxy holds it. */
+let page1 = "";
+// Galaxy's own rule for what a page may carry, shared with the e2e stub.
+const { badFence } = createRequire(import.meta.url)("../../../e2e/page-cells.cjs") as {
+  badFence: (content: string) => string | undefined;
+};
 /** GETs of the unfinished job behind d2, which the poll-guard turn reads twice. */
 let jobGets = 0;
 let host: PiHost;
@@ -369,7 +375,13 @@ beforeAll(async () => {
       const path = new URL(url).pathname;
       if (path === "/api/pages/p1") {
         pageCalls[method === "PUT" ? "PUT" : "GET"]++;
-        return json({});
+        if (method === "PUT") {
+          const body = JSON.parse(String(init.body)) as { content: string };
+          const fence = badFence(body.content);
+          if (fence) return json({ err_msg: `Unsupported fenced block type [${fence}].` }, 400);
+          page1 = body.content;
+        }
+        return json({ id: "p1", content: page1, content_editor: page1 });
       }
       if (path === "/api/histories") {
         return json(
@@ -858,6 +870,11 @@ describe("Orbit on pi-host", () => {
     expect(host.commands.get("reconcile")?.description).toContain("record runs no block claims");
     ledger.phase = "shutdown";
     await host.shutdown("quit");
+    // The shutdown summary went up as a carrier Galaxy accepts, and reads back as the fence.
+    expect(page1).toMatch(/^\[loom-session:v1\]: #loom "/m);
+    const { galaxyMarkdownToOrbit } =
+      await import("../../../../extensions/orbit/galaxy-markdown-adapter");
+    expect(galaxyMarkdownToOrbit(page1)).toContain("```loom-session");
   });
 
   it("ran every handler without a missing ctx member", () => {

@@ -13,12 +13,25 @@ import type { RecordStore } from "./record-store";
 // session_start runs before initSessionArtifacts) leaves it alone.
 let installed: RecordStore | null = null;
 
+// Every store installed in this process, by key. A write that outlives a conversation switch
+// (a capture or a poll tick pinned to the record it started on) resolves its own store here
+// rather than the one bound now.
+const byKey = new Map<string, RecordStore>();
+
+/** Install `store` as the bound record, keeping earlier ones by key; null forgets them all. */
 export function setRecordStore(store: RecordStore | null): void {
   installed = store;
+  if (store) byKey.set(store.key, store);
+  else byKey.clear();
 }
 
 export function installedRecordStore(): RecordStore | null {
   return installed;
+}
+
+/** The store installed under `key`, bound or not. */
+export function installedRecordStoreFor(key: string): RecordStore | null {
+  return byKey.get(key) ?? null;
 }
 
 /**
