@@ -4,6 +4,8 @@
  * host (npm run build first) on http://127.0.0.1:7878 until interrupted.
  *
  *   cd browser/hosted && node --import tsx scripts/dev-stack.ts
+ *
+ * ORBIT_LITELLM_URL, ORBIT_LITELLM_KEY and ORBIT_MODEL, when set, point it at a real model instead.
  */
 import { spawn } from "node:child_process";
 import { userInfo } from "node:os";
@@ -35,9 +37,10 @@ const host = spawn(process.execPath, [process.env.ORBIT_HOST_BUNDLE ?? join(ROOT
     ORBIT_OIDC_ISSUER: keycloak.issuer.href,
     ORBIT_OIDC_CLIENT_ID: "orbit-dev",
     ORBIT_TOKEN_KEY: Buffer.alloc(32, 1).toString("base64"),
-    ORBIT_LITELLM_URL: standIn.origin,
-    ORBIT_LITELLM_KEY: "sk-dev-service",
-    ORBIT_MODEL: "m",
+    // A real model when these are set (e.g. TACC's proxy); the stand-in's scripted one otherwise.
+    ORBIT_LITELLM_URL: process.env.ORBIT_LITELLM_URL ?? standIn.origin,
+    ORBIT_LITELLM_KEY: process.env.ORBIT_LITELLM_KEY ?? "sk-dev-service",
+    ORBIT_MODEL: process.env.ORBIT_MODEL ?? "m",
   },
 });
 console.log(`stand-ins: Keycloak ${keycloak.issuer.href}, model/Galaxy/LiteLLM ${standIn.origin}`);
