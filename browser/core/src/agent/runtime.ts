@@ -6,6 +6,7 @@ import {
   DEFAULT_COMPACTION_POLICY,
   Harness,
   InboxDoc,
+  SystemEntry,
   UsageDoc,
   UserEntry,
   type AgentEvent,
@@ -13,6 +14,7 @@ import {
   type ConversationId,
   type Cursor,
   type EntryDraft,
+  type EntryId,
   type EntryRecord,
   type Storage,
   type Submission,
@@ -30,7 +32,14 @@ import { recordsOn, type RecordSummary } from "./notebook";
 import { GALAXY_READY, GALAXY_UNREACHABLE, systemText, type GalaxyStatus } from "./prompt";
 import { probeWindow, resolve, type LlmConfig, type Target } from "./providers";
 import { editRecord } from "./record-write";
-import { modelsOf, SCHEMA, thisBuild, usageTotals, type SessionDocument } from "./saved";
+import {
+  modelsOf,
+  SCHEMA,
+  thisBuild,
+  usageTotals,
+  type ExportedEntry,
+  type SessionDocument,
+} from "./saved";
 import { flavoredSkills } from "./skills";
 import type { Capability, Python } from "./tool";
 import { galaxyOps, agentTools, type AgentFlavor } from "./tools";
@@ -409,7 +418,7 @@ export class Runtime {
   /** The conversation as a saved session: its context, and what binds it to Galaxy. */
   async export(conversation: Conversation, title = ""): Promise<SessionDocument> {
     const [exported, bound, usage] = await Promise.all([
-      conversation.export(context),
+      exportEntries(conversation),
       this.harness.snapshot(Binding, conversation.id, context),
       this.harness.snapshot(UsageDoc, conversation.id, context),
     ]);
@@ -425,13 +434,13 @@ export class Runtime {
         title,
         createdAt: bound?.startedAt ?? now,
         updatedAt: now,
-        turn: exported.entries.filter((e) => e.kind === "pi.user").length,
+        turn: exported.filter((e) => e.kind === "pi.user").length,
         ...(bound?.pageId ? { recordPageId: bound.pageId } : {}),
         ...(build ? { build } : {}),
-        models: modelsOf(exported.entries),
+        models: modelsOf(exported),
         usage: usageTotals(totals),
       },
-      entries: [...exported.entries],
+      entries: exported,
     };
   }
 
@@ -449,12 +458,19 @@ export class Runtime {
         return found;
       }
     }
-    const opened = await this.harness.importConversation(
-      { entries: document.entries },
+    const opened = await this.harness.createConversation(
       {
         ownership: { kind: "ownerless" },
         agent: { model: this.model },
         init: async (tx, id) => {
+          const ids: EntryId[] = [];
+          for (const { head, ...entry } of document.entries) {
+            const placed =
+              head === undefined
+                ? {}
+                : { head: head === "self" ? ("self" as const) : ids[head.entry] };
+            ids.push((await tx.appendEntry(id, { ...entry, ...placed })).id);
+          }
           Object.assign(await tx.doc(Binding, id), {
             sessionId: document.session.id,
             startedAt: document.session.createdAt,
@@ -592,6 +608,31 @@ export async function watchedBy(
     const state = (record.state as { checkpoint?: { state?: string } }).checkpoint?.state;
     return [{ ...(record.input as unknown as Watched), ...(state ? { state } : {}) }];
   });
+}
+
+/**
+ * The conversation's whole history, oldest first and without system entries, as schema 5 saves it:
+ * a head marker names the entry the context starts at by its position, or the first saved one
+ * after it when that is a system entry.
+ */
+async function exportEntries(conversation: Conversation): Promise<ExportedEntry[]> {
+  const history: EntryRecord[] = [];
+  let cursor: Cursor | undefined;
+  do {
+    const page = await conversation.entries({}, 500, cursor, context);
+    history.push(...page.items);
+    cursor = page.next;
+  } while (cursor !== undefined);
+  const kept = history.filter((entry) => !SystemEntry.is(entry)).sort((a, b) => a.id - b.id);
+  const at = (id: EntryId) => kept.findIndex((entry) => entry.id >= id);
+  return kept.map((entry) => ({
+    kind: entry.kind,
+    ...(entry.model === undefined ? {} : { model: [...entry.model] }),
+    ...(entry.data === undefined ? {} : { data: entry.data }),
+    ...(entry.head === undefined
+      ? {}
+      : { head: entry.head === entry.id ? ("self" as const) : { entry: at(entry.head) } }),
+  }));
 }
 
 /** The id of the newest entry of the conversation's active context. */
