@@ -21,7 +21,7 @@ import { text } from "../fake-model";
 import { agentModels } from "../model";
 import { resolve } from "../providers";
 import type { Settled } from "../watch";
-import { orbitWatch, Watching } from "./watch";
+import { orbitWatch, wakeups, Watching } from "./watch";
 
 const ctx = BACKGROUND_CONTEXT;
 const LLM = "http://llm.test/v1";
@@ -53,13 +53,18 @@ const tick = (recordKey: string, over: Partial<TickResult> = {}): TickResult => 
 const opened: Harness[] = [];
 
 /** A harness with the watch installed, a conversation, and the poll results to answer with. */
-async function setup(script: (n: number, conversation: ConversationId) => TickResult) {
+async function setup(
+  script: (n: number, conversation: ConversationId) => TickResult,
+  {
+    delivered: deliver = async () => {},
+  }: { delivered?: (keys: readonly string[]) => Promise<void> } = {},
+) {
   vi.stubGlobal("fetch", async () => text("ok"));
   const polls: PollOptions[] = [];
   const settled: Settled[] = [];
   const delivered: string[][] = [];
   let bound: ConversationId | undefined;
-  const wakers = new Map<ConversationId, () => void>();
+  const { wake, woken } = wakeups();
   const watch = orbitWatch({
     pollMs: 2,
     bound: (id) => id === bound,
@@ -68,9 +73,12 @@ async function setup(script: (n: number, conversation: ConversationId) => TickRe
       polls.push(options);
       return script(polls.length, bound!);
     },
-    delivered: async (_key, keys) => void delivered.push([...keys]),
+    delivered: async (_key, keys) => {
+      await deliver(keys);
+      delivered.push([...keys]);
+    },
     settled: (_id, s) => void settled.push(s),
-    woken: (id) => new Promise<void>((r) => wakers.set(id, r)),
+    woken,
   });
   const registry = createRegistry();
   registry.install(defineExtension({ name: "browser-shell", tasks: [watch.task] }));
@@ -85,7 +93,7 @@ async function setup(script: (n: number, conversation: ConversationId) => TickRe
   );
   bound = conversation.id;
   harness.resume();
-  const ensure = (options: { recover?: boolean } = {}) =>
+  const ensure = (options: { recover?: boolean; stale?: boolean } = {}) =>
     harness.commit((tx) => watch.ensure(tx, conversation.id, options), ctx);
   const active = async () =>
     (await harness.snapshot(Watching, conversation.id, ctx))?.active === true;
@@ -98,7 +106,10 @@ async function setup(script: (n: number, conversation: ConversationId) => TickRe
     ensure,
     active,
     bind: (id: ConversationId | undefined) => (bound = id),
-    wake: (id: ConversationId) => wakers.get(id)?.(),
+    wake,
+    checkpoint: async () =>
+      (await harness.inspect(ctx)).tasks.find((t) => t.record.kind === "olit.galaxy-watch")?.record
+        .state as { checkpoint?: { ticks: number } } | undefined,
   };
 }
 
@@ -214,5 +225,101 @@ describe("the Orbit watch", () => {
     await vi.waitFor(async () => expect(await w.active()).toBe(false));
     expect(w.settled).toEqual([]);
     expect(w.delivered).toEqual([]);
+  });
+
+  it("retries a tick that fails, rather than leaving the conversation unwatched", async () => {
+    let failOnce = true;
+    const w = await setup(
+      (n, id) =>
+        n === 1 ? tick(key(id), { transitions: [event(key(id))], inProgress: 1 }) : tick(key(id)),
+      {
+        delivered: async () => {
+          if (failOnce) {
+            failOnce = false;
+            throw new Error("the ledger file refused the write");
+          }
+        },
+      },
+    );
+    await w.ensure();
+    await vi.waitFor(async () => expect(await w.active()).toBe(false));
+    expect(w.polls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("makes a new watch when the flag says active but no task is behind it", async () => {
+    const w = await setup((_n, id) => tick(key(id)));
+    await w.harness.commit(async (tx) => {
+      (await tx.doc(Watching, w.conversation.id)).active = true;
+    }, ctx);
+    await w.ensure();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(w.polls).toEqual([]);
+    await w.ensure({ stale: true });
+    await vi.waitFor(() => expect(w.polls).toHaveLength(1));
+  });
+
+  it("starts the backoff over when new work arrives for a live watch", async () => {
+    const w = await setup((_n, id) => tick(key(id), { inProgress: 1 }));
+    const ticks = async () => (await w.checkpoint())?.checkpoint?.ticks ?? 0;
+    await w.ensure();
+    await vi.waitFor(async () => expect(await ticks()).toBeGreaterThan(12));
+    const before = await ticks();
+    await w.ensure();
+    w.wake(w.conversation.id);
+    await vi.waitFor(async () => expect(await ticks()).toBeLessThan(before));
+  });
+
+  it("writes nothing while the conversation isn't shown", async () => {
+    const w = await setup((_n, id) => tick(key(id)));
+    w.bind(undefined);
+    await w.ensure();
+    await new Promise((r) => setTimeout(r, 60));
+    expect((await w.checkpoint())?.checkpoint?.ticks).toBe(0);
+  });
+
+  it("hands over a written-down follow-up once, after a tick that failed past writing it down", async () => {
+    let failOnce = true;
+    const w = await setup(
+      (n, id) =>
+        n === 1
+          ? tick(key(id), {
+              transitions: [event(key(id))],
+              resumePrompt: "[follow-up] j1 completed",
+            })
+          : tick(key(id)),
+      {
+        delivered: async () => {
+          if (failOnce) {
+            failOnce = false;
+            throw new Error("died after the hand-over");
+          }
+        },
+      },
+    );
+    await w.ensure();
+    await vi.waitFor(async () => expect(await w.active()).toBe(false));
+    await vi.waitFor(async () =>
+      expect(await inputs(w.conversation)).toEqual(["[follow-up] j1 completed"]),
+    );
+    expect(w.delivered).toEqual([["job:j1:completed"]]);
+  });
+});
+
+describe("wakeups", () => {
+  it("keeps a wake that came with nobody waiting for the next wait", async () => {
+    const { wake, woken } = wakeups();
+    const id = 7 as unknown as ConversationId;
+    wake(id);
+    let resolved = false;
+    await woken(id).then(() => (resolved = true));
+    expect(resolved).toBe(true);
+    // Used up: the next wait waits.
+    let again = false;
+    void woken(id).then(() => (again = true));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(again).toBe(false);
+    wake(id);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(again).toBe(true);
   });
 });

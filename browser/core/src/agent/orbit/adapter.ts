@@ -33,8 +33,8 @@ export interface ShellToolHost {
   /** The conversation the call runs in: the bound one. */
   conversation(): ConversationId | undefined;
   binding(id: ConversationId): Promise<Binding>;
-  /** Keep a binding the tool changed (a record page it made, a history it switched to). */
-  rebind(id: ConversationId, binding: Binding): Promise<void>;
+  /** Keep the binding fields the tool changed (a record page it made, a history it switched to). */
+  rebind(id: ConversationId, changed: Partial<Binding>): Promise<void>;
   /** The artifacts the conversation's results carried, newest last. */
   artifacts(id: ConversationId): Promise<Artifact[]>;
 }
@@ -68,7 +68,6 @@ export function adaptTool(tool: AgentTool, host: ShellToolHost): GalaxyTool {
         };
       }
       const [bound, prior] = await Promise.all([host.binding(id), host.artifacts(id)]);
-      const before = JSON.stringify(bound);
       const ctx: Context = {
         ...host.clients(signal),
         binding: { ...bound },
@@ -88,7 +87,15 @@ export function adaptTool(tool: AgentTool, host: ShellToolHost): GalaxyTool {
           : typeof value === "string"
             ? value
             : rendered({ data: claim(value, ctx) });
-      if (JSON.stringify(ctx.binding) !== before) await host.rebind(id, ctx.binding);
+      // Only what the tool changed: a whole snapshot written back would undo a binding write
+      // that landed while the call ran (the record page made, the model switched).
+      const changed = Object.fromEntries(
+        Object.entries(ctx.binding).filter(
+          ([key, value]) =>
+            JSON.stringify(value) !== JSON.stringify((bound as Record<string, unknown>)[key]),
+        ),
+      );
+      if (Object.keys(changed).length) await host.rebind(id, changed);
       const guard = value instanceof Outcome ? value.guard : undefined;
       return {
         content: [{ type: "text" as const, text }],
