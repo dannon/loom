@@ -51,7 +51,8 @@ beforeAll(async () => {
   await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
   origin = `http://127.0.0.1:${(probe.address() as AddressInfo).port}`;
   await new Promise((resolve) => probe.close(resolve));
-  const tokens = createTokenCache({ refresh: async () => ({ token: "access", expiresAt: Date.now() + 600_000 }) });
+  // A token per user, so a test can tell whose a Galaxy request went out as.
+  const tokens = createTokenCache({ refresh: async (sub) => ({ token: `token-${sub}`, expiresAt: Date.now() + 600_000 }) });
   const auth: AuthContext = {
     pool,
     oidc: unusedOidc,
@@ -73,7 +74,7 @@ beforeAll(async () => {
     limits: { maxTurns: 6, maxToolCalls: 20, outputBytes: 1 << 22 },
     tokens,
     modelFor: async () => ({ baseUrl: `${standIn.origin}/v1`, id: "m", apiKey: "model-key-0123456789" }),
-    pageFor: async () => "p1",
+    pageFor: async (conversation) => `page-${conversation.id}`,
     onEvent: (id, event) => sockets?.deliver(id, event),
     retryDelayMs: () => 300,
   });
@@ -254,6 +255,59 @@ describe("the WebSocket", () => {
       killSwitch = undefined;
       page.close();
     }
+  });
+});
+
+describe("two users side by side", () => {
+  it("share no stream, Galaxy request, token or page", async () => {
+    const alice = await signedIn();
+    const bob = await signedIn();
+    const theirs = new Map<string, string>();
+    const pages = await Promise.all(
+      [alice, bob].map(async (who) => {
+        const conversation = await createConversation(pool, who.sub);
+        theirs.set(conversation.id, who.sub);
+        const page = new Page(who.cookie);
+        await page.opened;
+        page.send({ type: "open", conversationId: conversation.id });
+        return { who, conversation, page, history: `h${randomUUID().replace(/-/g, "").slice(0, 12)}` };
+      }),
+    );
+    const from = standIn.seen.length;
+    // At the same time, each reading a history of their own.
+    for (const { page, conversation, history } of pages) {
+      page.send({ type: "submit", conversationId: conversation.id, text: `READ_HISTORY ${history}` });
+    }
+    for (const { page, history } of pages) {
+      await until(() => standIn.galaxyCalls("GET", `/api/histories/${history}`) > 0, `${history} to be read`);
+      await until(() => page.events().filter((e) => e.type === "run_end").length >= 2, "both runs to end");
+    }
+    const [a, b] = pages as [(typeof pages)[0], (typeof pages)[0]];
+    // Each page saw its own conversation and nothing of the other's.
+    expect(JSON.stringify(a.page.events())).toContain(a.history);
+    expect(JSON.stringify(a.page.events())).not.toContain(b.history);
+    expect(JSON.stringify(b.page.events())).toContain(b.history);
+    expect(JSON.stringify(b.page.events())).not.toContain(a.history);
+    // Every Galaxy request about one user's history or page went out as that user.
+    const galaxy = standIn.seen.slice(from).filter((s) => s.to === "galaxy");
+    for (const request of galaxy) {
+      const owner =
+        request.path.endsWith(a.history) ? alice.sub : request.path.endsWith(b.history) ? bob.sub : undefined;
+      const page = /page-([0-9a-f-]{36})/.exec(request.path)?.[1];
+      const expected = owner ?? (page ? theirs.get(page) : undefined);
+      if (expected) expect(request.authorization).toBe(`Bearer token-${expected}`);
+      expect([`Bearer token-${alice.sub}`, `Bearer token-${bob.sub}`]).toContain(request.authorization);
+    }
+    expect(galaxy.filter((s) => s.path.endsWith(a.history)).length).toBeGreaterThan(0);
+    // Separate pages, and no Galaxy token ever reached the model.
+    const rows = await pool.query<{ page_id: string }>("SELECT page_id FROM orbit_conversations WHERE id = ANY($1)", [
+      pages.map((p) => p.conversation.id),
+    ]);
+    expect(new Set(rows.rows.map((r) => r.page_id)).size).toBe(2);
+    const toModel = standIn.seen.slice(from).filter((s) => s.to === "model");
+    for (const request of toModel) expect(request.body).not.toContain("token-");
+    a.page.close();
+    b.page.close();
   });
 });
 

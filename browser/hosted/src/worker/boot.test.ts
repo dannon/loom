@@ -11,7 +11,7 @@ import { acquireLease, releaseLease } from "../lease/leases";
 import { bumpLeaseGen } from "../storage/postgres-storage";
 import { ensureDatabase } from "../test-db";
 import { startStandIn, type StandIn } from "../test-stand-in";
-import { bundleWorker } from "./bundle";
+import { bundleWorker, nodeEdges } from "./bundle";
 import { WITHHELD_TOOLS } from "./guards";
 import type { WorkerData } from "./protocol";
 import { runWorker, TEST_TOKEN, type Running, type Tokens } from "./test-workers";
@@ -217,6 +217,14 @@ describe("Galaxy as the signed-in user", () => {
     moved = true;
     running.worker.postMessage({ cmd: "submit", text: "READ_H1 please" });
     expect(await running.exited).toBe(LEASE_LOST);
+  });
+});
+
+describe("the server surface", () => {
+  it("pins which of Orbit's sources import Node-only modules", async () => {
+    const edges = await nodeEdges(join(HERE, "boot.ts"));
+    expect(edges.length).toBeGreaterThan(0);
+    await expect(`${JSON.stringify(edges, null, 2)}\n`).toMatchFileSnapshot("../../__surface__/server/edges.json");
   });
 });
 
