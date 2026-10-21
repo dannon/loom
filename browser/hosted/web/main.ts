@@ -173,8 +173,12 @@ async function start(): Promise<void> {
         signedOut: signIn,
         submitted: (text) => {
           welcome?.remove();
+          // The host titles a conversation from its first message only; follow it.
+          const entry = list.find((c) => c.id === current);
+          if (!entry || entry.title) return;
+          entry.title = text.trim().split("\n")[0]!;
           const title = document.querySelector('#conversations .item[aria-current="page"] .item-title');
-          if (title && !list.find((c) => c.id === current)?.title) title.textContent = text.trim().split("\n")[0]!;
+          if (title) title.textContent = entry.title;
         },
       }),
   });
