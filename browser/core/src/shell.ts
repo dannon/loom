@@ -424,6 +424,9 @@ export async function mountOrbitBrowser(
         if (launch.greeting) {
           info(launch.greeting);
         }
+      } else if (message.type === "quiet") {
+        chat.hideThinking();
+        setBusy(false);
       } else if (message.type === "notice") {
         // What the brain said outside a turn: a slash command's answer, a progress or Galaxy note.
         if (message.level === "error") chat.addErrorMessage(message.text);

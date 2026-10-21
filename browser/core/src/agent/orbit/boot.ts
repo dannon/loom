@@ -112,6 +112,10 @@ export function bootOrbit(options: OrbitBootOptions): OrbitBoot {
   const host = createPiHost({
     name: "orbit",
     cwd: "/orbit",
+    // What the shim couldn't do: a production worker has no other place to say so.
+    onNote: (note) => {
+      if (note.kind === "handler-error" || note.kind === "busy") console.warn("[orbit]", note);
+    },
     // Only confirm has a dialog in the page; select, input and editor are noted and dismissed.
     ui: { ...options.ui, supports: ["confirm"] },
     ...options.host,

@@ -211,7 +211,14 @@ export function createMemoryLedger(
       // The history is noted only once Galaxy answers: a call it refused names a history that
       // may not exist, and reconcile would go looking in it.
       entries.set(entry.callId, opened);
-      await persisted();
+      try {
+        await persisted();
+      } catch (error) {
+        // Not on disk means not sent: an entry left here would keep the record "open" and pin
+        // reconcile's window to a request that never went out.
+        entries.delete(entry.callId);
+        throw error;
+      }
     },
     async responded(callId, submission) {
       const entry = entries.get(callId);
