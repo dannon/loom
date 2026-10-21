@@ -16,6 +16,7 @@ import {
   type EntryRecord,
   type Storage,
   type Submission,
+  type SubmissionId,
 } from "@earendil-works/pi-durable";
 
 import { artifactsOf, registerArtifactKinds, type Artifact } from "../artifacts/kinds";
@@ -368,10 +369,12 @@ export class Runtime {
       // A request id per input: after a crash before the commit below, delivering them again
       // writes nothing twice.
       for (const p of pending) {
-        await conversation.submit(
-          { type: "write", requestId: `held:${p.id}`, entry: placed(p) },
-          context,
-        );
+        if (await undelivered(this.harness, conversation, p)) {
+          await conversation.submit(
+            { type: "write", requestId: `held:${p.id}`, entry: placed(p) },
+            context,
+          );
+        }
       }
       await conversation.commit(async (tx) => {
         const policy = await tx.doc(FollowUps, conversation.id);
@@ -381,10 +384,18 @@ export class Runtime {
     return conversation.submit({ type: "input", content: text }, context);
   }
 
-  /** Every conversation with live work: a run, or Galaxy work it watches. */
+  /**
+   * Every conversation with live work: a run, Galaxy work it watches, or input pi-durable queued,
+   * which without a run is input an earlier build held in pi-durable's inbox.
+   */
   async active(): Promise<Conversation[]> {
-    const { tasks } = await this.harness.inspect(context);
-    const ids = new Set(tasks.map(({ record }) => record.conversationId).filter((id) => id));
+    const { tasks, submissions } = await this.harness.inspect(context);
+    const ids = new Set(
+      [
+        ...tasks.map(({ record }) => record.conversationId),
+        ...submissions.map((s) => s.conversationId),
+      ].filter((id) => id),
+    );
     const found = await Promise.all(
       [...ids].map((id) => this.harness.conversation(id as ConversationId, context)),
     );
@@ -392,7 +403,7 @@ export class Runtime {
   }
 
   hold(conversations: Conversation[]): Promise<void> {
-    return hold(conversations, this.brand);
+    return hold(this.harness, conversations, this.brand);
   }
 
   /** The conversation as a saved session: its context, and what binds it to Galaxy. */
@@ -492,40 +503,71 @@ export class Runtime {
  * next message, while its Galaxy work is still watched. Returns once the pauses are committed and
  * the aborts enqueued, without waiting for a running tool to end.
  *
- * Input pi-durable has queued moves to the conversation's own pending list in the commit that
- * pauses it, withdrawn as `Conversation.abort()` withdraws it, so no run's boundary can place it
- * after the pause and nothing pi-durable does while the conversation is held can start it.
+ * Input pi-durable has queued is recorded in the conversation's own pending list in the commit that
+ * pauses it, then withdrawn through `Harness.abortSubmission()`. A boundary may place it in
+ * between; delivery then finds it placed and skips it, so it is delivered once either way.
  */
 export async function hold(
+  harness: Harness,
   conversations: Conversation[],
   brand: Brand = DEFAULT_BRAND,
 ): Promise<void> {
+  const queued: SubmissionId[][] = [];
   for (const conversation of conversations) {
-    await conversation.commit(async (tx) => {
+    const ids = await conversation.commit(async (tx) => {
       const policy = await tx.doc(FollowUps, conversation.id);
-      const inbox = await tx.doc(InboxDoc, conversation.id);
       policy.paused = true;
+      // Read only: a queued input's content is kept in pi-durable's inbox and nowhere public.
       // Queued writes stay, as an abort leaves them.
-      const kept = inbox.items.filter((item) => item.mode === "write");
-      for (const item of inbox.items) {
-        if (item.mode !== "write") {
+      const inputs = (await tx.doc(InboxDoc, conversation.id)).items.filter(
+        (item) => item.mode !== "write",
+      );
+      for (const item of inputs) {
+        const id = `inbox:${item.id}`;
+        if (!policy.pending.some((p) => p.id === id)) {
           policy.pending.push({
-            id: `inbox:${item.id}`,
+            id,
             content: item.content,
             ...(item.entry ? { entry: item.entry } : {}),
           });
-          tx.settleSubmission(item.id, { status: "unanswered", reason: "aborted" });
         }
       }
-      inbox.items = kept;
+      return inputs.map((item) => item.id);
     }, context);
+    queued.push(ids);
   }
+  // Withdrawing schedules nothing, so when the store opens no run takes a step before the aborts.
+  await Promise.all(
+    conversations.flatMap((conversation, i) =>
+      queued[i].map((id) => harness.abortSubmission(id, context, conversation.id)),
+    ),
+  );
   // One synchronous pass: every abort mark is enqueued before scheduling can take a step.
   for (const conversation of conversations) {
     conversation
       .abort(context)
       .catch((e) => console.warn(`[${brand.id}] a held conversation did not stop`, e));
   }
+}
+
+/**
+ * Whether a pending input is still the user's to deliver. Input pi-durable had queued is withdrawn
+ * first, in case a crash came before hold() withdrew it; once withdrawn nothing can place it, and
+ * input a boundary placed before then is in the transcript already.
+ */
+async function undelivered(
+  harness: Harness,
+  conversation: Conversation,
+  pending: Pending,
+): Promise<boolean> {
+  let free = true;
+  if (pending.id.startsWith("inbox:")) {
+    const id = Number(pending.id.slice("inbox:".length)) as SubmissionId;
+    await harness.abortSubmission(id, context, conversation.id);
+    const record = await (await harness.submission(id, context))?.status(context);
+    free = record === undefined || (record.status === "unanswered" && record.entry === undefined);
+  }
+  return free;
 }
 
 /** The entry a pending input is placed as: its own kind, or the user's message pi-durable writes. */

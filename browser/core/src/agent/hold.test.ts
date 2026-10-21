@@ -427,14 +427,16 @@ describe("follow-ups held for the user", () => {
   });
 });
 
-describe("held follow-ups across a restart", () => {
-  const file = () => join(mkdtempSync(join(tmpdir(), "olit-hold-")), "olit.sqlite3");
-  const reopen = async (runtime: Runtime, path: string) => {
-    await runtime.close();
-    opened.splice(opened.indexOf(runtime), 1);
-    return machine(await openNodeSqliteStorage(path));
-  };
+const file = () => join(mkdtempSync(join(tmpdir(), "olit-hold-")), "olit.sqlite3");
 
+/** Open the store again; after a "crash" step threw, closing commits nothing more. */
+const reopen = async (runtime: Runtime, path: string) => {
+  await runtime.close();
+  opened.splice(opened.indexOf(runtime), 1);
+  return machine(await openNodeSqliteStorage(path));
+};
+
+describe("held follow-ups across a restart", () => {
   it("keeps a held follow-up when the page closes, and delivers it once", async () => {
     const path = file();
     const asked = world({ state: "ok" }, () => text("Both."));
@@ -518,6 +520,310 @@ describe("held follow-ups across a restart", () => {
     const reopened = (await after.kept({ historyId: "h1" }))!;
     expect(asked).toHaveLength(0);
     expect((await policyOf(after, reopened))?.pending).toHaveLength(1);
+  });
+});
+
+const crash = () => Promise.reject(new Error("crash"));
+const marked = (messages: string[]) => messages.map((m) => m.startsWith(MARK) || m);
+const times = (messages: string[], what: string) => messages.filter((m) => m === what).length;
+
+/**
+ * A conversation held with two inputs waiting, in the order they arrived: "second", queued behind
+ * the run "first" started, then job j1's follow-up, which settled while held.
+ */
+async function heldTwo(runtime: Runtime, asked: string[][], job: { state: string }) {
+  const conversation = await runtime.create({ historyId: "h1" });
+  const watching = await watchJob(conversation);
+  await runtime.submit(conversation, "first");
+  await until(() => asked.length === 1);
+  const queued = await conversation.submit({ type: "input", content: "second" }, context);
+  await runtime.hold([conversation]);
+  job.state = "ok";
+  await runtime.harness.waitForTask(watching, context);
+  await conversation.waitForIdle(context);
+  expect((await policyOf(runtime, conversation))?.pending.map((p) => p.id)).toEqual([
+    `inbox:${queued.id}`,
+    "watch:job:j1",
+  ]);
+  return { conversation, queued };
+}
+
+describe("delivering held input", () => {
+  it("delivers it in the order it arrived, a watch's follow-up among it, before the user's message", async () => {
+    const job = { state: "queued" };
+    const asked = world(job, hanging, () => text("All."));
+    const runtime = await machine();
+    const { conversation } = await heldTwo(runtime, asked, job);
+
+    await (await runtime.submit(conversation, "continue")).wait(context);
+    expect(asked).toHaveLength(2);
+    expect(marked(asked[1])).toEqual(["first", "second", true, "continue"]);
+    expect((await policyOf(runtime, conversation))?.pending).toEqual([]);
+  });
+
+  it("keeps a follow-up held before queued input ahead of it", async () => {
+    const asked = world({ state: "ok" }, hanging, () => text("All."));
+    const runtime = await machine();
+    const conversation = await runtime.create({ historyId: "h1" });
+    await runtime.submit(conversation, "first");
+    await until(() => asked.length === 1);
+    await conversation.commit(async (tx) => {
+      (await tx.doc(FollowUps, conversation.id)).automatic = MAX_AUTO_FOLLOW_UPS;
+    }, context);
+    // Past the cap the follow-up waits even while the run goes on.
+    await runtime.harness.waitForTask(await watchJob(conversation), context);
+    const queued = await conversation.submit({ type: "input", content: "second" }, context);
+    await runtime.hold([conversation]);
+    expect((await policyOf(runtime, conversation))?.pending.map((p) => p.id)).toEqual([
+      "watch:job:j1",
+      `inbox:${queued.id}`,
+    ]);
+    await conversation.waitForIdle(context);
+
+    await (await runtime.submit(conversation, "continue")).wait(context);
+    expect(marked(asked[1])).toEqual(["first", true, "second", "continue"]);
+  });
+
+  it("withdraws queued input under its own id and delivers it under held:<id>, once", async () => {
+    const asked = world({ state: "queued" }, hanging, () => text("Both."));
+    const runtime = await machine();
+    const conversation = await runtime.create({ historyId: "h1" });
+    await runtime.submit(conversation, "first");
+    await until(() => asked.length === 1);
+    const queued = await conversation.submit({ type: "input", content: "second" }, context);
+    await runtime.hold([conversation]);
+    const withdrawn = await queued.status(context);
+    expect(withdrawn).toMatchObject({ type: "input", status: "unanswered", reason: "aborted" });
+    expect(withdrawn.entry).toBeUndefined();
+
+    await (await runtime.submit(conversation, "continue")).wait(context);
+    expect(times(await userEntries(conversation), "second")).toBe(1);
+    // The original submission stays withdrawn; its input is answered under the write's entry.
+    expect(await queued.status(context)).toEqual(withdrawn);
+
+    // Delivering again under the same request id finds the write delivered, and writes nothing.
+    const requestId = `held:inbox:${queued.id}`;
+    const message = { role: "user" as const, content: "second", timestamp: 1 };
+    const again = await conversation.submit(
+      { type: "write", requestId, entry: { kind: "pi.user", model: [message] } },
+      context,
+    );
+    expect(again.id).not.toBe(queued.id);
+    expect(await again.status(context)).toMatchObject({ type: "write", requestId, status: "done" });
+    expect(times(await userEntries(conversation), "second")).toBe(1);
+  });
+
+  it("delivers input once when the run placed it between the pause and its withdrawal", async () => {
+    const gate = Promise.withResolvers<Response>();
+    const asked = world(
+      { state: "queued" },
+      () => gate.promise,
+      () => text("Second."),
+    );
+    const runtime = await machine();
+    const conversation = await runtime.create({ historyId: "h1" });
+    await runtime.submit(conversation, "first");
+    await until(() => asked.length === 1);
+    const queued = await conversation.submit({ type: "input", content: "second" }, context);
+    vi.spyOn(runtime.harness, "abortSubmission").mockImplementationOnce(crash);
+    await expect(runtime.hold([conversation])).rejects.toThrow("crash");
+
+    // The run's next boundary places it before anything withdraws it.
+    gate.resolve(text("First."));
+    expect(await queued.wait(context)).toMatchObject({ status: "done" });
+    expect((await policyOf(runtime, conversation))?.pending.map((p) => p.id)).toEqual([
+      `inbox:${queued.id}`,
+    ]);
+
+    await (await runtime.submit(conversation, "continue")).wait(context);
+    expect(asked.at(-1)).toEqual(["first", "second", "continue"]);
+    expect(times(await userEntries(conversation), "second")).toBe(1);
+    expect((await policyOf(runtime, conversation))?.pending).toEqual([]);
+  });
+});
+
+/** Reset, compact or write to the conversation, and wait for what that started. */
+async function touch(runtime: Runtime, conversation: Conversation, what: string) {
+  if (what === "a write") {
+    const note = { role: "user" as const, content: "a note", timestamp: Date.now() };
+    const entry = { kind: "test.note", model: [note] };
+    await (await conversation.submit({ type: "write", entry }, context)).wait(context);
+  } else if (what === "a compaction") {
+    await runtime.harness.waitForTask(await conversation.compact(undefined, context), context);
+  } else {
+    await conversation.reset(undefined, context);
+  }
+  await conversation.waitForIdle(context);
+}
+
+describe("held input across a crash", () => {
+  it.each(["a write", "a compaction", "a reset"])(
+    "withdraws on opening what a crash left queued after the pause, and %s starts none of it",
+    async (what) => {
+      const path = file();
+      const asked = world({ state: "queued" }, hanging);
+      const before = await machine(await openNodeSqliteStorage(path));
+      const conversation = await before.create({ historyId: "h1" });
+      await before.submit(conversation, "first");
+      await until(() => asked.length === 1);
+      const queued = await conversation.submit({ type: "input", content: "second" }, context);
+      vi.spyOn(before.harness, "abortSubmission").mockImplementation(crash);
+      await expect(before.hold([conversation])).rejects.toThrow("crash");
+      const inbox = await before.harness.snapshot(InboxDoc, conversation.id, context);
+      expect(inbox?.items.map((item) => item.id)).toEqual([queued.id]);
+
+      const after = await reopen(before, path);
+      const reopened = (await after.kept({ historyId: "h1" }))!;
+      await reopened.waitForIdle(context);
+      expect((await after.harness.snapshot(InboxDoc, reopened.id, context))?.items).toEqual([]);
+      expect(await after.harness.submission(queued.id, context)).toBeDefined();
+      expect((await policyOf(after, reopened))?.pending).toEqual([
+        { id: `inbox:${queued.id}`, content: "second" },
+      ]);
+
+      await touch(after, reopened, what);
+      expect(asked.flat()).not.toContain("second");
+      expect((await after.harness.snapshot(LiveDoc, reopened.id, context))?.run).toBeUndefined();
+      expect(await userEntries(reopened)).not.toContain("second");
+
+      await (await after.submit(reopened, "continue")).wait(context);
+      expect(asked.at(-1)!.slice(-2)).toEqual(["second", "continue"]);
+      expect(times(asked.flat(), "second")).toBe(1);
+      expect(times(await userEntries(reopened), "second")).toBe(1);
+    },
+  );
+
+  it("holds input an earlier build kept queued in pi-durable's inbox, when the store opens", async () => {
+    const path = file();
+    const asked = world({ state: "queued" });
+    const before = await machine(await openNodeSqliteStorage(path));
+    const conversation = await before.create({ historyId: "h1" });
+    await conversation.commit(async (tx) => {
+      (await tx.doc(FollowUps, conversation.id)).paused = true;
+    }, context);
+    // How olit.000 held input: queued in an idle conversation, for the next input to place.
+    const queued = await conversation.submit(
+      { type: "input", content: "second", whenIdle: "queue" },
+      context,
+    );
+    expect((await queued.status(context)).status).toBe("queued");
+
+    const after = await reopen(before, path);
+    const reopened = (await after.kept({ historyId: "h1" }))!;
+    await reopened.reset(undefined, context);
+    await reopened.waitForIdle(context);
+    expect(asked).toHaveLength(0);
+    expect((await policyOf(after, reopened))?.pending.map((p) => p.id)).toEqual([
+      `inbox:${queued.id}`,
+    ]);
+
+    await (await after.submit(reopened, "continue")).wait(context);
+    expect(asked).toEqual([["second", "continue"]]);
+  });
+
+  it("does not resume the run when a crash came before its abort", async () => {
+    const path = file();
+    const asked = world({ state: "queued" }, hanging, () => text("All."));
+    const before = await machine(await openNodeSqliteStorage(path));
+    const conversation = await before.create({ historyId: "h1" });
+    await before.submit(conversation, "first");
+    await until(() => asked.length === 1);
+    await conversation.submit({ type: "input", content: "second" }, context);
+    vi.spyOn(conversation, "abort").mockImplementation(() => new Promise(() => {}));
+    await before.hold([conversation]);
+
+    const after = await reopen(before, path);
+    const reopened = (await after.kept({ historyId: "h1" }))!;
+    await reopened.waitForIdle(context);
+    expect(asked).toHaveLength(1);
+    expect((await policyOf(after, reopened))?.pending).toHaveLength(1);
+    await (await after.submit(reopened, "continue")).wait(context);
+    expect(asked[1]).toEqual(["first", "second", "continue"]);
+  });
+
+  // Where submit() stops: each step it takes calls one of these, which then fails.
+  const steps: Array<[string, "submit" | "commit", number]> = [
+    ["after the commit that ends the hold", "submit", 0],
+    ["after the first input was written", "submit", 1],
+    ["before the commit that empties the list", "commit", 1],
+    ["before the user's message", "submit", 2],
+  ];
+  it.each(steps)("delivers each input once when the page closed %s", async (_, step, after) => {
+    const path = file();
+    const job = { state: "queued" };
+    const asked = world(job, hanging, () => text("All."));
+    const before = await machine(await openNodeSqliteStorage(path));
+    const { conversation } = await heldTwo(before, asked, job);
+    const original = conversation[step].bind(conversation) as (...args: unknown[]) => unknown;
+    let calls = 0;
+    vi.spyOn(conversation, step).mockImplementation(((...args: unknown[]) =>
+      ++calls > after ? crash() : original(...args)) as never);
+    await expect(before.submit(conversation, "continue")).rejects.toThrow("crash");
+
+    const reopened = await reopen(before, path);
+    const kept = (await reopened.kept({ historyId: "h1" }))!;
+    await kept.waitForIdle(context);
+    expect(asked).toHaveLength(1);
+    await (await reopened.submit(kept, "again")).wait(context);
+    expect(asked).toHaveLength(2);
+    expect(marked(asked[1])).toEqual(["first", "second", true, "again"]);
+    expect(marked(await userEntries(kept)).filter((m) => m === true || m === "second")).toEqual([
+      "second",
+      true,
+    ]);
+    expect((await policyOf(reopened, kept))?.pending).toEqual([]);
+  });
+});
+
+describe("delivery racing the user", () => {
+  it("delivers each input once to two messages sent together, before both", async () => {
+    const job = { state: "queued" };
+    const asked = world(
+      job,
+      hanging,
+      () => text("One."),
+      () => text("Two."),
+    );
+    const runtime = await machine();
+    const { conversation } = await heldTwo(runtime, asked, job);
+
+    const sent = await Promise.all([
+      runtime.submit(conversation, "one"),
+      runtime.submit(conversation, "two"),
+    ]);
+    await Promise.all(sent.map((s) => s.wait(context)));
+    await conversation.waitForIdle(context);
+    expect(marked(await userEntries(conversation))).toEqual([
+      "first",
+      "second",
+      true,
+      "one",
+      "two",
+    ]);
+    expect((await policyOf(runtime, conversation))?.pending).toEqual([]);
+  });
+
+  it("loses and repeats nothing when a Stop comes while delivering", async () => {
+    const job = { state: "queued" };
+    const asked = world(job, hanging, () => text("All."));
+    const runtime = await machine();
+    const { conversation } = await heldTwo(runtime, asked, job);
+    const submit = conversation.submit.bind(conversation);
+    let stopped = false;
+    vi.spyOn(conversation, "submit").mockImplementation(async (draft, ctx) => {
+      if (!stopped) {
+        stopped = true;
+        await runtime.hold([conversation]);
+      }
+      return submit(draft, ctx);
+    });
+    await (await runtime.submit(conversation, "continue")).wait(context);
+    await conversation.waitForIdle(context);
+    // Olit's worker never lets the two interleave (inOrder); here the message, admitted after the
+    // Stop's pause, still runs, with what waited delivered once.
+    expect(marked(asked.at(-1)!)).toEqual(["first", "second", true, "continue"]);
+    expect((await policyOf(runtime, conversation))?.pending).toEqual([]);
+    expect((await policyOf(runtime, conversation))?.paused).toBe(true);
   });
 });
 

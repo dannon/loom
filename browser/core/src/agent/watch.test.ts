@@ -354,7 +354,7 @@ describe("the watch task", () => {
   it("keeps watching a held conversation's work, and keeps its follow-up for the user", async () => {
     let state = "running";
     const { harness, conversation, task } = await submitted(new MemoryStorage(), () => state);
-    await hold([conversation]);
+    await hold(harness, [conversation]);
     await new Promise((r) => setTimeout(r, 30));
     expect(await watchedBy(harness, conversation.id, context)).toHaveLength(1);
     state = "ok";
