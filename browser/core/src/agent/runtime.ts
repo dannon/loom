@@ -1,14 +1,18 @@
 import type { Context as Chord } from "@earendil-works/chord";
+import type { UserMessage } from "@earendil-works/pi-ai";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
   createRegistry,
   DEFAULT_COMPACTION_POLICY,
   Harness,
+  InboxDoc,
   UsageDoc,
+  UserEntry,
   type AgentEvent,
   type Conversation,
   type ConversationId,
   type Cursor,
+  type EntryDraft,
   type EntryRecord,
   type Storage,
   type Submission,
@@ -16,7 +20,7 @@ import {
 
 import { artifactsOf, registerArtifactKinds, type Artifact } from "../artifacts/kinds";
 import type { AskFor } from "./destructive";
-import { Binding, FollowUps, Sessions } from "./documents";
+import { Binding, FollowUps, Sessions, type Pending } from "./documents";
 import { DEFAULT_BRAND, type Brand } from "./brand";
 import { DEFAULT_CAPABILITIES, MAX_STEPS, agentExtension } from "./extension";
 import { connectGalaxy, connectWeb, type Galaxy } from "./galaxy";
@@ -349,11 +353,31 @@ export class Runtime {
     return historyId ? recordsOn(this.galaxy, historyId, this.brand) : Promise.resolve([]);
   }
 
-  /** The user's own message, which lets settled work start runs again. */
+  /**
+   * The user's own message, which lets settled work start runs again. What waited for it goes
+   * first, each as the entry its input is placed as, so the run the message starts answers them
+   * together, as pi-durable's follow-up mode `all` would place them.
+   */
   async submit(conversation: Conversation, text: string): Promise<Submission> {
-    await conversation.commit(async (tx) => {
-      Object.assign(await tx.doc(FollowUps, conversation.id), { automatic: 0, paused: false });
+    const pending = await conversation.commit(async (tx) => {
+      const policy = await tx.doc(FollowUps, conversation.id);
+      Object.assign(policy, { automatic: 0, paused: false });
+      return policy.pending.map((p) => ({ ...p }));
     }, context);
+    if (pending.length) {
+      // A request id per input: after a crash before the commit below, delivering them again
+      // writes nothing twice.
+      for (const p of pending) {
+        await conversation.submit(
+          { type: "write", requestId: `held:${p.id}`, entry: placed(p) },
+          context,
+        );
+      }
+      await conversation.commit(async (tx) => {
+        const policy = await tx.doc(FollowUps, conversation.id);
+        policy.pending = policy.pending.filter((p) => !pending.some((d) => d.id === p.id));
+      }, context);
+    }
     return conversation.submit({ type: "input", content: text }, context);
   }
 
@@ -467,6 +491,10 @@ export class Runtime {
  * Hold conversations nobody is looking at: each run ends and its follow-ups wait for the user's
  * next message, while its Galaxy work is still watched. Returns once the pauses are committed and
  * the aborts enqueued, without waiting for a running tool to end.
+ *
+ * Input pi-durable has queued moves to the conversation's own pending list in the commit that
+ * pauses it, withdrawn as `Conversation.abort()` withdraws it, so no run's boundary can place it
+ * after the pause and nothing pi-durable does while the conversation is held can start it.
  */
 export async function hold(
   conversations: Conversation[],
@@ -474,15 +502,40 @@ export async function hold(
 ): Promise<void> {
   for (const conversation of conversations) {
     await conversation.commit(async (tx) => {
-      (await tx.doc(FollowUps, conversation.id)).paused = true;
+      const policy = await tx.doc(FollowUps, conversation.id);
+      const inbox = await tx.doc(InboxDoc, conversation.id);
+      policy.paused = true;
+      // Queued writes stay, as an abort leaves them.
+      const kept = inbox.items.filter((item) => item.mode === "write");
+      for (const item of inbox.items) {
+        if (item.mode !== "write") {
+          policy.pending.push({
+            id: `inbox:${item.id}`,
+            content: item.content,
+            ...(item.entry ? { entry: item.entry } : {}),
+          });
+          tx.settleSubmission(item.id, { status: "unanswered", reason: "aborted" });
+        }
+      }
+      inbox.items = kept;
     }, context);
   }
   // One synchronous pass: every abort mark is enqueued before scheduling can take a step.
   for (const conversation of conversations) {
     conversation
-      .abort(context, { keepQueued: true })
+      .abort(context)
       .catch((e) => console.warn(`[${brand.id}] a held conversation did not stop`, e));
   }
+}
+
+/** The entry a pending input is placed as: its own kind, or the user's message pi-durable writes. */
+function placed(pending: Pending): EntryDraft {
+  const message = { role: "user", content: pending.content, timestamp: Date.now() } as UserMessage;
+  return {
+    kind: pending.entry?.kind ?? UserEntry.kind,
+    ...(pending.entry?.data === undefined ? {} : { data: pending.entry.data }),
+    model: [message],
+  };
 }
 
 /** Galaxy work the conversation watches, with the state its watch last read. */

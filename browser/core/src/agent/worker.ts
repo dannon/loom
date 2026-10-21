@@ -1,5 +1,4 @@
 import {
-  InboxDoc,
   LiveDoc,
   MemoryStorage,
   type Storage,
@@ -107,16 +106,15 @@ function decline(conversation: ConversationId) {
   }
 }
 
-/** Follow-ups queued for the user while the conversation is idle, and why. */
+/** Follow-ups waiting for the user while the conversation is idle, and why. */
 async function postHeld() {
   if (!runtime || !conversation) return;
   const id = conversation.id;
-  const [policy, inbox, live] = await Promise.all([
+  const [policy, live] = await Promise.all([
     runtime.harness.snapshot(FollowUps, id, context),
-    runtime.harness.snapshot(InboxDoc, id, context),
     runtime.harness.snapshot(LiveDoc, id, context),
   ]);
-  const queued = !live?.run && (inbox?.items ?? []).some((item) => item.mode !== "write");
+  const queued = !live?.run && (policy?.pending.length ?? 0) > 0;
   const next: Waiting = queued ? heldBy(policy) : undefined;
   if (next !== held) {
     held = next;
@@ -153,6 +151,8 @@ async function attach(next: Conversation) {
       }
     }
     known = now;
+    // A watch that settles while the conversation is held keeps its follow-up in the same commit.
+    await postHeld();
   });
   await postHeld();
   detach = async () => {

@@ -1463,7 +1463,7 @@ export function createPiHost(options: PiHostOptions): PiHost {
     // reads that event as the receipt.
     try {
       return await b.conversation.submit(
-        { type: "input", content: input.text, whenBusy: deliverAs ?? "reject", whenIdle: "start" },
+        { type: "input", content: input.text, whenBusy: deliverAs ?? "reject" },
         b.context,
       );
     } catch (error) {
