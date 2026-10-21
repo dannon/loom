@@ -23,7 +23,8 @@ const keycloak = await startMockOidc({ clientId: "orbit-dev" });
 keycloak.user = "dev-user";
 const standIn = await startStandIn();
 
-const host = spawn(process.execPath, [join(ROOT, "dist", "host.mjs")], {
+// ORBIT_HOST_BUNDLE runs a copy elsewhere, e.g. to check dist/ needs nothing beside it.
+const host = spawn(process.execPath, [process.env.ORBIT_HOST_BUNDLE ?? join(ROOT, "dist", "host.mjs")], {
   stdio: "inherit",
   env: {
     PATH: process.env.PATH,
