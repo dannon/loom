@@ -74,6 +74,8 @@ export interface RuntimeConfig extends LlmConfig {
   ai_compaction?: boolean;
   capabilities?: Capability[];
   max_steps?: number;
+  /** How often the Orbit brain's watch polls Galaxy at first; tests and drives shorten it. */
+  poll_ms?: number;
 }
 
 export interface RuntimeOptions {

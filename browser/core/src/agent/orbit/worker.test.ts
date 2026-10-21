@@ -26,6 +26,7 @@ function galaxy() {
   const puts: string[] = [];
   let created = 0;
   let hold: { page: string; gate: Promise<void> } | undefined;
+  const job = { state: "running" };
   const handle = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -54,12 +55,15 @@ function galaxy() {
     if (path === "/api/tools" && request.method === "POST") {
       return json({ jobs: [{ id: JOB, tool_id: "cat1", history_id: "h1" }], outputs: [] });
     }
-    if (path.startsWith("/api/jobs/")) return json({ id: JOB, state: "running", tool_id: "cat1" });
+    if (path.startsWith("/api/jobs/")) {
+      return json({ id: JOB, state: job.state, tool_id: "cat1", history_id: "h1", outputs: {} });
+    }
     return json({});
   };
   return {
     pages,
     puts,
+    job,
     handle,
     holdWrites(page: string) {
       let release!: () => void;
@@ -73,13 +77,21 @@ function galaxy() {
 }
 
 /** The worker, booted from a fresh module graph, and what it has posted to the page. */
-async function worker(answers: Array<() => Response>, capabilities = ["llm", "read", "write"]) {
+async function worker(
+  answers: Array<() => Response>,
+  capabilities = ["llm", "read", "write"],
+  config: Record<string, unknown> = {},
+) {
   vi.resetModules();
   const fake = galaxy();
   let asked = 0;
+  const prompts: string[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = input instanceof Request ? input : new Request(String(input), init);
-    if (request.url.startsWith(LLM)) return (answers[asked++] ?? (() => text("done")))();
+    if (request.url.startsWith(LLM)) {
+      prompts.push(await request.clone().text());
+      return (answers[asked++] ?? (() => text("done")))();
+    }
     return fake.handle(request);
   });
   const posted: Message[] = [];
@@ -104,6 +116,7 @@ async function worker(answers: Array<() => Response>, capabilities = ["llm", "re
         ai_model: "m",
         ai_api_key: "k",
         capabilities,
+        ...config,
       },
       placement: { historyId: "h1" },
     },
@@ -111,7 +124,7 @@ async function worker(answers: Array<() => Response>, capabilities = ["llm", "re
   await vi.waitFor(() => expect(seen("ready").length + seen("failed").length).toBe(1), {
     timeout: 10_000,
   });
-  return { fake, posted, send, seen };
+  return { fake, posted, send, seen, prompts };
 }
 
 afterEach(async () => {
@@ -167,4 +180,33 @@ describe("the Orbit worker", { timeout: 30_000 }, () => {
     expect(fake.pages.size).toBe(1);
     expect(new Set(fake.puts)).toEqual(new Set([first]));
   }, 20_000);
+
+  it("watches a submission to its end: the block, the page's settled line, and one follow-up turn", async () => {
+    const { fake, send, seen, prompts } = await worker(
+      [
+        () => toolCall("run_tool", { history_id: "h1", tool_id: "cat1", inputs: {} }),
+        () => text("submitted"),
+        () => text("followed up"),
+      ],
+      ["llm", "read", "write"],
+      { poll_ms: 5 },
+    );
+    const { galaxyMarkdownToLoom } =
+      await import("../../../../../extensions/loom/galaxy-markdown-adapter");
+    const record = () => galaxyMarkdownToLoom([...fake.pages.values()][0]?.content ?? "");
+    send({ type: "submit", text: "run cat on it" });
+    await vi.waitFor(() => expect(record()).toContain(`job_id: ${JOB}`), { timeout: 10_000 });
+    fake.job.state = "ok";
+    await vi.waitFor(() => expect(seen("settled")).toHaveLength(1), { timeout: 10_000 });
+    expect(seen("settled")[0]).toMatchObject({
+      settled: { watched: { kind: "job", id: JOB }, outcome: "completed" },
+    });
+    await vi.waitFor(() => expect(prompts).toHaveLength(3), { timeout: 10_000 });
+    expect(prompts[2]).toContain(JOB);
+    expect(record()).toMatch(/status: completed/);
+    // Delivered once: later ticks hand over nothing more.
+    await new Promise((r) => setTimeout(r, 100));
+    expect(prompts).toHaveLength(3);
+    expect(seen("settled")).toHaveLength(1);
+  });
 });

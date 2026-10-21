@@ -28,7 +28,7 @@ import { setInstructionSource } from "../../../../../extensions/loom/user-instru
 import { setVendorSkillsSource } from "../../../../../extensions/loom/vendor-skills";
 import { setCapabilityProfile } from "../../../../../shared/capability-profile.js";
 import { setConfigSource } from "../../../../../shared/config-source.js";
-import { defineExtension, type Extension } from "@earendil-works/pi-durable";
+import { defineExtension, type AnyTask, type Extension } from "@earendil-works/pi-durable";
 import { createPiHost, type PiHost, type PiHostOptions, type PiHostUi } from "../pi-host";
 import { orbitGrant } from "./grants";
 import { registerBrowserLayers, type LayerHost } from "./layers";
@@ -64,6 +64,10 @@ export interface OrbitBootOptions {
   shellTools?: GalaxyTool[];
   /** What the browser layers read; without it none are registered. */
   layers?: LayerHost;
+  /** The browser shell's durable tasks: the watch. */
+  tasks?: AnyTask[];
+  /** What a reconcile that saw a run end wakes instead of polling: the bound conversation's watch. */
+  pollWake?: () => void;
   host?: Pick<PiHostOptions, "models" | "beforeStart" | "onLateCompletion" | "afterExecute">;
 }
 
@@ -104,9 +108,8 @@ export function bootOrbit(options: OrbitBootOptions): OrbitBoot {
     credentials: () => ({ url: options.galaxy.url, apiKey: options.galaxy.key ?? "cookie" }),
   });
   setSubmissionLedger(options.ledger);
-  // The durable watch (slice 3 commit 17) is what a reconcile that saw a run end will wake; until
-  // it exists nothing polls outside a watch, so the wake does nothing.
-  setPollWake(() => {});
+  // Nothing polls outside the durable watch: a reconcile that saw a run end wakes it.
+  setPollWake(options.pollWake ?? (() => {}));
   setGalaxyToolSource(createGalaxyOpsToolSource({ extras: options.extras ?? [] }));
 
   const host = createPiHost({
@@ -126,7 +129,10 @@ export function bootOrbit(options: OrbitBootOptions): OrbitBoot {
   if (options.layers) registerBrowserLayers(host.api, options.layers);
   return {
     host,
-    // The browser shell's own durable pieces ride beside Orbit's: the watch task joins it later.
-    extensions: [host.seal(), defineExtension({ name: "browser-shell" })],
+    // The browser shell's own durable pieces ride beside Orbit's.
+    extensions: [
+      host.seal(),
+      defineExtension({ name: "browser-shell", tasks: options.tasks ?? [] }),
+    ],
   };
 }
