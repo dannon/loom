@@ -16,6 +16,9 @@ export interface Seen {
   readonly lastText?: string;
   /** The model request's most recent user message. */
   readonly userText?: string;
+  /** What a Galaxy request authenticated with. */
+  readonly authorization?: string;
+  readonly apiKey?: string;
 }
 
 export interface StandIn {
@@ -75,7 +78,13 @@ export async function startStandIn(): Promise<StandIn> {
       });
       answer = modelAnswer(body.messages);
     } else {
-      seen.push({ to: "galaxy", method: req.method!, path });
+      seen.push({
+        to: "galaxy",
+        method: req.method!,
+        path,
+        authorization: req.headers.authorization,
+        apiKey: req.headers["x-api-key"] as string | undefined,
+      });
       const sent = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString("utf8")) as { deleted?: boolean }) : {};
       answer =
         path === "/api/histories/h1"

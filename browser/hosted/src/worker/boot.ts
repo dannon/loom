@@ -17,10 +17,11 @@ import { agentModels } from "../../../core/src/agent/model";
 import { createPiHost, type AskAnswer } from "../../../core/src/agent/pi-host";
 import { resolve as resolveTarget } from "../../../core/src/agent/providers";
 import { LeaseFence } from "../lease/lease-fence";
-import { PostgresStorage } from "../storage/postgres-storage";
+import { LeaseLostError, PostgresStorage } from "../storage/postgres-storage";
 import { fencedFetch } from "./fenced-fetch";
+import { hostedGalaxyFetch, TokenUnavailable } from "./galaxy-fetch";
 import { registerSurfaceGate, registerToolCallCap, WITHHELD_TOOLS } from "./guards";
-import type { FromWorker, ToWorker, WorkerData } from "./protocol";
+import type { FromWorker, TokenAnswer, ToWorker, WorkerData } from "./protocol";
 import { installTripwire } from "./tripwire";
 
 const data = workerData as WorkerData;
@@ -68,10 +69,28 @@ orbit.setVendorSkillsSource({
   manifest: vendor.manifest,
   read: (target) => vendor.files[target] ?? null,
 });
-// The placeholder key is under the redactor's 8-character minimum, so it never masks real text.
-// H5 replaces this fetch with one that swaps in the user's token and keeps the redirect guard.
+// Galaxy requests go out as the user: the host hands over their access token one request at a time
+// (brief H5), and never to a worker whose lease has moved on, which this worker then treats as lost.
+let nextToken = 0;
+const tokenWaits = new Map<number, (answer: TokenAnswer) => void>();
+const token = async (): Promise<string> => {
+  const answer = await new Promise<TokenAnswer>((resolve) => {
+    const id = ++nextToken;
+    tokenWaits.set(id, resolve);
+    post({ type: "token", id });
+  });
+  if ("token" in answer) return answer.token;
+  if (answer.failure.kind === "lease") {
+    const lost = new LeaseLostError(data.storeId, data.leaseGen, -1);
+    fence.check(lost);
+    throw lost;
+  }
+  throw new TokenUnavailable(answer.failure);
+};
+// The placeholder key, which the fetch replaces with the token, is under the redactor's
+// 8-character minimum, so it never masks real text.
 orbit.setGalaxyTransport({
-  fetch: fence.fetch((url, init) => network(url, init)),
+  fetch: hostedGalaxyFetch({ fence, token, network }),
   credentials: () => ({ url: data.galaxyUrl, apiKey: "hosted" }),
 });
 // A path-shaped key under no real directory: the page store keeps its side stores in memory.
@@ -175,6 +194,12 @@ port.on("message", (message: ToWorker) => {
         },
       );
       return;
+    case "token": {
+      const resolve = tokenWaits.get(message.id);
+      tokenWaits.delete(message.id);
+      resolve?.(message);
+      return;
+    }
     case "answer": {
       // An ask already withdrawn has no entry, so a late answer does nothing.
       const resolve = pending.get(message.id);
