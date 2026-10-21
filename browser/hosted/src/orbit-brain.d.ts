@@ -1,5 +1,5 @@
 /**
- * The Orbit seams the recovery worker installs, served by recovery-bundle.ts as one virtual module.
+ * The Orbit seams the hosted workers install, served by worker/bundle.ts as one virtual module.
  * Typed loosely on purpose: the brain's sources typecheck under the root project, and pulling
  * extensions/loom into this workspace's program would check them under the wrong config.
  */
@@ -7,7 +7,7 @@ declare module "orbit-brain" {
   type Seam<T> = (next: T | null) => void;
   export const loom: (pi: unknown) => void;
   export const setCapabilityProfile: Seam<Record<string, unknown>>;
-  export const setConfigSource: Seam<{ load: () => unknown }>;
+  export const setConfigSource: Seam<{ load: () => unknown; secrets?: () => string[] }>;
   export const setInstructionSource: Seam<{
     files: () => Array<{ scope: string; path: string; content: string; truncated: boolean }>;
   }>;
@@ -23,5 +23,17 @@ declare module "orbit-brain" {
   export const setRecordStore: Seam<unknown>;
   export const createPageRecordStore: (opts: { key: string; pageId: string }) => unknown;
   export const setGalaxyToolSource: Seam<unknown>;
-  export const createGalaxyOpsToolSource: (opts: { extras: unknown[] }) => unknown;
+  export const createGalaxyOpsToolSource: (opts: { extras: unknown[] }) => {
+    tools: () => Array<{ name: string }>;
+    companions?: () => unknown[];
+  };
+  export const createMemoryOutputStore: (limits?: { entries?: number; bytes?: number }) => unknown;
+  export const setGalaxyOutputStore: Seam<unknown>;
+}
+
+/** The vendored skills tree, inlined by worker/bundle.ts. */
+declare module "orbit-vendor-skills" {
+  export const catalog: unknown;
+  export const manifest: { files: Array<{ target: string }> };
+  export const files: Record<string, string>;
 }
