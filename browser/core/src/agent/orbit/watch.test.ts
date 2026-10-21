@@ -57,7 +57,8 @@ async function setup(
   script: (n: number, conversation: ConversationId) => TickResult,
   {
     delivered: deliver = async () => {},
-  }: { delivered?: (keys: readonly string[]) => Promise<void> } = {},
+    pollMs = 2,
+  }: { delivered?: (keys: readonly string[]) => Promise<void>; pollMs?: number } = {},
 ) {
   vi.stubGlobal("fetch", async () => text("ok"));
   const polls: PollOptions[] = [];
@@ -66,7 +67,7 @@ async function setup(
   let bound: ConversationId | undefined;
   const { wake, woken } = wakeups();
   const watch = orbitWatch({
-    pollMs: 2,
+    pollMs,
     bound: (id) => id === bound,
     recordKey: key,
     poll: async (options) => {
@@ -93,7 +94,7 @@ async function setup(
   );
   bound = conversation.id;
   harness.resume();
-  const ensure = (options: { recover?: boolean; stale?: boolean } = {}) =>
+  const ensure = (options: { recover?: boolean } = {}) =>
     harness.commit((tx) => watch.ensure(tx, conversation.id, options), ctx);
   const active = async () =>
     (await harness.snapshot(Watching, conversation.id, ctx))?.active === true;
@@ -109,7 +110,7 @@ async function setup(
     wake,
     checkpoint: async () =>
       (await harness.inspect(ctx)).tasks.find((t) => t.record.kind === "olit.galaxy-watch")?.record
-        .state as { checkpoint?: { ticks: number } } | undefined,
+        .state as { checkpoint?: { ticks: number; backoff?: number } } | undefined,
   };
 }
 
@@ -246,27 +247,54 @@ describe("the Orbit watch", () => {
     expect(w.polls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("makes a new watch when the flag says active but no task is behind it", async () => {
+  it("makes a new watch when the doc says active but names no live task", async () => {
     const w = await setup((_n, id) => tick(key(id)));
     await w.harness.commit(async (tx) => {
-      (await tx.doc(Watching, w.conversation.id)).active = true;
+      Object.assign(await tx.doc(Watching, w.conversation.id), {
+        active: true,
+        taskId: "gone" as never,
+      });
     }, ctx);
     await w.ensure();
-    await new Promise((r) => setTimeout(r, 30));
-    expect(w.polls).toEqual([]);
-    await w.ensure({ stale: true });
     await vi.waitFor(() => expect(w.polls).toHaveLength(1));
   });
 
-  it("starts the backoff over when new work arrives for a live watch", async () => {
-    const w = await setup((_n, id) => tick(key(id), { inProgress: 1 }));
-    const ticks = async () => (await w.checkpoint())?.checkpoint?.ticks ?? 0;
+  it("keeps watching when some work settles while more is still running", async () => {
+    const w = await setup((n, id) =>
+      n === 1
+        ? tick(key(id), { inProgress: 2 })
+        : n === 2
+          ? tick(key(id), { transitions: [event(key(id))], inProgress: 1 })
+          : tick(key(id)),
+    );
     await w.ensure();
-    await vi.waitFor(async () => expect(await ticks()).toBeGreaterThan(12));
-    const before = await ticks();
+    await vi.waitFor(async () => expect(await w.active()).toBe(false));
+    // Ended by its own quiet tick, not faulted on the second: that one polled three times.
+    expect(w.polls).toHaveLength(3);
+    expect(w.delivered).toEqual([["job:j1:completed"]]);
+  });
+
+  it("doesn't end on a quiet tick when a submission arrived while it polled", async () => {
+    let w!: Awaited<ReturnType<typeof setup>>;
+    w = await setup((n, id) => {
+      // The first tick sees nothing open; a submission's ensure lands before it commits.
+      if (n === 1) void w.ensure();
+      return tick(key(id));
+    });
+    await w.ensure();
+    await vi.waitFor(async () => expect(await w.active()).toBe(false));
+    expect(w.polls).toHaveLength(2);
+  });
+
+  it("starts the backoff over when new work arrives for a live watch", async () => {
+    // Slow enough that a reset to 1 is still under 4 when it's sampled.
+    const w = await setup((_n, id) => tick(key(id), { inProgress: 1 }), { pollMs: 20 });
+    const backoff = async () => (await w.checkpoint())?.checkpoint?.backoff ?? 0;
+    await w.ensure();
+    await vi.waitFor(async () => expect(await backoff()).toBeGreaterThan(7), { timeout: 3_000 });
     await w.ensure();
     w.wake(w.conversation.id);
-    await vi.waitFor(async () => expect(await ticks()).toBeLessThan(before));
+    await vi.waitFor(async () => expect(await backoff()).toBeLessThan(4));
   });
 
   it("writes nothing while the conversation isn't shown", async () => {
@@ -306,6 +334,19 @@ describe("the Orbit watch", () => {
 });
 
 describe("wakeups", () => {
+  it("keeps a wake that lands after a wait ended by its timer", async () => {
+    const { wake, woken } = wakeups();
+    const id = 3 as unknown as ConversationId;
+    // A wait that ended some other way stops listening, as the watch's pause does.
+    const ended = new AbortController();
+    void woken(id, ended.signal);
+    ended.abort();
+    wake(id);
+    let resolved = false;
+    await woken(id).then(() => (resolved = true));
+    expect(resolved).toBe(true);
+  });
+
   it("keeps a wake that came with nobody waiting for the next wait", async () => {
     const { wake, woken } = wakeups();
     const id = 7 as unknown as ConversationId;
