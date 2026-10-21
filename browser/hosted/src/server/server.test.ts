@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Server } from "node:http";
-import { createServer as createNetServer, type AddressInfo } from "node:net";
+import { connect as connectTcp, createServer as createNetServer, type AddressInfo } from "node:net";
 import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -198,6 +198,36 @@ describe("the WebSocket", () => {
     again.close();
   });
 
+  it("survives an upgrade request it can't parse", async () => {
+    const answer = await new Promise<string>((resolve) => {
+      const raw = connectTcp(Number(new URL(origin).port), "127.0.0.1", () =>
+        raw.write(
+          "GET http://a:zz/ws HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
+        ),
+      );
+      let text = "";
+      raw.on("data", (chunk) => (text += String(chunk)));
+      raw.on("close", () => resolve(text));
+      raw.on("error", () => resolve(text));
+    });
+    expect(answer).toMatch(/^HTTP\/1\.1 400/);
+    expect((await fetch(`${origin}/healthz`)).status).toBe(200);
+  });
+
+  it("ends a socket whose session was signed out elsewhere", async () => {
+    const { sub, cookie } = await signedIn();
+    const c = await createConversation(pool, sub);
+    const page = new Page(cookie);
+    await page.opened;
+    const closed = new Promise<number>((resolve) => page.ws.once("close", (code) => resolve(code)));
+    await pool.query("DELETE FROM orbit_sessions WHERE user_sub = $1", [sub]);
+    page.send({ type: "submit", conversationId: c.id, text: "after sign-out" });
+    expect(await closed).toBe(4401);
+    expect(page.received.find((m) => m.type === "failed")).toBeDefined();
+    expect(modelSaw("after sign-out")).toBe(0);
+  });
+
   it("refuses a message naming another user's conversation, and nothing reaches the model", async () => {
     const owner = await signedIn();
     const c = await createConversation(pool, owner.sub);
@@ -248,8 +278,9 @@ describe("the WebSocket", () => {
     killSwitch = "Orbit is paused for maintenance.";
     try {
       page.send({ type: "submit", conversationId: c.id, text: "while paused" });
-      const notice = await until(() => page.received.find((m) => m.type === "notice"), "the notice");
-      expect(notice).toEqual({ type: "notice", text: "Orbit is paused for maintenance.", level: "warning" });
+      // failed, which takes the shell out of its busy state, rather than a notice that would leave it there.
+      const refused = await until(() => page.received.find((m) => m.type === "failed"), "the refusal");
+      expect(refused).toEqual({ type: "failed", message: "Orbit is paused for maintenance." });
       expect(modelSaw("while paused")).toBe(0);
     } finally {
       killSwitch = undefined;

@@ -27,10 +27,10 @@ export function socketWorker(options: SocketWorkerOptions): Worker {
     onmessage: null as ((event: MessageEvent) => void) | null,
     onerror: null as ((event: ErrorEvent) => void) | null,
     postMessage(message: PageMessage) {
-      // The shell's own open carries Galaxy and model settings the host decides; only the
-      // conversation matters here.
-      const tagged = message.type === "open" ? { type: "open" } : message;
-      const text = JSON.stringify({ ...tagged, conversationId: options.conversationId });
+      // This shim opens the conversation on every connect; the shell's own open (with Galaxy and model
+      // settings the host decides) would only open it twice.
+      if (message.type === "open") return;
+      const text = JSON.stringify({ ...message, conversationId: options.conversationId });
       if (socket?.readyState === WebSocket.OPEN) socket.send(text);
       else outbox.push(text);
     },
@@ -43,6 +43,7 @@ export function socketWorker(options: SocketWorkerOptions): Worker {
   const deliver = (data: WorkerMessage) => shim.onmessage?.({ data } as MessageEvent);
 
   function connect() {
+    if (closed) return;
     const ws = new WebSocket(options.url);
     socket = ws;
     let opened = false;
@@ -59,8 +60,17 @@ export function socketWorker(options: SocketWorkerOptions): Worker {
     };
     ws.onclose = (event) => {
       if (closed) return;
-      // Refused before it opened: most likely the session ended, which a reload can't fix.
+      // Refused before it opened, again: the session may have ended, or the host may be restarting.
+      // Only the former is worth a trip through sign-in.
       if (!opened && attempt >= 2) {
+        void fetch("/api/me", { credentials: "same-origin" }).then(
+          (r) => {
+            if (r.status === 401) options.signedOut();
+          },
+          () => undefined,
+        );
+      }
+      if (event.code === 4401) {
         options.signedOut();
         return;
       }

@@ -10,7 +10,8 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import type { WorkerMessage } from "../../../core/src/agent/worker";
 import type { AuthContext } from "../auth/routes";
-import { sessionOf } from "../auth/routes";
+import { readCookie, SESSION_COOKIE, sessionOf } from "../auth/routes";
+import { findSession } from "../auth/sessions";
 import { createConversation, getConversation } from "../dispatch/conversations";
 import type { DispatchEvent, Dispatcher } from "../dispatch/dispatcher";
 import type { FromWorker } from "../worker/protocol";
@@ -43,6 +44,8 @@ export class Sockets {
   readonly #server = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
   /** Who is watching each conversation. */
   readonly #watching = new Map<string, Set<WebSocket>>();
+  /** What a page that just opened a running conversation gets once the worker's snapshot reaches it. */
+  readonly #afterSnapshot = new Map<WebSocket, () => void>();
 
   constructor(context: SocketContext) {
     this.#c = context;
@@ -50,7 +53,13 @@ export class Sockets {
 
   /** Take /ws upgrades on `http`. */
   attach(http: Server): void {
-    http.on("upgrade", (req, socket, head) => void this.#upgrade(req, socket, head));
+    http.on("upgrade", (req, socket, head) => {
+      // A malformed request must cost one socket, never the process.
+      this.#upgrade(req, socket, head).catch((error: Error) => {
+        this.#c.log?.(`upgrade refused: ${error.message}`);
+        socket.destroy();
+      });
+    });
   }
 
   /** The dispatcher's events, sent to every page watching the conversation. */
@@ -60,29 +69,47 @@ export class Sockets {
     const message = this.#translate(conversationId, event);
     if (!message) return;
     const text = JSON.stringify(message);
-    for (const ws of watchers) ws.send(text);
+    const snapshot = message.type === "events" && message.events.some((e) => e.type === "snapshot");
+    for (const ws of watchers) {
+      ws.send(text);
+      const then = snapshot ? this.#afterSnapshot.get(ws) : undefined;
+      if (then) {
+        this.#afterSnapshot.delete(ws);
+        then();
+      }
+    }
   }
 
   async #upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
     const refuse = (status: string) => {
       socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
     };
-    if (new URL(req.url ?? "/", "http://x").pathname !== "/ws") return refuse("404 Not Found");
+    let path: string;
+    try {
+      path = new URL(req.url ?? "/", "http://x").pathname;
+    } catch {
+      return refuse("400 Bad Request");
+    }
+    if (path !== "/ws") return refuse("404 Not Found");
     // A page on another site can open a WebSocket with the user's cookie; only Orbit's own may.
     if (req.headers.origin !== this.#c.auth.publicUrl.origin) return refuse("403 Forbidden");
     const session = await sessionOf(this.#c.auth, req).catch(() => undefined);
     if (!session) return refuse("401 Unauthorized");
-    this.#server.handleUpgrade(req, socket, head, (ws) => this.#connected(ws, session.sub));
+    const sessionId = readCookie(req, this.#c.auth.publicUrl.protocol === "https:" ? `__Host-${SESSION_COOKIE}` : SESSION_COOKIE)!;
+    this.#server.handleUpgrade(req, socket, head, (ws) => this.#connected(ws, session.sub, sessionId));
   }
 
-  #connected(ws: WebSocket, sub: string): void {
+  #connected(ws: WebSocket, sub: string, sessionId: string): void {
     let watching: string | undefined;
     const send = (message: ToPage) => ws.send(JSON.stringify(message));
     const unwatch = () => {
       if (watching) this.#watching.get(watching)?.delete(ws);
       watching = undefined;
     };
-    ws.on("close", unwatch);
+    ws.on("close", () => {
+      unwatch();
+      this.#afterSnapshot.delete(ws);
+    });
     ws.on("message", (raw) => {
       let message: FromPage;
       try {
@@ -90,16 +117,27 @@ export class Sockets {
       } catch {
         return;
       }
-      this.#handle(message, sub, send, (id) => {
+      // The session is checked on every message, not just at upgrade: signing out (or the session
+      // running out) in another tab ends this socket too.
+      void findSession(this.#c.auth.pool, sessionId)
+        .then((session) => {
+          if (session?.sub !== sub) {
+            send({ type: "failed", message: "You're signed out. Reload to sign in again." });
+            ws.close(4401, "signed out");
+            return;
+          }
+          return this.#handle(message, sub, send, (then) => this.#afterSnapshot.set(ws, then), (id) => {
         unwatch();
         watching = id;
         const set = this.#watching.get(id) ?? new Set();
         set.add(ws);
         this.#watching.set(id, set);
-      }).catch((error: Error) => {
-        this.#c.log?.(`socket message failed: ${error.message}`);
-        send({ type: "failed", message: "Orbit couldn't do that. Try again in a moment." });
-      });
+          });
+        })
+        .catch((error: Error) => {
+          this.#c.log?.(`socket message failed: ${error.message}`);
+          send({ type: "failed", message: "Orbit couldn't do that. Try again in a moment." });
+        });
     });
   }
 
@@ -107,6 +145,7 @@ export class Sockets {
     message: FromPage,
     sub: string,
     send: (message: ToPage) => void,
+    afterSnapshot: (then: () => void) => void,
     watch: (conversationId: string) => void,
   ): Promise<void> {
     const { dispatcher } = this.#c;
@@ -119,21 +158,30 @@ export class Sockets {
     }
     const id = conversation.id;
     switch (message.type) {
-      case "open":
+      case "open": {
         watch(id);
-        // A running worker sends its own snapshot, which every watcher redraws from; otherwise the
-        // store has everything there is. Ready goes after a stored one: a snapshot clears the chat,
-        // and with it the shell's ready line.
-        if (!dispatcher.snapshot(id)) send({ type: "events", events: [await storedSnapshot(this.#c.auth.pool, conversation)] });
-        send({ type: "ready", galaxy: "ok" });
-        for (const ask of dispatcher.pendingAsks(id)) {
-          const shown = this.#translate(id, { type: "ask", id: ask.id, request: ask.request });
-          if (shown) send(shown);
+        // Ready and any waiting asks go after the snapshot: a snapshot clears the chat, and with it
+        // anything drawn before. A running worker sends its own snapshot, which every watcher redraws
+        // from; otherwise the store has everything there is.
+        const greet = () => {
+          send({ type: "ready", galaxy: "ok" });
+          for (const ask of dispatcher.pendingAsks(id)) {
+            const shown = this.#translate(id, { type: "ask", id: ask.id, request: ask.request });
+            if (shown) send(shown);
+          }
+        };
+        if (dispatcher.isLive(id)) {
+          afterSnapshot(greet);
+          if (dispatcher.snapshot(id)) return;
         }
+        send({ type: "events", events: [await storedSnapshot(this.#c.auth.pool, conversation)] });
+        greet();
         return;
+      }
       case "submit":
         if (this.#c.turnsDisabled) {
-          send({ type: "notice", text: this.#c.turnsDisabled, level: "warning" });
+          // failed, not a notice: the shell went busy on submit, and only failed or a run's end clears it.
+          send({ type: "failed", message: this.#c.turnsDisabled });
           return;
         }
         if (typeof message.text !== "string" || !message.text.trim()) return;
