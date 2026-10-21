@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Type } from "@sinclair/typebox";
 import { allOperations, type AnyOperation, type GalaxyContext } from "@galaxyproject/galaxy-ops";
-import { setGalaxyTransport } from "../extensions/loom/galaxy-api";
+import { resetGalaxyOpsVersion, setGalaxyTransport } from "../extensions/loom/galaxy-api";
 import { GALAXY_DEADLINE_TEXT } from "../extensions/loom/galaxy-failure";
 import { GALAXY_OUTPUT_MARKER } from "../extensions/loom/galaxy-output";
 import { galaxyOutputStore, setGalaxyOutputStore } from "../extensions/loom/galaxy-output-store";
@@ -266,6 +266,24 @@ describe("a service outage", () => {
       },
     });
     expectOutage(await run(toolFromOperation(op("get_user"))));
+  });
+
+  it("an outage only the version probe hit doesn't relabel the op's own failure", async () => {
+    resetGalaxyOpsVersion();
+    const urls: string[] = [];
+    setGalaxyTransport({
+      credentials: CREDENTIALS,
+      fetch: async (url) => {
+        urls.push(url);
+        if (url.endsWith("/api/version")) throw outage();
+        return json({ err_msg: "No such history" }, 404);
+      },
+    });
+    // Only an op that needs a minimum Galaxy version runs the probe; the page ops do.
+    const result = await run(toolFromOperation(op("list_pages")), { history_id: "f00d" });
+    expect(urls.some((u) => u.endsWith("/api/version"))).toBe(true);
+    expect(result.structuredContent.errorKind).toBe("not_found");
+    expect(result.details.galaxy.kind).toBeNull();
   });
 
   it("a policy check that throws one is service_outage, not a thrown error", async () => {

@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "../db/migrate";
 import { currentLeaseGen, LeaseLostError, PostgresStorage } from "../storage/postgres-storage";
 import { ensureDatabase } from "../test-db";
-import { acquireLease, releaseLease, renewLease } from "./leases";
+import { acquireLease, acquireLeaseInTransaction, releaseLease, renewLease } from "./leases";
 
 const TTL = 60_000;
 
@@ -104,6 +104,47 @@ describe("conversation leases", () => {
     expect(await releaseLease(pool, storeId, "worker-b")).toBe(false);
     expect(await releaseLease(pool, storeId, "worker-a")).toBe(true);
     expect(await acquireLease(pool, storeId, "worker-b", TTL)).toBe(gen + 1);
+  });
+
+  it("a renew racing a takeover waits for it and then reports the lease lost", async () => {
+    const storeId = freshStoreId();
+    await acquireLease(pool, storeId, "worker-a", TTL);
+    await expire(storeId);
+    const takeover = await pool.connect();
+    // Hold the takeover between reading the lease and writing the new holder, the window a renew
+    // could otherwise slip into.
+    let readLease!: () => void;
+    const leaseRead = new Promise<void>((resolve) => (readLease = resolve));
+    let resume!: () => void;
+    const resumed = new Promise<void>((resolve) => (resume = resolve));
+    const paused = {
+      query: async (text: string, values?: unknown[]) => {
+        const result = await takeover.query(text, values);
+        if (text.includes("AS live FROM orbit_leases")) {
+          readLease();
+          await resumed;
+        }
+        return result;
+      },
+    } as unknown as pg.PoolClient;
+    try {
+      await takeover.query("BEGIN");
+      const acquiring = acquireLeaseInTransaction(paused, storeId, "worker-b", TTL);
+      await leaseRead;
+      let settled = false;
+      const renewing = renewLease(pool, storeId, "worker-a", TTL).finally(() => {
+        settled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(settled).toBe(false);
+      resume();
+      expect(await acquiring).toBe(2);
+      await takeover.query("COMMIT");
+      expect(await renewing).toBe(false);
+    } finally {
+      takeover.release();
+    }
+    expect(await holderOf(storeId)).toBe("worker-b");
   });
 
   it("of two holders acquiring at once, exactly one gets the lease", async () => {
