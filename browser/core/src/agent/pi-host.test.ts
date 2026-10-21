@@ -7,7 +7,12 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
+import {
+  createRegistry,
+  Harness,
+  MemoryStorage,
+  type Conversation,
+} from "@earendil-works/pi-durable";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { hanging, json, text, toolCall } from "./fake-model";
@@ -16,8 +21,11 @@ import {
   createPiHost,
   EMITTED_EVENTS,
   NotInThisShell,
+  NOT_BOUND_REASON,
   STALE_CTX_MESSAGE,
+  SWITCHING_REASON,
   type HostNote,
+  type PiHostOptions,
   type PiHostUi,
 } from "./pi-host";
 import { resolve } from "./providers";
@@ -94,7 +102,13 @@ function probe(
 
 const opened: Harness[] = [];
 
-async function boot(options: { ui?: PiHostUi; extras?: (api: ExtensionAPI) => void } = {}) {
+async function boot(
+  options: {
+    ui?: PiHostUi;
+    extras?: (api: ExtensionAPI) => void;
+    host?: Partial<PiHostOptions>;
+  } = {},
+) {
   const seq: string[] = [];
   const events: Recorded[] = [];
   const notes: HostNote[] = [];
@@ -103,6 +117,7 @@ async function boot(options: { ui?: PiHostUi; extras?: (api: ExtensionAPI) => vo
     ui: options.ui,
     model: () => ({ provider: "custom", id: "m" }),
     onNote: (n) => notes.push(n),
+    ...options.host,
   });
   probe(host.api, seq, events, options.extras);
   const registry = createRegistry();
@@ -125,7 +140,9 @@ async function boot(options: { ui?: PiHostUi; extras?: (api: ExtensionAPI) => vo
   // pi's session_start precedes any run; a resumed conversation's hooks must find it done.
   await host.start("startup");
   harness.resume();
-  return { host, harness, conversation, seq, events, notes, reports };
+  const another = () =>
+    harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model } }, ctx);
+  return { host, harness, conversation, another, seq, events, notes, reports };
 }
 
 const settled =
@@ -546,5 +563,247 @@ describe("pi-host", () => {
       detail: "late",
       phase: "run",
     });
+  });
+});
+
+describe("pi-host across conversations", () => {
+  /** The tool results a conversation holds, as text. */
+  const results = async (conversation: Conversation) =>
+    (await conversation.context(ctx)).messages
+      .filter((m) => m.role === "toolResult")
+      .map((m) => textOf(m.content));
+
+  it("shuts down, attaches another conversation and starts it, with fresh ctx and the old ones stale", async () => {
+    model(
+      () => toolCall("echo", { n: 1 }),
+      () => text("done"),
+    );
+    const captured: ExtensionContext[] = [];
+    const starting: string[] = [];
+    const { host, harness, another, seq } = await boot({
+      extras: (api) => api.on("session_start", (_e, c) => void captured.push(c)),
+      host: { beforeStart: (id) => void starting.push(String(id)) },
+    });
+    await host.shutdown("new");
+    const second = await another();
+    await host.attach(harness, second, ctx);
+    await host.start("new");
+    expect(starting).toHaveLength(2);
+    expect(starting[1]).toBe(String(second.id));
+    expect(seq.filter((s) => s === "session_start")).toHaveLength(2);
+    expect(() => captured[0].cwd).toThrow(STALE_CTX_MESSAGE);
+    expect(captured[1].cwd).toBe("/");
+    // The second conversation runs a tool turn through the same host.
+    await (await host.submit("hi"))!.wait(ctx);
+    await until(settled(seq));
+    expect(await results(second)).toEqual(["echo 1"]);
+  });
+
+  it("makes the ctx of a conversation attached over without a shutdown stale too", async () => {
+    model();
+    let captured: ExtensionContext | undefined;
+    const { host, harness, another } = await boot({
+      extras: (api) => api.on("session_start", (_e, c) => void (captured ??= c)),
+    });
+    await host.attach(harness, await another(), ctx);
+    expect(() => captured!.cwd).toThrow(STALE_CTX_MESSAGE);
+  });
+
+  it("blocks a tool call from a conversation that isn't bound, without running it", async () => {
+    model(
+      () => toolCall("echo", { n: 1 }),
+      () => text("done"),
+    );
+    const ran: number[] = [];
+    const { host, harness, conversation, another, notes } = await boot({
+      extras: (api) => api.on("tool_execution_start", () => void ran.push(1)),
+    });
+    // Another conversation is bound; the first one still runs a turn of its own.
+    await host.attach(harness, await another(), ctx);
+    await (
+      await conversation.submit({ type: "input", content: "hi", whenIdle: "start" }, ctx)
+    ).wait(ctx);
+    await conversation.waitForIdle(ctx);
+    // pi-durable words the block itself, since no hook of a bound conversation rewrote it.
+    const [only, ...rest] = await results(conversation);
+    expect(rest).toEqual([]);
+    expect(only).toContain(`Tool call blocked: ${NOT_BOUND_REASON}`);
+    expect(ran).toEqual([]);
+    expect(notes.map((n) => (n.kind === "refused" ? n.member : ""))).toContain(
+      "hook for another conversation",
+    );
+  });
+
+  it("blocks a call that arrives after quiesce, and admits again once re-attached", async () => {
+    model(
+      () => toolCall("echo", { n: 1 }),
+      () => text("done"),
+      () => toolCall("echo", { n: 2 }),
+      () => text("done"),
+    );
+    const { host, harness, conversation, seq } = await boot();
+    host.quiesce(conversation.id);
+    await (await host.submit("hi"))!.wait(ctx);
+    await until(settled(seq));
+    expect(await results(conversation)).toEqual([SWITCHING_REASON]);
+    await host.shutdown("resume");
+    await host.attach(harness, conversation, ctx);
+    await host.start("resume");
+    await (await host.submit("again"))!.wait(ctx);
+    await until(settled(seq, 2));
+    expect(await results(conversation)).toEqual([SWITCHING_REASON, "echo 2"]);
+  });
+
+  it("follows the conversation's own model when no fixed model is given", async () => {
+    model();
+    let captured: ExtensionContext | undefined;
+    const models = {
+      getModel: (provider: string, id: string) =>
+        (id === "big"
+          ? {
+              provider,
+              id,
+              contextWindow: 1_000_000,
+              maxTokens: 64_000,
+              cost: { input: 3, output: 15 },
+            }
+          : undefined) as never,
+    };
+    const { conversation, events } = await boot({
+      extras: (api) => api.on("session_start", (_e, c) => void (captured = c)),
+      host: { model: undefined, models },
+    });
+    expect(captured!.model?.id).toBe("m");
+    expect(captured!.model?.contextWindow).toBe(128000);
+    await conversation.configure({ model: { provider: "custom", modelId: "big" } }, ctx);
+    await until(() => events.some((e) => e.type === "model_select"));
+    expect(captured!.model).toMatchObject({
+      id: "big",
+      contextWindow: 1_000_000,
+      maxTokens: 64_000,
+    });
+    expect(events.find((e) => e.type === "model_select")!.model).toMatchObject({
+      id: "big",
+      contextWindow: 1_000_000,
+    });
+  });
+
+  it("holds settle open until a slow tool_execution_end handler returns", async () => {
+    model(
+      () => toolCall("echo", { n: 1 }),
+      () => text("done"),
+    );
+    let release!: () => void;
+    let ended = false;
+    const { host, conversation, seq } = await boot({
+      extras: (api) =>
+        api.on("tool_execution_end", async () => {
+          await new Promise<void>((r) => (release = r));
+          ended = true;
+        }),
+    });
+    void host.submit("hi");
+    await until(() => release !== undefined);
+    host.quiesce(conversation.id);
+    let outcome: { settled: boolean; late: string[] } | undefined;
+    const settling = host.settle(conversation.id, 5_000).then((o) => (outcome = o));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(outcome).toBeUndefined();
+    release();
+    await settling;
+    expect(ended).toBe(true);
+    expect(outcome).toEqual({ settled: true, late: [] });
+    await until(settled(seq));
+  });
+
+  it("names a tool that outlives the timeout as late, and hands its result to the shell after the switch", async () => {
+    model(
+      () => toolCall("slow", {}),
+      () => text("done"),
+    );
+    let finish!: () => void;
+    const late: Array<{ conversation: string; name: string; text: string }> = [];
+    const endedFor: string[] = [];
+    const { host, harness, conversation, another } = await boot({
+      extras: (api) => {
+        api.registerTool({
+          name: "slow",
+          label: "Slow",
+          description: "takes its time",
+          parameters: Type.Object({}),
+          execute: async () => {
+            await new Promise<void>((r) => (finish = r));
+            return { content: [{ type: "text", text: "slow done" }], details: {} };
+          },
+        });
+        api.on("tool_execution_end", (e) => void endedFor.push(e.toolName));
+      },
+      host: {
+        onLateCompletion: (id, call, result) =>
+          void late.push({
+            conversation: String(id),
+            name: call.name,
+            text: textOf(result.content),
+          }),
+      },
+    });
+    void host.submit("hi");
+    await until(() => finish !== undefined);
+    host.quiesce(conversation.id);
+    const outcome = await host.settle(conversation.id, 30);
+    expect(outcome.settled).toBe(false);
+    expect(outcome.late).toHaveLength(1);
+    // The switch goes on without it.
+    await host.shutdown("new");
+    await host.attach(harness, await another(), ctx);
+    await host.start("new");
+    finish();
+    await until(() => late.length === 1);
+    expect(late).toEqual([
+      { conversation: String(conversation.id), name: "slow", text: "slow done" },
+    ]);
+    // Orbit's own end events didn't run for it: they'd act on the conversation bound now.
+    expect(endedFor).toEqual([]);
+    expect(await host.settle(conversation.id, 30)).toEqual({ settled: true, late: [] });
+  });
+
+  it("lets settle through at once for a call its run's abort stopped", async () => {
+    model(() => toolCall("waits", {}));
+    let started = false;
+    const { host, conversation } = await boot({
+      extras: (api) =>
+        api.registerTool({
+          name: "waits",
+          label: "Waits",
+          description: "runs until stopped",
+          parameters: Type.Object({}),
+          execute: async (_id, _params, signal) => {
+            started = true;
+            await new Promise((_r, reject) =>
+              signal?.addEventListener("abort", () => reject(signal.reason), { once: true }),
+            );
+            return { content: [], details: {} };
+          },
+        }),
+    });
+    void host.submit("hi");
+    await until(() => started);
+    await conversation.abort(ctx);
+    host.quiesce(conversation.id);
+    const before = Date.now();
+    expect(await host.settle(conversation.id, 2_000)).toEqual({ settled: true, late: [] });
+    expect(Date.now() - before).toBeLessThan(1_000);
+  });
+
+  it("runs none of Orbit's turn hooks for a conversation while nothing is bound", async () => {
+    model(() => text("done"));
+    const { host, another, seq, notes } = await boot();
+    await host.shutdown("new");
+    const marker = seq.length;
+    const loose = await another();
+    await (await loose.submit({ type: "input", content: "hi", whenIdle: "start" }, ctx)).wait(ctx);
+    await loose.waitForIdle(ctx);
+    expect(seq.slice(marker)).toEqual([]);
+    expect(notes.filter((n) => n.kind === "handler-error")).toEqual([]);
   });
 });
