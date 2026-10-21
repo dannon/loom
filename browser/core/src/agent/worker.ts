@@ -43,6 +43,8 @@ export type WorkerMessage =
   | { type: "lost" }
   | {
       type: "ready";
+      /** Which brain answers: the browser's own when absent. */
+      brain?: "browser" | "orbit";
       unkept?: string;
       galaxy: GalaxyStatus;
       galaxyProblem?: string;
@@ -59,6 +61,13 @@ export type WorkerMessage =
   /** A confirmation the agent no longer waits on. */
   | { type: "withdrawn"; id: number }
   | { type: "reply"; id: number; value?: unknown; error?: string }
+  /** Something the brain told the user outside a turn: a slash command's answer, a notice. */
+  | {
+      type: "notice";
+      level: "info" | "warning" | "error";
+      text: string;
+      conversationId?: ConversationId;
+    }
   | { type: "failed"; message: string };
 
 export type PageMessage =
@@ -260,6 +269,11 @@ function inOrder(work: () => Promise<unknown>) {
 
 /** Run this worker as the agent, with what `agentFlavor` adds to it. */
 export function startAgentWorker(agentFlavor: AgentFlavor): void {
+  // A literal at build time: a default build drops this branch and never bundles Orbit's brain.
+  if (process.env.orbit_brain === "orbit") {
+    void import("./orbit/worker").then(({ startOrbitWorker }) => startOrbitWorker(agentFlavor));
+    return;
+  }
   flavor = agentFlavor;
   registerArtifactKinds(flavor.artifactKinds ?? []);
   self.onmessage = onMessage;

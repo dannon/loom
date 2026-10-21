@@ -383,6 +383,8 @@ export async function mountOrbitBrowser(
       } else if (message.type === "ready") {
         ready = true;
         galaxyStatus = message.galaxy;
+        // Which brain answers, where a drive can read it (e2e/brain.cjs).
+        document.documentElement.dataset.brain = message.brain ?? "browser";
         refreshControls();
         if (message.unkept) {
           chat.addErrorMessage(
@@ -422,6 +424,10 @@ export async function mountOrbitBrowser(
         if (launch.greeting) {
           info(launch.greeting);
         }
+      } else if (message.type === "notice") {
+        // What the brain said outside a turn: a slash command's answer, a progress or Galaxy note.
+        if (message.level === "error") chat.addErrorMessage(message.text);
+        else info(message.text);
       } else if (message.type === "recoverable") {
         // The browser kept nothing of a session here; the user says which, if any, this is.
         const line = info(
