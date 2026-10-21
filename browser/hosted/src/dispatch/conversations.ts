@@ -49,6 +49,13 @@ export async function createConversation(db: Queryable, ownerSub: string, title?
   return fromRow(rows[0]!);
 }
 
+/** Name an untitled conversation, from its first message; a title once set stays. */
+export async function titleIfUntitled(db: Queryable, id: string, text: string): Promise<void> {
+  const line = text.trim().split("\n")[0]!.replace(/\s+/g, " ");
+  const title = line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line;
+  if (title) await db.query("UPDATE orbit_conversations SET title = $2 WHERE id = $1 AND title IS NULL", [id, title]);
+}
+
 export async function getConversation(db: Queryable, id: string): Promise<ConversationRow | undefined> {
   const { rows } = await db.query<Row>(`SELECT ${COLUMNS} FROM orbit_conversations WHERE id = $1`, [id]);
   return rows[0] && fromRow(rows[0]);

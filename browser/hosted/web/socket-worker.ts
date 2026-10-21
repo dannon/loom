@@ -15,6 +15,8 @@ export interface SocketWorkerOptions {
   readonly moved: (conversationId: string) => void;
   /** The socket was refused for want of a session. */
   readonly signedOut: () => void;
+  /** The user sent a message. */
+  readonly submitted?: (text: string) => void;
 }
 
 export function socketWorker(options: SocketWorkerOptions): Worker {
@@ -30,6 +32,7 @@ export function socketWorker(options: SocketWorkerOptions): Worker {
       // This shim opens the conversation on every connect; the shell's own open (with Galaxy and model
       // settings the host decides) would only open it twice.
       if (message.type === "open") return;
+      if (message.type === "submit") options.submitted?.(message.text);
       const text = JSON.stringify({ ...message, conversationId: options.conversationId });
       if (socket?.readyState === WebSocket.OPEN) socket.send(text);
       else outbox.push(text);

@@ -107,6 +107,7 @@ async function main(): Promise<void> {
     sockets,
     webRoot: process.env.ORBIT_WEB_ROOT ?? fileURLToPath(new URL("./web", import.meta.url)),
     log,
+    model: config.model.id,
     health: async () => ({
       postgres: await pool.query("SELECT 1").then(
         () => true,

@@ -12,7 +12,7 @@ import type { WorkerMessage } from "../../../core/src/agent/worker";
 import type { AuthContext } from "../auth/routes";
 import { readCookie, SESSION_COOKIE, sessionOf } from "../auth/routes";
 import { findSession } from "../auth/sessions";
-import { createConversation, getConversation } from "../dispatch/conversations";
+import { createConversation, getConversation, titleIfUntitled } from "../dispatch/conversations";
 import type { DispatchEvent, Dispatcher } from "../dispatch/dispatcher";
 import type { FromWorker } from "../worker/protocol";
 import { storedSnapshot } from "./snapshot";
@@ -185,6 +185,7 @@ export class Sockets {
           return;
         }
         if (typeof message.text !== "string" || !message.text.trim()) return;
+        if (conversation.title === null) await titleIfUntitled(this.#c.auth.pool, id, message.text);
         await dispatcher.submit(id, message.text);
         return;
       case "stop":

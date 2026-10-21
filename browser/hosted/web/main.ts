@@ -4,11 +4,15 @@
  */
 import { mountOrbitBrowser } from "@galaxyproject/orbit-browser";
 
+import { ORBIT_LOGO } from "./logo";
 import { socketWorker } from "./socket-worker";
 
 interface Me {
   sub: string;
   galaxyUrl: string;
+  username?: string;
+  email?: string;
+  model?: string;
 }
 interface Listed {
   id: string;
@@ -36,27 +40,109 @@ async function newConversation(): Promise<void> {
   open((await api<{ id: string }>("/api/conversations", { method: "POST" })).id);
 }
 
-function sidebar(list: Listed[], current: string): HTMLElement {
-  const nav = document.createElement("nav");
-  nav.id = "conversations";
-  const fresh = document.createElement("button");
-  fresh.textContent = "New conversation";
-  fresh.addEventListener("click", () => void newConversation());
-  nav.append(fresh);
-  for (const conversation of list) {
-    const link = document.createElement("a");
-    link.href = `/c/${conversation.id}`;
-    link.textContent = conversation.title ?? `Conversation of ${new Date(conversation.lastActiveAt).toLocaleString()}`;
-    if (conversation.id === current) link.setAttribute("aria-current", "page");
-    nav.append(link);
+const make = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) => {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+};
+
+/** "5m ago", "yesterday", or the date, for the conversation list. */
+function when(iso: string): string {
+  const then = new Date(iso);
+  const minutes = Math.round((Date.now() - then.getTime()) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 24 * 60) return `${Math.round(minutes / 60)}h ago`;
+  if (minutes < 48 * 60) return "yesterday";
+  return then.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function masthead(me: Me): HTMLElement {
+  const bar = make("header");
+  bar.id = "masthead";
+  const brand = make("a", "brand");
+  brand.href = "/";
+  brand.title = "Orbit";
+  brand.innerHTML = ORBIT_LOGO;
+  bar.append(brand, make("span", "spacer"));
+
+  const galaxy = new URL(me.galaxyUrl);
+  const server = make("a", "chip server");
+  server.href = galaxy.href;
+  server.target = "_blank";
+  server.rel = "noopener";
+  server.title = "Open this Galaxy";
+  server.append(make("span", "dot"), make("span", "", galaxy.host));
+  bar.append(server);
+
+  const who = me.username ?? me.email;
+  if (who) {
+    const user = make("span", "chip user", who);
+    if (me.email) user.title = me.email;
+    bar.append(user);
   }
-  const out = document.createElement("form");
+
+  const out = make("form");
   out.method = "post";
   out.action = "/auth/logout";
-  const button = document.createElement("button");
-  button.textContent = "Sign out";
-  out.append(button);
-  nav.append(out);
+  out.append(make("button", "chip action", "Sign out"));
+  bar.append(out);
+  return bar;
+}
+
+const EXAMPLES = [
+  "What are my most recent histories?",
+  "Find a Galaxy tool to compare two BED files",
+  "Recommend an IWC workflow for RNA-seq differential expression",
+];
+
+/** A new conversation's opening: what Orbit is for, and a few things to try. */
+function welcomePanel(me: Me): HTMLElement | undefined {
+  const pane = document.getElementById("chat-pane");
+  const input = document.getElementById("input") as HTMLTextAreaElement | null;
+  const send = document.getElementById("send-btn");
+  if (!pane || !input || !send) return undefined;
+  const panel = make("div");
+  panel.id = "welcome";
+  const mark = make("div", "welcome-logo");
+  mark.innerHTML = ORBIT_LOGO;
+  panel.append(
+    mark,
+    make("p", "welcome-line", `Ask about your histories, run tools and workflows, and keep notes on ${new URL(me.galaxyUrl).host}.`),
+  );
+  const examples = make("div", "welcome-examples");
+  for (const text of EXAMPLES) {
+    const button = make("button", "welcome-example", text);
+    button.addEventListener("click", () => {
+      input.value = text;
+      input.dispatchEvent(new Event("input"));
+      send.click();
+    });
+    examples.append(button);
+  }
+  panel.append(examples);
+  pane.append(panel);
+  return panel;
+}
+
+function sidebar(list: Listed[], current: string): HTMLElement {
+  const nav = make("nav");
+  nav.id = "conversations";
+  const fresh = make("button", "new-conversation", "+ New conversation");
+  fresh.addEventListener("click", () => void newConversation());
+  nav.append(fresh, make("div", "section-label", "Conversations"));
+  const items = make("div", "items");
+  for (const conversation of list) {
+    const link = make("a", "item");
+    link.href = `/c/${conversation.id}`;
+    const title = conversation.title ?? "New conversation";
+    link.title = title;
+    link.append(make("span", "item-title", title), make("span", "item-when", when(conversation.lastActiveAt)));
+    if (conversation.id === current) link.setAttribute("aria-current", "page");
+    items.append(link);
+  }
+  nav.append(items);
   return nav;
 }
 
@@ -70,9 +156,11 @@ async function start(): Promise<void> {
     else await newConversation();
     return;
   }
-  document.body.prepend(sidebar(list, current));
+  document.getElementById("frame")!.prepend(sidebar(list, current));
+  document.body.prepend(masthead(me));
   const app = document.getElementById("app")!;
   await mountOrbitBrowser(app, {
+    theme: "dark",
     galaxyRoot: me.galaxyUrl,
     pyodideURL: "",
     // The conversation lives on the host; the shell's own Galaxy history lookup has nothing to find.
@@ -83,8 +171,22 @@ async function start(): Promise<void> {
         conversationId: current,
         moved: open,
         signedOut: signIn,
+        submitted: (text) => {
+          welcome?.remove();
+          const title = document.querySelector('#conversations .item[aria-current="page"] .item-title');
+          if (title && !list.find((c) => c.id === current)?.title) title.textContent = text.trim().split("\n")[0]!;
+        },
       }),
   });
+  const welcome = list.find((c) => c.id === current)?.title ? undefined : welcomePanel(me);
+  // The host picks the model, so the shell's switcher has nothing to offer: name the model instead.
+  const picker = document.getElementById("model-btn");
+  if (picker && me.model) {
+    const label = make("span", "footer-control", me.model);
+    label.id = "model-label";
+    label.title = "The model Orbit runs on here";
+    picker.replaceWith(label);
+  }
 }
 
 void start();
