@@ -108,6 +108,23 @@ export async function bundleWorker(entry: string, outfile: string): Promise<stri
   return outfile;
 }
 
+/**
+ * Which of Orbit's own sources import which Node-only modules in the worker bundle: imported but,
+ * the conformance tests hold, never called. A new edge is a new way to reach the host, so it's pinned.
+ */
+export async function nodeEdges(entry: string): Promise<string[]> {
+  const result = await build({ ...options(entry, "edges.mjs"), write: false, metafile: true });
+  const edges = new Set<string>();
+  for (const [input, { imports }] of Object.entries(result.metafile!.inputs)) {
+    const file = resolve(input);
+    if (!file.startsWith(LOOM) && !file.startsWith(SHARED)) continue;
+    for (const { path, external } of imports) {
+      if (external) edges.add(`${file.slice(REPO.length + 1)} -> ${path.replace(/^node:/, "")}`);
+    }
+  }
+  return [...edges].sort();
+}
+
 function options(entry: string, outfile: string) {
   return {
     entryPoints: [entry],

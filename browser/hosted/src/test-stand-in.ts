@@ -16,6 +16,8 @@ export interface Seen {
   readonly lastText?: string;
   /** The model request's most recent user message. */
   readonly userText?: string;
+  /** The whole model request, for checking what reached the model. */
+  readonly body?: string;
   /** What a Galaxy request authenticated with. */
   readonly authorization?: string;
   readonly apiKey?: string;
@@ -50,6 +52,9 @@ async function modelAnswer(messages: Message[]): Promise<Response> {
   const user = textOf(messages.filter((m) => m.role === "user").at(-1)?.content);
   if (last.role === "user" && said.includes("SLOW")) await new Promise((resolve) => setTimeout(resolve, 3000));
   if (last.role === "user" && said.includes("READ_H1")) return toolCall("get_history_details", { history_id: "h1" });
+  // READ_HISTORY <id>: read a history of the user's choosing, so a test can tell whose requests are whose.
+  const named = last.role === "user" ? /READ_HISTORY (\w+)/.exec(said) : null;
+  if (named) return toolCall("get_history_details", { history_id: named[1]! });
   if (last.role === "user" && said.includes("DELETE_H1")) {
     return toolCall("update_history", { history_id: "h1", deleted: true });
   }
@@ -67,7 +72,8 @@ export async function startStandIn(): Promise<StandIn> {
     const path = new URL(req.url!, "http://x").pathname;
     let answer: Response;
     if (path.startsWith("/v1/")) {
-      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { messages: Message[] };
+      const raw = Buffer.concat(chunks).toString("utf8");
+      const body = JSON.parse(raw) as { messages: Message[] };
       const last = body.messages.at(-1)!;
       seen.push({
         to: "model",
@@ -76,6 +82,7 @@ export async function startStandIn(): Promise<StandIn> {
         lastRole: last.role,
         lastText: textOf(last.content),
         userText: textOf(body.messages.filter((m) => m.role === "user").at(-1)?.content),
+        body: raw,
       });
       answer = await modelAnswer(body.messages);
     } else {
@@ -87,9 +94,10 @@ export async function startStandIn(): Promise<StandIn> {
         apiKey: req.headers["x-api-key"] as string | undefined,
       });
       const sent = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString("utf8")) as { deleted?: boolean }) : {};
+      const history = /^\/api\/histories\/(\w+)$/.exec(path)?.[1];
       answer =
-        path === "/api/histories/h1"
-          ? Response.json({ id: "h1", name: "one brain", deleted: sent.deleted === true })
+        history
+          ? Response.json({ id: history, name: history === "h1" ? "one brain" : `history ${history}`, deleted: sent.deleted === true })
           : path === "/api/histories"
             ? Response.json([{ id: "h1", name: "one brain" }])
             : path === "/api/pages" && req.method === "POST"
