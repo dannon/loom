@@ -322,7 +322,13 @@ export async function mountOrbitBrowser(
     };
   }
 
+  /** Settled work already shown: a watch tick replayed after a crash posts it again. */
+  const shown = new Set<string>();
+
   function settledOne({ watched: w, state, outcome, record }: Settled) {
+    const said = `${w.kind}:${w.id}:${state}`;
+    if (shown.has(said)) return;
+    shown.add(said);
     const what = WHAT[w.kind];
     if (record) {
       chat.addErrorMessage(`The record was not updated for ${what} ${w.id}: ${record}.`);

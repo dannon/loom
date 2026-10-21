@@ -19,12 +19,14 @@ import {
 
 import { galaxyOpsEntry } from "../../../../../extensions/loom/galaxy-ops-tools";
 import { createPage, listHistoryPages } from "../../../../../extensions/loom/galaxy-pages-api";
+import { pollGalaxyNow } from "../../../../../extensions/loom/galaxy-poller";
 import { galaxyBackgroundIdle } from "../../../../../extensions/loom/galaxy-reconcile";
 import { captureLateSubmission } from "../../../../../extensions/loom/galaxy-submission-capture";
 import { isSubmissionTool } from "../../../../../extensions/loom/galaxy-submission";
 import { setRecordStore } from "../../../../../extensions/loom/record-store";
 import {
   createMemoryLedger,
+  submissionLedger,
   type SubmissionLedger,
 } from "../../../../../extensions/loom/submission-ledger";
 import { createPageRecordStore } from "../../../../../extensions/loom/record-store-page";
@@ -45,6 +47,7 @@ import { bootOrbit, type OrbitBoot } from "./boot";
 import { setOrbitCwd } from "./env";
 import { orbitGrant } from "./grants";
 import { openLedger, opfsFile } from "./ledger";
+import { orbitWatch } from "./watch";
 
 /** How long a conversation being left gets to finish its tool calls' end events. */
 const SETTLE_MS = 30_000;
@@ -107,6 +110,38 @@ function decline(id: ConversationId, runOnly = false) {
 
 /** The record page's key for a conversation: under its own pseudo directory. */
 const pageKey = (id: ConversationId) => `/orbit/${id}/notebook.md`;
+
+/** A conversation's watch, sleeping between ticks, woken when something asks it to look now. */
+const wakers = new Map<ConversationId, () => void>();
+const wake = (id: ConversationId) => {
+  wakers.get(id)?.();
+  wakers.delete(id);
+};
+
+let watch: ReturnType<typeof orbitWatch>;
+
+const makeWatch = (pollMs?: number) =>
+  orbitWatch({
+    pollMs,
+    bound: (id) => conversation?.id === id,
+    recordKey: pageKey,
+    poll: (options) => pollGalaxyNow(options),
+    delivered: (recordKey, keys) => submissionLedger().delivered(recordKey, keys),
+    settled: (id, settled) => {
+      if (conversation?.id === id) post({ type: "settled", settled });
+    },
+    woken: (id) => new Promise<void>((resolve) => wakers.set(id, resolve)),
+  });
+
+/**
+ * Make sure `id` has a watch, from outside any run, and have it look now: on attach (with
+ * `recover`, so its first tick captures what the ledger holds answered and reconciles), and when
+ * a reconcile saw a run end.
+ */
+async function watchNow(id: ConversationId, recover = false) {
+  await runtime!.harness.commit((tx) => watch.ensure(tx, id, { recover }), context);
+  wake(id);
+}
 
 /**
  * Install `id`'s record store before its session starts. Its page is made on the first write
@@ -198,6 +233,9 @@ async function show(next: Conversation, reason: SessionReason) {
   detach = () => stream.stop();
   await orbit!.host.attach(harness, next, context);
   await orbit!.host.start(reason);
+  // Whatever happened while the conversation wasn't shown, or before a reload, the watch's first
+  // tick finds: answered submissions with no block, runs that finished, events never delivered.
+  await watchNow(next.id, true);
   await postHeld();
 }
 
@@ -238,6 +276,7 @@ async function open(request: OpenRequest) {
     unkept ??= opened.unkept;
   }
   const url = new URL(galaxy.root, self.location.href).href.replace(/\/+$/, "");
+  watch = makeWatch(request.config.poll_ms);
   const python = browserPython(request.pyodideURL);
   const galaxyOptions = {
     root: galaxy.root,
@@ -302,8 +341,17 @@ async function open(request: OpenRequest) {
         post({ type: "notice", level, text, ...(id === undefined ? {} : { conversationId: id }) });
       },
     },
+    tasks: [watch.task],
+    pollWake: () => {
+      if (conversation) void watchNow(conversation.id).catch(failed);
+    },
     host: {
       models: { getModel: (provider, id) => runtime?.models?.getModel(provider, id) },
+      // A submission makes sure its conversation has a watch, in the call's own commit.
+      afterExecute: async (name, result, api, id) => {
+        if (!isSubmissionTool(name) || result.isError) return;
+        await api.commit((tx) => watch.ensure(tx, id), context);
+      },
       beforeStart: installRecord,
       // Only a submission has anything to capture; any other late call is just finished.
       onLateCompletion: (_id, call, result) =>
