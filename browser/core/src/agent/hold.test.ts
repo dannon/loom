@@ -695,30 +695,42 @@ describe("held input across a crash", () => {
 
   it("holds input an earlier build kept queued in pi-durable's inbox, when the store opens", async () => {
     const path = file();
-    const asked = world({ state: "queued" });
+    let fail!: () => void;
+    const failing = new Promise<void>((resolve) => (fail = resolve));
+    const asked = world({ state: "queued" }, async () => {
+      await failing;
+      return json({ error: { message: "unavailable" } }, 400);
+    });
     const before = await machine(await openNodeSqliteStorage(path));
     const conversation = await before.create({ historyId: "h1" });
     await conversation.commit(async (tx) => {
       (await tx.doc(FollowUps, conversation.id)).paused = true;
     }, context);
-    // How olit.000 held input: queued in an idle conversation, for the next input to place.
+    // Input an earlier build left queued in an idle conversation, for the next input to place:
+    // here queued behind a run that then fails, which leaves it in pi-durable's inbox.
+    const first = await conversation.submit({ type: "input", content: "first" }, context);
+    await until(() => asked.length === 1);
     const queued = await conversation.submit(
-      { type: "input", content: "second", whenIdle: "queue" },
+      { type: "input", content: "second", whenBusy: "followUp" },
       context,
     );
+    fail();
+    expect((await first.wait(context)).status).toBe("unanswered");
+    await conversation.waitForIdle(context);
     expect((await queued.status(context)).status).toBe("queued");
 
     const after = await reopen(before, path);
     const reopened = (await after.kept({ historyId: "h1" }))!;
     await reopened.reset(undefined, context);
     await reopened.waitForIdle(context);
-    expect(asked).toHaveLength(0);
+    expect(asked).toHaveLength(1);
     expect((await policyOf(after, reopened))?.pending.map((p) => p.id)).toEqual([
       `inbox:${queued.id}`,
     ]);
 
     await (await after.submit(reopened, "continue")).wait(context);
-    expect(asked).toEqual([["second", "continue"]]);
+    expect(asked).toHaveLength(2);
+    expect(asked.at(-1)!.slice(-2)).toEqual(["second", "continue"]);
   });
 
   it("does not resume the run when a crash came before its abort", async () => {
