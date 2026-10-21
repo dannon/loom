@@ -27,6 +27,7 @@ import {
   setSubmissionLedger,
   submissionLedger,
   terminalEventKey,
+  type LedgerState,
   type SubmissionLedger,
 } from "../extensions/loom/submission-ledger";
 import { GALAXY } from "./galaxy-family-fixture";
@@ -144,6 +145,55 @@ describe("the memory ledger", () => {
     // A voided key can be reserved again by a later, real transition.
     await ledger.reserve(event("j2"));
     expect(await ledger.reserved("/a/notebook.md")).toHaveLength(1);
+  });
+
+  it("as a durable ledger, comes back from what it last wrote down", async () => {
+    let disk: LedgerState | undefined;
+    const persist = async (state: LedgerState) => void (disk = JSON.parse(JSON.stringify(state)));
+    const first = createMemoryLedger({ persist });
+    await first.dispatched(entry("c1"));
+    await first.dispatched(entry("c2"));
+    await first.responded("c1", {
+      kind: "jobs",
+      label: "x",
+      historyId: HISTORY,
+      jobs: [{ jobId: JOB }],
+    });
+    await first.captured("c2");
+    await first.reserve(event("j1"));
+    await first.confirm("/a/notebook.md", event("j1").key);
+    await first.reserve(event("j2"));
+
+    const reopened = createMemoryLedger({ state: disk, persist });
+    expect((await reopened.open("/a/notebook.md")).map((e) => [e.callId, e.state])).toEqual([
+      ["c1", "responded"],
+    ]);
+    expect((await reopened.undelivered("/a/notebook.md")).map((e) => e.id)).toEqual(["j1"]);
+    expect((await reopened.reserved("/a/notebook.md")).map((e) => e.id)).toEqual(["j2"]);
+    expect(await reopened.lastHistory("/a/notebook.md")).toEqual({
+      historyId: HISTORY,
+      server: SERVER,
+    });
+  });
+
+  it("as a durable ledger, returns from dispatched only once the entry is written, and fails with the write", async () => {
+    let release!: () => void;
+    let fail = false;
+    const ledger = createMemoryLedger({
+      persist: () =>
+        fail
+          ? Promise.reject(new Error("quota exceeded"))
+          : new Promise<void>((r) => (release = r)),
+    });
+    let done = false;
+    const pending = ledger.dispatched(entry("c1")).then(() => (done = true));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(done).toBe(false);
+    release();
+    await pending;
+    fail = true;
+    // A submission whose entry can't be written down is stopped before its request goes out.
+    await expect(ledger.dispatched(entry("c2"))).rejects.toThrow("quota exceeded");
   });
 
   it("remembers a delivered mid-flight failure, so the next tick can't announce it again", async () => {
