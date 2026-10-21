@@ -38,6 +38,8 @@ beforeAll(async () => {
 
 afterEach(async () => {
   await Promise.all(dispatchers.splice(0).map((d) => d.shutdown()));
+  // Turns a test sent back for later would otherwise run in the next test's hosts.
+  await bosses[0]?.deleteAllJobs("turn").catch(() => undefined);
   await Promise.all(bosses.splice(0).map((b) => b.stop({ graceful: false })));
 });
 
@@ -55,7 +57,7 @@ interface Host {
   readonly spawned: Array<{ storeId: string; worker: Worker }>;
 }
 
-async function host(name = "host"): Promise<Host> {
+async function host(name = "host", concurrency?: number): Promise<Host> {
   const boss = new PgBoss({ host: SOCKET, database: DATABASE, user: userInfo().username, schedule: false, supervise: false });
   boss.on("error", () => undefined);
   await boss.start();
@@ -78,7 +80,8 @@ async function host(name = "host"): Promise<Host> {
       if (process.env.DISPATCH_LOG) console.log(`[${name}] ${id.slice(0, 8)} ${event.type}`);
       events.set(id, [...(events.get(id) ?? []), event]);
     },
-    retryAfterMs: () => 300,
+    retryDelayMs: () => 300,
+    concurrency,
     log: process.env.DISPATCH_LOG ? (m) => console.log(`[${name}] ${m}`) : undefined,
     spawn: (b, data) => {
       const worker = spawnWorker(b, data);
@@ -97,10 +100,14 @@ async function user(): Promise<string> {
   return sub;
 }
 
-async function until<T>(check: () => T | undefined | false, what: string, timeoutMs = 20_000): Promise<T> {
+async function until<T>(
+  check: () => T | undefined | false | Promise<T | undefined | false>,
+  what: string,
+  timeoutMs = 20_000,
+): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const value = check();
+    const value = await check();
     if (value) return value;
     if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`);
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -117,11 +124,11 @@ describe("dispatch", () => {
   it("a sticky worker's second turn runs on the same worker with no generation change", async () => {
     const h = await host();
     const c = await createConversation(pool, await user());
-    await h.dispatcher.submit(c.id, "hello");
-    await until(() => modelSaw("hello") > 0 && settledCount(h, c.id) >= 2, "the first turn");
+    await h.dispatcher.submit(c.id, `hello ${c.id}`);
+    await until(() => modelSaw(`hello ${c.id}`) > 0 && settledCount(h, c.id) >= 2, "the first turn");
     const gen = await currentLeaseGen(pool, c.storeId);
-    await h.dispatcher.submit(c.id, "hello again");
-    await until(() => modelSaw("hello again") > 0 && settledCount(h, c.id) >= 3, "the second turn");
+    await h.dispatcher.submit(c.id, `hello again ${c.id}`);
+    await until(() => modelSaw(`hello again ${c.id}`) > 0 && settledCount(h, c.id) >= 3, "the second turn");
     expect(await currentLeaseGen(pool, c.storeId)).toBe(gen);
     expect(h.spawned.filter((w) => w.storeId === c.storeId)).toHaveLength(1);
   });
@@ -148,10 +155,57 @@ describe("dispatch", () => {
     await h.dispatcher.submit(a.id, "DELETE_H1");
     const ask = await asked(h, a.id);
     await h.dispatcher.submit(b.id, "hello from b");
-    await until(() => of(h, b.id, "waiting").length > 1, "b to be sent back more than once");
+    await until(() => of(h, b.id, "waiting").length > 0, "b to be sent back");
+    // Still sent back a few retries later: b never got a worker while a was asking.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     expect(h.dispatcher.isLive(b.id)).toBe(false);
+    expect(modelSaw("hello from b")).toBe(0);
     h.dispatcher.answer(a.id, ask.id, true);
     await until(() => modelSaw("hello from b") > 0, "b's turn once a is done");
+  });
+
+  it("a pending confirm holds no handler: with two slots, two asking users don't block a third", async () => {
+    const h = await host("narrow", 2);
+    for (const _ of [0, 1]) {
+      const c = await createConversation(pool, await user());
+      await h.dispatcher.submit(c.id, "DELETE_H1");
+      await asked(h, c.id);
+    }
+    const third = await createConversation(pool, await user());
+    await h.dispatcher.submit(third.id, "third user");
+    await until(() => modelSaw("third user") > 0, "the third user's turn", 10_000);
+  });
+
+  it("a message during a running turn queues no job behind it, and the turn's end sends it", async () => {
+    // A job queued behind an active one trips pg-boss's stately unique index on fetch, and with its
+    // queue cache up to a minute stale that empties the fetch for every conversation.
+    const h = await host();
+    const c = await createConversation(pool, await user());
+    await h.dispatcher.submit(c.id, "hello");
+    await until(() => settledCount(h, c.id) >= 2, "the first turn");
+    await h.dispatcher.submit(c.id, `SLOW ${c.id}`);
+    await until(() => modelSaw(`SLOW ${c.id}`) > 0, "the slow run to start");
+    await h.dispatcher.submit(c.id, `while you wait ${c.id}`);
+    const queued = await pool.query(
+      "SELECT 1 FROM pgboss.job WHERE name = 'turn' AND singleton_key = $1 AND state IN ('created', 'retry')",
+      [c.id],
+    );
+    expect(queued.rowCount).toBe(0);
+    await until(() => modelSaw(`while you wait ${c.id}`) > 0, "the waiting message's turn");
+  });
+
+  it("a restart mid-run with nothing pending marks the conversation, and the next host finishes it", async () => {
+    const first = await host("before");
+    const c = await createConversation(pool, await user());
+    await first.dispatcher.submit(c.id, "hello");
+    await until(() => settledCount(first, c.id) >= 2, "the first turn");
+    await first.dispatcher.submit(c.id, `SLOW ${c.id}`);
+    await until(() => modelSaw(`SLOW ${c.id}`) > 0, "the slow run to start");
+    await first.dispatcher.shutdown();
+    expect((await getConversation(pool, c.id))?.interrupted).toBe(true);
+    const second = await host("after");
+    await until(() => settledCount(second, c.id) >= 1, "the resumed run to settle", 20_000);
+    await until(async () => !(await getConversation(pool, c.id))?.interrupted, "the interruption to clear");
   });
 
   it("Stop during a pending confirm settles the call as not run, and Galaxy sees no write", async () => {
@@ -205,8 +259,8 @@ describe("dispatch", () => {
   it("two hosts can't both hold a conversation: the second sends the turn back instead of booting", async () => {
     const a = await host("a");
     const c = await createConversation(pool, await user());
-    await a.dispatcher.submit(c.id, "hello");
-    await until(() => modelSaw("hello") > 0 && settledCount(a, c.id) >= 2, "a's turn");
+    await a.dispatcher.submit(c.id, `hello ${c.id}`);
+    await until(() => modelSaw(`hello ${c.id}`) > 0 && settledCount(a, c.id) >= 2, "a's turn");
     // a keeps its worker and lease but stops taking turns, so b gets the next one.
     await bosses[0]!.offWork("turn");
     const b = await host("b");

@@ -177,6 +177,8 @@ export class Sockets {
         return { type: "notice", text: event.text, level: event.level };
       case "waiting":
         return { type: "notice", text: "Waiting for your other conversation's turn to finish.", level: "info" };
+      case "failed":
+        return { type: "failed", message: event.message };
       case "worker-exit":
         // A lost lease means another host has the conversation; it says nothing to the user.
         if (event.code === 0 || event.code === 75) return undefined;

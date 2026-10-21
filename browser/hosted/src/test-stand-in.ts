@@ -41,13 +41,14 @@ type Message = { role: string; content: unknown };
 
 /**
  * The model's script. READ_H1 reads history h1, DELETE_H1 deletes it (the destructive gate asks
- * first), KEEP_GOING calls a tool after every result until a tool call is refused; anything else, and
- * any tool result, gets "ok".
+ * first), KEEP_GOING calls a tool after every result until a tool call is refused, SLOW answers after
+ * three seconds; anything else, and any tool result, gets "ok".
  */
-function modelAnswer(messages: Message[]): Response {
+async function modelAnswer(messages: Message[]): Promise<Response> {
   const last = messages.at(-1)!;
   const said = textOf(last.content);
   const user = textOf(messages.filter((m) => m.role === "user").at(-1)?.content);
+  if (last.role === "user" && said.includes("SLOW")) await new Promise((resolve) => setTimeout(resolve, 3000));
   if (last.role === "user" && said.includes("READ_H1")) return toolCall("get_history_details", { history_id: "h1" });
   if (last.role === "user" && said.includes("DELETE_H1")) {
     return toolCall("update_history", { history_id: "h1", deleted: true });
@@ -76,7 +77,7 @@ export async function startStandIn(): Promise<StandIn> {
         lastText: textOf(last.content),
         userText: textOf(body.messages.filter((m) => m.role === "user").at(-1)?.content),
       });
-      answer = modelAnswer(body.messages);
+      answer = await modelAnswer(body.messages);
     } else {
       seen.push({
         to: "galaxy",

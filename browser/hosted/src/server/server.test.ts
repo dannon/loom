@@ -75,7 +75,7 @@ beforeAll(async () => {
     modelFor: async () => ({ baseUrl: `${standIn.origin}/v1`, id: "m", apiKey: "model-key-0123456789" }),
     pageFor: async () => "p1",
     onEvent: (id, event) => sockets?.deliver(id, event),
-    retryAfterMs: () => 300,
+    retryDelayMs: () => 300,
   });
   sockets = new Sockets({
     auth,
@@ -138,10 +138,14 @@ class Page {
   }
 }
 
-async function until<T>(check: () => T | undefined | false, what: string, timeoutMs = 20_000): Promise<T> {
+async function until<T>(
+  check: () => T | undefined | false | Promise<T | undefined | false>,
+  what: string,
+  timeoutMs = 20_000,
+): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const value = check();
+    const value = await check();
     if (value) return value;
     if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`);
     await new Promise((resolve) => setTimeout(resolve, 50));
