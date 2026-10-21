@@ -15,6 +15,7 @@ import {
   wrapGalaxyTool,
 } from "../extensions/loom/galaxy-tool-wrap";
 import { isUlid } from "../extensions/loom/ulid";
+import { ServiceOutageError } from "../shared/service-outage.js";
 import { utf8ByteLength } from "../shared/truncate-middle.js";
 import { CREDENTIALS, json } from "./galaxy-test-helpers";
 
@@ -217,6 +218,98 @@ describe("failure kinds from galaxy-ops' error kinds", () => {
     expect(result.details.galaxy.kind).toBe("auth");
     expect(result.content[0].text).toContain("/connect");
     expect(result.structuredContent).toMatchObject({ success: false, errorKind: "auth" });
+  });
+});
+
+describe("a service outage", () => {
+  const outage = () => new ServiceOutageError("Galaxy is unavailable right now");
+  const expectOutage = (result: Awaited<ReturnType<typeof run>>) => {
+    expect(result.isError).toBe(true);
+    expect(result.details).toMatchObject({ galaxy: { kind: "service_outage" } });
+    expect(result.content[0].text).toContain("Galaxy is unavailable right now");
+  };
+
+  it("a transport that throws one is service_outage, never dropped or auth", async () => {
+    setGalaxyTransport({
+      credentials: CREDENTIALS,
+      fetch: async () => {
+        throw outage();
+      },
+    });
+    const result = await run(toolFromOperation(op("get_user")));
+    expectOutage(result);
+    expect(result.structuredContent).toMatchObject({ success: false, errorKind: "service_outage" });
+  });
+
+  it("survives withTransportCode rebuilding it with a cause code", async () => {
+    setGalaxyTransport({
+      credentials: CREDENTIALS,
+      fetch: async () => {
+        throw new ServiceOutageError("Galaxy is unavailable right now", {
+          cause: Object.assign(new Error("refused"), { code: "ECONNREFUSED" }),
+        });
+      },
+    });
+    const result = await run(toolFromOperation(op("get_user")));
+    expectOutage(result);
+    expect(result.content[0].text).toContain("ECONNREFUSED");
+  });
+
+  it("matches another bundle's copy of the class by name, down the cause chain", async () => {
+    const foreign = Object.assign(new Error("Galaxy is unavailable right now"), {
+      name: "ServiceOutageError",
+    });
+    setGalaxyTransport({
+      credentials: CREDENTIALS,
+      fetch: async () => {
+        throw new TypeError("fetch failed", { cause: foreign });
+      },
+    });
+    expectOutage(await run(toolFromOperation(op("get_user"))));
+  });
+
+  it("a policy check that throws one is service_outage, not a thrown error", async () => {
+    const fetch = vi.fn();
+    setGalaxyTransport({ credentials: CREDENTIALS, fetch });
+    const tool = toolFromOperation(op("get_user"), {
+      policy: {
+        check: async () => {
+          throw outage();
+        },
+      },
+    });
+    expectOutage(await run(tool));
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("an extra that throws one is service_outage", async () => {
+    const down: GalaxyTool = {
+      name: "download_dataset",
+      label: "download_dataset",
+      description: "shell extra",
+      parameters: Type.Object({}),
+      execute: async () => {
+        throw outage();
+      },
+    };
+    const result = await run(wrapGalaxyTool(down));
+    expect(result.isError).toBe(true);
+    expect(result.details).toMatchObject({
+      galaxy: { tool: "download_dataset", kind: "service_outage" },
+    });
+  });
+
+  it("an extra's other errors still throw", async () => {
+    const broken: GalaxyTool = {
+      name: "download_dataset",
+      label: "download_dataset",
+      description: "shell extra",
+      parameters: Type.Object({}),
+      execute: async () => {
+        throw new Error("not an outage");
+      },
+    };
+    await expect(run(wrapGalaxyTool(broken))).rejects.toThrow("not an outage");
   });
 });
 
