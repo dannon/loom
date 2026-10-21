@@ -524,6 +524,31 @@ function noteKey(n: HostNote): string {
   }
 }
 
+/**
+ * What the model is offered under a profile: each declared tool's name, description, parameter
+ * names and annotations, and the system prompt's section headings. The recorded tool list slice 4
+ * compares the old brain against; a model-visible change shows up as a diff of it.
+ */
+function surface(api: ExtensionAPI, systemPrompt?: string) {
+  const tools = api
+    .getAllTools()
+    // The test's own probe tool isn't the brain's.
+    .filter((t) => t.exposure !== "hidden" && t.name !== "probe")
+    .map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: Object.keys(
+        (t.parameters as { properties?: Record<string, unknown> } | undefined)?.properties ?? {},
+      ).sort(),
+      annotations: (t as { annotations?: unknown }).annotations ?? null,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const sections = systemPrompt
+    ? [...systemPrompt.matchAll(/^#{1,3} (.+)$/gm)].map((m) => m[1].trim())
+    : undefined;
+  return JSON.stringify({ tools, ...(sections ? { sections } : {}) }, null, 2) + "\n";
+}
+
 const golden = () => ({
   reaches: reaches(ASSERTED),
   informational: reaches(INFORMATIONAL),
@@ -597,6 +622,12 @@ describe("Orbit on pi-host", () => {
     }
     expect(seen.size).toBeGreaterThan(1);
     expect([...named].sort()).toEqual(["openapi-fetch", "zod"]);
+    // Orbit's brain resolves the repo root's galaxy-ops, not the browser's fork: a bare import
+    // from extensions/loom walks up from there, so nothing on that path may hold its own copy.
+    expect(fs.existsSync(join(REPO, "node_modules", "@galaxyproject", "galaxy-ops"))).toBe(true);
+    for (const dir of [join(LOOM, "node_modules"), join(REPO, "extensions", "node_modules")]) {
+      expect(fs.existsSync(dir), dir).toBe(false);
+    }
   });
 
   it("names the handlers no seam fires", () => {
@@ -707,6 +738,13 @@ describe("Orbit on pi-host", () => {
     const fetched = textOf(last.content);
     expect(fetched.startsWith("Error:")).toBe(false);
     expect(fetched).toContain("collection");
+  });
+
+  it("records the surface the model is offered under the worker profile", async () => {
+    // The tool turn above made the first request; its system prompt is Orbit's whole prompt.
+    const prompt = requests.find((r) => r.messages?.[0]?.role === "system")?.messages[0].content;
+    expect(typeof prompt).toBe("string");
+    await expect(surface(host.api, prompt)).toMatchFileSnapshot("./__surface__/orbit/tools.json");
   });
 
   it("validates a @sinclair/typebox schema strictly, as Orbit does today", async () => {
@@ -921,6 +959,9 @@ describe("Orbit on pi-host under a read-only grant", () => {
       const own = readHost.tools.filter((n) => !family.has(n));
       expect(own).toHaveLength(16 - 5 - 5);
       for (const name of ORBIT_WRITING_TOOLS) expect(own, name).not.toContain(name);
+      await expect(surface(readHost.api)).toMatchFileSnapshot(
+        "./__surface__/orbit/tools.read.json",
+      );
     } finally {
       setCapabilityProfile(PROFILE);
       install();
