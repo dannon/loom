@@ -67,6 +67,9 @@ export async function migrate(pool: Pool): Promise<void> {
  */
 async function migratePgBoss(pool: Pool): Promise<void> {
   const client = await pool.connect();
+  // pg-boss sends its DDL as one BEGIN...COMMIT batch, so a failure leaves the session in an aborted
+  // transaction: roll it back so the unlock can run, and never return that connection to the pool.
+  let broken: Error | undefined;
   try {
     await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_LOCK]);
     try {
@@ -78,10 +81,16 @@ async function migratePgBoss(pool: Pool): Promise<void> {
       });
       await boss.start();
       await boss.stop({ graceful: false });
+    } catch (error) {
+      broken = error as Error;
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
     } finally {
-      await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_LOCK]);
+      await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_LOCK]).catch((unlockError: Error) => {
+        broken ??= unlockError;
+      });
     }
   } finally {
-    client.release();
+    client.release(broken);
   }
 }

@@ -75,7 +75,7 @@ describe("loadConfig", () => {
       problems({
         ...DEV,
         ORBIT_PORT: "70000",
-        ORBIT_DATABASE_URL: "mysql://db/orbit",
+        ORBIT_DATABASE_URL: "postgres://db:abc/orbit",
         ORBIT_GALAXY_URL: "test.galaxyproject.org",
         ORBIT_TOKEN_KEY: Buffer.alloc(16).toString("base64"),
         ORBIT_LEASE_RENEW_SECONDS: "45",

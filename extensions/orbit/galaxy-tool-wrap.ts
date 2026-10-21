@@ -183,8 +183,12 @@ export async function runGalaxyCall(
         if (!outage) throw err;
         return outageFailure(outage.message);
       }
-      // The outage's own message: galaxy-ops' is built from whatever error wrapped it.
-      if (env.success === false && seen.outage) return outageFailure(seen.outage.message);
+      // Only a failure galaxy-ops reads as a lost connection: the version probe shares this fetch, and
+      // an outage it hit and tolerated mustn't relabel the op's own not-found or validation error.
+      // The outage's own message, since galaxy-ops' is built from whatever error wrapped it.
+      if (env.success === false && env.errorKind === "connection" && seen.outage) {
+        return outageFailure(seen.outage.message);
+      }
       return { env };
     },
   );

@@ -15,7 +15,9 @@ type Queryable = Pick<PoolClient, "query">;
 /**
  * Take the store's lease for `holder`, creating the store if needed, and return the generation its
  * storage should be fenced on; undefined when another holder's lease is still live. The same holder
- * acquiring again extends its lease without a bump.
+ * acquiring again extends its lease without a bump, so `holder` must name one worker instance, never a
+ * host or a reused id: a restarted worker under an old name would inherit the old generation and leave
+ * a hung predecessor unfenced.
  */
 export async function acquireLease(
   pool: Pool,
@@ -40,8 +42,10 @@ export async function acquireLeaseInTransaction(
     "SELECT lease_gen FROM durable_stores WHERE store_id = $1 FOR UPDATE",
     [storeId],
   );
+  // Locked too, so a renew or release racing this takeover waits for it and then finds the new holder,
+  // rather than reporting a lease its caller no longer has.
   const { rows: leases } = await client.query<{ holder: string; live: boolean }>(
-    "SELECT holder, expires_at > now() AS live FROM orbit_leases WHERE store_id = $1",
+    "SELECT holder, expires_at > now() AS live FROM orbit_leases WHERE store_id = $1 FOR UPDATE",
     [storeId],
   );
   const held = leases[0];

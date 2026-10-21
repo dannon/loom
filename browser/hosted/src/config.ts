@@ -37,6 +37,17 @@ export class ConfigError extends Error {
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const isLoopback = (url: URL) => LOOPBACK.has(url.hostname);
 
+// Parsed as well as matched, so the boot summary's own parse can't fail on a URL this accepted.
+const isPostgresUrl = (raw: string) => {
+  if (!/^postgres(ql)?:\/\//.test(raw)) return false;
+  try {
+    new URL(raw);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /** Read and check every setting, throwing a ConfigError that lists all the problems at once. */
 export function loadConfig(env: Record<string, string | undefined> = process.env): HostConfig {
   const problems: string[] = [];
@@ -83,7 +94,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (!Number.isInteger(port) || port < 1 || port > 65535) problems.push("ORBIT_PORT must be a port number");
 
   const databaseUrl = required("ORBIT_DATABASE_URL");
-  if (databaseUrl !== undefined && !/^postgres(ql)?:\/\//.test(databaseUrl)) {
+  if (databaseUrl !== undefined && !isPostgresUrl(databaseUrl)) {
     problems.push("ORBIT_DATABASE_URL must be a postgres:// URL");
   }
 
