@@ -722,6 +722,7 @@ export function createPiHost(options: PiHostOptions): PiHost {
     }) as ExtensionToolContext;
   }
 
+  /** A command's ctx. Its signal is undefined: pi's is the stream's, and no Orbit command reads it. */
   function makeCommandCtx(): ExtensionCommandContext {
     const assertActive = activeCheck();
     const throws = (member: string) => () => {
@@ -1717,8 +1718,9 @@ export function createPiHost(options: PiHostOptions): PiHost {
     if (!b) throw new Error("pi-host: attach() before submit()");
     const { source = "rpc", deliverAs } = opts;
     // pi runs a registered /command before the input chain and never sends it to the model,
-    // splitting the name from its arguments at the first space (agent-session.js prompt()).
-    if (text.startsWith("/")) {
+    // splitting the name from its arguments at the first space (agent-session.js prompt()). Text
+    // the brain sends itself is not a command: pi's sendUserMessage skips this step.
+    if (source !== "extension" && text.startsWith("/")) {
       const space = text.indexOf(" ");
       const name = space === -1 ? text.slice(1) : text.slice(1, space);
       if (commands.has(name)) {
