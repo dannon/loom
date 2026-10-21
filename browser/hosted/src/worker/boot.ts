@@ -61,7 +61,7 @@ orbit.setConfigSource({
     experiments: { autoResume: false, teamDispatch: false },
   }),
   // The redactor reads these as well as the environment.
-  secrets: () => [data.model.apiKey],
+  secrets: () => [data.model.apiKey, ...recentTokens],
 });
 orbit.setInstructionSource({ files: () => [] });
 orbit.setVendorSkillsSource({
@@ -71,15 +71,28 @@ orbit.setVendorSkillsSource({
 });
 // Galaxy requests go out as the user: the host hands over their access token one request at a time
 // (brief H5), and never to a worker whose lease has moved on, which this worker then treats as lost.
+// Set by the host's close: asks are withdrawn by rejecting, and token waits fail.
+let closing = false;
 let nextToken = 0;
 const tokenWaits = new Map<number, (answer: TokenAnswer) => void>();
+// Closing joins every running tool call, so one parked on a token the host will no longer send must
+// fail instead, or close never returns.
+const CLOSED: TokenAnswer = { failure: { kind: "outage", message: "The conversation is closing." } };
+// The last few access tokens handed out, so a Galaxy error that echoes one back is masked too.
+const recentTokens: string[] = [];
 const token = async (): Promise<string> => {
-  const answer = await new Promise<TokenAnswer>((resolve) => {
-    const id = ++nextToken;
-    tokenWaits.set(id, resolve);
-    post({ type: "token", id });
-  });
-  if ("token" in answer) return answer.token;
+  const answer = closing
+    ? CLOSED
+    : await new Promise<TokenAnswer>((resolve) => {
+        const id = ++nextToken;
+        tokenWaits.set(id, resolve);
+        post({ type: "token", id });
+      });
+  if ("token" in answer) {
+    if (!recentTokens.includes(answer.token)) recentTokens.unshift(answer.token);
+    recentTokens.length = Math.min(recentTokens.length, 4);
+    return answer.token;
+  }
   if (answer.failure.kind === "lease") {
     const lost = new LeaseLostError(data.storeId, data.leaseGen, -1);
     fence.check(lost);
@@ -104,7 +117,6 @@ orbit.setGalaxyOutputStore(orbit.createMemoryOutputStore({ entries: 32, bytes: d
 // 8. The host, the guards, Orbit, and the conversation.
 let nextAsk = 0;
 const pending = new Map<number, (answer: AskAnswer) => void>();
-let closing = false;
 const host = createPiHost({
   name: "orbit",
   cwd: "/",
@@ -212,6 +224,8 @@ port.on("message", (message: ToWorker) => {
       return;
     case "close":
       closing = true;
+      for (const resolve of tokenWaits.values()) resolve(CLOSED);
+      tokenWaits.clear();
       harness
         .close(ctx)
         .then(

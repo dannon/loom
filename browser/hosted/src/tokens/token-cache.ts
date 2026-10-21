@@ -3,6 +3,7 @@
  * expiry, and concurrent requests during a refresh share that one refresh: Keycloak rotates refresh
  * tokens, so two refreshes racing with the same refresh token would end the session.
  */
+import { TokenUnavailable } from "../worker/galaxy-fetch";
 
 export interface AccessToken {
   readonly token: string;
@@ -39,6 +40,7 @@ export function createTokenCache(options: TokenCacheOptions): TokenCache {
     async token(sub) {
       const held = current.get(sub);
       if (held && held.expiresAt - skew > now()) return held.token;
+      const asked = epochs.get(sub) ?? 0;
       let flight = refreshing.get(sub);
       if (!flight) {
         const epoch = epochs.get(sub) ?? 0;
@@ -54,7 +56,12 @@ export function createTokenCache(options: TokenCacheOptions): TokenCache {
           () => current.delete(sub),
         );
       }
-      return (await flight).token;
+      const fresh = await flight;
+      // Signed out while waiting: the token belongs to a session that has ended.
+      if ((epochs.get(sub) ?? 0) !== asked) {
+        throw new TokenUnavailable({ kind: "auth", message: "You're signed out. Sign in again to continue." });
+      }
+      return fresh.token;
     },
     forget(sub) {
       current.delete(sub);

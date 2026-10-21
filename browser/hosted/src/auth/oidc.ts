@@ -40,6 +40,8 @@ export interface Oidc {
   endSessionUrl(postLogoutRedirect: string, idToken?: string): URL;
 }
 
+const KEYCLOAK_TIMEOUT_MS = 10_000;
+
 // Keycloak's default SSO session idle time, for a response that doesn't say.
 const DEFAULT_REFRESH_LIFETIME_S = 30 * 60;
 
@@ -48,6 +50,15 @@ export async function connectOidc(settings: OidcSettings): Promise<Oidc> {
   const config = settings.clientSecret
     ? await client.discovery(settings.issuer, settings.clientId, settings.clientSecret, undefined, options)
     : await client.discovery(settings.issuer, settings.clientId, undefined, client.None(), options);
+  // A refresh holds the session's row lock and a pool connection while it waits on Keycloak, so a
+  // stalled Keycloak must fail fast (as an outage) rather than after undici's five minutes.
+  config[client.customFetch] = (url, init) =>
+    fetch(url, {
+      ...(init as RequestInit),
+      signal: init.signal
+        ? AbortSignal.any([init.signal, AbortSignal.timeout(KEYCLOAK_TIMEOUT_MS)])
+        : AbortSignal.timeout(KEYCLOAK_TIMEOUT_MS),
+    });
 
   const tokenSet = (tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers, sub?: string): TokenSet => {
     const now = Date.now();
@@ -99,7 +110,7 @@ export async function connectOidc(settings: OidcSettings): Promise<Oidc> {
         }
         throw new TokenUnavailable({ kind: "outage", message: "The sign-in service couldn't be reached." });
       }
-      // A refresh response carries no ID token on Keycloak's default settings; the subject is unchanged.
+      // The subject doesn't change on refresh; read it from the access token if no ID token came back.
       return tokenSet(tokens, subjectOf(tokens.access_token));
     },
     async revoke(refreshToken) {
