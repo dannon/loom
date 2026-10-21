@@ -149,6 +149,10 @@ export function registerSessionLifecycle(pi: ExtensionAPI): void {
       toast(registry.notice, registry.session.store.mode === "writer" ? "info" : "warning");
     }
 
+    // The worker starts a session on every panel open, conversation switch and reload, so a
+    // greeting there would be a model call each time and a turn nobody asked for.
+    if (capabilityProfile().ui === "worker") return;
+
     const freshSession = readEnv("FRESH_SESSION") === "1";
     const isResume = process.argv.includes("--continue");
 
