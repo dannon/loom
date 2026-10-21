@@ -69,13 +69,18 @@ async function stopped(running: Running): Promise<void> {
   expect(await running.exited).toBe(0);
 }
 
-/** A worker on a new conversation, past its greeting. */
-async function greeted(overrides: Partial<WorkerData> = {}, tokens?: Tokens) {
+/** A worker on a new conversation, ready for a message. */
+async function started(overrides: Partial<WorkerData> = {}, tokens?: Tokens) {
   const data = await workerData(overrides);
   const running = run(data, tokens);
   const ready = await running.waitFor("ready");
-  await running.waitFor("settled");
   return { data, running, ready };
+}
+
+/** Past one plain turn, by when the worker's startup reads of Galaxy are done too. */
+async function settledIn(running: Running): Promise<void> {
+  running.worker.postMessage({ cmd: "submit", text: "hello" });
+  await running.waitFor("settled");
 }
 
 describe("the worker bootstrap", () => {
@@ -90,48 +95,49 @@ describe("the worker bootstrap", () => {
   });
 
   it("boots and runs a Galaxy turn with no filesystem reach and nothing in its environment but the shim", async () => {
-    const { running, ready } = await greeted({ traceReaches: true });
-    expect(ready.env).toEqual(["ORBIT_ACTIVE_LLM_API_KEY"]);
+    const { running, ready } = await started({ traceReaches: true });
+    expect([...ready.env].sort()).toEqual(["ORBIT_ACTIVE_LLM_API_KEY", "ORBIT_FRESH_SESSION"]);
     expect(ready.resuming).toBe(false);
     const before = standIn.galaxyCalls("GET", "/api/histories/h1");
     running.worker.postMessage({ cmd: "submit", text: "READ_H1 please" });
     expect(await running.waitFor("submitted")).toEqual({ type: "submitted", admitted: true });
-    await running.waitFor("settled", 2);
+    await running.waitFor("settled");
     expect(standIn.galaxyCalls("GET", "/api/histories/h1")).toBe(before + 1);
     expect(running.messages.filter((m) => m.type === "reach")).toEqual([]);
     expect(running.messages.filter((m) => m.type === "report")).toEqual([]);
     await stopped(running);
   });
 
-  it("reopens a greeted conversation without greeting it again", async () => {
-    const { data, running: first, ready: opened } = await greeted();
+  it("never greets, on a new conversation or a reopened one", async () => {
+    const before = standIn.modelCalls();
+    const { data, running: first, ready: opened } = await started();
+    first.worker.postMessage({ cmd: "submit", text: "first words" });
+    await first.waitFor("settled");
     await stopped(first);
 
     const second = run(await workerData({ storeId: data.storeId, conversationId: opened.conversationId }));
     const ready = await second.waitFor("ready");
     expect(ready.conversationId).toBe(opened.conversationId);
-    expect([...ready.env].sort()).toEqual(["ORBIT_ACTIVE_LLM_API_KEY", "ORBIT_FRESH_SESSION"]);
-    const before = standIn.modelCalls();
     second.worker.postMessage({ cmd: "submit", text: "back again" });
     await second.waitFor("settled");
-    // One run, and it answered the message rather than greeting.
+    // Two runs, each answering the user's message; neither opened with a greeting.
     const calls = standIn.seen.filter((s) => s.to === "model").slice(before);
-    expect(calls.map((c) => c.userText)).toEqual(["back again"]);
+    expect(calls.map((c) => c.userText)).toEqual(["first words", "back again"]);
     await stopped(second);
   });
 
   it("stops calling tools at the cap for one user message, and the model is told why", async () => {
-    const { running } = await greeted({ limits: { maxTurns: 6, maxToolCalls: 2, outputBytes: 1 << 20 } });
+    const { running } = await started({ limits: { maxTurns: 6, maxToolCalls: 2, outputBytes: 1 << 20 } });
     const before = standIn.galaxyCalls("GET", "/api/histories/h1");
     running.worker.postMessage({ cmd: "submit", text: "KEEP_GOING" });
-    await running.waitFor("settled", 2);
+    await running.waitFor("settled");
     expect(standIn.galaxyCalls("GET", "/api/histories/h1")).toBe(before + 2);
     expect(standIn.seen.some((s) => s.to === "model" && s.lastText?.includes("has used its 2 tool calls"))).toBe(true);
     await stopped(running);
   });
 
   it("exits with 75 on a lost lease, before the model is asked anything", async () => {
-    const { data, running } = await greeted();
+    const { data, running } = await started();
     const before = standIn.modelCalls();
     await bumpLeaseGen(pool, data.storeId);
     running.worker.postMessage({ cmd: "submit", text: "hello again" });
@@ -142,13 +148,13 @@ describe("the worker bootstrap", () => {
 
 describe("a pending confirm", () => {
   it("Stop withdraws it, the run settles, and the delete never reaches Galaxy", async () => {
-    const { running } = await greeted();
+    const { running } = await started();
     const puts = standIn.galaxyCalls("PUT", "/api/histories/h1");
     running.worker.postMessage({ cmd: "submit", text: "DELETE_H1" });
     const ask = await running.waitFor("ask");
     running.worker.postMessage({ cmd: "stop" });
     expect(await running.waitFor("ask-withdrawn")).toEqual({ type: "ask-withdrawn", id: ask.id });
-    expect((await running.waitFor("settled", 2)).aborted).toBe(true);
+    expect((await running.waitFor("settled")).aborted).toBe(true);
     // A late answer to the withdrawn ask changes nothing.
     running.worker.postMessage({ cmd: "answer", id: ask.id, value: true });
     expect(standIn.galaxyCalls("PUT", "/api/histories/h1")).toBe(puts);
@@ -156,7 +162,7 @@ describe("a pending confirm", () => {
   });
 
   it("closing withdraws it without waiting for the host, and the reopened worker asks again", async () => {
-    const { data, running, ready: opened } = await greeted();
+    const { data, running, ready: opened } = await started();
     const puts = standIn.galaxyCalls("PUT", "/api/histories/h1");
     running.worker.postMessage({ cmd: "submit", text: "DELETE_H1" });
     const first = await running.waitFor("ask");
@@ -179,10 +185,10 @@ describe("a pending confirm", () => {
 
 describe("Galaxy as the signed-in user", () => {
   it("sends the host's access token and no API key", async () => {
-    const { running } = await greeted();
+    const { running } = await started();
     const from = standIn.seen.length;
     running.worker.postMessage({ cmd: "submit", text: "READ_H1 please" });
-    await running.waitFor("settled", 2);
+    await running.waitFor("settled");
     const galaxy = standIn.seen.slice(from).filter((s) => s.to === "galaxy");
     expect(galaxy.length).toBeGreaterThan(0);
     for (const request of galaxy) {
@@ -194,9 +200,10 @@ describe("Galaxy as the signed-in user", () => {
 
   it("a sign-in outage reaches the model as service_outage, and Galaxy is never asked", async () => {
     let down = false;
-    const { running } = await greeted({}, () =>
+    const { running } = await started({}, () =>
       down ? { failure: { kind: "outage", message: "The sign-in service couldn't be reached." } } : { token: TEST_TOKEN },
     );
+    await settledIn(running);
     down = true;
     const from = standIn.seen.length;
     running.worker.postMessage({ cmd: "submit", text: "READ_H1 please" });
@@ -211,9 +218,10 @@ describe("Galaxy as the signed-in user", () => {
 
   it("a token refused for a moved lease stops the worker like a lost lease", async () => {
     let moved = false;
-    const { running } = await greeted({}, () =>
+    const { running } = await started({}, () =>
       moved ? { failure: { kind: "lease", message: "This conversation moved to another worker." } } : { token: TEST_TOKEN },
     );
+    await settledIn(running);
     moved = true;
     running.worker.postMessage({ cmd: "submit", text: "READ_H1 please" });
     expect(await running.exited).toBe(LEASE_LOST);

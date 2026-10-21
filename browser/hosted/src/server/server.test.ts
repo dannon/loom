@@ -185,8 +185,8 @@ describe("the WebSocket", () => {
     page.send({ type: "submit", conversationId: c.id, text: "hello there" });
     await until(() => modelSaw("hello there") > 0, "the model to hear it");
     await until(
-      () => page.events().filter((e) => e.type === "run_end").length >= 2,
-      "the greeting's run and this one to end",
+      () => page.events().some((e) => e.type === "run_end"),
+      "the run to end",
     );
 
     const again = new Page(cookie);
@@ -311,7 +311,7 @@ describe("two users side by side", () => {
     }
     for (const { page, history } of pages) {
       await until(() => standIn.galaxyCalls("GET", `/api/histories/${history}`) > 0, `${history} to be read`);
-      await until(() => page.events().filter((e) => e.type === "run_end").length >= 2, "both runs to end");
+      await until(() => page.events().some((e) => e.type === "run_end"), "the run to end");
     }
     const [a, b] = pages as [(typeof pages)[0], (typeof pages)[0]];
     // Each page saw its own conversation and nothing of the other's.

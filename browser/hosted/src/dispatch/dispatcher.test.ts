@@ -126,10 +126,10 @@ describe("dispatch", () => {
     const h = await host();
     const c = await createConversation(pool, await user());
     await h.dispatcher.submit(c.id, `hello ${c.id}`);
-    await until(() => modelSaw(`hello ${c.id}`) > 0 && settledCount(h, c.id) >= 2, "the first turn");
+    await until(() => modelSaw(`hello ${c.id}`) > 0 && settledCount(h, c.id) >= 1, "the first turn");
     const gen = await currentLeaseGen(pool, c.storeId);
     await h.dispatcher.submit(c.id, `hello again ${c.id}`);
-    await until(() => modelSaw(`hello again ${c.id}`) > 0 && settledCount(h, c.id) >= 3, "the second turn");
+    await until(() => modelSaw(`hello again ${c.id}`) > 0 && settledCount(h, c.id) >= 2, "the second turn");
     expect(await currentLeaseGen(pool, c.storeId)).toBe(gen);
     expect(h.spawned.filter((w) => w.storeId === c.storeId)).toHaveLength(1);
   });
@@ -143,7 +143,7 @@ describe("dispatch", () => {
     await h.dispatcher.submit(c.id, "second");
     h.dispatcher.answer(c.id, ask.id, true);
     await until(() => modelSaw("first\n\nsecond") > 0, "the coalesced turn");
-    await until(() => settledCount(h, c.id) >= 3, "it to settle");
+    await until(() => settledCount(h, c.id) >= 2, "it to settle");
     expect(modelSaw("first")).toBe(0);
     expect(modelSaw("second")).toBe(0);
   });
@@ -183,7 +183,7 @@ describe("dispatch", () => {
     const h = await host();
     const c = await createConversation(pool, await user());
     await h.dispatcher.submit(c.id, "hello");
-    await until(() => settledCount(h, c.id) >= 2, "the first turn");
+    await until(() => settledCount(h, c.id) >= 1, "the first turn");
     await h.dispatcher.submit(c.id, `SLOW ${c.id}`);
     await until(() => modelSaw(`SLOW ${c.id}`) > 0, "the slow run to start");
     await h.dispatcher.submit(c.id, `while you wait ${c.id}`);
@@ -199,7 +199,7 @@ describe("dispatch", () => {
     const first = await host("before");
     const c = await createConversation(pool, await user());
     await first.dispatcher.submit(c.id, "hello");
-    await until(() => settledCount(first, c.id) >= 2, "the first turn");
+    await until(() => settledCount(first, c.id) >= 1, "the first turn");
     await first.dispatcher.submit(c.id, `SLOW ${c.id}`);
     await until(() => modelSaw(`SLOW ${c.id}`) > 0, "the slow run to start");
     await first.dispatcher.shutdown();
@@ -273,7 +273,7 @@ describe("dispatch", () => {
     const a = await host("a");
     const c = await createConversation(pool, await user());
     await a.dispatcher.submit(c.id, `hello ${c.id}`);
-    await until(() => modelSaw(`hello ${c.id}`) > 0 && settledCount(a, c.id) >= 2, "a's turn");
+    await until(() => modelSaw(`hello ${c.id}`) > 0 && settledCount(a, c.id) >= 1, "a's turn");
     // a keeps its worker and lease but stops taking turns, so b gets the next one.
     await bosses[0]!.offWork("turn");
     const b = await host("b");
