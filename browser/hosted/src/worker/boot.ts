@@ -32,9 +32,11 @@ const reopen = data.conversationId !== undefined;
 
 if (data.traceReaches) installTripwire((api) => post({ type: "reach", api }));
 
-// 1. The environment: the model key for the redactor. ORBIT_FRESH_SESSION, which stops a second
-// greeting, waits until the conversation is open, since only one with entries has been greeted.
+// 1. The environment: the model key for the redactor, and ORBIT_FRESH_SESSION, which skips Orbit's
+// startup greeting. Hosted conversations start with the user's message instead: a greeting would be
+// a model turn nobody asked for, on every new conversation.
 process.env.ORBIT_ACTIVE_LLM_API_KEY = data.model.apiKey;
+process.env.ORBIT_FRESH_SESSION = "1";
 
 // 2. Storage and the fence. A lost lease exits the thread with 75 (LeaseFence's default here), and
 // from then on nothing leaves the worker: not a commit, not a Galaxy write, not a model call.
@@ -185,7 +187,6 @@ const conversation = reopen
   : await harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model } }, ctx);
 if (!conversation) throw new Error(`No conversation ${data.conversationId} in store ${data.storeId}`);
 await host.attach(harness, conversation, ctx);
-if (reopen && (await conversation.context(ctx)).messages.length > 0) process.env.ORBIT_FRESH_SESSION = "1";
 // Read before the session starts, when the only unfinished tasks are ones an earlier worker left.
 const tasks = (await harness.inspect(ctx)).tasks as unknown as Array<{ record: { state: { status: string } } }>;
 const resuming = tasks.some((t) => t.record.state.status !== "terminal");
