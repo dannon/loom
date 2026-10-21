@@ -5,10 +5,10 @@
  * but never calls in this profile replaced by inert stand-ins, and the vendored skills inlined so the
  * worker never reads them from disk.
  */
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { build, type Plugin } from "esbuild";
+import { build, type BuildOptions, type Plugin } from "esbuild";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO = resolve(HERE, "..", "..", "..", "..");
@@ -84,15 +84,39 @@ const seams: Plugin = {
   },
 };
 
+/**
+ * V8 keeps a script's source for its lifetime, at one byte per character only when the whole file
+ * is ASCII (bench/RESULTS-boot.md). esbuild's ascii charset escapes strings but not regex literals or
+ * legal comments; a \u escape means the same thing in a string, template, regex or identifier.
+ */
+export const asciiOnly = (source: string) =>
+  source.replace(/[^\x00-\x7f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+
+/** The production bundle: minified and all ASCII, which together keep ~40 MB off each worker. */
+export async function bundleWorkerForProduction(entry: string, outfile: string): Promise<string> {
+  const result = await build({ ...options(entry, outfile), minify: true, legalComments: "none", write: false });
+  const text = asciiOnly(result.outputFiles![0]!.text);
+  mkdirSync(dirname(outfile), { recursive: true });
+  const stray = text.search(/[^\x00-\x7f]/);
+  if (stray >= 0) throw new Error(`The worker bundle has a non-ASCII byte at ${stray}`);
+  writeFileSync(outfile, text);
+  return outfile;
+}
+
 export async function bundleWorker(entry: string, outfile: string): Promise<string> {
-  await build({
+  await build(options(entry, outfile));
+  return outfile;
+}
+
+function options(entry: string, outfile: string) {
+  return {
     entryPoints: [entry],
     outfile,
     bundle: true,
-    platform: "node",
-    format: "esm",
+    platform: "node" as const,
+    format: "esm" as const,
     target: "node22",
-    logLevel: "error",
+    logLevel: "error" as const,
     plugins: [seams],
     // Bundled, every module shares the worker entry's import.meta, so lessons/validate.mjs would
     // take itself for the CLI and exit the thread.
@@ -104,6 +128,5 @@ export async function bundleWorker(entry: string, outfile: string): Promise<stri
         "const require = __rcRequire(import.meta.url);",
       ].join("\n"),
     },
-  });
-  return outfile;
+  } satisfies BuildOptions;
 }

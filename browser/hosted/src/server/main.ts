@@ -1,0 +1,136 @@
+/**
+ * The hosted Orbit service: one process with the HTTP server, the dispatcher and its workers. Every
+ * setting comes from the environment (config.ts); the worker bundle and the built page sit next to
+ * this file in the image (ORBIT_WORKER_BUNDLE and ORBIT_WEB_ROOT override where).
+ */
+import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
+import { fileURLToPath } from "node:url";
+import pg from "pg";
+import { PgBoss } from "pg-boss";
+
+import { connectOidc } from "../auth/oidc";
+import type { AuthContext } from "../auth/routes";
+import { refreshForUser } from "../auth/sessions";
+import { ConfigError, describeConfig, loadConfig } from "../config";
+import { migrate } from "../db/migrate";
+import { Dispatcher } from "../dispatch/dispatcher";
+import { galaxyPageCreator } from "../dispatch/pages";
+import { liteLlmModels } from "../model/litellm";
+import { createTokenCache } from "../tokens/token-cache";
+import { createHostServer } from "./http";
+import { Sockets } from "./socket";
+
+const log = (message: string) => console.log(`[orbit] ${message}`);
+
+async function main(): Promise<void> {
+  let config;
+  try {
+    config = loadConfig();
+  } catch (error) {
+    if (error instanceof ConfigError) {
+      console.error(error.message);
+      process.exit(78);
+    }
+    throw error;
+  }
+  console.log(describeConfig(config));
+
+  const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 20 });
+  await migrate(pool);
+  // A short queue cache, so a stately key that just went idle stops being skipped soon after.
+  const boss = new PgBoss({ connectionString: config.databaseUrl, schedule: false, queueCacheIntervalSeconds: 5 });
+  boss.on("error", (error: Error) => log(`pg-boss: ${error.message}`));
+  await boss.start();
+
+  const oidc = await connectOidc({
+    issuer: config.oidc.issuer,
+    clientId: config.oidc.clientId,
+    clientSecret: config.oidc.clientSecret,
+    allowHttp: config.oidc.issuer.protocol === "http:" && ["localhost", "127.0.0.1"].includes(config.oidc.issuer.hostname),
+  });
+  const tokens = createTokenCache({ refresh: refreshForUser(pool, config.tokenKey, oidc) });
+  const auth: AuthContext = {
+    pool,
+    oidc,
+    tokens,
+    tokenKey: config.tokenKey,
+    publicUrl: config.publicUrl,
+    galaxyUrl: config.galaxyUrl,
+    galaxyLinkUrl: config.galaxyLinkUrl,
+  };
+
+  let sockets: Sockets | undefined;
+  const dispatcher = new Dispatcher({
+    pool,
+    boss,
+    bundle: process.env.ORBIT_WORKER_BUNDLE ?? fileURLToPath(new URL("./worker.mjs", import.meta.url)),
+    // A restarted host is a new holder, so its first acquire on every conversation bumps.
+    hostId: `${hostname()}/${process.pid}/${randomUUID()}`,
+    databaseUrl: config.databaseUrl,
+    galaxyUrl: config.galaxyUrl.href,
+    lease: config.lease,
+    limits: {
+      maxTurns: config.turnLimits.maxSteps,
+      maxToolCalls: config.turnLimits.maxToolCalls,
+      outputBytes: 8 * 1024 * 1024,
+    },
+    tokens,
+    modelFor: liteLlmModels({
+      pool,
+      tokenKey: config.tokenKey,
+      url: config.model.litellmUrl,
+      adminKey: config.model.adminKey,
+      model: config.model.id,
+      tpm: config.model.tpm,
+      rpm: config.model.rpm,
+    }),
+    pageFor: galaxyPageCreator({ galaxyUrl: config.galaxyUrl.href, tokens }),
+    compileCache: process.env.ORBIT_COMPILE_CACHE ?? fileURLToPath(new URL("./.compile-cache", import.meta.url)),
+    onEvent: (id, event) => sockets?.deliver(id, event),
+    log,
+  });
+  sockets = new Sockets({ auth, dispatcher, turnsDisabled: config.turnsDisabled, log });
+
+  const server = createHostServer({
+    auth,
+    sockets,
+    webRoot: process.env.ORBIT_WEB_ROOT ?? fileURLToPath(new URL("./web", import.meta.url)),
+    log,
+    health: async () => ({
+      postgres: await pool.query("SELECT 1").then(
+        () => true,
+        () => false,
+      ),
+      keycloak: await fetch(new URL(`${config.oidc.issuer.href.replace(/\/$/, "")}/.well-known/openid-configuration`), {
+        signal: AbortSignal.timeout(3000),
+      }).then(
+        (r) => r.ok,
+        () => false,
+      ),
+    }),
+  });
+  await new Promise<void>((resolve) => server.listen(config.port, resolve));
+  await dispatcher.start();
+  log(`listening on ${config.port}`);
+
+  let stopping = false;
+  const stop = async (signal: string) => {
+    if (stopping) return;
+    stopping = true;
+    log(`${signal}: closing conversations`);
+    // Workers first (pending confirms are asked again on the next start), then the rest.
+    await dispatcher.shutdown();
+    await boss.stop({ graceful: true, timeout: 10_000 });
+    server.close();
+    await pool.end();
+    process.exit(0);
+  };
+  process.on("SIGTERM", () => void stop("SIGTERM"));
+  process.on("SIGINT", () => void stop("SIGINT"));
+}
+
+main().catch((error: Error) => {
+  console.error(`[orbit] failed to start: ${error.stack ?? error.message}`);
+  process.exit(1);
+});
