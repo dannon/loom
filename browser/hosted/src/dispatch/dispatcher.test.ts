@@ -57,7 +57,7 @@ interface Host {
   readonly spawned: Array<{ storeId: string; worker: Worker }>;
 }
 
-async function host(name = "host", concurrency?: number): Promise<Host> {
+async function host(name = "host", concurrency?: number, turnsDisabled?: () => string | undefined): Promise<Host> {
   const boss = new PgBoss({ host: SOCKET, database: DATABASE, user: userInfo().username, schedule: false, supervise: false });
   boss.on("error", () => undefined);
   await boss.start();
@@ -82,6 +82,7 @@ async function host(name = "host", concurrency?: number): Promise<Host> {
     },
     retryDelayMs: () => 300,
     concurrency,
+    turnsDisabled,
     log: process.env.DISPATCH_LOG ? (m) => console.log(`[${name}] ${m}`) : undefined,
     spawn: (b, data) => {
       const worker = spawnWorker(b, data);
@@ -206,6 +207,18 @@ describe("dispatch", () => {
     const second = await host("after");
     await until(() => settledCount(second, c.id) >= 1, "the resumed run to settle", 20_000);
     await until(async () => !(await getConversation(pool, c.id))?.interrupted, "the interruption to clear");
+  });
+
+  it("the kill switch stops every turn, queued ones included, and they run once it's lifted", async () => {
+    const paused = await host("paused", undefined, () => "Orbit is paused.");
+    const c = await createConversation(pool, await user());
+    await paused.dispatcher.submit(c.id, `held ${c.id}`);
+    await until(() => of(paused, c.id, "failed").length > 0, "the turn to be turned away");
+    expect(modelSaw(`held ${c.id}`)).toBe(0);
+    expect((await getConversation(pool, c.id))?.interrupted).toBe(true);
+    await paused.dispatcher.shutdown();
+    await host("resumed");
+    await until(() => modelSaw(`held ${c.id}`) > 0, "the held message to run once lifted");
   });
 
   it("Stop during a pending confirm settles the call as not run, and Galaxy sees no write", async () => {

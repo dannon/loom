@@ -82,6 +82,13 @@ describe("loadConfig", () => {
     ]);
   });
 
+  it("sends tokens and the admin key only over TLS beyond localhost", () => {
+    expect(problems({ ...DEV, ORBIT_GALAXY_URL: "http://galaxy.example.org", ORBIT_LITELLM_URL: "http://litellm.example.org" })).toEqual([
+      "ORBIT_GALAXY_URL must be https unless it is localhost",
+      "ORBIT_LITELLM_URL must be https unless it is localhost",
+    ]);
+  });
+
   it("checks the shape of what is set", () => {
     expect(
       problems({

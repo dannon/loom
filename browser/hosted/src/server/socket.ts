@@ -143,7 +143,8 @@ export class Sockets {
         dispatcher.stop(id);
         return;
       case "confirmed":
-        dispatcher.answer(id, Number(message.id), message.approved === true);
+        // Under the kill switch a paused run doesn't go on: a yes counts as a no.
+        dispatcher.answer(id, Number(message.id), message.approved === true && !this.#c.turnsDisabled);
         return;
       case "reset": {
         // A new conversation; the old one stays in the list.

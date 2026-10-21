@@ -5,6 +5,7 @@
  * worker in its workerData and nowhere else, and LiteLLM's spend log, keyed by user, is the usage
  * ledger.
  */
+import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 
 import { seal, unseal } from "../auth/seal";
@@ -40,7 +41,9 @@ export function liteLlmModels(options: LiteLlmOptions): (sub: string) => Promise
       headers: { authorization: `Bearer ${options.adminKey}`, "content-type": "application/json" },
       body: JSON.stringify({
         user_id: sub,
-        key_alias: `orbit-${sub}`,
+        // Unique per key: LiteLLM refuses a repeated alias, and a key it made that we never stored
+        // (a lost response, a failed commit, a rotated ORBIT_TOKEN_KEY) would block the user for good.
+        key_alias: `orbit-${sub}-${randomUUID().slice(0, 8)}`,
         models: [options.model],
         tpm_limit: options.tpm,
         rpm_limit: options.rpm,
@@ -48,7 +51,10 @@ export function liteLlmModels(options: LiteLlmOptions): (sub: string) => Promise
       }),
       signal: AbortSignal.timeout(15_000),
     });
-    if (!response.ok) throw new Error(`LiteLLM refused to create a model key: HTTP ${response.status}`);
+    if (!response.ok) {
+      const said = (await response.text().catch(() => "")).slice(0, 300);
+      throw new Error(`LiteLLM refused to create a model key: HTTP ${response.status} ${said}`);
+    }
     const body = (await response.json()) as { key?: unknown };
     if (typeof body.key !== "string" || !body.key) throw new Error("LiteLLM created a key but didn't return it");
     return body.key;
@@ -62,6 +68,8 @@ export function liteLlmModels(options: LiteLlmOptions): (sub: string) => Promise
       );
       if (rows.length === 0) throw new Error(`No user ${sub}`);
       const sealed = rows[0]!.model_key;
+      // A key that won't unseal (ORBIT_TOKEN_KEY rotated) is replaced; the old one stays at LiteLLM,
+      // where its user_id still ties it to the user.
       const held = sealed ? unseal(options.tokenKey, sealed, PURPOSE) : undefined;
       if (held) return held;
       const key = await generate(sub);

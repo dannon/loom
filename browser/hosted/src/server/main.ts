@@ -60,6 +60,22 @@ async function main(): Promise<void> {
     galaxyLinkUrl: config.galaxyLinkUrl,
   };
 
+  // /healthz is open to anyone, so Keycloak is asked at most every ten seconds.
+  let keycloak: { at: number; up: Promise<boolean> } | undefined;
+  const keycloakUp = () => {
+    if (!keycloak || Date.now() - keycloak.at > 10_000) {
+      const discovery = new URL(`${config.oidc.issuer.href.replace(/\/$/, "")}/.well-known/openid-configuration`);
+      keycloak = {
+        at: Date.now(),
+        up: fetch(discovery, { signal: AbortSignal.timeout(3000) }).then(
+          (r) => r.ok,
+          () => false,
+        ),
+      };
+    }
+    return keycloak.up;
+  };
+
   let sockets: Sockets | undefined;
   const dispatcher = new Dispatcher({
     pool,
@@ -88,6 +104,7 @@ async function main(): Promise<void> {
     pageFor: galaxyPageCreator({ galaxyUrl: config.galaxyUrl.href, tokens }),
     compileCache: process.env.ORBIT_COMPILE_CACHE ?? fileURLToPath(new URL("./.compile-cache", import.meta.url)),
     onEvent: (id, event) => sockets?.deliver(id, event),
+    turnsDisabled: () => config.turnsDisabled,
     log,
   });
   sockets = new Sockets({ auth, dispatcher, turnsDisabled: config.turnsDisabled, log });
@@ -102,12 +119,7 @@ async function main(): Promise<void> {
         () => true,
         () => false,
       ),
-      keycloak: await fetch(new URL(`${config.oidc.issuer.href.replace(/\/$/, "")}/.well-known/openid-configuration`), {
-        signal: AbortSignal.timeout(3000),
-      }).then(
-        (r) => r.ok,
-        () => false,
-      ),
+      keycloak: await keycloakUp(),
     }),
   });
   await new Promise<void>((resolve) => server.listen(config.port, resolve));
@@ -119,9 +131,10 @@ async function main(): Promise<void> {
     if (stopping) return;
     stopping = true;
     log(`${signal}: closing conversations`);
-    // Workers first (pending confirms are asked again on the next start), then the rest.
-    await dispatcher.shutdown();
-    await boss.stop({ graceful: true, timeout: 10_000 });
+    // Workers first (pending confirms are asked again on the next start), then the rest, all inside
+    // the 45 s compose gives: cut short, a turn job stays active until it expires.
+    await dispatcher.shutdown(8_000);
+    await boss.stop({ graceful: true, timeout: 8_000 });
     server.close();
     await pool.end();
     process.exit(0);
