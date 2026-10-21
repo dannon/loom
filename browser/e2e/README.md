@@ -60,8 +60,9 @@ request off 127.0.0.1.
 ## Which brain answered
 
 `run-all.sh` follows every drive that passes with `node e2e/brain.cjs`, which reads `/__seen` and
-fails the drive when its requests declared the other brain's tools: Orbit's brain always declares
-`galaxy_job_record` and never `finish` or `notebook_resume`, the browser brain the reverse.
+fails the drive when its requests declared the other brain's tools: Orbit's brain declares
+`galaxy_read_output` under any grant and never `finish` or `notebook_resume`, and the browser brain
+declares `finish` and never `galaxy_read_output` or `galaxy_job_record`.
 `EXPECT_BRAIN=orbit` grades a `VITE_ORBIT_BRAIN=orbit` build; the default is `browser`. A drive that
 never sends the model a tool list is not graded.
 
