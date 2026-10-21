@@ -9,6 +9,7 @@ import {
   type ConversationId,
   type Cursor,
   type EntryRecord,
+  type Extension,
   type Storage,
   type Submission,
 } from "@earendil-works/pi-durable";
@@ -87,6 +88,11 @@ export interface RuntimeOptions {
   pollMs?: number;
   /** What a flavor adds: tools, skills, result notes, prompt sections and artifact kinds. */
   flavor?: AgentFlavor;
+  /**
+   * Another brain's extensions, installed in place of the browser's own (Orbit's, behind
+   * VITE_ORBIT_BRAIN). The model, compaction, storage and the conversations stay the runtime's.
+   */
+  extensions?: Extension[];
 }
 
 /** Where a new conversation works, as the page or the harness knows it. */
@@ -127,6 +133,8 @@ interface Current {
 export class Runtime {
   /** Why Galaxy did not answer when the session opened, when it did not. */
   galaxyProblem?: string;
+  /** The models the runtime connects through, for a brain that looks one up. */
+  models?: Pick<ReturnType<typeof agentModels>["models"], "getModel">;
   private constructor(
     readonly harness: Harness,
     readonly galaxy: Galaxy,
@@ -137,7 +145,16 @@ export class Runtime {
     readonly brand: Brand,
   ) {}
 
-  static async open({ storage, config, python, env = {}, ask, pollMs, flavor }: RuntimeOptions) {
+  static async open({
+    storage,
+    config,
+    python,
+    env = {},
+    ask,
+    pollMs,
+    flavor,
+    extensions,
+  }: RuntimeOptions) {
     registerArtifactKinds(flavor?.artifactKinds ?? []);
     const brand = flavor?.brand ?? DEFAULT_BRAND;
     const galaxyOptions = {
@@ -210,7 +227,7 @@ export class Runtime {
       watch,
     });
     const registry = createRegistry();
-    registry.install(extension);
+    for (const installed of extensions ?? [extension]) registry.install(installed);
     harness = await Harness.open(
       storage,
       {
@@ -241,6 +258,7 @@ export class Runtime {
     );
     const runtime = new Runtime(harness, galaxy, galaxyStatus, current, connect, env, brand);
     runtime.galaxyProblem = galaxyProblem;
+    runtime.models = models;
     // Before scheduling starts, so no run the store holds takes another step unasked.
     await runtime.hold(await runtime.active());
     harness.resume();
@@ -250,6 +268,11 @@ export class Runtime {
   /** The model new requests use. */
   get model() {
     return this.current.model;
+  }
+
+  /** The key the model is reached with, for a brain that scrubs it from what it shows. */
+  get apiKey(): string | undefined {
+    return this.current.apiKey;
   }
 
   /** Switch provider or model for `conversation`, and for every conversation opened after. */

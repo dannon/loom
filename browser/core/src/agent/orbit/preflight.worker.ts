@@ -1,29 +1,20 @@
 /**
- * Does Orbit's brain (extensions/loom) load and register in a worker at all? Boots it on pi-host
- * under the worker profile, opens the session registry and writes and re-reads one attempt, then
- * posts { ok, mode } or { ok: false, error }. Built and loaded by scripts/preflight-orbit.mjs and
+ * Does Orbit's brain (extensions/loom) load and register in a worker at all? Boots it the way the
+ * flag worker does (bootOrbit), opens the session registry and writes and re-reads one attempt,
+ * then posts { ok, mode } or { ok: false, error }. Built and loaded by scripts/preflight-orbit.mjs and
  * e2e/orbit-preflight-drive.cjs; nothing ships it.
  *
  * The conformance test (pi-host.orbit.test.ts) boots the same brain under Node, where process.pid,
  * Buffer and the builtins all exist. This is what it can't see: the bundle and the worker realm.
  */
-import "./env";
-
-import loom from "../../../../../extensions/loom/index";
-import { createGalaxyOpsToolSource } from "../../../../../extensions/loom/galaxy-ops-tools";
-import { setGalaxyTransport } from "../../../../../extensions/loom/galaxy-api";
-import { setGalaxyToolSource } from "../../../../../extensions/loom/galaxy-tool-source";
-import { setInstructionSource } from "../../../../../extensions/loom/user-instructions";
 import { setRecordStore } from "../../../../../extensions/loom/record-store";
 import { createPageRecordStore } from "../../../../../extensions/loom/record-store-page";
 import {
   closeSessionRegistry,
   openSessionRegistry,
 } from "../../../../../extensions/loom/registry-runtime";
-import { setVendorSkillsSource } from "../../../../../extensions/loom/vendor-skills";
-import { setCapabilityProfile } from "../../../../../shared/capability-profile.js";
-import { setConfigSource } from "../../../../../shared/config-source.js";
-import { createPiHost } from "../pi-host";
+import { createMemoryLedger } from "../../../../../extensions/loom/submission-ledger";
+import { bootOrbit } from "./boot";
 
 const SERVER = "http://galaxy.invalid";
 const ANALYSIS = "/orbit/preflight";
@@ -32,31 +23,14 @@ const json = (body: unknown) =>
   new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
 
 async function preflight(): Promise<{ mode: string; tools: number }> {
-  setCapabilityProfile({
-    shell: false,
-    files: false,
-    notebook: "page",
-    network: true,
-    mcpServers: false,
-    ui: "worker",
-  });
-  setConfigSource({ load: () => ({ lessons: { enabled: false } }) });
-  setInstructionSource({ files: () => [] });
-  setVendorSkillsSource({
-    catalog: {},
-    manifest: { repo: "", commit: "", files: [] },
-    read: () => null,
-  });
-  setGalaxyTransport({
-    fetch: async () => json({}),
-    credentials: () => ({ url: SERVER, apiKey: "cookie" }),
+  const { host } = bootOrbit({
+    capabilities: ["llm", "local", "read", "write"],
+    galaxy: { fetch: async () => json({}), url: SERVER },
+    ledger: createMemoryLedger(),
+    secrets: () => [],
+    ui: { ask: async () => undefined, notify: () => {} },
   });
   setRecordStore(createPageRecordStore({ key: `${ANALYSIS}/notebook.md`, pageId: "preflight" }));
-  setGalaxyToolSource(createGalaxyOpsToolSource({}));
-
-  const host = createPiHost({ name: "orbit", cwd: ANALYSIS });
-  loom(host.api);
-  host.seal();
 
   // The registry over the page profile's in-memory fs, named by the shimmed process.pid.
   const { session } = openSessionRegistry({
