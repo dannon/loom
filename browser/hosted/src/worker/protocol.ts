@@ -16,7 +16,10 @@ export interface WorkerData {
   readonly limits: {
     /** Model turns per run (pi-durable's maxTurns). */
     readonly maxTurns: number;
-    /** Tool calls per run; past it, calls are blocked with a reason the model reads. */
+    /**
+     * Tool calls per user message; past it, calls are blocked with a reason the model reads. Runs
+     * Orbit starts itself (an auto-resume follow-up) count against the last user message's budget.
+     */
     readonly maxToolCalls: number;
     /** Bytes the spilled-output ring may hold. */
     readonly outputBytes: number;
@@ -36,6 +39,8 @@ export type FromWorker =
   | {
       readonly type: "ready";
       readonly conversationId: string;
+      /** A run interrupted earlier (a crash, a restart) picked up again on open; it ends in `settled`. */
+      readonly resuming: boolean;
       readonly tools: readonly string[];
       /** The names in the worker's environment, so the host can check nothing leaked in. */
       readonly env: readonly string[];
@@ -43,6 +48,8 @@ export type FromWorker =
   | { readonly type: "ask"; readonly id: number; readonly request: AskRequest }
   | { readonly type: "ask-withdrawn"; readonly id: number }
   | { readonly type: "notify"; readonly text: string; readonly level: "info" | "warning" | "error" }
+  /** Whether a submitted input was taken; a conversation busy with an Orbit follow-up refuses it. */
+  | { readonly type: "submitted"; readonly admitted: boolean }
   /** A run has finished and the conversation is idle until the next input. */
   | { readonly type: "settled"; readonly aborted: boolean }
   | { readonly type: "report"; readonly message: string }

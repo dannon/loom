@@ -4,14 +4,22 @@
  */
 import surface from "../../__surface__/server/tools.json";
 
-/** User-defined tools, which run arbitrary code on Galaxy under the user's account: not offered hosted. */
-export const WITHHELD_TOOLS: ReadonlySet<string> = new Set(["create_user_tool", "run_user_tool"]);
+/**
+ * User-defined tools, which run arbitrary code on Galaxy under the user's account, aren't offered
+ * hosted; managing them (listing, deleting) goes with them until live acceptance decides otherwise.
+ */
+export const WITHHELD_TOOLS: ReadonlySet<string> = new Set([
+  "create_user_tool",
+  "run_user_tool",
+  "list_user_tools",
+  "delete_user_tool",
+]);
 
 /** The tools a hosted worker may run, from the pinned surface snapshot. */
 export const SERVER_TOOLS: ReadonlySet<string> = new Set(surface as string[]);
 
 type Blocked = { block: true; reason: string } | undefined;
-type On = (event: string, handler: (event: { toolName: string }) => Blocked | void) => void;
+type On = (event: string, handler: (event: { toolName: string; source?: string }) => Blocked | void) => void;
 
 /**
  * Block any tool outside the surface. A tool Orbit gains later is refused here until the snapshot
@@ -25,11 +33,15 @@ export function registerSurfaceGate(on: On, allowed: ReadonlySet<string> = SERVE
   );
 }
 
-/** Block tool calls past `max` in one run; a run starts at agent_start. */
+/**
+ * Block tool calls past `max` per user message. The count restarts on the user's input, not on
+ * agent_start: queued follow-ups continue a run without one, and a run Orbit starts on its own
+ * shouldn't get a fresh budget the user never asked for.
+ */
 export function registerToolCallCap(on: On, max: number): void {
   let calls = 0;
-  on("agent_start", () => {
-    calls = 0;
+  on("input", (event) => {
+    if (event.source !== "extension") calls = 0;
   });
   on("tool_call", () => {
     calls += 1;

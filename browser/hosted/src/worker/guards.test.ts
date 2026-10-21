@@ -33,14 +33,16 @@ describe("the surface gate", () => {
 });
 
 describe("the tool-call cap", () => {
-  it("blocks past the cap and starts over with the next run", () => {
+  it("blocks past the cap and starts over with the user's next message, not Orbit's", () => {
     const { on, fire } = events();
     registerToolCallCap(on, 2);
-    fire("agent_start");
+    fire("input", { toolName: "", source: "rpc" } as never);
     expect(fire("tool_call")).toBeUndefined();
     expect(fire("tool_call")).toBeUndefined();
     expect(fire("tool_call")).toMatchObject({ block: true });
-    fire("agent_start");
+    fire("input", { toolName: "", source: "extension" } as never);
+    expect(fire("tool_call")).toMatchObject({ block: true });
+    fire("input", { toolName: "", source: "rpc" } as never);
     expect(fire("tool_call")).toBeUndefined();
   });
 });

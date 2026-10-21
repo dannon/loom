@@ -31,13 +31,14 @@ const reopen = data.conversationId !== undefined;
 
 if (data.traceReaches) installTripwire((api) => post({ type: "reach", api }));
 
-// 1. The environment: the model key for the redactor, and no second greeting on a reopen.
+// 1. The environment: the model key for the redactor. ORBIT_FRESH_SESSION, which stops a second
+// greeting, waits until the conversation is open, since only one with entries has been greeted.
 process.env.ORBIT_ACTIVE_LLM_API_KEY = data.model.apiKey;
-if (reopen) process.env.ORBIT_FRESH_SESSION = "1";
 
 // 2. Storage and the fence. A lost lease exits the thread with 75 (LeaseFence's default here), and
 // from then on nothing leaves the worker: not a commit, not a Galaxy write, not a model call.
-const pool = new pg.Pool({ connectionString: data.database, max: 4 });
+// Two connections: commits are serialized per store anyway, and every live worker holds a pool.
+const pool = new pg.Pool({ connectionString: data.database, max: 2 });
 const fence = new LeaseFence({ storeId: data.storeId, leaseGen: data.leaseGen, db: pool });
 const storage = fence.storage(await PostgresStorage.open(pool, data.storeId, { leaseGen: data.leaseGen }));
 const network = globalThis.fetch;
@@ -84,19 +85,36 @@ orbit.setGalaxyOutputStore(orbit.createMemoryOutputStore({ entries: 32, bytes: d
 // 8. The host, the guards, Orbit, and the conversation.
 let nextAsk = 0;
 const pending = new Map<number, (answer: AskAnswer) => void>();
+let closing = false;
 const host = createPiHost({
   name: "orbit",
   cwd: "/",
   model: () => ({ provider: "custom", id: data.model.id }),
   ui: {
     notify: (text, level) => post({ type: "notify", text, level }),
-    ask: (request, _conversationId, signal) => {
-      const id = ++nextAsk;
-      post({ type: "ask", id, request });
-      // Withdrawn on Stop or close (H1): the browser takes the dialog down, and the host settles it.
-      signal?.addEventListener("abort", () => post({ type: "ask-withdrawn", id }), { once: true });
-      return new Promise<AskAnswer>((resolve) => pending.set(id, resolve));
-    },
+    ask: (request, _conversationId, signal) =>
+      new Promise<AskAnswer>((resolve, reject) => {
+        // The run was stopped or closed (H1 passes the turn's signal) before or while the user was
+        // asked. A close rejects, so the interrupted call is asked again on resume (the gate pause
+        // contract); a Stop answers nothing, and the gate doesn't run the call.
+        const withdraw = () => {
+          if (closing) reject(signal?.reason ?? new Error("The conversation closed while asking."));
+          else resolve(undefined);
+        };
+        if (signal?.aborted) return withdraw();
+        const id = ++nextAsk;
+        pending.set(id, resolve);
+        post({ type: "ask", id, request });
+        signal?.addEventListener(
+          "abort",
+          () => {
+            if (!pending.delete(id)) return;
+            post({ type: "ask-withdrawn", id });
+            withdraw();
+          },
+          { once: true },
+        );
+      }),
   },
 });
 const on = host.api.on as unknown as Parameters<typeof registerSurfaceGate>[0];
@@ -136,28 +154,47 @@ const conversation = reopen
   : await harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model } }, ctx);
 if (!conversation) throw new Error(`No conversation ${data.conversationId} in store ${data.storeId}`);
 await host.attach(harness, conversation, ctx);
+if (reopen && (await conversation.context(ctx)).messages.length > 0) process.env.ORBIT_FRESH_SESSION = "1";
+// Read before the session starts, when the only unfinished tasks are ones an earlier worker left.
+const tasks = (await harness.inspect(ctx)).tasks as unknown as Array<{ record: { state: { status: string } } }>;
+const resuming = tasks.some((t) => t.record.state.status !== "terminal");
+
+/** What went wrong, for the host's log; never the error's own object, which can carry request data. */
+const report = (error: unknown) =>
+  post({ type: "report", message: error instanceof Error ? error.message : String(error) });
 
 port.on("message", (message: ToWorker) => {
   switch (message.cmd) {
     case "submit":
-      void host.submit(message.text);
+      // A busy conversation (an Orbit follow-up running) refuses the input; the host keeps it.
+      host.submit(message.text).then(
+        (admitted) => post({ type: "submitted", admitted: admitted !== undefined }),
+        (error: unknown) => {
+          report(error);
+          post({ type: "submitted", admitted: false });
+        },
+      );
       return;
     case "answer": {
+      // An ask already withdrawn has no entry, so a late answer does nothing.
       const resolve = pending.get(message.id);
       pending.delete(message.id);
       resolve?.(message.value);
       return;
     }
     case "stop":
-      void conversation.abort(ctx);
+      conversation.abort(ctx).catch(report);
       return;
     case "close":
-      // Not awaited here: close joins every invocation, and one parked in a confirm only returns
-      // once the host settles its ask.
-      harness.close(ctx).then(
-        () => post({ type: "closed" }),
-        (error: unknown) => post({ type: "closed", error: error instanceof Error ? error.message : String(error) }),
-      );
+      closing = true;
+      harness
+        .close(ctx)
+        .then(
+          () => post({ type: "closed" }),
+          (error: unknown) => post({ type: "closed", error: error instanceof Error ? error.message : String(error) }),
+        )
+        // With the pool and the port closed the thread has nothing left and exits by itself.
+        .finally(() => pool.end().catch(() => undefined).finally(() => port.close()));
       return;
   }
 });
@@ -167,6 +204,7 @@ harness.resume();
 post({
   type: "ready",
   conversationId: String(conversation.id),
+  resuming,
   tools: host.api.getAllTools().map((t) => t.name),
   env: Object.keys(process.env),
 });
