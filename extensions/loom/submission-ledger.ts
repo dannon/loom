@@ -133,15 +133,55 @@ export function pruneClosed<E extends SubmissionEntry, T extends TerminalEvent>(
   };
 }
 
+/** Everything a ledger holds, as plain data: what a durable ledger writes down and reads back. */
+export interface LedgerState {
+  entries: SubmissionEntry[];
+  /** By record key. */
+  events: Record<string, TerminalEvent[]>;
+  histories: Record<string, LedgerHistory>;
+}
+
 /**
  * The in-memory ledger. Entries and events are pruned the moment they close, so a long desktop
  * session holds only what is actually open.
+ *
+ * A durable ledger is this one with a starting `state` and a `persist` that writes each change
+ * down before the call returns: the rules live in one place, and only where they're kept differs.
  */
-export function createMemoryLedger(): SubmissionLedger {
-  const entries = new Map<string, SubmissionEntry>();
+export function createMemoryLedger(
+  opts: { state?: LedgerState; persist?: (state: LedgerState) => Promise<void> } = {},
+): SubmissionLedger {
+  const entries = new Map<string, SubmissionEntry>(
+    (opts.state?.entries ?? []).map((e) => [e.callId, { ...e }]),
+  );
   // Events by record key, then event key.
-  const events = new Map<string, Map<string, TerminalEvent>>();
-  const histories = new Map<string, LedgerHistory>();
+  const events = new Map<string, Map<string, TerminalEvent>>(
+    Object.entries(opts.state?.events ?? {}).map(([recordKey, list]) => [
+      recordKey,
+      new Map(list.map((e) => [e.key, { ...e }])),
+    ]),
+  );
+  const histories = new Map<string, LedgerHistory>(Object.entries(opts.state?.histories ?? {}));
+
+  const snapshot = (): LedgerState => ({
+    entries: [...entries.values()].map((e) => ({ ...e })),
+    events: Object.fromEntries(
+      [...events]
+        .filter(([, keyed]) => keyed.size > 0)
+        .map(([recordKey, keyed]) => [recordKey, [...keyed.values()].map((e) => ({ ...e }))]),
+    ),
+    histories: Object.fromEntries([...histories].map(([k, h]) => [k, { ...h }])),
+  });
+  // Writes go down in the order the changes were made, and each change returns only once its own
+  // write has landed, so a dispatched entry is on disk before its request goes out.
+  let writing: Promise<void> = Promise.resolve();
+  const persisted = async () => {
+    if (!opts.persist) return;
+    const state = snapshot();
+    const write = writing.then(() => opts.persist!(state));
+    writing = write.catch(() => {});
+    await write;
+  };
 
   const noteHistory = (entry: SubmissionEntry, historyId: string | undefined) => {
     if (historyId) histories.set(entry.recordKey, { historyId, server: entry.server });
@@ -171,6 +211,7 @@ export function createMemoryLedger(): SubmissionLedger {
       // The history is noted only once Galaxy answers: a call it refused names a history that
       // may not exist, and reconcile would go looking in it.
       entries.set(entry.callId, opened);
+      await persisted();
     },
     async responded(callId, submission) {
       const entry = entries.get(callId);
@@ -181,26 +222,33 @@ export function createMemoryLedger(): SubmissionLedger {
         entry,
         submission.historyId ?? submission.jobs?.find((j) => j.historyId)?.historyId,
       );
+      await persisted();
     },
     async captured(callId) {
       close(callId);
+      await persisted();
     },
     async reconciled(callId) {
       close(callId);
+      await persisted();
     },
     async abandoned(callId) {
       close(callId);
+      await persisted();
     },
     async reserve(event) {
       const keyed = eventsOf(event.recordKey);
       if (keyed.has(event.key)) return;
       keyed.set(event.key, { ...event, state: "reserved" });
+      await persisted();
     },
     async confirm(recordKey, key) {
       settle(recordKey, key, "confirmed");
+      await persisted();
     },
     async void(recordKey, key) {
       settle(recordKey, key, "voided");
+      await persisted();
     },
     async delivered(recordKey, keys) {
       const keyed = eventsOf(recordKey);
@@ -217,6 +265,7 @@ export function createMemoryLedger(): SubmissionLedger {
           }
         }
       }
+      await persisted();
     },
     async open(recordKey) {
       return [...entries.values()].filter((e) => e.recordKey === recordKey).map((e) => ({ ...e }));
