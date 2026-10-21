@@ -24,7 +24,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { json, text, toolCall } from "./fake-model";
 import { sources, specifiers, withoutTypeImports } from "../flavor-boundary";
 import { agentModels } from "./model";
-import { createPiHost, type HostNote, type PiHost } from "./pi-host";
+import { createPiHost, type AskRequest, type HostNote, type PiHost } from "./pi-host";
 import { resolve as resolveTarget } from "./providers";
 import { LOOP } from "./runtime";
 import type { CapabilityProfile } from "../../../../shared/capability-profile.js";
@@ -261,11 +261,18 @@ const script: Array<() => Response | Promise<Response>> = [];
 const requests: Array<Record<string, any>> = [];
 const seen: Seen[] = [];
 const notices: Array<[string, string]> = [];
+/** What the brain asked the person, and the confirm answers the next asks get, in order. */
+const asked: AskRequest[] = [];
+const confirms: boolean[] = [];
 const notes: HostNote[] = [];
 /** Calls the page record store made for its page, so the run can prove the record came from it. */
 const pageCalls = { GET: 0, PUT: 0 };
 /** The record page as Galaxy holds it. */
 let page1 = "";
+/** The second conversation's record page, for the switch. */
+let page2 = "";
+/** Writes to history h1, which the destructive turn asks to delete. */
+let historyWrites = 0;
 /** GETs of the unfinished job behind d2, which the poll-guard turn reads twice. */
 let jobGets = 0;
 let host: PiHost;
@@ -344,13 +351,78 @@ beforeAll(async () => {
   });
 
   ledger.phase = "import";
-  const loom = await import("../../../../extensions/loom/index");
+  const { installOrbitSeams, registerOrbit, workerUi } = await import("./orbit/boot");
+  const { createMemoryLedger } = await import("../../../../extensions/loom/submission-ledger");
+  const galaxyFetch = async (url: string, init: RequestInit): Promise<Response> => {
+    const method = init.method ?? "GET";
+    const path = new URL(url).pathname;
+    if (path === "/api/pages/p1") {
+      pageCalls[method === "PUT" ? "PUT" : "GET"]++;
+      if (method === "PUT") {
+        const body = JSON.parse(String(init.body)) as { content: string };
+        // Galaxy refuses a page with a fence it has no cell for, as the e2e stub does.
+        const problem = pageContentProblem(body.content);
+        if (problem) return json({ err_msg: problem }, 400);
+        page1 = body.content;
+      }
+      return json({ id: "p1", content: page1, content_editor: page1 });
+    }
+    if (path === "/api/pages/p2") {
+      if (method === "PUT") page2 = (JSON.parse(String(init.body)) as { content: string }).content;
+      return json({ id: "p2", content: page2, content_editor: page2 });
+    }
+    if (path === "/api/histories/h1" && method === "PUT") {
+      historyWrites++;
+      return json({ id: "h1", name: "one brain", deleted: true });
+    }
+    if (path === "/api/histories") {
+      return json(
+        method === "POST" ? { id: "h1", name: "one brain" } : [{ id: "h1", name: "one brain" }],
+      );
+    }
+    // The history guard's lookup: d1 lives in another history than the one a run names.
+    if (path === "/api/datasets/d1") {
+      return json({ id: "d1", name: "d1.txt", history_id: "elsewhere", state: "ok" });
+    }
+    if (path === "/api/histories/hbig/contents") return json(BIG_HISTORY);
+    // A dataset whose creating job is still running, for the poll guard.
+    if (path === "/api/datasets/d2") {
+      return json({
+        id: "d2",
+        name: "d2.txt",
+        history_id: "h1",
+        state: "running",
+        creating_job: "j2",
+      });
+    }
+    if (path === "/api/jobs/j2") {
+      jobGets++;
+      return json({ id: "j2", state: "running", tool_id: "cat1" });
+    }
+    // Everything else, /api/version included: an unknown version refuses nothing and costs no wait.
+    return json({});
+  };
+  // The worker's own seams, as orbit/boot.ts installs them, with a full grant.
+  installOrbitSeams({
+    capabilities: ["llm", "local", "read", "write"],
+    galaxy: { fetch: galaxyFetch as unknown as typeof fetch, url: "http://galaxy.test", key: "k" },
+    ledger: createMemoryLedger(),
+    secrets: () => [],
+    extras: EXTRAS.map(stub) as never,
+  });
   const { setCapabilityProfile } = await import("../../../../shared/capability-profile.js");
-  setCapabilityProfile(PROFILE);
   seams.push(() => setCapabilityProfile(null));
   const { setConfigSource } = await import("../../../../shared/config-source.js");
-  setConfigSource({ load: () => CONFIG });
   seams.push(() => setConfigSource(null));
+  const { setSubmissionLedger } = await import("../../../../extensions/loom/submission-ledger");
+  seams.push(() => setSubmissionLedger(null));
+  const { setPollWake } = await import("../../../../extensions/loom/galaxy-reconcile");
+  seams.push(() => setPollWake(null));
+  const { setGalaxyToolSource } = await import("../../../../extensions/loom/galaxy-tool-source");
+  seams.push(() => setGalaxyToolSource(null));
+  // Two seams Node has to fill differently: the worker hands over no standing instructions yet
+  // (one here proves the seam carries it), and fetches skill bodies by URL, where this reads the
+  // vendored tree from disk.
   const { setInstructionSource } = await import("../../../../extensions/loom/user-instructions");
   setInstructionSource({
     files: () => [
@@ -365,61 +437,11 @@ beforeAll(async () => {
     read: (target) => vendorFiles.get(target) ?? null,
   });
   seams.push(() => setVendorSkillsSource(null));
-  const { setGalaxyTransport } = await import("../../../../extensions/loom/galaxy-api");
-  setGalaxyTransport({
-    fetch: async (url, init) => {
-      const method = init.method ?? "GET";
-      const path = new URL(url).pathname;
-      if (path === "/api/pages/p1") {
-        pageCalls[method === "PUT" ? "PUT" : "GET"]++;
-        if (method === "PUT") {
-          const body = JSON.parse(String(init.body)) as { content: string };
-          // Galaxy refuses a page with a fence it has no cell for, as the e2e stub does.
-          const problem = pageContentProblem(body.content);
-          if (problem) return json({ err_msg: problem }, 400);
-          page1 = body.content;
-        }
-        return json({ id: "p1", content: page1, content_editor: page1 });
-      }
-      if (path === "/api/histories") {
-        return json(
-          method === "POST" ? { id: "h1", name: "one brain" } : [{ id: "h1", name: "one brain" }],
-        );
-      }
-      // The history guard's lookup: d1 lives in another history than the one a run names.
-      if (path === "/api/datasets/d1") {
-        return json({ id: "d1", name: "d1.txt", history_id: "elsewhere", state: "ok" });
-      }
-      if (path === "/api/histories/hbig/contents") return json(BIG_HISTORY);
-      // A dataset whose creating job is still running, for the poll guard.
-      if (path === "/api/datasets/d2") {
-        return json({
-          id: "d2",
-          name: "d2.txt",
-          history_id: "h1",
-          state: "running",
-          creating_job: "j2",
-        });
-      }
-      if (path === "/api/jobs/j2") {
-        jobGets++;
-        return json({ id: "j2", state: "running", tool_id: "cat1" });
-      }
-      // Everything else, /api/version included: an unknown version refuses nothing and costs no wait.
-      return json({});
-    },
-    credentials: () => ({ url: "http://galaxy.test", apiKey: "k" }),
-  });
   // The record is a Galaxy page, not a file. The key stays under the temp dir so the side stores
   // keyed by its dirname (activity log, template replay) land where they did.
   const { setRecordStore } = await import("../../../../extensions/loom/record-store");
   const { createPageRecordStore } = await import("../../../../extensions/loom/record-store-page");
   setRecordStore(createPageRecordStore({ key: join(tmp, "notebook.md"), pageId: "p1" }));
-  const { setGalaxyToolSource } = await import("../../../../extensions/loom/galaxy-tool-source");
-  const { createGalaxyOpsToolSource } =
-    await import("../../../../extensions/loom/galaxy-ops-tools");
-  setGalaxyToolSource(createGalaxyOpsToolSource({ extras: EXTRAS.map(stub) }));
-  seams.push(() => setGalaxyToolSource(null));
 
   ledger.phase = "register";
   host = createPiHost({
@@ -427,12 +449,18 @@ beforeAll(async () => {
     cwd: tmp,
     phase: () => ledger.phase,
     model: () => ({ provider: "custom", id: "m" }),
-    // No `ask`, so hasUI is false: the worker's confirm bridge is slice 3.
-    ui: { notify: (t, l) => void notices.push([l, t]) },
+    // The worker's confirm-only bridge, answered from `confirms`; hasUI is true, as in the worker.
+    ui: workerUi({
+      notify: (t, l) => void notices.push([l, t]),
+      ask: async (request) => {
+        asked.push(request);
+        return request.kind === "confirm" ? (confirms.shift() ?? false) : undefined;
+      },
+    }),
     onNote: (n) => void notes.push(n),
   });
   recorders(host.api);
-  loom.default(host.api);
+  registerOrbit(host, {});
   host.api.registerTool(probe as never);
 
   ledger.phase = "seal";
@@ -554,6 +582,9 @@ const golden = () => ({
   informational: reaches(INFORMATIONAL),
   edges: edges(),
   notes: unique(notes.map(noteKey)),
+  // What the person saw outside a turn, now that the host has a UI.
+  // The temp directory is a different path every run.
+  notices: unique(notices.map(([level, text]) => `${level} | ${text.replaceAll(tmp, "<tmp>")}`)),
 });
 
 // ── assertions ───────────────────────────────────────────────────────────────────────────────────
@@ -888,10 +919,75 @@ describe("Orbit on pi-host", () => {
     expect(textOf(repeat.content)).toContain("No Galaxy request was sent");
     expect(textOf(repeat.content)).not.toContain("Status wait interrupted");
     expect(jobGets).toBe(1);
-    expect(notices.slice(noticesBefore)).toEqual([]);
+    // With a UI the turn's progress line still shows; the guard itself says nothing to the user.
+    expect(notices.slice(noticesBefore)).toEqual([
+      ["info", "Progress: checking Galaxy data and job status."],
+    ]);
     // As in the guard turn: let the galaxy-tool status clear inside this phase.
     await new Promise((r) => setTimeout(r, 3_100));
   }, 15_000);
+
+  it("asks before a destructive Galaxy call, through the confirm bridge, and honours both answers", async () => {
+    ledger.phase = "turn";
+    const before = runs.settled;
+    const remove = () => toolCall("update_history", { history_id: "h1", deleted: true });
+    confirms.push(false, true);
+    script.push(
+      remove,
+      () => text("kept it"),
+      remove,
+      () => text("deleted it"),
+    );
+    await (await host.submit("delete the history"))!.wait(ctx);
+    await until(() => runs.settled >= before + 1);
+    expect(historyWrites).toBe(0);
+    await (await host.submit("yes, really delete it"))!.wait(ctx);
+    await until(() => runs.settled >= before + 2);
+    expect(historyWrites).toBe(1);
+    const confirmsAsked = asked.filter((a) => a.kind === "confirm");
+    expect(confirmsAsked).toHaveLength(2);
+    expect(confirmsAsked[0]).toMatchObject({ title: "Confirm destructive Galaxy operation" });
+    const results = (await conversation.context(ctx)).messages.filter(
+      (m) => m.role === "toolResult",
+    );
+    expect(textOf(results.at(-2)?.content)).toBe("Destructive Galaxy operation cancelled by user.");
+  });
+
+  it("switches to a second conversation with its own page and back, through quiesce and settle", async () => {
+    ledger.phase = "switch";
+    const { setRecordStore } = await import("../../../../extensions/loom/record-store");
+    const { createPageRecordStore } = await import("../../../../extensions/loom/record-store-page");
+    const { galaxyBackgroundIdle } = await import("../../../../extensions/loom/galaxy-reconcile");
+    const { getNotebookPath } = await import("../../../../extensions/loom/state");
+    const first = conversation;
+    const leave = async () => {
+      host.quiesce(conversation.id);
+      expect(await host.settle(conversation.id, 5_000)).toEqual({ settled: true, late: [] });
+      await galaxyBackgroundIdle();
+      await host.shutdown("new");
+    };
+    await leave();
+    const secondKey = join(tmp, "second", "notebook.md");
+    fs.mkdirSync(dirname(secondKey), { recursive: true });
+    setRecordStore(createPageRecordStore({ key: secondKey, pageId: "p2" }));
+    const { models: _models, model } = await agentModels().connect(
+      resolveTarget({ ai_base_url: LLM, ai_model: "m", ai_api_key: "k" }),
+    );
+    conversation = await harness.createConversation(
+      { ownership: { kind: "ownerless" }, agent: { model } },
+      ctx,
+    );
+    await host.attach(harness, conversation, ctx);
+    await host.start("new");
+    expect(getNotebookPath()).toBe(secondKey);
+    // And back: the first conversation resumes on its own page.
+    await leave();
+    setRecordStore(createPageRecordStore({ key: join(tmp, "notebook.md"), pageId: "p1" }));
+    conversation = first;
+    await host.attach(harness, conversation, ctx);
+    await host.start("resume");
+    expect(getNotebookPath()).toBe(join(tmp, "notebook.md"));
+  });
 
   it("runs commands and shuts down", async () => {
     ledger.phase = "command";
