@@ -386,6 +386,8 @@ const server = http.createServer(async (req, res) => {
         });
         prompts.push({
             hasTools: Array.isArray(body.tools) && body.tools.length > 0,
+            // The tools declared on this request, by name: which brain is answering (brain.cjs).
+            tools: (Array.isArray(body.tools) ? body.tools : []).map((t) => t?.function?.name ?? t?.name).filter(Boolean),
             roles: (body.messages || []).map((m) => m.role),
             toolResults: (body.messages || []).filter((m) => m.role === "tool").map((m) => String(m.content)),
             text: JSON.stringify(body.messages || []).slice(0, 4000),
