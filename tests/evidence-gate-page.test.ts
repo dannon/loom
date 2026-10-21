@@ -14,6 +14,7 @@ import {
   resetEvidenceOverrides,
 } from "../extensions/loom/evidence-gate";
 import { renderInvocationYaml } from "../extensions/loom/notebook-writer";
+import { loomToGalaxyMarkdown } from "../extensions/loom/galaxy-markdown-adapter";
 import { setRecordStore, type RecordStore } from "../extensions/loom/record-store";
 import { GalaxyApiError } from "../extensions/loom/galaxy-api";
 import { bareFamily } from "../shared/galaxy-tool-family.js";
@@ -205,6 +206,11 @@ describe("computeAfterContent for update_page", () => {
       }),
     ).toContain(`- [x] ${STEP2}`);
     expect(computeAfterContent(BODY, "update_page", { title: "Renamed" })).toBeNull();
+    // The model writes typed blocks as the page holds them, carriers; the record reads them as
+    // fences, and the after-image is judged in that same form.
+    expect(computeAfterContent(BODY, "update_page", { content: loomToGalaxyMarkdown(BODY) })).toBe(
+      BODY,
+    );
     // Combinations the bridge refuses write nothing.
     expect(
       computeAfterContent(BODY, "update_page", { content: "# New\n", section_heading: "## X" }),

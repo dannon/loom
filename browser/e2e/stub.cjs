@@ -2,6 +2,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const { badFence } = require("./page-cells.cjs");
 
 // The plugin package: its manifest and the static/ Galaxy serves.
 const ROOT = path.join(__dirname, "..", "olit");
@@ -41,7 +42,7 @@ const TYPES = {
     ".md": "text/markdown",
 };
 
-let script = "confirm";
+let script = "confirm";     // confirm | slow | slow-once | compact | ratelimit | plan | plan-after-graph
 // Saved visualizations as Galaxy keeps them: each a type, a title and its latest revision's config.
 const visualizations = new Map();
 const visualizationWrites = [];
@@ -49,13 +50,6 @@ const visualizationWrites = [];
 let jobState = "queued";
 // Pages as Galaxy keeps them: a page may be attached to a history (a history notebook) and listed by it.
 const pages = new Map();
-// The cell types Galaxy's page parser renders; its server refuses any other ``` fence.
-const PAGE_CELLS = ["galaxy", "markdown", "vega", "visualization", "vitessce"];
-const badFence = (content) =>
-    String(content || "")
-        .split("\n")
-        .map((line) => line.trim())
-        .find((line) => line.startsWith("```") && line.length > 3 && !PAGE_CELLS.includes(line.slice(3)));     // confirm | slow | slow-once | compact | ratelimit | plan | plan-after-graph
 let bootDelay = 0;          // ms the agent's user lookup waits, so a drive can act while Olit boots
 let galaxyUp = true;        // /api/version answers, which is what the agent probes for reachability
 let rateLimited = 0;
