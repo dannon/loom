@@ -11,6 +11,16 @@ import type { Pool } from "pg";
 import type { ConversationRow } from "../dispatch/conversations";
 import { PostgresStorage } from "../storage/postgres-storage";
 
+/**
+ * What pi-durable's view shows (harness/context.js selectActive): after a compaction, the newest
+ * head marker and the entries from its head on, rather than everything the conversation ever held.
+ */
+function active(entries: readonly EntryRecord[]): EntryRecord[] {
+  const head = entries.findLast((e) => (e as { head?: unknown }).head !== undefined) as (EntryRecord & { head: number }) | undefined;
+  if (!head) return [...entries];
+  return [head, ...entries.filter((e) => e.id >= head.head && (e as { head?: unknown }).head === undefined)];
+}
+
 export async function storedSnapshot(pool: Pool, conversation: ConversationRow): Promise<SnapshotEvent> {
   const entries: EntryRecord[] = [];
   if (conversation.durableConversationId !== null) {
@@ -23,13 +33,15 @@ export async function storedSnapshot(pool: Pool, conversation: ConversationRow):
         entries.push(...page.items);
         cursor = page.next;
       } while (cursor !== undefined);
+      // Scans run newest first; the transcript reads oldest first.
+      entries.reverse();
     } finally {
       await storage.close(BACKGROUND_CONTEXT);
     }
   }
   return {
     type: "snapshot",
-    entries,
+    entries: active(entries),
     tools: [],
     compactions: [],
     inbox: [],

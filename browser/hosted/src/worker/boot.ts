@@ -192,9 +192,19 @@ const resuming = tasks.some((t) => t.record.state.status !== "terminal");
 
 // The conversation's events from a snapshot on, as the browser worker streams them (worker.ts
 // attach), so the shell's ChatView draws a hosted conversation the way it draws its own.
-const events = await watchEvents(harness, conversation.id, ctx);
+let events = await watchEvents(harness, conversation.id, ctx);
 post({ type: "events", events: [events.snapshot] });
 events.start(async (batch) => post({ type: "events", events: batch }));
+/**
+ * A browser (re)connected: everything it should show, from the top. The old stream stops first, so
+ * nothing it held back can land after the fresh snapshot; what commits in between is in the snapshot.
+ */
+async function restream(): Promise<void> {
+  await events.stop();
+  events = await watchEvents(harness, conversation!.id, ctx);
+  post({ type: "events", events: [events.snapshot] });
+  events.start(async (batch) => post({ type: "events", events: batch }));
+}
 
 /** What went wrong, for the host's log; never the error's own object, which can carry request data. */
 const report = (error: unknown) =>
@@ -229,14 +239,7 @@ port.on("message", (message: ToWorker) => {
       conversation.abort(ctx).catch(report);
       return;
     case "snapshot":
-      // A browser (re)connected: everything it should show, from the top.
-      watchEvents(harness, conversation.id, ctx).then(
-        (fresh) => {
-          post({ type: "events", events: [fresh.snapshot] });
-          return fresh.stop();
-        },
-        report,
-      );
+      if (!closing) restream().catch(report);
       return;
     case "close":
       closing = true;
