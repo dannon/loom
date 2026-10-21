@@ -220,8 +220,10 @@ export interface PiHostOptions {
     result: ToolExecutionResult,
   ) => void | Promise<void>;
   /**
-   * Runs inside every tool's execute, once it has a result, with pi-durable's execution api: the
-   * one place a shell can commit durable work (create a task, say) as part of the call itself.
+   * Runs inside a tool's execute once the tool returns, with pi-durable's execution api: the one
+   * place a shell can commit durable work (create a task, say) as part of the call itself. Not run
+   * for a tool that threw, nor for a call whose conversation is no longer bound, where the run's
+   * commits are refused anyway; the shell's attach-time recovery covers those.
    */
   afterExecute?: (
     name: string,
@@ -985,7 +987,7 @@ export function createPiHost(options: PiHostOptions): PiHost {
             details: json(r.details) ?? {},
             isError: r.isError === true,
           };
-          if (options.afterExecute) {
+          if (options.afterExecute && isBound(api.conversationId)) {
             try {
               await options.afterExecute(def.name, result, api, api.conversationId);
             } catch (error) {

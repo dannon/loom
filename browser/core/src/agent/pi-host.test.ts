@@ -724,6 +724,7 @@ describe("pi-host across conversations", () => {
     let finish!: () => void;
     const late: Array<{ conversation: string; name: string; text: string }> = [];
     const endedFor: string[] = [];
+    const executed: string[] = [];
     const { host, harness, conversation, another } = await boot({
       extras: (api) => {
         api.registerTool({
@@ -739,6 +740,7 @@ describe("pi-host across conversations", () => {
         api.on("tool_execution_end", (e) => void endedFor.push(e.toolName));
       },
       host: {
+        afterExecute: (name) => void executed.push(name),
         onLateCompletion: (id, call, result) =>
           void late.push({
             conversation: String(id),
@@ -762,8 +764,10 @@ describe("pi-host across conversations", () => {
     expect(late).toEqual([
       { conversation: String(conversation.id), name: "slow", text: "slow done" },
     ]);
-    // Orbit's own end events didn't run for it: they'd act on the conversation bound now.
+    // Orbit's own end events didn't run for it, nor did afterExecute: they'd act on the
+    // conversation bound now.
     expect(endedFor).toEqual([]);
+    expect(executed).toEqual([]);
     expect(await host.settle(conversation.id, 30)).toEqual({ settled: true, late: [] });
   });
 

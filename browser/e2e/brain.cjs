@@ -2,11 +2,12 @@
 // runs this after every stub-backed drive, so a flag build that quietly boots the default brain
 // (or the reverse) fails the tier instead of passing on the old brain's behaviour.
 //
-// EXPECT_BRAIN=browser (the default) or orbit. Orbit's brain always declares galaxy_job_record and
-// never the browser brain's finish or notebook_resume; the browser brain is the reverse.
+// EXPECT_BRAIN=browser (the default) or orbit. Each brain is known by a tool it declares under any
+// grant, read-only included: Orbit's galaxy_read_output and the browser brain's finish. Neither
+// declares the other's tools, record writers included.
 const MARKS = {
-    orbit: { always: "galaxy_job_record", never: ["finish", "notebook_resume"] },
-    browser: { always: "notebook_resume", never: ["galaxy_job_record"] },
+    orbit: { always: "galaxy_read_output", never: ["finish", "notebook_resume"] },
+    browser: { always: "finish", never: ["galaxy_read_output", "galaxy_job_record"] },
 };
 
 /** What is wrong with these prompts for `expected`, or [] when they fit; null when nothing says. */
