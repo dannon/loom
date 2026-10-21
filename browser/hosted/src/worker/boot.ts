@@ -165,9 +165,24 @@ api.registerTool = (def) => {
 orbit.loom(api);
 const registry = createRegistry();
 registry.install(host.seal());
-const { models, model } = await agentModels().connect(
+const connected = await agentModels().connect(
   resolveTarget({ ai_base_url: data.model.baseUrl, ai_model: data.model.id, ai_api_key: data.model.apiKey }),
 );
+const { model } = connected;
+// Every worker shares the service key; the request's `user` is what tells LiteLLM whose spend it is.
+type Options = Parameters<typeof connected.models.streamSimple>[2];
+const tagged = (options: Options): Options => ({
+  ...options,
+  onPayload: async (payload, m) => {
+    const next = (await options?.onPayload?.(payload, m)) ?? payload;
+    return { ...(next as object), user: data.model.user };
+  },
+});
+const models = {
+  ...connected.models,
+  streamSimple: (m, context, options) => connected.models.streamSimple(m, context, tagged(options)),
+  completeSimple: (m, context, options) => connected.models.completeSimple(m, context, tagged(options)),
+} as typeof connected.models;
 const harness = await Harness.open(
   storage,
   {

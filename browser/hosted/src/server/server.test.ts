@@ -73,7 +73,7 @@ beforeAll(async () => {
     lease: { ttlMs: 60_000, renewMs: 15_000, maxTurnMs: 60_000 },
     limits: { maxTurns: 6, maxToolCalls: 20, outputBytes: 1 << 22 },
     tokens,
-    modelFor: async () => ({ baseUrl: `${standIn.origin}/v1`, id: "m", apiKey: "model-key-0123456789" }),
+    modelFor: (sub) => ({ baseUrl: `${standIn.origin}/v1`, id: "m", apiKey: "model-key-0123456789", user: sub }),
     pageFor: async (conversation) => `page-${conversation.id}`,
     onEvent: (id, event) => sockets?.deliver(id, event),
     retryDelayMs: () => 300,

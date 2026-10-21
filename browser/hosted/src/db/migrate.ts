@@ -79,6 +79,11 @@ export const HOST_MIGRATIONS: MigrationSet = {
       // The user's LiteLLM virtual key (H9), sealed with ORBIT_TOKEN_KEY.
       "ALTER TABLE orbit_users ADD COLUMN model_key BYTEA",
     ],
+    [
+      // Gone with per-user keys: the host calls LiteLLM on one service key and tags each request
+      // with the user instead.
+      "ALTER TABLE orbit_users DROP COLUMN model_key",
+    ],
   ],
 };
 

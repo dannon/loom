@@ -52,7 +52,7 @@ export interface DispatcherOptions {
   readonly compileCache?: string;
   readonly tokens: TokenCache;
   /** The model a user's worker talks to, with their key (H9). */
-  readonly modelFor: (sub: string) => Promise<WorkerData["model"]>;
+  readonly modelFor: (sub: string) => WorkerData["model"];
   /** The conversation's Galaxy page, created on first use. */
   readonly pageFor: (conversation: ConversationRow) => Promise<string>;
   readonly onEvent: (conversationId: string, event: FromWorker | DispatchEvent) => void;
@@ -422,7 +422,7 @@ export class Dispatcher {
       database: this.#o.databaseUrl,
       galaxyUrl: this.#o.galaxyUrl,
       pageId,
-      model: await this.#o.modelFor(conversation.ownerSub),
+      model: this.#o.modelFor(conversation.ownerSub),
       limits: this.#o.limits,
       ...(this.#o.compileCache ? { compileCache: this.#o.compileCache } : {}),
     };

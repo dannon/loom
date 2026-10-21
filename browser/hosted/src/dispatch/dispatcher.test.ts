@@ -74,7 +74,7 @@ async function host(name = "host", concurrency?: number, turnsDisabled?: () => s
     lease: { ttlMs: 60_000, renewMs: 15_000, maxTurnMs: 60_000 },
     limits: { maxTurns: 6, maxToolCalls: 20, outputBytes: 1 << 22 },
     tokens: createTokenCache({ refresh: async () => ({ token: "access", expiresAt: Date.now() + 600_000 }) }),
-    modelFor: async () => ({ baseUrl: `${standIn.origin}/v1`, id: "m", apiKey: "model-key-0123456789" }),
+    modelFor: (sub) => ({ baseUrl: `${standIn.origin}/v1`, id: "m", apiKey: "model-key-0123456789", user: sub }),
     pageFor: async () => "p1",
     onEvent: (id, event) => {
       if (process.env.DISPATCH_LOG) console.log(`[${name}] ${id.slice(0, 8)} ${event.type}`);

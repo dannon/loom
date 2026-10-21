@@ -22,12 +22,10 @@ export interface HostConfig {
   /** Encrypts refresh tokens at rest (brief decision 8). */
   readonly tokenKey: Buffer;
   readonly model: {
-    /** LiteLLM; workers reach the model through it with per-user virtual keys (H9). */
+    /** LiteLLM; workers reach the model through it on Orbit's one service key (H9). */
     readonly litellmUrl: URL;
-    readonly adminKey: string;
+    readonly key: string;
     readonly id: string;
-    readonly tpm: number;
-    readonly rpm: number;
   };
   /** Per user message: model turns, and tool calls (README decision 5). */
   readonly turnLimits: { readonly maxSteps: number; readonly maxToolCalls: number };
@@ -138,7 +136,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 
   const litellmUrl = url("ORBIT_LITELLM_URL", required("ORBIT_LITELLM_URL"));
   secure("ORBIT_LITELLM_URL", litellmUrl);
-  const adminKey = required("ORBIT_LITELLM_ADMIN_KEY");
+  const modelKey = required("ORBIT_LITELLM_KEY");
   const modelId = required("ORBIT_MODEL");
   const count = (name: string, fallback: number): number => {
     const raw = value(name);
@@ -147,8 +145,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     if (!Number.isInteger(n) || n <= 0) problems.push(`${name} must be a positive whole number`);
     return n;
   };
-  const tpm = count("ORBIT_MODEL_TPM", 100_000);
-  const rpm = count("ORBIT_MODEL_RPM", 30);
   const turnsDisabled = value("ORBIT_TURNS_DISABLED");
   const maxSteps = count("ORBIT_MAX_STEPS", 40);
   const maxToolCalls = count("ORBIT_MAX_TOOL_CALLS", 60);
@@ -168,7 +164,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     galaxyLinkUrl: galaxyLinkUrl ?? new URL("/login/start", galaxyUrl!),
     oidc: { issuer: issuer!, clientId: clientId!, clientSecret },
     tokenKey,
-    model: { litellmUrl: litellmUrl!, adminKey: adminKey!, id: modelId!, tpm, rpm },
+    model: { litellmUrl: litellmUrl!, key: modelKey!, id: modelId! },
     turnsDisabled,
     turnLimits: { maxSteps, maxToolCalls },
     lease: { ttlMs, renewMs, maxTurnMs },
@@ -192,7 +188,7 @@ export function describeConfig(config: HostConfig): string {
     ["token key", "set"],
     [
       "model",
-      `${config.model.id} via ${config.model.litellmUrl.origin} (admin key set), per user ${config.model.tpm} tpm / ${config.model.rpm} rpm`,
+      `${config.model.id} via ${config.model.litellmUrl.origin} (service key set)`,
     ],
     [
       "turns",
