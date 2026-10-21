@@ -47,6 +47,7 @@ import { bootOrbit, type OrbitBoot } from "./boot";
 import { setOrbitCwd } from "./env";
 import { orbitGrant } from "./grants";
 import { openLedger, opfsFile } from "./ledger";
+import { ownSkillFiles } from "./skills";
 import { orbitWatch } from "./watch";
 
 /** How long a conversation being left gets to finish its tool calls' end events. */
@@ -303,9 +304,19 @@ async function open(request: OpenRequest) {
       return found ? artifactsIn(found, context) : [];
     },
   };
-  const shellTools = [pythonTool(brand.name), ...processTools()].filter((t) =>
-    granted(t, capabilities),
-  );
+  // The core's own tools and the flavor's (Olit's visualizations), as the grant allows.
+  const shellTools = [
+    pythonTool(brand.name),
+    ...processTools(),
+    ...(flavor.tools?.() ?? []),
+  ].filter((t) => granted(t, capabilities));
+  const callContext = async () => {
+    const id = conversation?.id;
+    const [binding, prior] = id
+      ? await Promise.all([shell.binding(id), shell.artifacts(id)])
+      : [{}, []];
+    return { ...shell.clients(undefined), binding, artifacts: { prior, produced: [] } };
+  };
   orbit = bootOrbit({
     capabilities,
     galaxy: {
@@ -327,6 +338,17 @@ async function open(request: OpenRequest) {
       shellTools: () => new Set(shellTools.map((t) => t.name)),
       artifacts: () => (conversation ? shell.artifacts(conversation.id) : Promise.resolve([])),
     },
+    flavorLayers: {
+      brandName: brand.name,
+      annotators: flavor.annotators,
+      promptSections: flavor.promptSections,
+      datasetId: async () =>
+        conversation
+          ? (await runtime!.harness.snapshot(Binding, conversation.id, context))?.datasetId
+          : undefined,
+      context: callContext,
+    },
+    ownSkills: ownSkillFiles(flavor.skills ?? {}, brand.id),
     secrets: () => [runtime?.apiKey].filter((s): s is string => typeof s === "string"),
     ui: {
       ask: async (request, id, signal) =>
