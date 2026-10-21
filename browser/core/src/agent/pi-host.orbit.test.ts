@@ -10,7 +10,7 @@ import cp from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
-import { createRequire, syncBuiltinESMExports } from "node:module";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,7 @@ import { createPiHost, type HostNote, type PiHost } from "./pi-host";
 import { resolve as resolveTarget } from "./providers";
 import { LOOP } from "./runtime";
 import type { CapabilityProfile } from "../../../../shared/capability-profile.js";
+import { pageContentProblem } from "../../../../shared/galaxy-page-cells.js";
 
 // ── tripwire ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -265,10 +266,6 @@ const notes: HostNote[] = [];
 const pageCalls = { GET: 0, PUT: 0 };
 /** The record page as Galaxy holds it. */
 let page1 = "";
-// Galaxy's own rule for what a page may carry, shared with the e2e stub.
-const { badFence } = createRequire(import.meta.url)("../../../e2e/page-cells.cjs") as {
-  badFence: (content: string) => string | undefined;
-};
 /** GETs of the unfinished job behind d2, which the poll-guard turn reads twice. */
 let jobGets = 0;
 let host: PiHost;
@@ -377,8 +374,9 @@ beforeAll(async () => {
         pageCalls[method === "PUT" ? "PUT" : "GET"]++;
         if (method === "PUT") {
           const body = JSON.parse(String(init.body)) as { content: string };
-          const fence = badFence(body.content);
-          if (fence) return json({ err_msg: `Unsupported fenced block type [${fence}].` }, 400);
+          // Galaxy refuses a page with a fence it has no cell for, as the e2e stub does.
+          const problem = pageContentProblem(body.content);
+          if (problem) return json({ err_msg: problem }, 400);
           page1 = body.content;
         }
         return json({ id: "p1", content: page1, content_editor: page1 });
@@ -395,7 +393,13 @@ beforeAll(async () => {
       if (path === "/api/histories/hbig/contents") return json(BIG_HISTORY);
       // A dataset whose creating job is still running, for the poll guard.
       if (path === "/api/datasets/d2") {
-        return json({ id: "d2", name: "d2.txt", history_id: "h1", state: "running", creating_job: "j2" });
+        return json({
+          id: "d2",
+          name: "d2.txt",
+          history_id: "h1",
+          state: "running",
+          creating_job: "j2",
+        });
       }
       if (path === "/api/jobs/j2") {
         jobGets++;
@@ -540,12 +544,14 @@ describe("Orbit on pi-host", () => {
       // tool_result), which is where observations get the Galaxy version. The empty-completion
       // check adds three (session_start, input, agent_end).
       on: 71 + 7 + 1 + 2 + 3,
-      // Orbit's own tools (ena_runs among them); the Galaxy family (the browser entry's 42
-      // operations, the shell's three extras, and Orbit's list_jobs and get_job_logs bridges);
-      // galaxy_read_output beside it; and the probe. mcp_read_output is MCP-only.
-      tools: 16 + 47 + 1 + 1,
-      // The real /reconcile, in the stub's place.
-      commands: 21,
+      // Orbit's own tools (ena_runs among them) less the five page-sync tools, which a page
+      // record has no use for; the Galaxy family (the browser entry's 42 operations, the shell's
+      // three extras, and Orbit's list_jobs and get_job_logs bridges); galaxy_read_output beside
+      // it; and the probe. mcp_read_output is MCP-only.
+      tools: 16 - 5 + 47 + 1 + 1,
+      // The real /reconcile, in the stub's place; /sync goes with the page-sync tools, and
+      // /connect and /profiles with the profiles a page-signed worker has none of.
+      commands: 21 - 3,
     });
     // No MCP server is registered under bare Galaxy tools, so nothing is refused.
     expect(notes.filter((n) => n.kind !== "silent" && n.phase === "register")).toEqual([]);
@@ -910,11 +916,11 @@ describe("Orbit on pi-host under a read-only grant", () => {
       // (upload_file is a write extra), and the two job bridges; galaxy_read_output beside them.
       expect(galaxy.map((t) => t.name).filter((n) => n !== "galaxy_read_output")).toHaveLength(33);
       expect(galaxy.map((t) => t.name)).toContain("galaxy_read_output");
-      // Orbit's own 16 under write, less the record writers this profile registers: the two
-      // invocation checks, both record tools, loom_propose and four of the five notebook tools.
+      // Orbit's own 11 under write and a page record, less the record writers: the two
+      // invocation checks, both record tools and loom_propose.
       const family = new Set(galaxy.map((t) => t.name));
       const own = readHost.tools.filter((n) => !family.has(n));
-      expect(own).toHaveLength(16 - 9);
+      expect(own).toHaveLength(16 - 5 - 5);
       for (const name of ORBIT_WRITING_TOOLS) expect(own, name).not.toContain(name);
     } finally {
       setCapabilityProfile(PROFILE);

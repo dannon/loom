@@ -3,7 +3,6 @@
  * carriers Galaxy accepts, a conversation has no page until something is written to it, and a
  * write pinned to one record lands in that record's page whichever store is bound by then.
  */
-import { createRequire } from "node:module";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
@@ -27,14 +26,11 @@ import { createPageRecordStore } from "../extensions/orbit/record-store-page";
 import { registerSessionLifecycle } from "../extensions/orbit/session-lifecycle";
 import { resetState, setNotebookPath } from "../extensions/orbit/state";
 import { setSubmissionLedger } from "../extensions/orbit/submission-ledger";
+import { pageContentProblem } from "../shared/galaxy-page-cells.js";
 import { pageContentHash } from "../shared/page-content-hash.js";
 import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 import { GALAXY } from "./galaxy-family-fixture";
 import { guardHooks, json, recordGalaxy, runOp, type SeenRequest } from "./galaxy-test-helpers";
-
-const { badFence } = createRequire(import.meta.url)("../browser/e2e/page-cells.cjs") as {
-  badFence: (content: string) => string | undefined;
-};
 
 // session_start's artifacts would land an activity log in the test runner's cwd.
 vi.mock("../extensions/orbit/state.js", async (importOriginal) => ({
@@ -69,8 +65,8 @@ function galaxyPages(other: (req: SeenRequest) => Response | Promise<Response> =
         : json({ err_msg: "Page not found" }, 404);
     }
     const content = String(req.body?.content ?? "");
-    const fence = badFence(content);
-    if (fence) return json({ err_msg: `Unsupported fenced block type [${fence}].` }, 400);
+    const problem = pageContentProblem(content);
+    if (problem) return json({ err_msg: problem }, 400);
     puts.push(id);
     pages.set(id, content);
     return json({ id });
@@ -137,7 +133,7 @@ describe("typed blocks on a page", () => {
     const store = createPageRecordStore({ key: "/pages/a/notebook.md", pageId: "p1" });
     await store.write(FENCED);
     const stored = galaxy.pages.get("p1")!;
-    expect(badFence(stored)).toBeUndefined();
+    expect(pageContentProblem(stored)).toBeUndefined();
     for (const kind of ["invocation", "job", "session", "udt", "proposal"]) {
       expect(stored).toContain(`[loom-${kind}:v1]: #loom "`);
     }
