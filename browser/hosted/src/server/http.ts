@@ -14,6 +14,28 @@ export interface HostServerOptions {
   /** Whether Postgres and Keycloak answer, for /healthz. */
   readonly health: () => Promise<Record<string, boolean>>;
   readonly log?: (message: string) => void;
+  /** The model every conversation runs on, for the page to name. */
+  readonly model?: string;
+}
+
+/** Who Galaxy says the user is, for the page's masthead; nothing when Galaxy can't say. */
+async function galaxyUser(auth: AuthContext, sub: string): Promise<{ username?: string; email?: string }> {
+  try {
+    const token = await auth.tokens.token(sub);
+    const response = await fetch(new URL("/api/users/current", auth.galaxyUrl), {
+      headers: { authorization: `Bearer ${token}` },
+      redirect: "manual",
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) return {};
+    const body = (await response.json()) as { username?: unknown; email?: unknown };
+    return {
+      ...(typeof body.username === "string" && { username: body.username }),
+      ...(typeof body.email === "string" && { email: body.email }),
+    };
+  } catch {
+    return {};
+  }
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -43,7 +65,12 @@ export function createHostServer(options: HostServerOptions): Server {
       const session = await sessionOf(auth, req);
       if (!session) return json(res, 401, { error: "Not signed in.", login: "/auth/login" });
       if (path === "/api/me" && req.method === "GET") {
-        return json(res, 200, { sub: session.sub, galaxyUrl: auth.galaxyUrl.href });
+        return json(res, 200, {
+          sub: session.sub,
+          galaxyUrl: auth.galaxyUrl.href,
+          model: options.model,
+          ...(await galaxyUser(auth, session.sub)),
+        });
       }
       if (path === "/api/conversations" && req.method === "GET") {
         const rows = await listConversations(auth.pool, session.sub);
