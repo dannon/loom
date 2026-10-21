@@ -75,7 +75,6 @@
   "notes": [
     "command | dropped ctx.ui.setWidget notebook",
     "seal | silent session_tree (3)",
-    "session_start | dropped ctx.ui.setStatus galaxy-plan",
     "session_start | dropped ctx.ui.setToolsExpanded",
     "shutdown | refused appendEntry notebook_snapshot",
     "turn | dropped ctx.ui.setStatus galaxy-plan",

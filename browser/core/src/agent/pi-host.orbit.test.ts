@@ -609,19 +609,16 @@ describe("Orbit on pi-host", () => {
     return result;
   }
 
-  it("starts the session and lets the greeting run settle", async () => {
+  it("starts the session with no greeting run", async () => {
     ledger.phase = "session_start";
     // pi's session_start precedes any run; only then does the scheduler start.
     await host.start("startup");
     harness.resume();
-    // Galaxy credentials are configured, so the greeting is a model turn, sent fire-and-forget.
-    await until(() => runs.started >= 1);
+    // Galaxy credentials are configured, which on the desktop makes the greeting a model turn.
+    // The worker opens a session on every panel open and reload, so it sends none.
     await harness.waitForIdle(ctx);
-    await until(() => runs.settled >= 1 && idle());
-    expect(runs.started).toBe(1);
-    // The greeting under in-process Galaxy tools: no connect tool to ask for.
-    expect(JSON.stringify(requests[0].messages)).toContain("the Galaxy tools are ready to use");
-    expect(JSON.stringify(requests[0].messages)).not.toContain("mcp__galaxy__connect");
+    expect(runs.started).toBe(0);
+    expect(requests).toHaveLength(0);
     // No reconcile ran at session_start: the first tick after an attach is where it runs.
     const { readReconcileState } = await import("../../../../extensions/loom/galaxy-provenance");
     expect(await readReconcileState(tmp)).toBeNull();
@@ -649,7 +646,7 @@ describe("Orbit on pi-host", () => {
     );
     const s = await host.submit("fetch the collection skill");
     await s!.wait(ctx);
-    await until(() => runs.settled >= 2);
+    await until(() => runs.settled >= 1);
     const request = requests[before];
     expect(request.messages[0].role).toBe("system");
     // A sentence shared/prompt-blocks.js owns, so the section text is Orbit's whole prompt.
@@ -704,7 +701,7 @@ describe("Orbit on pi-host", () => {
     );
     const s = await host.submit("probe it");
     await s!.wait(ctx);
-    await until(() => runs.settled >= 3);
+    await until(() => runs.settled >= 2);
     const results = (await conversation.context(ctx)).messages.filter(
       (m) => m.role === "toolResult",
     );
@@ -724,7 +721,7 @@ describe("Orbit on pi-host", () => {
     );
     const first = await host.submit("make a history and look around");
     await first!.wait(ctx);
-    await until(() => runs.settled >= 4);
+    await until(() => runs.settled >= 3);
     // index.ts captures the new history id off the real create_history's POST.
     const { getState } = await import("../../../../extensions/loom/state");
     expect(getState().currentHistoryId).toBe("h1");
@@ -759,7 +756,7 @@ describe("Orbit on pi-host", () => {
     );
     const second = await host.submit("find fastp and run it");
     await second!.wait(ctx);
-    await until(() => runs.settled >= 5);
+    await until(() => runs.settled >= 4);
     last = await results();
     // galaxy-recovery's keywords refusal.
     const keywords = last.find((m) => m.toolName === "search_tools_by_keywords")!;
@@ -794,7 +791,7 @@ describe("Orbit on pi-host", () => {
     );
     const s = await host.submit("list my histories, then look inside the big one");
     await s!.wait(ctx);
-    await until(() => runs.settled >= 6);
+    await until(() => runs.settled >= 5);
     const last = await results();
     const histories = last.find((m) => m.toolName === "get_histories")!;
     expect(histories.isError, textOf(histories.content)).toBeFalsy();
@@ -823,7 +820,7 @@ describe("Orbit on pi-host", () => {
     const started = Date.now();
     const s = await host.submit("is the cat job done yet?");
     await s!.wait(ctx);
-    await until(() => runs.settled >= 7);
+    await until(() => runs.settled >= 6);
     // No two-minute wait in the brain: the watch is the worker's only clock.
     expect(Date.now() - started).toBeLessThan(1_000);
     const last = await results();
