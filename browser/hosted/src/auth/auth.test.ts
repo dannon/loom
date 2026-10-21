@@ -4,7 +4,7 @@ import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { migrate } from "../db/migrate";
-import { ensureDatabase } from "../test-db";
+import { freshDatabase } from "../test-db";
 import { createTokenCache } from "../tokens/token-cache";
 import { TokenUnavailable } from "../worker/galaxy-fetch";
 import { startMockOidc, type MockOidc } from "./mock-oidc";
@@ -23,7 +23,7 @@ let base: URL;
 let galaxyKnowsUser = true;
 
 beforeAll(async () => {
-  pool = new pg.Pool({ ...(await ensureDatabase("orbit_hosted_auth")), max: 6 });
+  pool = new pg.Pool({ ...(await freshDatabase("orbit_hosted_auth")), max: 6 });
   await migrate(pool);
   keycloak = await startMockOidc({ clientSecret: "s3cret" });
   oidc = await connectOidc({ issuer: keycloak.issuer, clientId: "orbit", clientSecret: "s3cret", allowHttp: true });
@@ -42,12 +42,18 @@ beforeAll(async () => {
       galaxyKnowsUser ? Response.json({ id: "galaxy-user-1" }) : Response.json({ err_msg: "unknown" }, { status: 403 })) as typeof fetch,
   };
   server.on("request", (req, res) => {
-    handleAuth(context, req, res).then((handled) => {
-      if (!handled) {
-        res.writeHead(404);
+    handleAuth(context, req, res).then(
+      (handled) => {
+        if (!handled) {
+          res.writeHead(404);
+          res.end();
+        }
+      },
+      () => {
+        res.writeHead(500);
         res.end();
-      }
-    });
+      },
+    );
   });
 });
 
@@ -137,6 +143,32 @@ describe("Keycloak sign-in", () => {
     expect(row!.refresh_token.length).toBeGreaterThan(28);
     // Keycloak's refresh tokens are base64url; nothing like one sits in the row in the clear.
     expect(row!.refresh_token.toString("latin1")).not.toMatch(/[A-Za-z0-9_-]{32}/);
+  });
+});
+
+describe("hostile input", () => {
+  it("ignores a cookie that isn't valid percent-encoding, and a return that would break the header", async () => {
+    const bad = await fetch(new URL("/auth/me", base), { headers: { cookie: `${SESSION_COOKIE}=%E0` } });
+    expect(bad.status).toBe(401);
+    const browser = new Browser();
+    const landed = await browser.signIn("henry", "/x\nSet-Cookie:evil=1");
+    expect(landed.status).toBe(302);
+    expect(landed.headers.get("location")).toBe("/");
+  });
+
+  it("refuses an expired sign-in state", async () => {
+    const browser = new Browser();
+    keycloak.user = "ivy";
+    const login = await browser.go(new URL("/auth/login", base));
+    const callback = (await browser.go(login.headers.get("location")!)).headers.get("location")!;
+    const later = Date.now() + 11 * 60_000;
+    const realNow = Date.now;
+    Date.now = () => later;
+    try {
+      expect((await browser.go(callback)).status).toBe(400);
+    } finally {
+      Date.now = realNow;
+    }
   });
 });
 

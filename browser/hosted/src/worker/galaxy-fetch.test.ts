@@ -151,8 +151,9 @@ describe("the token cache", () => {
     const inFlight = cache.token("u");
     cache.forget("u");
     release();
-    expect(await inFlight).toBe("fresh2");
-    // The sign-out came after that refresh started, so its token wasn't kept: the next ask refreshes.
+    // Asked before the sign-out, answered after it: the caller doesn't get the ended session's token.
+    await expect(inFlight).rejects.toBeInstanceOf(TokenUnavailable);
+    // Nor is it kept: the next ask refreshes.
     expect(await cache.token("u")).toBe("fresh3");
     expect(refreshes).toBe(3);
   });

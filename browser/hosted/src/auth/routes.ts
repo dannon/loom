@@ -11,8 +11,10 @@ import type { Oidc } from "./oidc";
 import { seal, unseal } from "./seal";
 import { createSession, endSession, findSession, type Session } from "./sessions";
 
+// __Host- on https, so a sibling *.galaxyproject.org host can't plant either cookie for this one.
 export const SESSION_COOKIE = "orbit_session";
 const SIGNIN_COOKIE = "orbit_signin";
+const cookieName = (context: AuthContext, name: string) => (context.publicUrl.protocol === "https:" ? `__Host-${name}` : name);
 const SIGNIN_PURPOSE = "orbit sign-in";
 const SIGNIN_TTL_S = 600;
 
@@ -32,15 +34,20 @@ export interface AuthContext {
 export function readCookie(req: IncomingMessage, name: string): string | undefined {
   for (const part of (req.headers.cookie ?? "").split(";")) {
     const [k, ...v] = part.trim().split("=");
-    if (k === name) return decodeURIComponent(v.join("="));
+    if (k !== name) continue;
+    try {
+      return decodeURIComponent(v.join("="));
+    } catch {
+      return undefined;
+    }
   }
   return undefined;
 }
 
-function cookie(context: AuthContext, name: string, value: string, attrs: { path: string; maxAge?: number }): string {
+function cookie(context: AuthContext, name: string, value: string, attrs: { maxAge?: number }): string {
   return [
-    `${name}=${encodeURIComponent(value)}`,
-    `Path=${attrs.path}`,
+    `${cookieName(context, name)}=${encodeURIComponent(value)}`,
+    "Path=/",
     "HttpOnly",
     "SameSite=Lax",
     ...(context.publicUrl.protocol === "https:" ? ["Secure"] : []),
@@ -50,7 +57,7 @@ function cookie(context: AuthContext, name: string, value: string, attrs: { path
 
 /** The signed-in user behind a request's session cookie, if any. */
 export async function sessionOf(context: AuthContext, req: IncomingMessage): Promise<Session | undefined> {
-  const id = readCookie(req, SESSION_COOKIE);
+  const id = readCookie(req, cookieName(context, SESSION_COOKIE));
   return id ? findSession(context.pool, id) : undefined;
 }
 
@@ -64,8 +71,12 @@ function plain(res: ServerResponse, status: number, text: string): void {
   res.end(text);
 }
 
-/** Only a path on this host, so a crafted return can't bounce a fresh session somewhere else. */
-const safeReturn = (raw: string | null) => (raw && raw.startsWith("/") && !raw.startsWith("//") && !raw.includes("\\") ? raw : "/");
+/**
+ * Only a path on this host, so a crafted return can't bounce a fresh session somewhere else, and
+ * nothing that could break out of the Location header.
+ */
+const safeReturn = (raw: string | null) =>
+  raw && raw.startsWith("/") && !raw.startsWith("//") && !raw.includes("\\") && !/[^\x21-\x7e]/.test(raw) ? raw : "/";
 
 /** Handle the /auth routes; false for anything else. */
 export async function handleAuth(context: AuthContext, req: IncomingMessage, res: ServerResponse): Promise<boolean> {
@@ -80,21 +91,28 @@ export async function handleAuth(context: AuthContext, req: IncomingMessage, res
       plain(res, 503, "The sign-in service couldn't be reached. Try again in a minute.");
       return true;
     }
-    const pending = JSON.stringify({ state: begun.state, verifier: begun.verifier, back: safeReturn(url.searchParams.get("return")) });
+    const pending = JSON.stringify({
+      state: begun.state,
+      verifier: begun.verifier,
+      back: safeReturn(url.searchParams.get("return")),
+      // Checked at the callback: a planted or replayed sign-in state stops working after ten minutes.
+      exp: Date.now() + SIGNIN_TTL_S * 1000,
+    });
     const box = seal(context.tokenKey, pending, SIGNIN_PURPOSE).toString("base64url");
-    redirect(res, begun.url.href, 302, [cookie(context, SIGNIN_COOKIE, box, { path: "/auth", maxAge: SIGNIN_TTL_S })]);
+    redirect(res, begun.url.href, 302, [cookie(context, SIGNIN_COOKIE, box, { maxAge: SIGNIN_TTL_S })]);
     return true;
   }
 
   if (req.method === "GET" && url.pathname === "/auth/callback") {
-    const clear = cookie(context, SIGNIN_COOKIE, "", { path: "/auth", maxAge: 0 });
-    const box = readCookie(req, SIGNIN_COOKIE);
+    const clear = cookie(context, SIGNIN_COOKIE, "", { maxAge: 0 });
+    const box = readCookie(req, cookieName(context, SIGNIN_COOKIE));
     const opened = box ? unseal(context.tokenKey, Buffer.from(box, "base64url"), SIGNIN_PURPOSE) : undefined;
-    if (!opened) {
+    const pending = opened ? (JSON.parse(opened) as { state: string; verifier: string; back: string; exp: number }) : undefined;
+    if (!pending || !(pending.exp > Date.now())) {
+      res.setHeader("set-cookie", [clear]);
       plain(res, 400, "That sign-in link has expired. Start again from Orbit.");
       return true;
     }
-    const pending = JSON.parse(opened) as { state: string; verifier: string; back: string };
     let tokens;
     try {
       // Built on the public URL, never the Host header, so the redirect_uri matches what Keycloak has.
@@ -108,7 +126,7 @@ export async function handleAuth(context: AuthContext, req: IncomingMessage, res
     const back = (await linkedToGalaxy(context, tokens.sub, tokens.accessToken)) ? pending.back : "/auth/link";
     redirect(res, back, 302, [
       clear,
-      cookie(context, SESSION_COOKIE, sessionId, { path: "/" }),
+      cookie(context, SESSION_COOKIE, sessionId, {}),
     ]);
     return true;
   }
@@ -125,11 +143,11 @@ export async function handleAuth(context: AuthContext, req: IncomingMessage, res
       plain(res, 403, "Sign out from Orbit itself.");
       return true;
     }
-    const id = readCookie(req, SESSION_COOKIE);
+    const id = readCookie(req, cookieName(context, SESSION_COOKIE));
     const ended = id ? await endSession(context.pool, context.tokenKey, context.oidc, id) : undefined;
     if (ended) context.tokens.forget(ended.sub);
     redirect(res, context.oidc.endSessionUrl(new URL("/", context.publicUrl).href).href, 303, [
-      cookie(context, SESSION_COOKIE, "", { path: "/", maxAge: 0 }),
+      cookie(context, SESSION_COOKIE, "", { maxAge: 0 }),
     ]);
     return true;
   }
