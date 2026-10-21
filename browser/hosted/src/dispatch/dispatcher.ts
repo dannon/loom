@@ -16,7 +16,7 @@ import type { Worker } from "node:worker_threads";
 import type { Pool } from "pg";
 import type { PgBoss } from "pg-boss";
 
-import type { AskAnswer } from "../../../core/src/agent/pi-host";
+import type { AskAnswer, AskRequest } from "../../../core/src/agent/pi-host";
 import { acquireLeaseInTransaction, releaseLease, renewLease } from "../lease/leases";
 import { LEASE_LOST_EXIT_CODE } from "../lease/lease-fence";
 import { withTransaction } from "../storage/postgres-storage";
@@ -46,6 +46,8 @@ export interface DispatcherOptions {
   readonly galaxyUrl: string;
   readonly lease: { readonly ttlMs: number; readonly renewMs: number; readonly maxTurnMs: number };
   readonly limits: WorkerData["limits"];
+  /** Handed to workers for V8's compile cache. */
+  readonly compileCache?: string;
   readonly tokens: TokenCache;
   /** The model a user's worker talks to, with their key (H9). */
   readonly modelFor: (sub: string) => Promise<WorkerData["model"]>;
@@ -73,7 +75,8 @@ interface Live {
   readonly holder: string;
   readonly leaseGen: number;
   readonly worker: Worker;
-  readonly asks: Set<number>;
+  /** Asks waiting on the user, so a page that (re)connects can show them. */
+  readonly asks: Map<number, AskRequest>;
   readonly waiters: Set<Waiter>;
   renew?: NodeJS.Timeout;
   /** A turn is between submit and settled. */
@@ -140,6 +143,19 @@ export class Dispatcher {
   /** Whether the conversation has a worker on this host now. */
   isLive(conversationId: string): boolean {
     return this.#live.has(conversationId);
+  }
+
+  /** Ask the conversation's worker for a fresh snapshot; false when no worker is running it. */
+  snapshot(conversationId: string): boolean {
+    const live = this.#live.get(conversationId);
+    if (!live) return false;
+    live.worker.postMessage({ cmd: "snapshot" });
+    return true;
+  }
+
+  /** What the conversation is waiting on the user for. */
+  pendingAsks(conversationId: string): Array<{ id: number; request: AskRequest }> {
+    return [...(this.#live.get(conversationId)?.asks ?? [])].map(([id, request]) => ({ id, request }));
   }
 
   /**
@@ -243,6 +259,7 @@ export class Dispatcher {
       pageId,
       model: await this.#o.modelFor(conversation.ownerSub),
       limits: this.#o.limits,
+      ...(this.#o.compileCache ? { compileCache: this.#o.compileCache } : {}),
     };
     const worker = (this.#o.spawn ?? spawnWorker)(this.#o.bundle, data);
     const live: Live = {
@@ -252,7 +269,7 @@ export class Dispatcher {
       holder,
       leaseGen,
       worker,
-      asks: new Set(),
+      asks: new Map(),
       waiters: new Set(),
       inTurn: false,
       exited: false,
@@ -338,7 +355,7 @@ export class Dispatcher {
         }).then((answer) => live.worker.postMessage({ cmd: "token", id: message.id, ...answer }));
         return;
       case "ask":
-        live.asks.add(message.id);
+        live.asks.set(message.id, message.request);
         break;
       case "ask-withdrawn":
         live.asks.delete(message.id);

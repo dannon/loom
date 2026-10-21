@@ -1,4 +1,6 @@
 /** What the host and a conversation's worker say to each other over the worker's port. */
+import type { AgentEvent } from "@earendil-works/pi-durable";
+
 import type { AskAnswer, AskRequest } from "../../../core/src/agent/pi-host";
 import type { TokenFailure } from "./galaxy-fetch";
 
@@ -33,6 +35,8 @@ export interface WorkerData {
     /** Bytes the spilled-output ring may hold. */
     readonly outputBytes: number;
   };
+  /** V8's compile cache directory, which the image's worker loader turns on before the bundle loads. */
+  readonly compileCache?: string;
   /** Tests only: report every filesystem and child_process call the worker makes. */
   readonly traceReaches?: boolean;
 }
@@ -42,6 +46,8 @@ export type ToWorker =
   | { readonly cmd: "answer"; readonly id: number; readonly value: AskAnswer }
   /** The user's Stop: abort the run; a pending confirm is withdrawn and its call not run. */
   | { readonly cmd: "stop" }
+  /** Post a fresh snapshot of the conversation, for a browser that just connected. */
+  | { readonly cmd: "snapshot" }
   | ({ readonly cmd: "token"; readonly id: number } & TokenAnswer)
   | { readonly cmd: "close" };
 
@@ -57,6 +63,8 @@ export type FromWorker =
     }
   | { readonly type: "ask"; readonly id: number; readonly request: AskRequest }
   | { readonly type: "ask-withdrawn"; readonly id: number }
+  /** pi-durable's conversation events, from a snapshot on: what the browser draws. */
+  | { readonly type: "events"; readonly events: readonly AgentEvent[] }
   /** The worker needs the user's access token for a Galaxy request. */
   | { readonly type: "token"; readonly id: number }
   | { readonly type: "notify"; readonly text: string; readonly level: "info" | "warning" | "error" }
