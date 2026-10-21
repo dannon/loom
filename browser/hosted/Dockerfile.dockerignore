@@ -1,0 +1,11 @@
+# Next to the Dockerfile, so BuildKit uses it for this build only.
+**/node_modules
+**/.scratch
+**/dist
+browser/core/temp
+browser/core/static
+browser/olit/static
+browser/bare/static
+.git
+app/out
+app/dist
