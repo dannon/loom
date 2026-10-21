@@ -839,7 +839,10 @@ describe("pi-host's UI surface", () => {
   });
 
   it("routes a registered /command from submit, as pi's prompt does, and sends the rest to the model", async () => {
-    const requests = model(() => text("done"));
+    const requests = model(
+      () => text("done"),
+      () => text("done"),
+    );
     const ran: string[] = [];
     const { host, seq } = await boot({
       extras: (api) =>
@@ -853,10 +856,15 @@ describe("pi-host's UI surface", () => {
     expect(ran).toEqual(["all of it", ""]);
     expect(seq.filter((s) => s === "input")).toEqual([]);
     expect(requests).toHaveLength(0);
+    // Slash text the brain sends itself goes to the model, as pi's sendUserMessage does.
+    host.api.sendUserMessage("/pending from the brain");
+    await until(() => requests.length === 1);
+    expect(ran).toEqual(["all of it", ""]);
+    await until(settled(seq));
     // An unregistered one is ordinary text.
     await (await host.submit("/nope"))!.wait(ctx);
-    await until(settled(seq));
-    expect(requests).toHaveLength(1);
+    await until(settled(seq, 2));
+    expect(requests).toHaveLength(2);
   });
 
   it("notes and dismisses an ask of a kind the shell doesn't support", async () => {
@@ -973,7 +981,9 @@ describe("pi-host's UI surface", () => {
     first.harness.resume();
     void first.host.submit("hi");
     await until(() => log.includes("first asked"));
-    // The page reloads with the dialog open.
+    // The page reloads with the dialog open. A graceful close aborts the first worker's dialog,
+    // where a killed worker would just stop; either way the second resumes the same intent, so
+    // this pins pi-durable's recovery along the abort path.
     await first.harness.close(ctx);
     const second = await worker("second", async () => true);
     const resumed = (await second.harness.conversation(conversation.id, ctx))!;
