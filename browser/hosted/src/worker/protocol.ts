@@ -1,5 +1,14 @@
 /** What the host and a conversation's worker say to each other over the worker's port. */
 import type { AskAnswer, AskRequest } from "../../../core/src/agent/pi-host";
+import type { TokenFailure } from "./galaxy-fetch";
+
+/**
+ * The host's answer to a token request: the user's access token, or why there isn't one. `lease`
+ * means the worker's generation is no longer current, which the worker treats as a lost lease.
+ */
+export type TokenAnswer =
+  | { readonly token: string }
+  | { readonly failure: TokenFailure | { readonly kind: "lease"; readonly message: string } };
 
 export interface WorkerData {
   /** The pi-durable store this conversation lives in, and the lease generation the worker holds. */
@@ -33,6 +42,7 @@ export type ToWorker =
   | { readonly cmd: "answer"; readonly id: number; readonly value: AskAnswer }
   /** The user's Stop: abort the run; a pending confirm is withdrawn and its call not run. */
   | { readonly cmd: "stop" }
+  | ({ readonly cmd: "token"; readonly id: number } & TokenAnswer)
   | { readonly cmd: "close" };
 
 export type FromWorker =
@@ -47,6 +57,8 @@ export type FromWorker =
     }
   | { readonly type: "ask"; readonly id: number; readonly request: AskRequest }
   | { readonly type: "ask-withdrawn"; readonly id: number }
+  /** The worker needs the user's access token for a Galaxy request. */
+  | { readonly type: "token"; readonly id: number }
   | { readonly type: "notify"; readonly text: string; readonly level: "info" | "warning" | "error" }
   /** Whether a submitted input was taken; a conversation busy with an Orbit follow-up refuses it. */
   | { readonly type: "submitted"; readonly admitted: boolean }

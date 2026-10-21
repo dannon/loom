@@ -14,7 +14,7 @@ import { startStandIn, type StandIn } from "../test-stand-in";
 import { bundleWorker } from "./bundle";
 import { WITHHELD_TOOLS } from "./guards";
 import type { WorkerData } from "./protocol";
-import { runWorker, type Running } from "./test-workers";
+import { runWorker, TEST_TOKEN, type Running, type Tokens } from "./test-workers";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRATCH = join(HERE, "..", "..", ".scratch", "worker");
@@ -60,7 +60,7 @@ async function workerData(overrides: Partial<WorkerData> = {}): Promise<WorkerDa
   };
 }
 
-const run = (data: WorkerData) => runWorker(bundle, data);
+const run = (data: WorkerData, tokens?: Tokens) => runWorker(bundle, data, tokens);
 
 /** Close the worker's harness; with its pool and port closed, the thread exits on its own. */
 async function stopped(running: Running): Promise<void> {
@@ -70,9 +70,9 @@ async function stopped(running: Running): Promise<void> {
 }
 
 /** A worker on a new conversation, past its greeting. */
-async function greeted(overrides: Partial<WorkerData> = {}) {
+async function greeted(overrides: Partial<WorkerData> = {}, tokens?: Tokens) {
   const data = await workerData(overrides);
-  const running = run(data);
+  const running = run(data, tokens);
   const ready = await running.waitFor("ready");
   await running.waitFor("settled");
   return { data, running, ready };
@@ -174,6 +174,49 @@ describe("a pending confirm", () => {
     await reopened.waitFor("settled");
     expect(standIn.galaxyCalls("PUT", "/api/histories/h1")).toBe(puts + 1);
     await stopped(reopened);
+  });
+});
+
+describe("Galaxy as the signed-in user", () => {
+  it("sends the host's access token and no API key", async () => {
+    const { running } = await greeted();
+    const from = standIn.seen.length;
+    running.worker.postMessage({ cmd: "submit", text: "READ_H1 please" });
+    await running.waitFor("settled", 2);
+    const galaxy = standIn.seen.slice(from).filter((s) => s.to === "galaxy");
+    expect(galaxy.length).toBeGreaterThan(0);
+    for (const request of galaxy) {
+      expect(request.authorization).toBe(`Bearer ${TEST_TOKEN}`);
+      expect(request.apiKey).toBeUndefined();
+    }
+    await stopped(running);
+  });
+
+  it("a sign-in outage reaches the model as service_outage, and Galaxy is never asked", async () => {
+    let down = false;
+    const { running } = await greeted({}, () =>
+      down ? { failure: { kind: "outage", message: "The sign-in service couldn't be reached." } } : { token: TEST_TOKEN },
+    );
+    down = true;
+    const from = standIn.seen.length;
+    running.worker.postMessage({ cmd: "submit", text: "READ_H1 please" });
+    await running.waitFor("settled", 2);
+    const after = standIn.seen.slice(from);
+    expect(after.filter((s) => s.to === "galaxy")).toEqual([]);
+    const toolResult = after.find((s) => s.to === "model" && s.lastRole === "tool");
+    expect(toolResult?.lastText).toContain("service_outage");
+    expect(toolResult?.lastText).toContain("is down");
+    await stopped(running);
+  });
+
+  it("a token refused for a moved lease stops the worker like a lost lease", async () => {
+    let moved = false;
+    const { running } = await greeted({}, () =>
+      moved ? { failure: { kind: "lease", message: "This conversation moved to another worker." } } : { token: TEST_TOKEN },
+    );
+    moved = true;
+    running.worker.postMessage({ cmd: "submit", text: "READ_H1 please" });
+    expect(await running.exited).toBe(LEASE_LOST);
   });
 });
 

@@ -1,7 +1,7 @@
 /** A running worker for tests: every message it posted, and a way to wait for the next of a kind. */
 import type { Worker } from "node:worker_threads";
 
-import type { FromWorker, WorkerData } from "./protocol";
+import type { FromWorker, TokenAnswer, WorkerData } from "./protocol";
 import { spawnWorker } from "./spawn";
 
 export interface Running {
@@ -13,10 +13,17 @@ export interface Running {
   count(type: FromWorker["type"]): number;
 }
 
-export function watch(worker: Worker): Running {
+/** How a test answers the worker's token requests; by default, always with one token. */
+export type Tokens = () => TokenAnswer | Promise<TokenAnswer>;
+export const TEST_TOKEN = "test-access-token";
+
+export function watch(worker: Worker, tokens: Tokens = () => ({ token: TEST_TOKEN })): Running {
   const messages: FromWorker[] = [];
   const waiters = new Set<() => void>();
   worker.on("message", (message: FromWorker) => {
+    if (message.type === "token") {
+      void Promise.resolve(tokens()).then((answer) => worker.postMessage({ cmd: "token", id: message.id, ...answer }));
+    }
     messages.push(message);
     for (const wake of waiters) wake();
   });
@@ -48,4 +55,5 @@ export function watch(worker: Worker): Running {
   };
 }
 
-export const runWorker = (bundle: string, data: WorkerData): Running => watch(spawnWorker(bundle, data));
+export const runWorker = (bundle: string, data: WorkerData, tokens?: Tokens): Running =>
+  watch(spawnWorker(bundle, data), tokens);
