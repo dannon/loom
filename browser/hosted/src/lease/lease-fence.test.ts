@@ -36,20 +36,20 @@ import {
   type ToWorker,
 } from "./lease-fence-protocol";
 import {
-  acquireLease,
+  bumpLeaseGen,
   currentLeaseGen,
   LeaseLostError,
   migratePostgresStorage,
-} from "./postgres-storage";
+} from "../storage/postgres-storage";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = resolve(HERE, "..", "..", "..");
+const REPO = resolve(HERE, "..", "..", "..", "..");
 const LOOM = join(REPO, "extensions", "loom");
 const SHARED = join(REPO, "shared");
 // The step-0 task reserves this database for this experiment.
 const DATABASE = process.env.LOOM_STEP0_FENCE_DB ?? "loom_step0_fence";
 // Outside os.tmpdir() so the bundle's bare `pg` import resolves to this workspace's copy.
-const OUT = join(HERE, "..", ".scratch", "lease-fence");
+const OUT = join(HERE, "..", "..", ".scratch", "lease-fence");
 
 // ── the worker bundle: recovery-bundle.ts's seams, for this entry ───────────────────────────────
 
@@ -247,7 +247,7 @@ async function conversationStore() {
   const storeId = `fence-${++n}-${randomUUID()}`;
   const dir = join(tmp, `x${n}`);
   fs.mkdirSync(dir, { recursive: true });
-  const leaseGen = await acquireLease(pool, storeId);
+  const leaseGen = await bumpLeaseGen(pool, storeId);
   return { storeId, dir, leaseGen };
 }
 
@@ -285,7 +285,7 @@ async function bootAndTakeOver(
   expect(admitted).toMatchObject({ ok: true, admitted: true });
   await boot.next("held");
   // Another host takes the conversation: the same upsert the host's dispatcher runs.
-  const newGen = await acquireLease(pool, store.storeId);
+  const newGen = await bumpLeaseGen(pool, store.storeId);
   return { ...store, boot, conversationId, request, newGen };
 }
 

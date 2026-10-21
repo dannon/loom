@@ -1,0 +1,87 @@
+/**
+ * Every schema the host needs, migrated in one call at boot: pi-durable's storage tables, the host's own
+ * and pg-boss's. Each is versioned separately, so the storage tables a spike database already has are
+ * left alone and only the rest are added.
+ */
+import type { Pool } from "pg";
+import { PgBoss } from "pg-boss";
+
+import { migratePostgresStorage } from "../storage/postgres-storage";
+import { applyMigrations, MIGRATION_LOCK, type MigrationSet } from "./migrations";
+
+// Prefixed like durable_*, so the host's tables can't collide with anything else in the database.
+export const HOST_MIGRATIONS: MigrationSet = {
+  name: "Orbit host",
+  versionTable: "orbit_schema",
+  steps: [
+    [
+      `CREATE TABLE orbit_users (
+        sub TEXT PRIMARY KEY,
+        galaxy_user_id TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE orbit_conversations (
+        id TEXT PRIMARY KEY,
+        owner_sub TEXT NOT NULL REFERENCES orbit_users (sub) ON DELETE CASCADE,
+        title TEXT,
+        store_id TEXT NOT NULL UNIQUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_active_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      "CREATE INDEX orbit_conversations_by_owner ON orbit_conversations (owner_sub, last_active_at DESC)",
+      // id_hash is the SHA-256 of the cookie value, so a leaked row can't be replayed as a cookie; the
+      // refresh token is encrypted with ORBIT_TOKEN_KEY.
+      `CREATE TABLE orbit_sessions (
+        id_hash TEXT PRIMARY KEY,
+        user_sub TEXT NOT NULL REFERENCES orbit_users (sub) ON DELETE CASCADE,
+        refresh_token BYTEA NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at TIMESTAMPTZ NOT NULL
+      )`,
+      "CREATE INDEX orbit_sessions_by_user ON orbit_sessions (user_sub)",
+      "CREATE INDEX orbit_sessions_by_expiry ON orbit_sessions (expires_at)",
+      // Who holds each store's lease and until when. The generation itself stays in
+      // durable_stores.lease_gen, the one place commits are fenced on.
+      `CREATE TABLE orbit_leases (
+        store_id TEXT PRIMARY KEY,
+        holder TEXT NOT NULL,
+        acquired_at TIMESTAMPTZ NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL
+      )`,
+    ],
+  ],
+};
+
+/** Create or upgrade every table the host uses. Safe to run from several hosts at once. */
+export async function migrate(pool: Pool): Promise<void> {
+  await migratePostgresStorage(pool);
+  await applyMigrations(pool, HOST_MIGRATIONS);
+  await migratePgBoss(pool);
+}
+
+/**
+ * pg-boss only migrates its schema from start(), so start one with nothing else running and stop it.
+ * On one connection holding the migration lock: pg-boss checks for its schema before creating it, so
+ * two hosts booting at once would otherwise both try to create it.
+ */
+async function migratePgBoss(pool: Pool): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_LOCK]);
+    try {
+      const boss = new PgBoss({
+        db: { executeSql: (text, values) => client.query(text, values) },
+        migrate: true,
+        supervise: false,
+        schedule: false,
+      });
+      await boss.start();
+      await boss.stop({ graceful: false });
+    } finally {
+      await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_LOCK]);
+    }
+  } finally {
+    client.release();
+  }
+}

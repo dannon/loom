@@ -17,10 +17,10 @@ import { Type } from "@sinclair/typebox";
 import * as orbit from "orbit-brain";
 import pg from "pg";
 
-import { json, text, toolCall } from "../../core/src/agent/fake-model";
-import { agentModels } from "../../core/src/agent/model";
-import { createPiHost } from "../../core/src/agent/pi-host";
-import { resolve as resolveTarget } from "../../core/src/agent/providers";
+import { json, text, toolCall } from "../../../core/src/agent/fake-model";
+import { agentModels } from "../../../core/src/agent/model";
+import { createPiHost } from "../../../core/src/agent/pi-host";
+import { resolve as resolveTarget } from "../../../core/src/agent/providers";
 import { LEASE_LOST_EXIT_CODE, LeaseFence } from "./lease-fence";
 import {
   PROMPTS,
@@ -31,7 +31,7 @@ import {
   type LeaseWorkerData,
   type ToWorker,
 } from "./lease-fence-protocol";
-import { PostgresStorage } from "./postgres-storage";
+import { PostgresStorage } from "../storage/postgres-storage";
 
 const data = workerData as LeaseWorkerData;
 const port = parentPort!;

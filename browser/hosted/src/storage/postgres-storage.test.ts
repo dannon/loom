@@ -18,7 +18,7 @@ import {
   LeaseLostError,
   PostgresStorage,
   TransactionAbortedError,
-  acquireLease,
+  bumpLeaseGen,
   currentLeaseGen,
   migratePostgresStorage,
 } from "./postgres-storage";
@@ -126,7 +126,7 @@ describe("PostgresStorage lease fence", () => {
   // rollback of writes already applied is covered by the hook tests below.
   it("rejects a stale-generation commit with LeaseLostError before it writes anything", async () => {
     const storeId = freshStoreId("fence");
-    const firstGen = await acquireLease(pool, storeId);
+    const firstGen = await bumpLeaseGen(pool, storeId);
     expect(firstGen).toBe(1);
     const stale = await PostgresStorage.open(pool, storeId, { leaseGen: firstGen });
     await stale.commit([root], context);
@@ -136,7 +136,7 @@ describe("PostgresStorage lease fence", () => {
       context,
     );
 
-    const secondGen = await acquireLease(pool, storeId);
+    const secondGen = await bumpLeaseGen(pool, storeId);
     expect(secondGen).toBe(2);
     const lostEntry = await stale.mintId<EntryId>();
     const lostTask = await stale.mintId<TaskId>();
@@ -174,12 +174,12 @@ describe("PostgresStorage lease fence", () => {
 
   it("poisons a pi-durable Session that loses its lease, so the stale worker cannot commit again", async () => {
     const storeId = freshStoreId("fence-session");
-    const gen = await acquireLease(pool, storeId);
+    const gen = await bumpLeaseGen(pool, storeId);
     const storage = await PostgresStorage.open(pool, storeId, { leaseGen: gen });
     await storage.commit([root], context);
     const session = createSession(storage);
     await session.commit((tx) => tx.appendEntry(ROOT_CONVERSATION_ID, { kind: "before" }), context);
-    await acquireLease(pool, storeId);
+    await bumpLeaseGen(pool, storeId);
     await expect(session.commit((tx) => tx.appendEntry(ROOT_CONVERSATION_ID, { kind: "after" }), context)).rejects.toBeInstanceOf(
       LeaseLostError,
     );
@@ -192,7 +192,7 @@ describe("PostgresStorage lease fence", () => {
 
   it("orders a lease takeover strictly after a commit that already holds the store row", async () => {
     const storeId = freshStoreId("fence-order");
-    const gen = await acquireLease(pool, storeId);
+    const gen = await bumpLeaseGen(pool, storeId);
     let releaseHook!: () => void;
     let hookEntered!: () => void;
     const entered = new Promise<void>((resolve) => (hookEntered = resolve));
@@ -209,7 +209,7 @@ describe("PostgresStorage lease fence", () => {
     );
     await entered;
     let takeoverDone = false;
-    const takeover = acquireLease(pool, storeId).then((next) => {
+    const takeover = bumpLeaseGen(pool, storeId).then((next) => {
       takeoverDone = true;
       return next;
     });
@@ -405,7 +405,7 @@ describe("PostgresStorage transactional wake through pg-boss", () => {
 
   it("sends the wake job inside the commit: present iff the commit succeeded, absent when the fence rejects", async () => {
     const storeId = freshStoreId("wake");
-    const gen = await acquireLease(pool, storeId);
+    const gen = await bumpLeaseGen(pool, storeId);
     let hookCalls = 0;
     const storage = await PostgresStorage.open(pool, storeId, {
       leaseGen: gen,
@@ -418,7 +418,7 @@ describe("PostgresStorage transactional wake through pg-boss", () => {
     const committedSeq = await storage.commit([root], context);
     expect(await jobsFor(storeId)).toEqual([{ storeId, seq: committedSeq }]);
 
-    await acquireLease(pool, storeId);
+    await bumpLeaseGen(pool, storeId);
     await expect(storage.commit([], context)).rejects.toBeInstanceOf(LeaseLostError);
     // The fence runs before the hook, so a stale holder never even attempts the send.
     expect(hookCalls).toBe(1);
@@ -428,7 +428,7 @@ describe("PostgresStorage transactional wake through pg-boss", () => {
 
   it("rolls the wake job back with the commit when anything after the send fails", async () => {
     const storeId = freshStoreId("wake-rollback");
-    const gen = await acquireLease(pool, storeId);
+    const gen = await bumpLeaseGen(pool, storeId);
     const storage = await PostgresStorage.open(pool, storeId, { leaseGen: gen });
     await storage.commit([root], context);
     let sentId: string | null = null;
