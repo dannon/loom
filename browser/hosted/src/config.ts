@@ -9,6 +9,8 @@ export interface HostConfig {
   readonly port: number;
   readonly databaseUrl: string;
   readonly galaxyUrl: URL;
+  /** Where a user Galaxy doesn't know yet signs in to Galaxy once, linking their Keycloak identity. */
+  readonly galaxyLinkUrl: URL;
   readonly oidc: {
     /** The Keycloak realm's issuer URL. */
     readonly issuer: URL;
@@ -99,6 +101,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   }
 
   const galaxyUrl = url("ORBIT_GALAXY_URL", required("ORBIT_GALAXY_URL"));
+  const galaxyLinkUrl = url("ORBIT_GALAXY_LINK_URL", value("ORBIT_GALAXY_LINK_URL"));
   const issuer = url("ORBIT_OIDC_ISSUER", required("ORBIT_OIDC_ISSUER"));
   const clientId = required("ORBIT_OIDC_CLIENT_ID");
   const clientSecret = value("ORBIT_OIDC_CLIENT_SECRET");
@@ -125,6 +128,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     port,
     databaseUrl: databaseUrl!,
     galaxyUrl: galaxyUrl!,
+    galaxyLinkUrl: galaxyLinkUrl ?? new URL("/login/start", galaxyUrl!),
     oidc: { issuer: issuer!, clientId: clientId!, clientSecret },
     tokenKey,
     lease: { ttlMs, renewMs, maxTurnMs },
@@ -139,7 +143,7 @@ export function describeConfig(config: HostConfig): string {
   const lines = [
     ["public URL", `${config.publicUrl.origin} (listening on ${config.port})`],
     ["database", `${where} (password ${db.password ? "set" : "not set"})`],
-    ["Galaxy", config.galaxyUrl.origin],
+    ["Galaxy", `${config.galaxyUrl.origin} (account link at ${config.galaxyLinkUrl.href})`],
     [
       "sign-in",
       `${config.oidc.issuer.href} as ${config.oidc.clientId} (client secret ${config.oidc.clientSecret ? "set" : "not set, public client"})`,
