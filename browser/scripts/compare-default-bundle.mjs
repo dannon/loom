@@ -44,7 +44,9 @@ function build(root) {
     env,
     encoding: "utf8",
   });
-  if (run.status !== 0) fail(`the build in ${root} failed:\n${run.stdout}\n${run.stderr}`);
+  // Thrown, not fail(): builds run inside the try below, whose finally removes the base worktree.
+  if (run.status !== 0)
+    throw new Error(`the build in ${root} failed:\n${run.stdout}\n${run.stderr}`);
   const out = path.join(root, "browser/olit/static");
   const files = {};
   const walk = (dir) => {
@@ -136,8 +138,13 @@ try {
       `${mark.padEnd(8)} ${name} (${before[name]?.length ?? "-"} -> ${after[name]?.length ?? "-"})`,
     );
   }
-  if (differ.length) fail(`${differ.length} file(s) differ from ${base}`);
-  console.log(`default bundle byte-identical to ${base}`);
+  // Not fail(): exiting here would skip the finally, leaving the base worktree registered.
+  if (differ.length) {
+    console.error(`compare-default-bundle: ${differ.length} file(s) differ from ${base}`);
+    process.exitCode = 1;
+  } else {
+    console.log(`default bundle byte-identical to ${base}`);
+  }
 } finally {
   git("worktree", "remove", "--force", baseTree);
   fs.rmSync(tmp, { recursive: true, force: true });
