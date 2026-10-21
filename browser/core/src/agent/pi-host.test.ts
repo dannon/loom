@@ -807,3 +807,182 @@ describe("pi-host across conversations", () => {
     expect(notes.filter((n) => n.kind === "handler-error")).toEqual([]);
   });
 });
+
+describe("pi-host's UI surface", () => {
+  it("withdraws a confirm when its tool call stops, though the caller passed no signal", async () => {
+    model(() => toolCall("echo", { n: 1 }));
+    let withdrawn = false;
+    let asked = false;
+    const { host, conversation, seq } = await boot({
+      ui: {
+        ask: (_request, _id, signal) =>
+          new Promise((resolve) => {
+            asked = true;
+            signal?.addEventListener("abort", () => {
+              withdrawn = true;
+              resolve(undefined);
+            });
+          }),
+      },
+      extras: (api) =>
+        api.on("tool_call", async (_e, c) => {
+          const ok = await c.ui.confirm("Destructive", "really?", {});
+          return ok ? undefined : { block: true, reason: "declined" };
+        }),
+    });
+    const s = await host.submit("hi");
+    await until(() => asked);
+    await conversation.abort(ctx);
+    await s!.wait(ctx);
+    expect(withdrawn).toBe(true);
+    await until(settled(seq));
+  });
+
+  it("routes a registered /command from submit, as pi's prompt does, and sends the rest to the model", async () => {
+    const requests = model(() => text("done"));
+    const ran: string[] = [];
+    const { host, seq } = await boot({
+      extras: (api) =>
+        api.registerCommand("pending", {
+          description: "probe",
+          handler: async (args) => void ran.push(args),
+        }),
+    });
+    expect(await host.submit("/pending all of it")).toBeUndefined();
+    expect(await host.submit("/pending")).toBeUndefined();
+    expect(ran).toEqual(["all of it", ""]);
+    expect(seq.filter((s) => s === "input")).toEqual([]);
+    expect(requests).toHaveLength(0);
+    // An unregistered one is ordinary text.
+    await (await host.submit("/nope"))!.wait(ctx);
+    await until(settled(seq));
+    expect(requests).toHaveLength(1);
+  });
+
+  it("notes and dismisses an ask of a kind the shell doesn't support", async () => {
+    model();
+    let captured: ExtensionContext | undefined;
+    const asked: string[] = [];
+    const { notes } = await boot({
+      ui: {
+        supports: ["confirm"],
+        ask: async (request) => {
+          asked.push(request.kind);
+          return true;
+        },
+      },
+      extras: (api) => api.on("session_start", (_e, c) => void (captured = c)),
+    });
+    expect(await captured!.ui.select("pick", ["a", "b"])).toBeUndefined();
+    expect(await captured!.ui.confirm("t", "m")).toBe(true);
+    expect(asked).toEqual(["confirm"]);
+    expect(notes).toContainEqual({
+      kind: "refused",
+      member: "ctx.ui.select",
+      detail: "this shell can't ask a select",
+      phase: "run",
+    });
+  });
+
+  it("says compaction and context usage are unsupported here", async () => {
+    model();
+    let captured: ExtensionContext | undefined;
+    const { notes } = await boot({
+      extras: (api) => api.on("session_start", (_e, c) => void (captured = c)),
+    });
+    const errors: Error[] = [];
+    captured!.compact({ onError: (e) => void errors.push(e) });
+    expect(captured!.getContextUsage()).toBeUndefined();
+    expect(errors[0]).toBeInstanceOf(NotInThisShell);
+    const unsupported = notes.filter(
+      (n) => n.kind === "refused" && n.detail === "unsupported in this shell",
+    );
+    expect(unsupported.map((n) => (n.kind === "refused" ? n.member : ""))).toEqual([
+      "ctx.compact",
+      "ctx.getContextUsage",
+    ]);
+  });
+
+  it("asks again after a reload during a confirm, and runs the call once when approved", async () => {
+    model(
+      () => toolCall("echo", { n: 1 }),
+      () => text("done"),
+    );
+    // The worker's files outlive the worker: the second harness reopens what the first wrote.
+    const files = new MemoryStorage();
+    const storage = new Proxy(files, {
+      get(target, prop) {
+        if (prop === "close") return async () => {};
+        const value = Reflect.get(target, prop) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const log: string[] = [];
+    async function worker(
+      label: string,
+      answer: (signal?: AbortSignal) => Promise<boolean | undefined>,
+    ) {
+      const host = createPiHost({
+        name: "probe",
+        model: () => ({ provider: "custom", id: "m" }),
+        ui: {
+          ask: (_request, _id, signal) => {
+            log.push(`${label} asked`);
+            return answer(signal);
+          },
+        },
+      });
+      host.api.registerTool({
+        name: "echo",
+        label: "Echo",
+        description: "echoes n",
+        parameters: Type.Object({ n: Type.Number() }),
+        execute: async (_id, params) => {
+          log.push(`${label} ran`);
+          return { content: [{ type: "text", text: `echo ${params.n}` }], details: {} };
+        },
+      });
+      host.api.on("tool_call", async (_e, c) =>
+        (await c.ui.confirm("Destructive", "really?", {}))
+          ? undefined
+          : { block: true, reason: "declined" },
+      );
+      const registry = createRegistry();
+      registry.install(host.seal());
+      const { models, model: agent } = await agentModels().connect(
+        resolve({ ai_base_url: LLM, ai_model: "m", ai_api_key: "k" }),
+      );
+      const harness = await Harness.open(
+        storage,
+        { models, registry, settings: { ...LOOP, maxTurns: 6 } },
+        ctx,
+      );
+      opened.push(harness);
+      return { host, harness, agent };
+    }
+    const first = await worker(
+      "first",
+      (signal) => new Promise((r) => signal?.addEventListener("abort", () => r(undefined))),
+    );
+    const conversation = await first.harness.createConversation(
+      { ownership: { kind: "ownerless" }, agent: { model: first.agent } },
+      ctx,
+    );
+    await first.host.attach(first.harness, conversation, ctx);
+    await first.host.start("startup");
+    first.harness.resume();
+    void first.host.submit("hi");
+    await until(() => log.includes("first asked"));
+    // The page reloads with the dialog open.
+    await first.harness.close(ctx);
+    const second = await worker("second", async () => true);
+    const resumed = (await second.harness.conversation(conversation.id, ctx))!;
+    await second.host.attach(second.harness, resumed, ctx);
+    await second.host.start("resume");
+    second.harness.resume();
+    await resumed.waitForIdle(ctx);
+    expect(log).toEqual(["first asked", "second asked", "second ran"]);
+    const results = (await resumed.context(ctx)).messages.filter((m) => m.role === "toolResult");
+    expect(results.map((m) => textOf(m.content))).toEqual(["echo 1"]);
+  });
+});
