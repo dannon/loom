@@ -93,7 +93,11 @@ export async function startStandIn(): Promise<StandIn> {
             ? Response.json([{ id: "h1", name: "one brain" }])
             : path === "/api/pages" && req.method === "POST"
               ? Response.json({ id: `page-${seen.length}` })
-              : Response.json({});
+              : path === "/api/users/current"
+                ? Response.json({ id: "galaxy-user-1", username: "stand-in" })
+                : path === "/key/generate" && req.method === "POST"
+                  ? Response.json({ key: `sk-stand-in-${seen.length}` })
+                  : Response.json({});
     }
     const headers: Record<string, string> = {};
     answer.headers.forEach((value, key) => (headers[key] = value));

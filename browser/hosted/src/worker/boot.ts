@@ -8,7 +8,7 @@
  */
 import { parentPort, workerData } from "node:worker_threads";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { createRegistry, Harness } from "@earendil-works/pi-durable";
+import { createRegistry, Harness, watchEvents } from "@earendil-works/pi-durable";
 import * as orbit from "orbit-brain";
 import * as vendor from "orbit-vendor-skills";
 import pg from "pg";
@@ -190,6 +190,12 @@ if (reopen && (await conversation.context(ctx)).messages.length > 0) process.env
 const tasks = (await harness.inspect(ctx)).tasks as unknown as Array<{ record: { state: { status: string } } }>;
 const resuming = tasks.some((t) => t.record.state.status !== "terminal");
 
+// The conversation's events from a snapshot on, as the browser worker streams them (worker.ts
+// attach), so the shell's ChatView draws a hosted conversation the way it draws its own.
+const events = await watchEvents(harness, conversation.id, ctx);
+post({ type: "events", events: [events.snapshot] });
+events.start(async (batch) => post({ type: "events", events: batch }));
+
 /** What went wrong, for the host's log; never the error's own object, which can carry request data. */
 const report = (error: unknown) =>
   post({ type: "report", message: error instanceof Error ? error.message : String(error) });
@@ -222,8 +228,19 @@ port.on("message", (message: ToWorker) => {
     case "stop":
       conversation.abort(ctx).catch(report);
       return;
+    case "snapshot":
+      // A browser (re)connected: everything it should show, from the top.
+      watchEvents(harness, conversation.id, ctx).then(
+        (fresh) => {
+          post({ type: "events", events: [fresh.snapshot] });
+          return fresh.stop();
+        },
+        report,
+      );
+      return;
     case "close":
       closing = true;
+      void events.stop().catch(() => undefined);
       for (const resolve of tokenWaits.values()) resolve(CLOSED);
       tokenWaits.clear();
       harness

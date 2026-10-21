@@ -469,6 +469,9 @@ export async function mountOrbitBrowser(
         el.send.disabled = true;
         refreshControls();
         chat.addErrorMessage(`${name} was opened in another tab, which has it now.`);
+      } else if (message.type === "notice") {
+        if (message.level === "error") chat.addErrorMessage(message.text);
+        else info(message.text);
       } else if (message.type === "failed") {
         console.error(`[${brand.id}] worker failed`, message.message);
         chat.hideThinking();

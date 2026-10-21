@@ -1,0 +1,269 @@
+import { randomUUID } from "node:crypto";
+import type { Server } from "node:http";
+import { createServer as createNetServer, type AddressInfo } from "node:net";
+import { userInfo } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { AgentEvent } from "@earendil-works/pi-durable";
+import pg from "pg";
+import { PgBoss } from "pg-boss";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { WebSocket } from "ws";
+
+import type { Oidc } from "../auth/oidc";
+import type { AuthContext } from "../auth/routes";
+import { createSession } from "../auth/sessions";
+import { migrate } from "../db/migrate";
+import { createConversation } from "../dispatch/conversations";
+import { Dispatcher } from "../dispatch/dispatcher";
+import { freshDatabase } from "../test-db";
+import { startStandIn, textOf, type StandIn } from "../test-stand-in";
+import { createTokenCache } from "../tokens/token-cache";
+import { bundleWorker } from "../worker/bundle";
+import { createHostServer } from "./http";
+import { Sockets, type ToPage } from "./socket";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const DATABASE = "orbit_hosted_server";
+const SOCKET = process.env.PGHOST ?? "/tmp";
+const KEY = Buffer.alloc(32, 5);
+
+let pool: pg.Pool;
+let boss: PgBoss;
+let standIn: StandIn;
+let dispatcher: Dispatcher;
+let server: Server;
+let origin: string;
+let killSwitch: string | undefined;
+
+const unusedOidc = {} as Oidc;
+
+beforeAll(async () => {
+  pool = new pg.Pool({ ...(await freshDatabase(DATABASE)), max: 8 });
+  await migrate(pool);
+  standIn = await startStandIn();
+  const bundle = await bundleWorker(join(HERE, "..", "worker", "boot.ts"), join(HERE, "..", "..", ".scratch", "server", "boot.mjs"));
+  boss = new PgBoss({ host: SOCKET, database: DATABASE, user: userInfo().username, schedule: false, supervise: false });
+  boss.on("error", () => undefined);
+  await boss.start();
+  // The public URL has to be known before the server is built, so find a free port first.
+  const probe = createNetServer();
+  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  origin = `http://127.0.0.1:${(probe.address() as AddressInfo).port}`;
+  await new Promise((resolve) => probe.close(resolve));
+  const tokens = createTokenCache({ refresh: async () => ({ token: "access", expiresAt: Date.now() + 600_000 }) });
+  const auth: AuthContext = {
+    pool,
+    oidc: unusedOidc,
+    tokens,
+    tokenKey: KEY,
+    publicUrl: new URL(origin),
+    galaxyUrl: new URL(standIn.origin),
+    galaxyLinkUrl: new URL("/login/start", standIn.origin),
+  };
+  let sockets: Sockets | undefined;
+  dispatcher = new Dispatcher({
+    pool,
+    boss,
+    bundle,
+    hostId: `server-${randomUUID()}`,
+    databaseUrl: `postgres://${userInfo().username}@/${DATABASE}?host=${encodeURIComponent(SOCKET)}`,
+    galaxyUrl: standIn.origin,
+    lease: { ttlMs: 60_000, renewMs: 15_000, maxTurnMs: 60_000 },
+    limits: { maxTurns: 6, maxToolCalls: 20, outputBytes: 1 << 22 },
+    tokens,
+    modelFor: async () => ({ baseUrl: `${standIn.origin}/v1`, id: "m", apiKey: "model-key-0123456789" }),
+    pageFor: async () => "p1",
+    onEvent: (id, event) => sockets?.deliver(id, event),
+    retryAfterMs: () => 300,
+  });
+  sockets = new Sockets({
+    auth,
+    dispatcher,
+    get turnsDisabled() {
+      return killSwitch;
+    },
+  });
+  server = createHostServer({ auth, sockets, health: async () => ({ postgres: true }) });
+  const port = Number(new URL(origin).port);
+  await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
+  await dispatcher.start();
+});
+
+afterAll(async () => {
+  await dispatcher?.shutdown();
+  await boss?.stop({ graceful: false });
+  await new Promise((resolve) => server?.close(resolve));
+  await pool?.end();
+  await standIn?.close();
+});
+
+/** A signed-in user: their row, a session, and the cookie that carries it. */
+async function signedIn(): Promise<{ sub: string; cookie: string }> {
+  const sub = `user-${randomUUID()}`;
+  const id = await createSession(pool, KEY, {
+    sub,
+    accessToken: "a",
+    accessExpiresAt: Date.now() + 60_000,
+    refreshToken: "r",
+    refreshExpiresAt: Date.now() + 3_600_000,
+    idToken: undefined,
+  });
+  return { sub, cookie: `orbit_session=${id}` };
+}
+
+class Page {
+  readonly received: ToPage[] = [];
+  readonly ws: WebSocket;
+  readonly opened: Promise<void>;
+  constructor(cookie: string | undefined, pageOrigin = origin) {
+    this.ws = new WebSocket(`${origin.replace("http", "ws")}/ws`, {
+      headers: { ...(cookie ? { cookie } : {}), origin: pageOrigin },
+    });
+    this.ws.on("message", (raw) => this.received.push(JSON.parse(String(raw)) as ToPage));
+    this.opened = new Promise((resolve, reject) => {
+      this.ws.once("open", () => resolve());
+      this.ws.once("unexpected-response", (_req, res) => reject(new Error(`HTTP ${res.statusCode}`)));
+      this.ws.once("error", reject);
+    });
+  }
+  send(message: Record<string, unknown>): void {
+    this.ws.send(JSON.stringify(message));
+  }
+  events(): AgentEvent[] {
+    return this.received.flatMap((m) => (m.type === "events" ? [...m.events] : []));
+  }
+  close(): void {
+    this.ws.close();
+  }
+}
+
+async function until<T>(check: () => T | undefined | false, what: string, timeoutMs = 20_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = check();
+    if (value) return value;
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+const modelSaw = (text: string) => standIn.seen.filter((s) => s.to === "model" && s.userText === text).length;
+const userEntries = (events: AgentEvent[], text: string) =>
+  events
+    .filter((e): e is Extract<AgentEvent, { type: "snapshot" }> => e.type === "snapshot")
+    .at(-1)
+    ?.entries.filter((e) => {
+      // A user message is a pi.user entry carrying the model's view of it.
+      const { kind, model } = e as { kind?: string; model?: Array<{ role?: string; content?: unknown }> };
+      return kind === "pi.user" && (model ?? []).some((m) => m.role === "user" && textOf(m.content) === text);
+    }) ?? [];
+
+describe("the WebSocket", () => {
+  it("only lets in a signed-in page from Orbit's own origin", async () => {
+    await expect(new Page(undefined).opened).rejects.toThrow("HTTP 401");
+    const { cookie } = await signedIn();
+    await expect(new Page(cookie, "https://evil.test").opened).rejects.toThrow("HTTP 403");
+    const page = new Page(cookie);
+    await page.opened;
+    page.close();
+  });
+
+  it("runs a turn end to end, and a page that reconnects mid-conversation redraws it without duplicates", async () => {
+    const { sub, cookie } = await signedIn();
+    const c = await createConversation(pool, sub);
+    const page = new Page(cookie);
+    await page.opened;
+    page.send({ type: "open", conversationId: c.id });
+    await until(() => page.received.some((m) => m.type === "ready"), "ready");
+    await until(() => page.events().some((e) => e.type === "snapshot"), "the stored snapshot");
+    page.send({ type: "submit", conversationId: c.id, text: "hello there" });
+    await until(() => modelSaw("hello there") > 0, "the model to hear it");
+    await until(
+      () => page.events().filter((e) => e.type === "run_end").length >= 2,
+      "the greeting's run and this one to end",
+    );
+
+    const again = new Page(cookie);
+    await again.opened;
+    again.send({ type: "open", conversationId: c.id });
+    await until(() => userEntries(again.events(), "hello there").length > 0, "a snapshot from the worker");
+    expect(userEntries(again.events(), "hello there")).toHaveLength(1);
+    page.close();
+    again.close();
+  });
+
+  it("refuses a message naming another user's conversation, and nothing reaches the model", async () => {
+    const owner = await signedIn();
+    const c = await createConversation(pool, owner.sub);
+    const stranger = await signedIn();
+    const page = new Page(stranger.cookie);
+    await page.opened;
+    page.send({ type: "submit", conversationId: c.id, text: "not yours" });
+    page.send({ type: "open", conversationId: c.id });
+    await until(() => page.received.filter((m) => m.type === "failed").length >= 2, "both refusals");
+    expect(page.received.some((m) => m.type === "events")).toBe(false);
+    expect(modelSaw("not yours")).toBe(0);
+    page.close();
+  });
+
+  it("shows a pending confirm, again to a page that reconnects, and the answer runs the call", async () => {
+    const { sub, cookie } = await signedIn();
+    const c = await createConversation(pool, sub);
+    const page = new Page(cookie);
+    await page.opened;
+    page.send({ type: "open", conversationId: c.id });
+    const puts = standIn.galaxyCalls("PUT", "/api/histories/h1");
+    page.send({ type: "submit", conversationId: c.id, text: "DELETE_H1" });
+    const confirm = await until(
+      () => page.received.find((m): m is Extract<ToPage, { type: "confirm" }> => m.type === "confirm"),
+      "the confirm",
+    );
+    expect(confirm.title).toBe("Confirm destructive Galaxy operation");
+    page.close();
+
+    const back = new Page(cookie);
+    await back.opened;
+    back.send({ type: "open", conversationId: c.id });
+    const shown = await until(
+      () => back.received.find((m): m is Extract<ToPage, { type: "confirm" }> => m.type === "confirm"),
+      "the confirm, again",
+    );
+    expect(shown.id).toBe(confirm.id);
+    back.send({ type: "confirmed", conversationId: c.id, id: shown.id, approved: true });
+    await until(() => standIn.galaxyCalls("PUT", "/api/histories/h1") === puts + 1, "the delete");
+    back.close();
+  });
+
+  it("turns every message away with the kill switch's notice", async () => {
+    const { sub, cookie } = await signedIn();
+    const c = await createConversation(pool, sub);
+    const page = new Page(cookie);
+    await page.opened;
+    killSwitch = "Orbit is paused for maintenance.";
+    try {
+      page.send({ type: "submit", conversationId: c.id, text: "while paused" });
+      const notice = await until(() => page.received.find((m) => m.type === "notice"), "the notice");
+      expect(notice).toEqual({ type: "notice", text: "Orbit is paused for maintenance.", level: "warning" });
+      expect(modelSaw("while paused")).toBe(0);
+    } finally {
+      killSwitch = undefined;
+      page.close();
+    }
+  });
+});
+
+describe("the HTTP API", () => {
+  it("lists and creates the user's own conversations, and refuses a cross-site create", async () => {
+    const { sub, cookie } = await signedIn();
+    const mine = await createConversation(pool, sub);
+    await createConversation(pool, (await signedIn()).sub);
+    const list = (await (await fetch(`${origin}/api/conversations`, { headers: { cookie } })).json()) as Array<{ id: string }>;
+    expect(list.map((c) => c.id)).toEqual([mine.id]);
+    const refused = await fetch(`${origin}/api/conversations`, { method: "POST", headers: { cookie, origin: "https://evil.test" } });
+    expect(refused.status).toBe(403);
+    const created = await fetch(`${origin}/api/conversations`, { method: "POST", headers: { cookie, origin } });
+    expect(created.status).toBe(201);
+    expect((await fetch(`${origin}/api/conversations`)).status).toBe(401);
+  });
+});
