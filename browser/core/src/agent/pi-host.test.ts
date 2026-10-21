@@ -986,3 +986,110 @@ describe("pi-host's UI surface", () => {
     expect(results.map((m) => textOf(m.content))).toEqual(["echo 1"]);
   });
 });
+
+describe("pi-host's tools", () => {
+  const extras = (api: ExtensionAPI) => {
+    api.registerTool({
+      name: "lookup",
+      label: "Lookup",
+      description: "reads",
+      parameters: Type.Object({}),
+      annotations: { readOnlyHint: true },
+      execute: async () => ({ content: [{ type: "text", text: "found" }], details: {} }),
+    });
+    api.registerTool({
+      name: "change",
+      label: "Change",
+      description: "writes",
+      parameters: Type.Object({}),
+      annotations: { readOnlyHint: false, destructiveHint: true },
+      execute: async () => ({ content: [], details: {} }),
+    });
+    api.registerTool({
+      name: "secret",
+      label: "Secret",
+      description: "unreachable",
+      parameters: Type.Object({}),
+      exposure: "hidden",
+      execute: async () => ({ content: [], details: {} }),
+    });
+  };
+
+  /** The pi-durable extension a host seals, with the probe's tools and these. */
+  function sealed() {
+    const host = createPiHost({ name: "probe" });
+    probe(host.api, [], [], extras);
+    return { host, extension: host.seal() };
+  }
+
+  it("lets only a tool that says it changes nothing rerun after a reload", () => {
+    const replay = Object.fromEntries(
+      sealed().extension.tools!.map((t) => [t.name, t.replay ?? "unsafe"]),
+    );
+    expect(replay).toEqual({ echo: "unsafe", boom: "unsafe", lookup: "safe", change: "unsafe" });
+  });
+
+  it("keeps a hidden tool registered but never declares it", () => {
+    const { host, extension } = sealed();
+    expect(host.tools).toContain("secret");
+    expect(extension.tools!.map((t) => t.name)).not.toContain("secret");
+    expect(host.api.getActiveTools()).not.toContain("secret");
+    const all = Object.fromEntries(host.api.getAllTools().map((t) => [t.name, t.exposure]));
+    expect(all).toMatchObject({ secret: "hidden", lookup: "direct", echo: "direct" });
+  });
+
+  it("runs afterExecute inside the call, with pi-durable's api, before tool_result", async () => {
+    model(
+      () => toolCall("echo", { n: 3 }),
+      () => text("done"),
+    );
+    const order: string[] = [];
+    const seen: Array<{ name: string; text: string; callId: string; conversation: string }> = [];
+    const { host, conversation, seq } = await boot({
+      extras: (api) => api.on("tool_result", () => void order.push("tool_result")),
+      host: {
+        afterExecute: (name, result, api, conversationId) => {
+          order.push("afterExecute");
+          seen.push({
+            name,
+            text: textOf(result.content),
+            callId: api.callId,
+            conversation: String(conversationId),
+          });
+        },
+      },
+    });
+    await (await host.submit("hi"))!.wait(ctx);
+    await until(settled(seq));
+    expect(order).toEqual(["afterExecute", "tool_result"]);
+    expect(seen).toEqual([
+      {
+        name: "echo",
+        text: "echo 3",
+        callId: expect.any(String),
+        conversation: String(conversation.id),
+      },
+    ]);
+  });
+
+  it("keeps the call's result when afterExecute throws, and notes it", async () => {
+    model(
+      () => toolCall("echo", { n: 4 }),
+      () => text("done"),
+    );
+    const { host, conversation, seq, notes } = await boot({
+      host: {
+        afterExecute: () => {
+          throw new Error("no task store");
+        },
+      },
+    });
+    await (await host.submit("hi"))!.wait(ctx);
+    await until(settled(seq));
+    const result = (await conversation.context(ctx)).messages.find((m) => m.role === "toolResult")!;
+    expect(textOf(result.content)).toBe("echo 4");
+    expect(notes.filter((n) => n.kind === "handler-error").map((n) => n.event)).toEqual([
+      "after_execute",
+    ]);
+  });
+});
