@@ -116,6 +116,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   }
 
   const galaxyUrl = url("ORBIT_GALAXY_URL", required("ORBIT_GALAXY_URL"));
+  // Users' tokens go to Galaxy and the admin key to LiteLLM: never in clear beyond this machine.
+  const secure = (name: string, at: URL | undefined) => {
+    if (at && at.protocol !== "https:" && !isLoopback(at)) problems.push(`${name} must be https unless it is localhost`);
+  };
+  secure("ORBIT_GALAXY_URL", galaxyUrl);
   const galaxyLinkUrl = url("ORBIT_GALAXY_LINK_URL", value("ORBIT_GALAXY_LINK_URL"));
   const issuer = url("ORBIT_OIDC_ISSUER", required("ORBIT_OIDC_ISSUER"));
   const clientId = required("ORBIT_OIDC_CLIENT_ID");
@@ -132,6 +137,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   }
 
   const litellmUrl = url("ORBIT_LITELLM_URL", required("ORBIT_LITELLM_URL"));
+  secure("ORBIT_LITELLM_URL", litellmUrl);
   const adminKey = required("ORBIT_LITELLM_ADMIN_KEY");
   const modelId = required("ORBIT_MODEL");
   const count = (name: string, fallback: number): number => {

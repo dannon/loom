@@ -58,6 +58,11 @@ export interface DispatcherOptions {
   readonly onEvent: (conversationId: string, event: FromWorker | DispatchEvent) => void;
   /** Turns run at once in this host. Each holds a worker, not a database connection. */
   readonly concurrency?: number;
+  /**
+   * The kill switch: while it returns a reason, no turn starts (queued ones, the sweeper's and
+   * resumed runs included); conversations are marked so they pick up once it's lifted.
+   */
+  readonly turnsDisabled?: () => string | undefined;
   /** How long a turn that couldn't start waits before trying again, by attempt (0-based). */
   readonly retryDelayMs?: (attempt: number) => number;
   readonly spawn?: (bundle: string, data: WorkerData) => Worker;
@@ -140,6 +145,7 @@ export class Dispatcher {
     );
     this.#working = true;
     // The sweeper: a turn cut off by a crash or a restart resumes without waiting for a new message.
+    if (this.#o.turnsDisabled?.()) return;
     for (const id of await interruptedConversations(this.#o.pool)) await this.#send({ conversationId: id });
   }
 
@@ -256,9 +262,11 @@ export class Dispatcher {
   async #runTurn(job: TurnJob): Promise<void> {
     const { conversationId } = job;
     const { pool } = this.#o;
-    if (this.#stopping) {
-      // Mid-restart: leave the inbox for the next host's sweeper.
+    const paused = this.#o.turnsDisabled?.();
+    if (this.#stopping || paused) {
+      // Mid-restart, or the kill switch: leave the inbox for the sweeper of a host that may run turns.
       await pool.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [conversationId]);
+      if (paused) this.#o.onEvent(conversationId, { type: "failed", message: paused });
       return;
     }
     const conversation = await getConversation(pool, conversationId);

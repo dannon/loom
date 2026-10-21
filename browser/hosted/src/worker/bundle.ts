@@ -95,7 +95,11 @@ export const asciiOnly = (source: string) =>
 /** The production bundle: minified and all ASCII, which together keep ~40 MB off each worker. */
 export async function bundleWorkerForProduction(entry: string, outfile: string): Promise<string> {
   const result = await build({ ...options(entry, outfile), minify: true, legalComments: "none", write: false });
-  const text = asciiOnly(result.outputFiles![0]!.text);
+  const source = result.outputFiles![0]!.text;
+  // Escaping is only meaning-preserving where the character isn't already escaped or raw.
+  const unsafe = source.search(/\\[^\x00-\x7f]|String\.raw`[^`]*[^\x00-\x7f]/);
+  if (unsafe >= 0) throw new Error(`The worker bundle has non-ASCII the ASCII pass can't escape safely, at ${unsafe}`);
+  const text = asciiOnly(source);
   mkdirSync(dirname(outfile), { recursive: true });
   const stray = text.search(/[^\x00-\x7f]/);
   if (stray >= 0) throw new Error(`The worker bundle has a non-ASCII byte at ${stray}`);

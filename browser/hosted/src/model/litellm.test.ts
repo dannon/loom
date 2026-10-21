@@ -63,7 +63,14 @@ describe("per-user model keys", () => {
       {
         url: "https://litellm.test/key/generate",
         auth: "Bearer sk-admin",
-        body: { user_id: sub, key_alias: `orbit-${sub}`, models: ["minimax"], tpm_limit: 50_000, rpm_limit: 20, metadata: { service: "orbit" } },
+        body: {
+          user_id: sub,
+          key_alias: expect.stringMatching(new RegExp(`^orbit-${sub}-[0-9a-f]{8}$`)),
+          models: ["minimax"],
+          tpm_limit: 50_000,
+          rpm_limit: 20,
+          metadata: { service: "orbit" },
+        },
       },
     ]);
   });
@@ -83,9 +90,21 @@ describe("per-user model keys", () => {
     expect(new Set(keys).size).toBe(2);
   });
 
+  it("makes a new key, under a new alias, when the stored one can't be unsealed", async () => {
+    const stub = stubLiteLlm();
+    const sub = await user();
+    await liteLlmModels(settings(stub.fetch))(sub);
+    // The token key rotated: the sealed key is unreadable now.
+    const rotated = { ...settings(stub.fetch), tokenKey: Buffer.alloc(32, 4) };
+    expect((await liteLlmModels(rotated)(sub)).apiKey).toBe("sk-user-2");
+    const aliases = stub.calls.map((c) => c.body.key_alias);
+    expect(new Set(aliases).size).toBe(2);
+    expect((await liteLlmModels(rotated)(sub)).apiKey).toBe("sk-user-2");
+  });
+
   it("stores nothing when LiteLLM refuses", async () => {
     const sub = await user();
-    await expect(liteLlmModels(settings(stubLiteLlm({ status: 500 }).fetch))(sub)).rejects.toThrow(/HTTP 500/);
+    await expect(liteLlmModels(settings(stubLiteLlm({ status: 500 }).fetch))(sub)).rejects.toThrow(/HTTP 500 no/);
     const { rows } = await pool.query("SELECT model_key FROM orbit_users WHERE sub = $1", [sub]);
     expect(rows[0]).toEqual({ model_key: null });
   });

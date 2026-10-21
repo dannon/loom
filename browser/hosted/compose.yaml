@@ -31,6 +31,9 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    # Shutdown closes every conversation before pg-boss lets go of its jobs; cut short, a job stays
+    # active and holds its conversation until it expires.
+    stop_grace_period: 45s
 
 volumes:
   pgdata:
