@@ -1,5 +1,5 @@
 /**
- * Orbit's brain (extensions/loom) installed in the agent worker, behind VITE_ORBIT_BRAIN: the
+ * Orbit's brain (extensions/orbit) installed in the agent worker, behind VITE_ORBIT_BRAIN: the
  * seams it reads instead of a Node host, set once per worker before the brain registers, then the
  * brain itself on pi-host. Only orbit/worker.ts imports this, and only under the flag, so the
  * default worker never loads it.
@@ -9,23 +9,23 @@
  */
 import "./env";
 
-import loom from "../../../../../extensions/loom/index";
-import { setGalaxyTransport } from "../../../../../extensions/loom/galaxy-api";
+import loom from "../../../../../extensions/orbit/index";
+import { setGalaxyTransport } from "../../../../../extensions/orbit/galaxy-api";
 import {
   createGalaxyOpsToolSource,
   type GalaxyExtra,
-} from "../../../../../extensions/loom/galaxy-ops-tools";
-import { setPollWake } from "../../../../../extensions/loom/galaxy-reconcile";
+} from "../../../../../extensions/orbit/galaxy-ops-tools";
+import { setPollWake } from "../../../../../extensions/orbit/galaxy-reconcile";
 import {
   setGalaxyToolSource,
   type GalaxyTool,
-} from "../../../../../extensions/loom/galaxy-tool-source";
+} from "../../../../../extensions/orbit/galaxy-tool-source";
 import {
   setSubmissionLedger,
   type SubmissionLedger,
-} from "../../../../../extensions/loom/submission-ledger";
-import { setInstructionSource } from "../../../../../extensions/loom/user-instructions";
-import { setVendorSkillsSource } from "../../../../../extensions/loom/vendor-skills";
+} from "../../../../../extensions/orbit/submission-ledger";
+import { setInstructionSource } from "../../../../../extensions/orbit/user-instructions";
+import { setVendorSkillsSource } from "../../../../../extensions/orbit/vendor-skills";
 import { setCapabilityProfile } from "../../../../../shared/capability-profile.js";
 import { setConfigSource } from "../../../../../shared/config-source.js";
 import { defineExtension, type AnyTask, type Extension } from "@earendil-works/pi-durable";
@@ -88,11 +88,17 @@ export interface OrbitBoot {
 
 let booted = false;
 
-/** Install Orbit's seams and register the brain. Once per worker: the seams are process-wide. */
-export function bootOrbit(options: OrbitBootOptions): OrbitBoot {
-  if (booted) throw new Error("Orbit's brain is already booted in this worker");
+/**
+ * Orbit's process-wide seams for the worker: the profile from the grant (refusing one Orbit can't
+ * map), the config, instructions, skills, Galaxy transport, ledger, poll wake and tool source.
+ */
+export function installOrbitSeams(
+  options: Pick<
+    OrbitBootOptions,
+    "capabilities" | "galaxy" | "ledger" | "secrets" | "extras" | "ownSkills" | "pollWake"
+  >,
+): void {
   const grant = orbitGrant(options.capabilities);
-  booted = true;
   setCapabilityProfile({
     shell: false,
     files: false,
@@ -120,7 +126,38 @@ export function bootOrbit(options: OrbitBootOptions): OrbitBoot {
   // Nothing polls outside the durable watch: a reconcile that saw a run end wakes it.
   setPollWake(options.pollWake ?? (() => {}));
   setGalaxyToolSource(createGalaxyOpsToolSource({ extras: options.extras ?? [] }));
+}
 
+/** The ask bridge a worker host gets: only confirm has a dialog in the page. */
+export const workerUi = (ui: OrbitBootOptions["ui"]): PiHostUi => ({
+  ...ui,
+  supports: ["confirm"],
+});
+
+/**
+ * Register Orbit's brain on `host`, then the shell's tools and layers after it, so Orbit's guards
+ * decide first.
+ */
+export function registerOrbit(
+  host: PiHost,
+  options: Pick<OrbitBootOptions, "shellTools" | "layers" | "flavorLayers">,
+): void {
+  loom(host.api);
+  for (const tool of options.shellTools ?? []) host.api.registerTool(tool);
+  if (options.layers) registerBrowserLayers(host.api, options.layers);
+  if (options.flavorLayers) registerFlavorLayers(host.api, options.flavorLayers);
+}
+
+/** Seal the host's registrations beside the browser shell's own extension and its tasks. */
+export function sealOrbit(host: PiHost, tasks: AnyTask[] = []): Extension[] {
+  return [host.seal(), defineExtension({ name: "browser-shell", tasks })];
+}
+
+/** Install Orbit's seams and register the brain. Once per worker: the seams are process-wide. */
+export function bootOrbit(options: OrbitBootOptions): OrbitBoot {
+  if (booted) throw new Error("Orbit's brain is already booted in this worker");
+  installOrbitSeams(options);
+  booted = true;
   const host = createPiHost({
     name: "orbit",
     cwd: "/orbit",
@@ -128,21 +165,9 @@ export function bootOrbit(options: OrbitBootOptions): OrbitBoot {
     onNote: (note) => {
       if (note.kind === "handler-error" || note.kind === "busy") console.warn("[orbit]", note);
     },
-    // Only confirm has a dialog in the page; select, input and editor are noted and dismissed.
-    ui: { ...options.ui, supports: ["confirm"] },
+    ui: workerUi(options.ui),
     ...options.host,
   });
-  loom(host.api);
-  for (const tool of options.shellTools ?? []) host.api.registerTool(tool);
-  // After Orbit's handlers, so its guards decide first.
-  if (options.layers) registerBrowserLayers(host.api, options.layers);
-  if (options.flavorLayers) registerFlavorLayers(host.api, options.flavorLayers);
-  return {
-    host,
-    // The browser shell's own durable pieces ride beside Orbit's.
-    extensions: [
-      host.seal(),
-      defineExtension({ name: "browser-shell", tasks: options.tasks ?? [] }),
-    ],
-  };
+  registerOrbit(host, options);
+  return { host, extensions: sealOrbit(host, options.tasks) };
 }
