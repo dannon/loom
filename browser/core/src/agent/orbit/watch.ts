@@ -14,7 +14,13 @@
  * For a conversation the page isn't showing it polls nothing (Orbit's poller works on the bound
  * record) and waits for the conversation to be shown again, with no timer and no writes.
  */
-import { defineDoc, defineTask, type ConversationId, type Tx } from "@earendil-works/pi-durable";
+import {
+  defineDoc,
+  defineTask,
+  type ConversationId,
+  type TaskId,
+  type Tx,
+} from "@earendil-works/pi-durable";
 
 import type { PollOptions, TickResult } from "../../../../../extensions/loom/galaxy-poller";
 import type { TerminalEvent } from "../../../../../extensions/loom/submission-ledger";
@@ -25,11 +31,18 @@ import { pollDelay, type Settled } from "../watch";
 export const ORBIT_WATCH = "olit.galaxy-watch";
 
 /**
- * Whether a conversation has a live watch; whether its next tick should first capture what the
- * ledger holds answered and reconcile (the first tick after the conversation is shown); and
- * whether new work arrived, so the next tick starts its backoff over.
+ * The conversation's watch task, when it has one; whether its next tick should first capture
+ * what the ledger holds answered and reconcile (the first tick after the conversation is shown);
+ * and whether new work arrived since a tick polled, so that tick neither ends nor keeps its
+ * backoff. `active` mirrors whether `taskId` names a live task, for readers outside a commit.
  */
-export const Watching = defineDoc<{ active: boolean; recover: boolean; fresh?: boolean }>({
+export const Watching = defineDoc<{
+  active: boolean;
+  recover: boolean;
+  fresh?: boolean;
+  /** pi-durable's id for the task, kept as it gives it. */
+  taskId?: TaskId;
+}>({
   kind: "olit.watching",
   version: 1,
   scope: "conversation",
@@ -49,16 +62,21 @@ export interface OrbitWatchOptions {
   settled(conversationId: ConversationId, settled: Settled): void;
   /**
    * Resolves when something asked this conversation's watch to look now. A wake asked for while
-   * nobody was waiting counts: it resolves the next call at once.
+   * nobody was waiting counts: it resolves the next call at once. `signal` ends the wait without
+   * a wake, and a later wake is then kept for the next one.
    */
-  woken(conversationId: ConversationId): Promise<void>;
+  woken(conversationId: ConversationId, signal?: AbortSignal): Promise<void>;
   pollMs?: number;
 }
 
 type WatchInput = { conversationId: ConversationId };
 /** A follow-up written down before it is handed over, so a replay hands over the same one. */
 type Pending = { requestId: string; prompt: string; keys: string[]; queue: boolean };
-type WatchState = { phase: "tick"; ticks: number; pending?: Pending };
+/**
+ * `ticks` only grows, so every commit is progress to pi-durable (a checkpoint that comes back
+ * unchanged faults the task); `backoff` is the wait's step, which new or settled work resets.
+ */
+type WatchState = { phase: "tick"; ticks: number; backoff?: number; pending?: Pending };
 
 /** A ledger event as the page's Settled: the browser brain's shape, which shell.ts renders. */
 export function settledOf(event: TerminalEvent): Settled {
@@ -73,7 +91,7 @@ export function settledOf(event: TerminalEvent): Settled {
 
 /**
  * Wakes for each conversation's watch. A wake with nobody waiting (it landed mid-tick, say) is
- * kept, and resolves the next wait at once.
+ * kept, and resolves the next wait at once; a wait that ended some other way stops waiting.
  */
 export function wakeups() {
   const waiting = new Map<ConversationId, () => void>();
@@ -85,12 +103,23 @@ export function wakeups() {
       if (resolve) resolve();
       else early.add(id);
     },
-    woken(id: ConversationId): Promise<void> {
+    woken(id: ConversationId, signal?: AbortSignal): Promise<void> {
       if (early.delete(id)) return Promise.resolve();
-      return new Promise<void>((resolve) => waiting.set(id, resolve));
+      return new Promise<void>((resolve) => {
+        waiting.set(id, resolve);
+        signal?.addEventListener(
+          "abort",
+          () => {
+            if (waiting.get(id) === resolve) waiting.delete(id);
+          },
+          { once: true },
+        );
+      });
     },
   };
 }
+
+const LIVE = new Set(["pending", "running", "waiting", "completing"]);
 
 export function orbitWatch(options: OrbitWatchOptions) {
   const pollMs = options.pollMs ?? 10_000;
@@ -99,20 +128,23 @@ export function orbitWatch(options: OrbitWatchOptions) {
   const pause = (id: ConversationId, ms: number | undefined, signal: AbortSignal) =>
     new Promise<void>((resolve) => {
       if (signal.aborted) return resolve();
+      const ended = new AbortController();
       const timer = ms === undefined ? undefined : setTimeout(done, ms);
       function done() {
         clearTimeout(timer);
         signal.removeEventListener("abort", done);
+        // A wait that ended by timer or abort stops listening, so the next wake is kept.
+        ended.abort();
         resolve();
       }
       signal.addEventListener("abort", done, { once: true });
-      void options.woken(id).then(done);
+      void options.woken(id, ended.signal).then(done);
     });
 
   const task = defineTask<WatchInput, WatchState, { ticks: number }>({
     name: ORBIT_WATCH,
     version: 3,
-    initial: () => ({ phase: "tick", ticks: 0 }),
+    initial: () => ({ phase: "tick", ticks: 0, backoff: 0 }),
     phases: {
       tick: async (current, runtime, context) => {
         const id = current.input.conversationId;
@@ -122,8 +154,18 @@ export function orbitWatch(options: OrbitWatchOptions) {
           if (runtime.signal.aborted) return;
           await pause(id, undefined, runtime.signal);
         }
+        /** The next checkpoint, from the task as it stands now: ticks always move on. */
+        const next = (now: { state: { checkpoint: unknown } }, change: Partial<WatchState>) => {
+          const at = now.state.checkpoint as WatchState;
+          return { ...at, ...change, phase: "tick" as const, ticks: at.ticks + 1 };
+        };
         const handOver = async (pending: Pending) => {
           const conversation = await runtime.conversation(id, context);
+          if (!conversation) {
+            runtime.report(
+              new Error(`watch: conversation ${String(id)} is gone; its follow-up is dropped`),
+            );
+          }
           await conversation?.submit(
             {
               type: "input",
@@ -135,23 +177,23 @@ export function orbitWatch(options: OrbitWatchOptions) {
           );
           await options.delivered(options.recordKey(id), pending.keys);
         };
-        let ticks = checkpoint.ticks;
+        let backoff = checkpoint.backoff ?? 0;
         try {
           // A follow-up a tick wrote down and didn't live to finish handing over.
           if (checkpoint.pending) {
             await handOver(checkpoint.pending);
             await runtime.commit(
-              () => ({ status: "running", checkpoint: { phase: "tick", ticks } }),
+              (_tx, now) => ({ status: "running", checkpoint: next(now, { pending: undefined }) }),
               context,
             );
           }
           const watching = await runtime.snapshot(Watching, id, context);
           const recover = watching?.recover === true;
-          if (watching?.fresh) ticks = 0;
           const result = await options.poll({
             awaitEnrichment: true,
             ...(recover ? { reconcile: true, recover: true } : {}),
           });
+          let quiet = false;
           // A tick that ran against another record (the page switched mid-tick) says nothing here.
           if (result.recordKey === options.recordKey(id)) {
             for (const event of result.transitions) options.settled(id, settledOf(event));
@@ -164,65 +206,72 @@ export function orbitWatch(options: OrbitWatchOptions) {
                 keys,
                 queue: held,
               };
-              await runtime.commit(async (tx) => {
+              await runtime.commit(async (tx, now) => {
                 if (!held) (await tx.doc(FollowUps, id)).automatic += 1;
-                return { status: "running", checkpoint: { phase: "tick", ticks, pending } };
+                return { status: "running", checkpoint: next(now, { pending }) };
               }, context);
               await handOver(pending);
             } else if (keys.length) {
               await options.delivered(result.recordKey, keys);
             }
             // Settled work starts the backoff over: what follows tends to be more work.
-            if (keys.length) ticks = 0;
-            const quiet =
+            if (keys.length) backoff = 0;
+            quiet =
               result.inProgress === 0 &&
               result.pendingEnrichment === 0 &&
               result.openSubmissions === 0;
-            if (quiet) {
-              await runtime.commit(async (tx) => {
-                Object.assign(await tx.doc(Watching, id), {
-                  active: false,
-                  recover: false,
-                  fresh: false,
-                });
-                return {
-                  status: "terminal",
-                  outcome: { status: "completed", result: { ticks: ticks + 1 } },
-                };
-              }, context);
-              return;
-            }
           }
-          await runtime.commit(async (tx) => {
+          let ended = false;
+          let step = backoff + 1;
+          await runtime.commit(async (tx, now) => {
             const doc = await tx.doc(Watching, id);
             if (recover) doc.recover = false;
+            // New work arrived after this tick polled: it isn't quiet after all. Computed afresh
+            // on each call: pi-durable may run this more than once.
+            const fresh = doc.fresh === true;
             doc.fresh = false;
-            return { status: "running", checkpoint: { phase: "tick", ticks: ticks + 1 } };
+            step = fresh ? 1 : backoff + 1;
+            if (quiet && !fresh) {
+              ended = true;
+              Object.assign(doc, { active: false, taskId: undefined });
+              const at = now.state.checkpoint as WatchState;
+              return {
+                status: "terminal",
+                outcome: { status: "completed", result: { ticks: at.ticks + 1 } },
+              };
+            }
+            return {
+              status: "running",
+              checkpoint: next(now, { pending: undefined, backoff: step }),
+            };
           }, context);
+          if (ended) return;
+          backoff = step;
         } catch (error) {
           // A tick that fails (a ledger write refused, Galaxy down) is retried, not given up on:
-          // a faulted watch would leave the conversation unwatched for good.
+          // a faulted watch would leave the conversation unwatched. Its checkpoint keeps a
+          // follow-up the tick wrote down.
           if (runtime.signal.aborted) return;
           runtime.report(error);
-          // From the task as it stands: a follow-up this tick wrote down has to survive.
+          const step = backoff + 1;
           await runtime
-            .commit(
-              (_tx, now) => ({
-                status: "running",
-                checkpoint: { ...(now.state.checkpoint as WatchState), ticks: ticks + 1 },
-              }),
-              context,
-            )
+            .commit(async (tx, now) => {
+              (await tx.doc(Watching, id)).fresh = false;
+              return { status: "running", checkpoint: next(now, { backoff: step }) };
+            }, context)
             .catch(() => {});
+          backoff = step;
         }
-        // Every way out commits a new count first: pi-durable runs the phase again once its
-        // checkpoint has moved, and the count is the backoff.
-        await pause(id, pollDelay(ticks + 1, pollMs), runtime.signal);
+        // pi-durable runs the phase again once its checkpoint has moved, as it has above.
+        await pause(id, pollDelay(backoff, pollMs), runtime.signal);
       },
     },
     abort: async (current, runtime, context) => {
       await runtime.commit(async (tx) => {
-        (await tx.doc(Watching, current.input.conversationId)).active = false;
+        Object.assign(await tx.doc(Watching, current.input.conversationId), {
+          active: false,
+          taskId: undefined,
+        });
         return { status: "terminal", outcome: { status: "aborted" } };
       }, context);
     },
@@ -231,24 +280,19 @@ export function orbitWatch(options: OrbitWatchOptions) {
   /**
    * Make sure the conversation has a watch, in the caller's transaction: a submission's execute,
    * or the worker showing the conversation (with `recover`, so the first tick captures and
-   * reconciles). Idempotent through the Watching doc; `stale` says the caller found no live task
-   * behind an `active` flag (a watch that faulted anyway), so a new one is made.
+   * reconciles). A watch is live when the task its doc names is; one that faulted, or a doc that
+   * says active with no task behind it, gets a new watch.
    */
-  async function ensure(
-    tx: Tx,
-    conversationId: ConversationId,
-    { recover = false, stale = false } = {},
-  ) {
+  async function ensure(tx: Tx, conversationId: ConversationId, { recover = false } = {}) {
     const doc = await tx.doc(Watching, conversationId);
     if (recover) doc.recover = true;
-    if (doc.active && !stale) {
-      // A live watch: new work starts its backoff over.
+    const known = doc.taskId !== undefined ? await tx.task(doc.taskId) : undefined;
+    if (known && LIVE.has((known.state as { status: string }).status)) {
+      // A live watch: new work keeps it from ending and starts its backoff over.
       doc.fresh = true;
       return;
     }
-    doc.active = true;
-    doc.fresh = false;
-    await tx.createTask(
+    const taskId = await tx.createTask(
       task,
       { conversationId },
       {
@@ -258,6 +302,7 @@ export function orbitWatch(options: OrbitWatchOptions) {
         background: true,
       },
     );
+    Object.assign(doc, { active: true, fresh: false, taskId });
   }
 
   return { task, ensure };

@@ -49,7 +49,7 @@ import { setOrbitCwd } from "./env";
 import { orbitGrant } from "./grants";
 import { openLedger, opfsFile } from "./ledger";
 import { ownSkillFiles } from "./skills";
-import { ORBIT_WATCH, orbitWatch, wakeups } from "./watch";
+import { orbitWatch, wakeups } from "./watch";
 
 /** How long a conversation being left gets to finish its tool calls' end events. */
 const SETTLE_MS = 30_000;
@@ -137,12 +137,7 @@ const makeWatch = (pollMs?: number) =>
  * a reconcile saw a run end.
  */
 async function watchNow(id: ConversationId, recover = false) {
-  const harness = runtime!.harness;
-  // An active flag with no live task behind it is a watch that faulted: make a new one.
-  const live = (await harness.inspect(context)).tasks.some(
-    ({ record }) => record.kind === ORBIT_WATCH && record.conversationId === id,
-  );
-  await harness.commit((tx) => watch.ensure(tx, id, { recover, stale: !live }), context);
+  await runtime!.harness.commit((tx) => watch.ensure(tx, id, { recover }), context);
   wake(id);
 }
 
