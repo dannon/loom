@@ -282,8 +282,31 @@ describe("the Orbit watch", () => {
       return tick(key(id));
     });
     await w.ensure();
+    const first = (await w.harness.snapshot(Watching, w.conversation.id, ctx))?.taskId;
     await vi.waitFor(async () => expect(await w.active()).toBe(false));
     expect(w.polls).toHaveLength(2);
+    // The same watch went on: the submission's ensure didn't have to make another.
+    const { tasks } = await w.harness.inspect(ctx);
+    expect(tasks.filter((t) => t.record.kind === "olit.galaxy-watch")).toEqual([]);
+    expect(first).toBeDefined();
+  });
+
+  it.each([
+    ["while it waits for the conversation to be shown", false],
+    ["between ticks", true],
+  ])("ends as aborted, with no fault, when its task is aborted %s", async (_when, shown) => {
+    const w = await setup((_n, id) => tick(key(id), { inProgress: 1 }), { pollMs: 500 });
+    if (!shown) w.bind(undefined);
+    await w.ensure();
+    if (shown) await vi.waitFor(() => expect(w.polls).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 20));
+    const [live] = (await w.harness.inspect(ctx)).tasks.filter(
+      (t) => t.record.kind === "olit.galaxy-watch",
+    );
+    await w.harness.abortTask(live.record.id, ctx);
+    const ended = await w.harness.waitForTask(live.record.id, ctx);
+    expect((ended.state as { outcome: { status: string } }).outcome.status).toBe("aborted");
+    expect(await w.active()).toBe(false);
   });
 
   it("starts the backoff over when new work arrives for a live watch", async () => {

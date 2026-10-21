@@ -44,7 +44,8 @@ export const Watching = defineDoc<{
   taskId?: TaskId;
 }>({
   kind: "olit.watching",
-  version: 1,
+  // 2: taskId, without which a watch made before it would be doubled by the first ensure.
+  version: 2,
   scope: "conversation",
   history: "latest",
   fork: "initial",
@@ -119,7 +120,10 @@ export function wakeups() {
   };
 }
 
-const LIVE = new Set(["pending", "running", "waiting", "completing"]);
+/** The watch definition's version: a record of another one can't run under this one. */
+const VERSION = 3;
+/** A task that will still run: one waiting its turn, or running now. */
+const LIVE = new Set(["pending", "running"]);
 
 export function orbitWatch(options: OrbitWatchOptions) {
   const pollMs = options.pollMs ?? 10_000;
@@ -143,7 +147,7 @@ export function orbitWatch(options: OrbitWatchOptions) {
 
   const task = defineTask<WatchInput, WatchState, { ticks: number }>({
     name: ORBIT_WATCH,
-    version: 3,
+    version: VERSION,
     initial: () => ({ phase: "tick", ticks: 0, backoff: 0 }),
     phases: {
       tick: async (current, runtime, context) => {
@@ -254,12 +258,18 @@ export function orbitWatch(options: OrbitWatchOptions) {
           if (runtime.signal.aborted) return;
           runtime.report(error);
           const step = backoff + 1;
-          await runtime
-            .commit(async (tx, now) => {
+          try {
+            await runtime.commit(async (tx, now) => {
               (await tx.doc(Watching, id)).fresh = false;
               return { status: "running", checkpoint: next(now, { backoff: step }) };
-            }, context)
-            .catch(() => {});
+            }, context);
+          } catch (refused) {
+            // Without that commit the phase can't return without faulting anyway: fault now, with
+            // the cause, rather than after a backoff. The next ensure replaces the watch.
+            if (runtime.signal.aborted) return;
+            runtime.report(refused);
+            throw refused;
+          }
           backoff = step;
         }
         // pi-durable runs the phase again once its checkpoint has moved, as it has above.
@@ -287,7 +297,13 @@ export function orbitWatch(options: OrbitWatchOptions) {
     const doc = await tx.doc(Watching, conversationId);
     if (recover) doc.recover = true;
     const known = doc.taskId !== undefined ? await tx.task(doc.taskId) : undefined;
-    if (known && LIVE.has((known.state as { status: string }).status)) {
+    // A record from another version of this definition is never scheduled again (pi-durable
+    // blocks it without a migrate), so it doesn't count as live.
+    const live =
+      known !== undefined &&
+      (known as { version?: number }).version === VERSION &&
+      LIVE.has((known.state as { status: string }).status);
+    if (live) {
       // A live watch: new work keeps it from ending and starts its backoff over.
       doc.fresh = true;
       return;
