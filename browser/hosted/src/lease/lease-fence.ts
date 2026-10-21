@@ -21,7 +21,7 @@ import { isMainThread } from "node:worker_threads";
 import type { Storage } from "@earendil-works/pi-durable";
 import type { PoolClient } from "pg";
 
-import { currentLeaseGen, LeaseLostError } from "./postgres-storage";
+import { currentLeaseGen, LeaseLostError } from "../storage/postgres-storage";
 
 /** EX_TEMPFAIL: the host reads it as "lease lost, recover elsewhere", never as a crash to retry here. */
 export const LEASE_LOST_EXIT_CODE = 75;

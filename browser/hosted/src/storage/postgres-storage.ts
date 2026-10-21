@@ -33,6 +33,8 @@ import {
 } from "@earendil-works/pi-durable";
 import type { Pool, PoolClient } from "pg";
 
+import { applyMigrations } from "../db/migrations";
+
 // A Postgres port of pi-durable's SqliteStorage (dist/storage/sqlite/storage.js). Every table carries
 // store_id so one database holds one logical store per conversation: the pi-durable scheduler resets
 // every running task in whatever store it opens, so stores must never share task rows.
@@ -200,25 +202,9 @@ const MIGRATIONS: readonly (readonly string[])[] = [
   ],
 ];
 
-// Any constant works; it only has to be the same in every process that migrates this database.
-const MIGRATION_LOCK = 0x6f726269;
-
 /** Create or upgrade the shared tables. Safe to call concurrently from several hosts. */
 export async function migratePostgresStorage(pool: Pool): Promise<void> {
-  await withTransaction(pool, async (client) => {
-    await client.query("SELECT pg_advisory_xact_lock($1)", [MIGRATION_LOCK]);
-    await client.query("CREATE TABLE IF NOT EXISTS durable_schema (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), version INTEGER NOT NULL)");
-    await client.query("INSERT INTO durable_schema (singleton, version) VALUES (1, 0) ON CONFLICT DO NOTHING");
-    const { rows } = await client.query<{ version: number }>("SELECT version FROM durable_schema WHERE singleton = 1");
-    const current = rows[0]!.version;
-    if (current > MIGRATIONS.length) {
-      throw new Error(`Durable Postgres schema version ${current} is newer than supported version ${MIGRATIONS.length}`);
-    }
-    for (let version = current + 1; version <= MIGRATIONS.length; version++) {
-      for (const statement of MIGRATIONS[version - 1]!) await client.query(statement);
-      await client.query("UPDATE durable_schema SET version = $1 WHERE singleton = 1", [version]);
-    }
-  });
+  await applyMigrations(pool, { name: "durable Postgres", versionTable: "durable_schema", steps: MIGRATIONS });
 }
 
 /** Create the store's metadata row if it is missing. Starts at ID 2 because 1 is the root conversation. */
@@ -232,11 +218,12 @@ export async function ensureStore(db: Queryable, storeId: string): Promise<void>
 }
 
 /**
- * Take the store's lease by bumping its generation, creating the store if needed. Any storage still
- * fenced on an older generation fails its next commit with LeaseLostError; a commit already holding the
- * metadata row lock finishes first, so the bump is ordered strictly after it.
+ * Bump the store's lease generation, creating the store if needed. Any storage still fenced on an older
+ * generation fails its next commit with LeaseLostError; a commit already holding the metadata row lock
+ * finishes first, so the bump is ordered strictly after it. The host takes leases through
+ * lease/leases.ts, which bumps only when the holder changes; this is the bare takeover under it.
  */
-export async function acquireLease(db: Queryable, storeId: string): Promise<number> {
+export async function bumpLeaseGen(db: Queryable, storeId: string): Promise<number> {
   const { rows } = await db.query<{ lease_gen: string }>(
     `WITH ids AS (INSERT INTO durable_id_blocks (store_id, next_id) VALUES ($1, 2) ON CONFLICT DO NOTHING)
       INSERT INTO durable_stores (store_id, next_seq, lease_gen) VALUES ($1, 1, 1)
@@ -329,7 +316,7 @@ type DocumentAction = {
 
 type RevisionRow = { seq: string; kind: "base" | "delta"; version: number; content: string };
 
-async function withTransaction<T>(pool: Pool, run: (client: PoolClient) => Promise<T>, begin = "BEGIN"): Promise<T> {
+export async function withTransaction<T>(pool: Pool, run: (client: PoolClient) => Promise<T>, begin = "BEGIN"): Promise<T> {
   const client = await pool.connect();
   // Set when BEGIN, ROLLBACK or COMMIT fails: that connection is destroyed rather than reused.
   let broken: Error | undefined;

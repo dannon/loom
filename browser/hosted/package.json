@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "MIT",
-  "description": "Step-0 spike for the hosted Orbit service: Postgres pi-durable Storage, pg-boss, boot timing and recovery experiments.",
+  "description": "The hosted Orbit service: Postgres pi-durable Storage, leases, pg-boss dispatch, and the step-0 boot and recovery experiments.",
   "scripts": {
     "test:unit": "vitest run",
     "typecheck": "tsc --noEmit"
