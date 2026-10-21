@@ -2,7 +2,8 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
-const { badFence } = require("./page-cells.cjs");
+// What Galaxy refuses on a page, in its own words; the brain and the conformance test check the same.
+const { pageContentProblem } = require("../../shared/galaxy-page-cells.js");
 
 // The plugin package: its manifest and the static/ Galaxy serves.
 const ROOT = path.join(__dirname, "..", "olit");
@@ -545,8 +546,8 @@ const server = http.createServer(async (req, res) => {
         }
         const body = await readJson(req);
         if (!body) return json(res, 400, { err_msg: "The request body is not JSON." });
-        const fence = badFence(body.content);
-        if (fence) return json(res, 400, { err_msg: `Unsupported fenced block type [${fence.slice(3)}].` });
+        const problem = pageContentProblem(String(body.content || ""));
+        if (problem) return json(res, 400, { err_msg: problem });
         const now = new Date().toISOString().replace("Z", ""); // Galaxy writes UTC without a zone
         if (req.method === "POST") {
             const created = `p${pages.size + 1}`;

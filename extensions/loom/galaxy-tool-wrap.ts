@@ -11,6 +11,7 @@
  */
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import type { GalaxyContext, GalaxyResult } from "@galaxyproject/galaxy-ops";
+import { authRemedy } from "../../shared/capability-profile-installed.js";
 import { utf8ByteLength } from "../../shared/truncate-middle.js";
 import { galaxyOpsContext } from "./galaxy-api";
 import { GALAXY_DEADLINE_TEXT, kindOfEnvelope, type GalaxyCallKind } from "./galaxy-failure";
@@ -57,8 +58,8 @@ export function galaxyFailure(message: string, errorKind?: string): GalaxyEnvelo
   };
 }
 
-const NOT_CONNECTED =
-  "Galaxy is not connected: no Galaxy URL and API key are configured. Ask the user to run /connect.";
+const notConnected = () =>
+  `Galaxy is not connected: no Galaxy URL and API key are configured. ${authRemedy()}.`;
 
 /** The envelope as the model and the guards see it, spilled when it is too large to show whole. */
 export function renderGalaxyResult(
@@ -160,7 +161,7 @@ export async function runGalaxyCall(
     opts.deadlineMs ?? GALAXY_DEADLINE_MS,
     async (joined): Promise<{ env: GalaxyEnvelope; kind?: GalaxyCallKind }> => {
       const ctx = contextFor(joined);
-      if (!ctx) return { env: galaxyFailure(NOT_CONNECTED, "auth"), kind: "auth" };
+      if (!ctx) return { env: galaxyFailure(notConnected(), "auth"), kind: "auth" };
       return { env: await call(ctx, joined) };
     },
   );

@@ -1,4 +1,12 @@
+import { installedCapabilityProfile } from "./capability-profile-installed.js";
 import { isDesktopShell, readEnv } from "./orbit-env.js";
+
+export {
+  authRemedy,
+  DEFAULT_AUTH_REMEDY,
+  installedCapabilityProfile,
+  setCapabilityProfile,
+} from "./capability-profile-installed.js";
 
 /**
  * What the shell running the brain can do, in one place, so the brain asks
@@ -31,6 +39,9 @@ import { isDesktopShell, readEnv } from "./orbit-env.js";
  * @property {"read" | "write"} [galaxy] whether the brain may change Galaxy. Under "read" it
  *   registers no tool that writes Galaxy or the analysis record. Every Node shell writes; a shell
  *   with a local shell couldn't hold to "read" anyway, since bash can reach Galaxy itself.
+ * @property {string} [authRemedy] what the model should ask of the user when Galaxy refuses the
+ *   credentials, as an imperative with no closing period. The Node shells have /connect; the
+ *   browser worker rides the Galaxy page's own sign-in.
  */
 
 /**
@@ -50,27 +61,6 @@ export function profileFromEnv(env = process.env) {
   };
 }
 
-let installed = null;
-
-/**
- * The shell's own description of itself; null puts env back in charge.
- * @param {CapabilityProfile | null} profile
- */
-export function setCapabilityProfile(profile) {
-  // A shell that predates a field gets the Node shells' value for it, so adding one changes no
-  // existing caller.
-  installed = profile ? { python: false, galaxy: "write", ...profile } : null;
-}
-
-/**
- * The installed profile itself (the same object capabilityProfile() returns),
- * or null when env is in charge.
- * @returns {CapabilityProfile | null}
- */
-export function installedCapabilityProfile() {
-  return installed;
-}
-
 /**
  * The profile the brain acts on: the installed one, else env. An explicit env
  * always means "read env", the way galaxyCredentials(env) does, so pure helpers
@@ -79,6 +69,7 @@ export function installedCapabilityProfile() {
  * @returns {CapabilityProfile}
  */
 export function capabilityProfile(env) {
+  const installed = installedCapabilityProfile();
   if (!env && installed) return installed;
   return profileFromEnv(env);
 }
