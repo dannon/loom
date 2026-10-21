@@ -50,6 +50,31 @@ export const HOST_MIGRATIONS: MigrationSet = {
         expires_at TIMESTAMPTZ NOT NULL
       )`,
     ],
+    [
+      // The conversation's Galaxy page (its record), the pi-durable conversation once a worker has
+      // created it, and whether a turn was cut off (crash, restart) and should resume.
+      `ALTER TABLE orbit_conversations
+        ADD COLUMN page_id TEXT,
+        ADD COLUMN durable_conversation_id TEXT,
+        ADD COLUMN interrupted BOOLEAN NOT NULL DEFAULT false`,
+      // Messages waiting for the conversation's next turn. A queued turn drains all of them, so
+      // messages that arrive while one is queued are coalesced into it.
+      `CREATE TABLE orbit_inbox (
+        id BIGSERIAL PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES orbit_conversations (id) ON DELETE CASCADE,
+        text TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      "CREATE INDEX orbit_inbox_by_conversation ON orbit_inbox (conversation_id, id)",
+      // One live loop per user (brief decision 6): the conversation whose turn is running or waiting
+      // on the user. Expires at the turn cap, so a host that died mid-turn can't hold it forever.
+      `CREATE TABLE orbit_live_loops (
+        user_sub TEXT PRIMARY KEY REFERENCES orbit_users (sub) ON DELETE CASCADE,
+        conversation_id TEXT NOT NULL,
+        holder TEXT NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL
+      )`,
+    ],
   ],
 };
 

@@ -1,0 +1,242 @@
+import { randomUUID } from "node:crypto";
+import { userInfo } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { Worker } from "node:worker_threads";
+import pg from "pg";
+import { PgBoss } from "pg-boss";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+
+import { migrate } from "../db/migrate";
+import { currentLeaseGen } from "../storage/postgres-storage";
+import { freshDatabase } from "../test-db";
+import { startStandIn, type StandIn } from "../test-stand-in";
+import { createTokenCache } from "../tokens/token-cache";
+import { bundleWorker } from "../worker/bundle";
+import type { FromWorker } from "../worker/protocol";
+import { spawnWorker } from "../worker/spawn";
+import { createConversation, getConversation } from "./conversations";
+import { Dispatcher, type DispatchEvent } from "./dispatcher";
+import { galaxyPageCreator } from "./pages";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const DATABASE = "orbit_hosted_dispatch";
+const SOCKET = process.env.PGHOST ?? "/tmp";
+
+let pool: pg.Pool;
+let bundle: string;
+let standIn: StandIn;
+const bosses: PgBoss[] = [];
+const dispatchers: Dispatcher[] = [];
+
+beforeAll(async () => {
+  pool = new pg.Pool({ ...(await freshDatabase(DATABASE)), max: 8 });
+  await migrate(pool);
+  bundle = await bundleWorker(join(HERE, "..", "worker", "boot.ts"), join(HERE, "..", "..", ".scratch", "dispatch", "boot.mjs"));
+  standIn = await startStandIn();
+});
+
+afterEach(async () => {
+  await Promise.all(dispatchers.splice(0).map((d) => d.shutdown()));
+  await Promise.all(bosses.splice(0).map((b) => b.stop({ graceful: false })));
+});
+
+afterAll(async () => {
+  await pool?.end();
+  await standIn?.close();
+});
+
+type Event = FromWorker | DispatchEvent;
+
+interface Host {
+  readonly dispatcher: Dispatcher;
+  readonly events: Map<string, Event[]>;
+  /** Workers this host started, by store. */
+  readonly spawned: Array<{ storeId: string; worker: Worker }>;
+}
+
+async function host(name = "host"): Promise<Host> {
+  const boss = new PgBoss({ host: SOCKET, database: DATABASE, user: userInfo().username, schedule: false, supervise: false });
+  boss.on("error", () => undefined);
+  await boss.start();
+  bosses.push(boss);
+  const events = new Map<string, Event[]>();
+  const spawned: Host["spawned"] = [];
+  const dispatcher = new Dispatcher({
+    pool,
+    boss,
+    bundle,
+    hostId: `${name}-${randomUUID()}`,
+    databaseUrl: `postgres://${userInfo().username}@/${DATABASE}?host=${encodeURIComponent(SOCKET)}`,
+    galaxyUrl: standIn.origin,
+    lease: { ttlMs: 60_000, renewMs: 15_000, maxTurnMs: 60_000 },
+    limits: { maxTurns: 6, maxToolCalls: 20, outputBytes: 1 << 22 },
+    tokens: createTokenCache({ refresh: async () => ({ token: "access", expiresAt: Date.now() + 600_000 }) }),
+    modelFor: async () => ({ baseUrl: `${standIn.origin}/v1`, id: "m", apiKey: "model-key-0123456789" }),
+    pageFor: async () => "p1",
+    onEvent: (id, event) => {
+      if (process.env.DISPATCH_LOG) console.log(`[${name}] ${id.slice(0, 8)} ${event.type}`);
+      events.set(id, [...(events.get(id) ?? []), event]);
+    },
+    retryAfterMs: () => 300,
+    log: process.env.DISPATCH_LOG ? (m) => console.log(`[${name}] ${m}`) : undefined,
+    spawn: (b, data) => {
+      const worker = spawnWorker(b, data);
+      spawned.push({ storeId: data.storeId, worker });
+      return worker;
+    },
+  });
+  await dispatcher.start();
+  dispatchers.push(dispatcher);
+  return { dispatcher, events, spawned };
+}
+
+async function user(): Promise<string> {
+  const sub = `user-${randomUUID()}`;
+  await pool.query("INSERT INTO orbit_users (sub) VALUES ($1)", [sub]);
+  return sub;
+}
+
+async function until<T>(check: () => T | undefined | false, what: string, timeoutMs = 20_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = check();
+    if (value) return value;
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+const of = (h: Host, id: string, type: Event["type"]) => (h.events.get(id) ?? []).filter((e) => e.type === type);
+const asked = (h: Host, id: string, n = 1) =>
+  until(() => of(h, id, "ask")[n - 1] as Extract<Event, { type: "ask" }> | undefined, `ask #${n}`);
+const settledCount = (h: Host, id: string) => of(h, id, "settled").length;
+const modelSaw = (text: string) => standIn.seen.filter((s) => s.to === "model" && s.userText === text).length;
+
+describe("dispatch", () => {
+  it("a sticky worker's second turn runs on the same worker with no generation change", async () => {
+    const h = await host();
+    const c = await createConversation(pool, await user());
+    await h.dispatcher.submit(c.id, "hello");
+    await until(() => modelSaw("hello") > 0 && settledCount(h, c.id) >= 2, "the first turn");
+    const gen = await currentLeaseGen(pool, c.storeId);
+    await h.dispatcher.submit(c.id, "hello again");
+    await until(() => modelSaw("hello again") > 0 && settledCount(h, c.id) >= 3, "the second turn");
+    expect(await currentLeaseGen(pool, c.storeId)).toBe(gen);
+    expect(h.spawned.filter((w) => w.storeId === c.storeId)).toHaveLength(1);
+  });
+
+  it("two messages during a running turn become one queued turn carrying both", async () => {
+    const h = await host();
+    const c = await createConversation(pool, await user());
+    await h.dispatcher.submit(c.id, "DELETE_H1");
+    const ask = await asked(h, c.id);
+    await h.dispatcher.submit(c.id, "first");
+    await h.dispatcher.submit(c.id, "second");
+    h.dispatcher.answer(c.id, ask.id, true);
+    await until(() => modelSaw("first\n\nsecond") > 0, "the coalesced turn");
+    await until(() => settledCount(h, c.id) >= 3, "it to settle");
+    expect(modelSaw("first")).toBe(0);
+    expect(modelSaw("second")).toBe(0);
+  });
+
+  it("a user's second conversation waits while the first is asking, without holding a handler", async () => {
+    const h = await host();
+    const sub = await user();
+    const a = await createConversation(pool, sub);
+    const b = await createConversation(pool, sub);
+    await h.dispatcher.submit(a.id, "DELETE_H1");
+    const ask = await asked(h, a.id);
+    await h.dispatcher.submit(b.id, "hello from b");
+    await until(() => of(h, b.id, "waiting").length > 1, "b to be sent back more than once");
+    expect(h.dispatcher.isLive(b.id)).toBe(false);
+    h.dispatcher.answer(a.id, ask.id, true);
+    await until(() => modelSaw("hello from b") > 0, "b's turn once a is done");
+  });
+
+  it("Stop during a pending confirm settles the call as not run, and Galaxy sees no write", async () => {
+    const h = await host();
+    const c = await createConversation(pool, await user());
+    const puts = standIn.galaxyCalls("PUT", "/api/histories/h1");
+    await h.dispatcher.submit(c.id, "DELETE_H1");
+    await asked(h, c.id);
+    h.dispatcher.stop(c.id);
+    const settled = await until(
+      () => of(h, c.id, "settled").find((e) => (e as Extract<Event, { type: "settled" }>).aborted),
+      "the aborted run",
+    );
+    expect(settled).toBeDefined();
+    expect(standIn.galaxyCalls("PUT", "/api/histories/h1")).toBe(puts);
+  });
+
+  it("a restart during a pending confirm asks again when the new host resumes the conversation", async () => {
+    const first = await host("before");
+    const c = await createConversation(pool, await user());
+    const puts = standIn.galaxyCalls("PUT", "/api/histories/h1");
+    await first.dispatcher.submit(c.id, "DELETE_H1");
+    await asked(first, c.id);
+    await first.dispatcher.shutdown();
+    expect((await getConversation(pool, c.id))?.interrupted).toBe(true);
+    expect(standIn.galaxyCalls("PUT", "/api/histories/h1")).toBe(puts);
+
+    const second = await host("after");
+    const again = await asked(second, c.id);
+    second.dispatcher.answer(c.id, again.id, true);
+    await until(() => standIn.galaxyCalls("PUT", "/api/histories/h1") === puts + 1, "the delete, once");
+    await until(async () => !(await getConversation(pool, c.id))?.interrupted, "the interruption to clear");
+  });
+
+  it("a crashed worker's conversation resumes on the next turn, on a fresh worker", async () => {
+    const h = await host();
+    const c = await createConversation(pool, await user());
+    await h.dispatcher.submit(c.id, "DELETE_H1");
+    await asked(h, c.id);
+    const gen = await currentLeaseGen(pool, c.storeId);
+    await h.spawned.find((w) => w.storeId === c.storeId)!.worker.terminate();
+    await until(() => of(h, c.id, "worker-exit").length > 0, "the crash");
+    await h.dispatcher.submit(c.id, "after the crash");
+    const again = await asked(h, c.id, 2);
+    expect(h.spawned.filter((w) => w.storeId === c.storeId)).toHaveLength(2);
+    expect(await currentLeaseGen(pool, c.storeId)).toBe(gen! + 1);
+    h.dispatcher.answer(c.id, again.id, true);
+    await until(() => modelSaw("after the crash") > 0, "the new message's turn");
+  });
+
+  it("two hosts can't both hold a conversation: the second sends the turn back instead of booting", async () => {
+    const a = await host("a");
+    const c = await createConversation(pool, await user());
+    await a.dispatcher.submit(c.id, "hello");
+    await until(() => modelSaw("hello") > 0 && settledCount(a, c.id) >= 2, "a's turn");
+    // a keeps its worker and lease but stops taking turns, so b gets the next one.
+    await bosses[0]!.offWork("turn");
+    const b = await host("b");
+    await b.dispatcher.submit(c.id, "from b");
+    await until(() => of(b, c.id, "waiting").length > 0, "b to find the lease taken");
+    expect(b.spawned.filter((w) => w.storeId === c.storeId)).toHaveLength(0);
+    expect(modelSaw("from b")).toBe(0);
+  });
+});
+
+describe("the conversation's Galaxy page", () => {
+  it("is created as the user, once, with a slug Galaxy accepts", async () => {
+    const sent: Array<{ url: string; auth: string | null; body: Record<string, unknown> }> = [];
+    const create = galaxyPageCreator({
+      galaxyUrl: "https://galaxy.test",
+      tokens: createTokenCache({ refresh: async () => ({ token: "user-token", expiresAt: Date.now() + 600_000 }) }),
+      fetch: (async (url: string, init: RequestInit) => {
+        sent.push({ url, auth: new Headers(init.headers).get("authorization"), body: JSON.parse(String(init.body)) });
+        return Response.json({ id: "page-7" });
+      }) as typeof fetch,
+    });
+    const c = await createConversation(pool, await user(), "Variant calling");
+    expect(await create(c)).toBe("page-7");
+    expect(sent).toEqual([
+      {
+        url: "https://galaxy.test/api/pages",
+        auth: "Bearer user-token",
+        body: { slug: `orbit-${c.id}`, title: "Variant calling", content_format: "markdown", content: "" },
+      },
+    ]);
+    expect(sent[0]!.body.slug).toMatch(/^[a-z0-9-]+$/);
+  });
+});

@@ -72,7 +72,7 @@ describe("migrate", () => {
 
     await migrate(pool);
     expect(await version(pool, "durable_schema")).toBe(2);
-    expect(await version(pool, "orbit_schema")).toBe(1);
+    expect(await version(pool, "orbit_schema")).toBe(HOST_MIGRATIONS.steps.length);
     const reopened = await PostgresStorage.open(pool, "spike-store");
     expect((await reopened.entry(entry, BACKGROUND_CONTEXT))?.entry.kind).toBe("kept");
     await reopened.close(BACKGROUND_CONTEXT);
