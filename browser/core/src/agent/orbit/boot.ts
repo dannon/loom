@@ -16,7 +16,10 @@ import {
   type GalaxyExtra,
 } from "../../../../../extensions/loom/galaxy-ops-tools";
 import { setPollWake } from "../../../../../extensions/loom/galaxy-reconcile";
-import { setGalaxyToolSource } from "../../../../../extensions/loom/galaxy-tool-source";
+import {
+  setGalaxyToolSource,
+  type GalaxyTool,
+} from "../../../../../extensions/loom/galaxy-tool-source";
 import {
   setSubmissionLedger,
   type SubmissionLedger,
@@ -28,6 +31,7 @@ import { setConfigSource } from "../../../../../shared/config-source.js";
 import { defineExtension, type Extension } from "@earendil-works/pi-durable";
 import { createPiHost, type PiHost, type PiHostOptions, type PiHostUi } from "../pi-host";
 import { orbitGrant } from "./grants";
+import { registerBrowserLayers, type LayerHost } from "./layers";
 import { vendorSkills } from "./skills";
 
 /** What the model is told to ask for when Galaxy refuses the page's sign-in. */
@@ -56,6 +60,10 @@ export interface OrbitBootOptions {
   ui: Required<Pick<PiHostUi, "ask" | "notify">>;
   /** Extras the Galaxy tool source registers beside the ops entry's operations. */
   extras?: GalaxyExtra[];
+  /** The shell's own tools (run_python, the processes), registered after the brain's. */
+  shellTools?: GalaxyTool[];
+  /** What the browser layers read; without it none are registered. */
+  layers?: LayerHost;
   host?: Pick<PiHostOptions, "models" | "beforeStart" | "onLateCompletion" | "afterExecute">;
 }
 
@@ -109,6 +117,9 @@ export function bootOrbit(options: OrbitBootOptions): OrbitBoot {
     ...options.host,
   });
   loom(host.api);
+  for (const tool of options.shellTools ?? []) host.api.registerTool(tool);
+  // After Orbit's handlers, so its guards decide first.
+  if (options.layers) registerBrowserLayers(host.api, options.layers);
   return {
     host,
     // The browser shell's own durable pieces ride beside Orbit's: the watch task joins it later.

@@ -17,6 +17,7 @@ import {
   type Storage,
 } from "@earendil-works/pi-durable";
 
+import { galaxyOpsEntry } from "../../../../../extensions/loom/galaxy-ops-tools";
 import { createPage, listHistoryPages } from "../../../../../extensions/loom/galaxy-pages-api";
 import { galaxyBackgroundIdle } from "../../../../../extensions/loom/galaxy-reconcile";
 import { captureLateSubmission } from "../../../../../extensions/loom/galaxy-submission-capture";
@@ -24,14 +25,17 @@ import { setRecordStore } from "../../../../../extensions/loom/record-store";
 import { createPageRecordStore } from "../../../../../extensions/loom/record-store-page";
 import { createMemoryLedger } from "../../../../../extensions/loom/submission-ledger";
 import { registerArtifactKinds } from "../../artifacts/kinds";
-import { DEFAULT_BRAND } from "../brand";
+import { DEFAULT_BRAND, noteTag } from "../brand";
 import { Binding, FollowUps, heldBy } from "../documents";
-import { connectGalaxy, galaxyFetch } from "../galaxy";
+import { connectGalaxy, connectWeb, galaxyFetch } from "../galaxy";
+import { galaxyTools } from "../galaxy-tools";
 import type { SessionReason } from "../pi-host";
-import { browserPython } from "../python";
-import { context, Runtime } from "../runtime";
+import { processTools } from "../processes";
+import { browserPython, pythonTool } from "../python";
+import { artifactsIn, context, Runtime } from "../runtime";
 import { holdStorage, openStorage } from "../storage";
-import type { AgentFlavor } from "../tools";
+import { galaxyOps, type AgentFlavor } from "../tools";
+import { adaptTool, galaxyExtras, granted, type ShellToolHost } from "./adapter";
 import type { OpenRequest, PageMessage, Waiting, WorkerMessage } from "../worker";
 import { bootOrbit, type OrbitBoot } from "./boot";
 import { setOrbitCwd } from "./env";
@@ -217,6 +221,35 @@ async function open(request: OpenRequest) {
     ledger = await openFileLedger(opfsFile(`${brand.id}-${user}-orbit-ledger.json`));
   }
   const url = new URL(galaxy.root, self.location.href).href.replace(/\/+$/, "");
+  const python = browserPython(request.pyodideURL);
+  const galaxyOptions = {
+    root: galaxy.root,
+    key: request.config.galaxy_key,
+    credentials: request.config.credentials,
+  };
+  // The browser's own tools read the conversation a call runs in when it runs.
+  const shell: ShellToolHost = {
+    clients: (signal) => ({
+      galaxy: connectGalaxy({ ...galaxyOptions, signal }),
+      web: connectWeb(signal),
+      ops: galaxyOps({ ...galaxyOptions, signal }),
+      python: { ...python, run: (code) => python.run(code, signal) },
+    }),
+    conversation: () => conversation?.id,
+    binding: async (id) => ({ ...((await runtime!.harness.snapshot(Binding, id, context)) ?? {}) }),
+    rebind: async (id, binding) => {
+      await runtime!.harness.commit(async (tx) => {
+        Object.assign(await tx.doc(Binding, id), binding);
+      }, context);
+    },
+    artifacts: async (id) => {
+      const found = await runtime!.harness.conversation(id, context);
+      return found ? artifactsIn(found, context) : [];
+    },
+  };
+  const shellTools = [pythonTool(brand.name), ...processTools()].filter((t) =>
+    granted(t, capabilities),
+  );
   orbit = bootOrbit({
     capabilities,
     galaxy: {
@@ -230,6 +263,14 @@ async function open(request: OpenRequest) {
       ...(request.config.galaxy_key ? { key: request.config.galaxy_key } : {}),
     },
     ledger,
+    // The grant filters these with every other Galaxy tool (upload_file is a writer).
+    extras: galaxyExtras(galaxyTools(noteTag(brand)), shell, galaxyOpsEntry().operations),
+    shellTools: shellTools.map((t) => adaptTool(t, shell)),
+    layers: {
+      brandName: brand.name,
+      shellTools: () => new Set(shellTools.map((t) => t.name)),
+      artifacts: () => (conversation ? shell.artifacts(conversation.id) : Promise.resolve([])),
+    },
     secrets: () => [runtime?.apiKey].filter((s): s is string => typeof s === "string"),
     ui: {
       ask: async (request, id, signal) =>
@@ -246,7 +287,7 @@ async function open(request: OpenRequest) {
   runtime = await Runtime.open({
     storage,
     config: request.config,
-    python: browserPython(request.pyodideURL),
+    python,
     flavor,
     extensions: orbit.extensions,
   });
