@@ -32,7 +32,9 @@ export const TURN_QUEUE = "turn";
 export type DispatchEvent =
   /** The turn waits: another of the user's conversations is running or asking them something. */
   | { readonly type: "waiting" }
-  | { readonly type: "worker-exit"; readonly code: number };
+  | { readonly type: "worker-exit"; readonly code: number }
+  /** The turn couldn't start after several tries. */
+  | { readonly type: "failed"; readonly message: string };
 
 export interface DispatcherOptions {
   readonly pool: Pool;
@@ -56,8 +58,8 @@ export interface DispatcherOptions {
   readonly onEvent: (conversationId: string, event: FromWorker | DispatchEvent) => void;
   /** Turns run at once in this host. Each holds a worker, not a database connection. */
   readonly concurrency?: number;
-  /** How long a turn that found the user's loop busy waits before trying again. */
-  readonly retryAfterMs?: () => number;
+  /** How long a turn that couldn't start waits before trying again, by attempt (0-based). */
+  readonly retryDelayMs?: (attempt: number) => number;
   readonly spawn?: (bundle: string, data: WorkerData) => Worker;
   readonly log?: (message: string) => void;
 }
@@ -66,6 +68,19 @@ interface Waiter {
   readonly type: FromWorker["type"];
   readonly resolve: (message: FromWorker) => void;
   readonly reject: (error: Error) => void;
+}
+
+/** A turn from its first input (or a resumed run) until the run settles. */
+interface Turn {
+  cap?: NodeJS.Timeout;
+  /**
+   * The run is this turn's: its input was taken, or it's an interrupted run resumed. Until then a
+   * settled is some other run's (a greeting the input waited behind) and doesn't end the turn.
+   */
+  running: boolean;
+  /** Settles when the turn ends, however it ends. */
+  readonly done: Promise<void>;
+  readonly end: () => void;
 }
 
 interface Live {
@@ -79,16 +94,24 @@ interface Live {
   readonly asks: Map<number, AskRequest>;
   readonly waiters: Set<Waiter>;
   renew?: NodeJS.Timeout;
-  /** A turn is between submit and settled. */
-  inTurn: boolean;
+  turn?: Turn;
   exited: boolean;
 }
 
+type TurnJob = { conversationId: string; attempt?: number };
+
 class Busy extends Error {}
+
+/** Five tries at a turn that keeps failing to start; after that the user's next message tries again. */
+const MAX_ATTEMPTS = 5;
 
 export class Dispatcher {
   readonly #o: DispatcherOptions;
   readonly #live = new Map<string, Live>();
+  /** Conversations with a handler running on this host. */
+  readonly #handling = new Set<string>();
+  /** Bookkeeping still writing (a turn's end, a worker's exit), which shutdown waits for. */
+  readonly #settling = new Set<Promise<unknown>>();
   #working = false;
   #stopping = false;
 
@@ -102,8 +125,9 @@ export class Dispatcher {
     if (!(await boss.getQueue(TURN_QUEUE))) {
       await boss.createQueue(TURN_QUEUE, {
         policy: "stately",
-        // A turn runs up to the cap, plus a boot.
-        expireInSeconds: Math.ceil(this.#o.lease.maxTurnMs / 1000) + 300,
+        // A handler waits at most for a boot and the turn cap: it returns once the run asks the
+        // user anything, and the cap stops a run that goes on.
+        expireInSeconds: Math.ceil(this.#o.lease.maxTurnMs / 1000) + 600,
         retryLimit: 0,
       });
     }
@@ -111,21 +135,28 @@ export class Dispatcher {
       TURN_QUEUE,
       { localConcurrency: this.#o.concurrency ?? 32, pollingIntervalSeconds: 0.5 },
       async ([job]) => {
-        await this.#runTurn((job!.data as { conversationId: string }).conversationId);
+        await this.#handle(job!.data as TurnJob);
       },
     );
     this.#working = true;
     // The sweeper: a turn cut off by a crash or a restart resumes without waiting for a new message.
-    for (const id of await interruptedConversations(this.#o.pool)) await this.#send(id);
+    for (const id of await interruptedConversations(this.#o.pool)) await this.#send({ conversationId: id });
   }
 
-  /** Queue a message for the conversation's next turn. */
+  /**
+   * Queue a message for the conversation's next turn. Delivered at least once: a worker that dies
+   * between taking the message into its durable inbox and acknowledging it gets it again.
+   */
   async submit(conversationId: string, text: string): Promise<void> {
     await this.#o.pool.query(
       "WITH c AS (UPDATE orbit_conversations SET last_active_at = now() WHERE id = $1) INSERT INTO orbit_inbox (conversation_id, text) VALUES ($1, $2)",
       [conversationId, text],
     );
-    await this.#send(conversationId);
+    // A turn running here (or a handler about to drain) takes it when it gets to it; a job queued
+    // behind an active one would stall pg-boss's fetch for every conversation (stately's unique
+    // index against a queue cache refreshed once a minute).
+    if (this.#handling.has(conversationId) || this.#live.get(conversationId)?.turn) return;
+    await this.#send({ conversationId });
   }
 
   /** The user's Stop: the run aborts, and a pending confirm is withdrawn with its call not run. */
@@ -159,15 +190,24 @@ export class Dispatcher {
   }
 
   /**
-   * Restart: stop taking turns, then close every worker. Closing withdraws a pending confirm by
+   * Restart: stop taking turns and close every worker. Closing withdraws a pending confirm by
    * rejecting it in the worker, so it's asked again when the conversation resumes; a turn cut off
-   * here marks its conversation for the sweeper.
+   * here marks its conversation for the next host's sweeper.
    */
   async shutdown(timeoutMs = 10_000): Promise<void> {
-    // Workers close first, so each turn's handler finishes and pg-boss records its job; a job left
-    // active would hold the conversation's one active slot until it expired, and the next host
-    // couldn't resume it. Turns that start meanwhile are turned away (see #runTurn).
     this.#stopping = true;
+    // Workers close first, so each handler finishes and pg-boss records its job; a job left active
+    // would hold the conversation's one active slot until it expired. A handler that boots a worker
+    // meanwhile is caught by the second pass.
+    for (let pass = 0; pass < 2; pass++) {
+      await this.#closeAll(timeoutMs);
+      if (pass === 0 && this.#working) await this.#o.boss.offWork(TURN_QUEUE, { wait: true });
+    }
+    this.#working = false;
+    while (this.#settling.size) await Promise.all([...this.#settling]);
+  }
+
+  async #closeAll(timeoutMs: number): Promise<void> {
     await Promise.all(
       [...this.#live.values()].map(async (live) => {
         const closed = this.#next(live, "closed").catch(() => undefined);
@@ -178,33 +218,59 @@ export class Dispatcher {
         await live.worker.terminate();
       }),
     );
-    if (this.#working) await this.#o.boss.offWork(TURN_QUEUE, { wait: true });
-    this.#working = false;
   }
 
-  #send(conversationId: string, startAfterMs?: number): Promise<string | null> {
+  #send(job: TurnJob, startAfterMs?: number): Promise<string | null> {
     // null when a turn is already queued for the conversation: it will drain this message too.
-    return this.#o.boss.send(
-      TURN_QUEUE,
-      { conversationId },
-      { singletonKey: conversationId, ...(startAfterMs ? { startAfter: Math.ceil(startAfterMs / 1000) } : {}) },
-    );
+    return this.#o.boss.send(TURN_QUEUE, job, {
+      singletonKey: job.conversationId,
+      ...(startAfterMs ? { startAfter: Math.max(1, Math.ceil(startAfterMs / 1000)) } : {}),
+    });
   }
 
-  async #runTurn(conversationId: string): Promise<void> {
-    if (this.#stopping) {
-      // Mid-restart: leave the inbox for the next host's sweeper.
-      await this.#o.pool.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [conversationId]);
+  /** Try the turn again later, backing off; past the last attempt, tell the user and stop trying. */
+  async #retry(job: TurnJob, why: string): Promise<void> {
+    const attempt = (job.attempt ?? 0) + 1;
+    if (attempt >= MAX_ATTEMPTS && why !== "busy") {
+      this.#o.onEvent(job.conversationId, { type: "failed", message: "Orbit couldn't start this conversation's turn. Send a message to try again." });
       return;
     }
-    const conversation = await getConversation(this.#o.pool, conversationId);
+    const delay = this.#o.retryDelayMs?.(attempt) ?? Math.min(30_000, 500 * 2 ** attempt) * (0.75 + Math.random() / 2);
+    await this.#send({ conversationId: job.conversationId, attempt }, delay);
+  }
+
+  async #handle(job: TurnJob): Promise<void> {
+    const conversationId = job.conversationId;
+    this.#handling.add(conversationId);
+    try {
+      await this.#runTurn(job);
+    } finally {
+      this.#handling.delete(conversationId);
+      // A message that came while this handler ran, and found no turn to take it, still needs one.
+      if (!this.#stopping && !this.#live.get(conversationId)?.turn && (await this.#hasInbox(conversationId))) {
+        await this.#send({ conversationId });
+      }
+    }
+  }
+
+  async #runTurn(job: TurnJob): Promise<void> {
+    const { conversationId } = job;
+    const { pool } = this.#o;
+    if (this.#stopping) {
+      // Mid-restart: leave the inbox for the next host's sweeper.
+      await pool.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [conversationId]);
+      return;
+    }
+    const conversation = await getConversation(pool, conversationId);
     if (!conversation) return;
     const sticky = this.#live.get(conversationId);
+    // A turn already running here takes new messages when it ends.
+    if (sticky?.turn) return;
     const holder = sticky?.holder ?? `${this.#o.hostId}/${randomUUID()}`;
 
     let leaseGen: number;
     try {
-      leaseGen = await withTransaction(this.#o.pool, async (client) => {
+      leaseGen = await withTransaction(pool, async (client) => {
         const { rowCount } = await client.query(
           `INSERT INTO orbit_live_loops (user_sub, conversation_id, holder, expires_at)
             VALUES ($1, $2, $3, now() + $4 * interval '1 millisecond')
@@ -221,30 +287,121 @@ export class Dispatcher {
     } catch (error) {
       if (!(error instanceof Busy)) throw error;
       // Never wait on the other conversation here: the job slot would be held for its whole turn.
-      this.#o.onEvent(conversationId, { type: "waiting" });
-      await this.#send(conversationId, this.#o.retryAfterMs?.() ?? 1000 + Math.random() * 2000);
+      if (!job.attempt) this.#o.onEvent(conversationId, { type: "waiting" });
+      await this.#retry(job, "busy");
       return;
     }
 
+    const release = () => this.#releaseLoop(conversation.ownerSub, conversationId);
+    if (sticky && sticky.leaseGen !== leaseGen) {
+      // The store changed hands since this worker opened it, so its storage is fenced out. Start
+      // over under a fresh holder once it's gone, rather than reuse its name.
+      await release();
+      await sticky.worker.terminate();
+      await this.#retry(job, "busy");
+      return;
+    }
+    if (this.#stopping) {
+      await release();
+      await pool.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [conversationId]);
+      return;
+    }
     try {
-      let live = sticky;
-      // Someone else held the store since this worker opened it; its storage is fenced out anyway.
-      if (live && live.leaseGen !== leaseGen) {
-        await live.worker.terminate();
-        live = undefined;
+      let live: Live | undefined = sticky;
+      if (!live) {
+        const booted = await this.#boot(conversation, holder, leaseGen);
+        live = booted;
+        // An interrupted run picked up again is this turn's work, before any new message.
+        if (booted.resuming) {
+          const resumed = this.#startTurn(live);
+          resumed.running = true;
+          await this.#untilSettledOrAsking(live, resumed);
+          return;
+        }
       }
-      live ??= await this.#boot(conversation, holder, leaseGen);
-      await this.#drain(live);
-      await this.#o.pool.query("UPDATE orbit_conversations SET interrupted = false WHERE id = $1", [conversationId]);
-    } finally {
-      await this.#o.pool.query(
-        "DELETE FROM orbit_live_loops WHERE user_sub = $1 AND conversation_id = $2 AND holder = $3",
-        [conversation.ownerSub, conversationId, this.#o.hostId],
-      );
+      const turn = this.#startTurn(live);
+      if (!(await this.#submitInbox(live))) {
+        this.#endTurn(live, "settled");
+        return;
+      }
+      await this.#untilSettledOrAsking(live, turn);
+    } catch (error) {
+      // Nothing scheduled would pick the inbox up again, so the turn is retried, and a restart
+      // finds it marked.
+      this.#o.log?.(`turn for ${conversationId} failed: ${(error as Error).message}`);
+      const live = this.#live.get(conversationId);
+      if (live?.turn) this.#endTurn(live, "interrupted");
+      else await release();
+      await pool.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [conversationId]);
+      await this.#retry(job, "failed");
     }
   }
 
-  async #boot(conversation: ConversationRow, holder: string, leaseGen: number): Promise<Live> {
+  /** The handler's wait: until the run settles, or until it asks the user, who may take a while. */
+  async #untilSettledOrAsking(live: Live, turn: Turn): Promise<void> {
+    const asking = live.asks.size > 0 ? Promise.resolve() : this.#next(live, "ask").then(() => undefined);
+    asking.catch(() => undefined);
+    await Promise.race([turn.done, asking]);
+  }
+
+  #startTurn(live: Live): Turn {
+    let end!: () => void;
+    const done = new Promise<void>((resolve) => (end = resolve));
+    const turn: Turn = { done, end, running: false };
+    // The turn cap, paused while the run waits on the user: approvals pause instead of timing out.
+    const arm = (ms: number) => {
+      turn.cap = setTimeout(() => {
+        if (live.asks.size > 0) arm(30_000);
+        else void live.worker.terminate();
+      }, ms);
+    };
+    arm(this.#o.lease.maxTurnMs);
+    live.turn = turn;
+    return turn;
+  }
+
+  /**
+   * End the conversation's turn: release the user's live loop, record whether it finished or was
+   * cut off, and send the next turn if messages came while it ran.
+   */
+  #endTurn(live: Live, how: "settled" | "interrupted"): void {
+    const turn = live.turn;
+    if (!turn) return;
+    clearTimeout(turn.cap);
+    live.turn = undefined;
+    turn.end();
+    const { pool } = this.#o;
+    const id = live.conversationId;
+    this.#track(async () => {
+      await this.#releaseLoop(live.sub, id);
+      // A restart's close settles the run as aborted; it still has to resume on the next host.
+      const interrupted = how === "interrupted" || this.#stopping;
+      await pool.query("UPDATE orbit_conversations SET interrupted = $2 WHERE id = $1", [id, interrupted]);
+      if (!this.#stopping && !this.#handling.has(id) && (await this.#hasInbox(id))) await this.#send({ conversationId: id });
+    }, `ending the turn for ${id}`);
+  }
+
+  #track(work: () => Promise<unknown>, what: string): void {
+    const running = work()
+      .catch((error: Error) => this.#o.log?.(`${what} failed: ${error.message}`))
+      .finally(() => this.#settling.delete(running));
+    this.#settling.add(running);
+  }
+
+  #releaseLoop(sub: string, conversationId: string): Promise<unknown> {
+    return this.#o.pool.query("DELETE FROM orbit_live_loops WHERE user_sub = $1 AND conversation_id = $2 AND holder = $3", [
+      sub,
+      conversationId,
+      this.#o.hostId,
+    ]);
+  }
+
+  async #hasInbox(conversationId: string): Promise<boolean> {
+    const { rowCount } = await this.#o.pool.query("SELECT 1 FROM orbit_inbox WHERE conversation_id = $1 LIMIT 1", [conversationId]);
+    return (rowCount ?? 0) > 0;
+  }
+
+  async #boot(conversation: ConversationRow, holder: string, leaseGen: number): Promise<Live & { resuming: boolean }> {
     const { pool } = this.#o;
     const pageId = conversation.pageId ?? (await this.#o.pageFor(conversation));
     if (conversation.pageId === null) {
@@ -271,13 +428,12 @@ export class Dispatcher {
       worker,
       asks: new Map(),
       waiters: new Set(),
-      inTurn: false,
       exited: false,
     };
     this.#live.set(conversation.id, live);
     worker.on("message", (message: FromWorker) => this.#onMessage(live, message));
     worker.on("error", (error) => this.#o.log?.(`worker for ${conversation.id} failed: ${error.message}`));
-    worker.once("exit", (code) => void this.#onExit(live, code));
+    worker.once("exit", (code) => this.#track(() => this.#onExit(live, code), `the exit of ${conversation.id}'s worker`));
 
     const ready = (await this.#next(live, "ready")) as Extract<FromWorker, { type: "ready" }>;
     if (conversation.durableConversationId === null) {
@@ -293,53 +449,45 @@ export class Dispatcher {
         },
         (error: Error) => this.#o.log?.(`lease renewal for ${conversation.id} failed: ${error.message}`),
       );
+      // A turn that runs (or waits on the user) keeps the user's live loop for as long as it lasts.
+      if (live.turn) {
+        void pool
+          .query(
+            "UPDATE orbit_live_loops SET expires_at = now() + $4 * interval '1 millisecond' WHERE user_sub = $1 AND conversation_id = $2 AND holder = $3",
+            [live.sub, live.conversationId, this.#o.hostId, this.#o.lease.maxTurnMs],
+          )
+          .catch(() => undefined);
+      }
     }, this.#o.lease.renewMs);
-    // An interrupted run picked up again counts as this turn's work before any new message.
-    if (ready.resuming) await this.#bounded(live, () => this.#next(live, "settled"));
-    return live;
+    return Object.assign(live, { resuming: ready.resuming });
   }
 
-  /** Hand the inbox to the worker as one input, then wait for the run to settle. */
-  async #drain(live: Live): Promise<void> {
+  /**
+   * Hand the inbox to the worker as one input; false when the inbox was empty. Messages are deleted
+   * once the worker has taken them into its durable inbox.
+   */
+  async #submitInbox(live: Live): Promise<boolean> {
     const { rows } = await this.#o.pool.query<{ id: string; text: string }>(
       "SELECT id, text FROM orbit_inbox WHERE conversation_id = $1 ORDER BY id",
       [live.conversationId],
     );
-    if (rows.length === 0) return;
+    if (rows.length === 0) return false;
     const text = rows.map((r) => r.text).join("\n\n");
-    await this.#bounded(live, async () => {
-      // Busy with a run Orbit started (a greeting, an auto-resume follow-up): let it finish, then retry.
-      for (let attempt = 0; ; attempt++) {
-        live.worker.postMessage({ cmd: "submit", text });
-        const ack = (await this.#next(live, "submitted")) as Extract<FromWorker, { type: "submitted" }>;
-        // Registered right after the ack and before the port delivers anything else, so the settled it
-        // waits for is the run this submit started (or, refused, the run that was in the way), never
-        // one that finished before the submit landed.
-        const settled = this.#next(live, "settled");
-        if (ack.admitted) {
-          // Taken into the conversation's durable inbox, so the messages are no longer ours to keep.
-          await this.#o.pool.query("DELETE FROM orbit_inbox WHERE id = ANY($1::bigint[])", [rows.map((r) => r.id)]);
-          await settled;
-          return;
-        }
-        if (attempt >= 20) throw new Error(`Conversation ${live.conversationId} stayed busy`);
-        // The run in the way may have settled just before the refusal came back, so don't wait on
-        // its settled alone.
-        settled.catch(() => undefined);
-        await Promise.race([settled, new Promise((resolve) => setTimeout(resolve, 500))]);
+    // Busy with a run Orbit started (a greeting, an auto-resume follow-up): let it finish, then retry.
+    for (let attempt = 0; ; attempt++) {
+      live.worker.postMessage({ cmd: "submit", text });
+      const ack = (await this.#next(live, "submitted")) as Extract<FromWorker, { type: "submitted" }>;
+      if (ack.admitted) {
+        if (live.turn) live.turn.running = true;
+        await this.#o.pool.query("DELETE FROM orbit_inbox WHERE id = ANY($1::bigint[])", [rows.map((r) => r.id)]);
+        return true;
       }
-    });
-  }
-
-  /** Run a turn's wait under the turn cap; past it, the worker is stopped and the turn is interrupted. */
-  async #bounded(live: Live, wait: () => Promise<unknown>): Promise<void> {
-    live.inTurn = true;
-    const cap = setTimeout(() => void live.worker.terminate(), this.#o.lease.maxTurnMs);
-    try {
-      await wait();
-    } finally {
-      clearTimeout(cap);
-      live.inTurn = false;
+      if (attempt >= 20) throw new Error(`Conversation ${live.conversationId} stayed busy`);
+      // The run in the way may have settled just before the refusal came back, so don't wait on
+      // its settled alone.
+      const settled = this.#next(live, "settled");
+      settled.catch(() => undefined);
+      await Promise.race([settled, new Promise((resolve) => setTimeout(resolve, 500))]);
     }
   }
 
@@ -359,6 +507,9 @@ export class Dispatcher {
         break;
       case "ask-withdrawn":
         live.asks.delete(message.id);
+        break;
+      case "settled":
+        if (live.turn?.running) this.#endTurn(live, "settled");
         break;
       case "report":
         this.#o.log?.(`conversation ${live.conversationId}: ${message.message}`);
@@ -383,8 +534,17 @@ export class Dispatcher {
     const { pool } = this.#o;
     // Cut off mid-turn (a crash, the turn cap, a restart) or holding an ask: resume it later. A lost
     // lease means another host has the conversation, and it's theirs to resume.
-    if ((live.inTurn || live.asks.size > 0) && code !== LEASE_LOST_EXIT_CODE) {
-      await pool.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [live.conversationId]).catch(() => undefined);
+    if (live.turn || live.asks.size > 0) {
+      if (code === LEASE_LOST_EXIT_CODE) {
+        const turn = live.turn;
+        live.turn = undefined;
+        clearTimeout(turn?.cap);
+        turn?.end();
+        await this.#releaseLoop(live.sub, live.conversationId).catch(() => undefined);
+      } else {
+        this.#endTurn(live, "interrupted");
+        await pool.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [live.conversationId]).catch(() => undefined);
+      }
     }
     // Let the next worker take the lease without waiting out the TTL; its acquire still bumps.
     await releaseLease(pool, live.storeId, live.holder).catch(() => undefined);
