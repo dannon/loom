@@ -13,7 +13,7 @@ import {
 } from "../../../../../extensions/loom/galaxy-tool-source";
 import { fenced, registerArtifactKinds } from "../../artifacts/kinds";
 import type { Artifact } from "../tool";
-import { registerBrowserLayers } from "./layers";
+import { registerBrowserLayers, registerFlavorLayers } from "./layers";
 
 type Handler = (event: { toolName: string; input: Record<string, unknown> }) => Promise<unknown>;
 
@@ -98,5 +98,71 @@ describe("the browser layers", () => {
   it("leave Orbit's own tools alone", async () => {
     const call = layer();
     expect(await call("galaxy_job_record", { tool_id: "lineage_report" })).toBeUndefined();
+  });
+});
+
+describe("the flavor layers", () => {
+  function flavored(annotate = async () => "[olit] that's a visualization" as string | undefined) {
+    const handlers = new Map<string, (event: any, ctx?: any) => Promise<unknown>>();
+    registerFlavorLayers(
+      {
+        on: (event: string, h: (event: any, ctx?: any) => Promise<unknown>) =>
+          void handlers.set(event, h),
+      } as never,
+      {
+        brandName: "Olit",
+        annotators: [annotate],
+        promptSections: ({ datasetId }) => ({
+          afterIdentity: [`Opened on dataset ${datasetId}.`],
+          terminology: ["- **visualization**: a Galaxy plugin that renders a dataset."],
+        }),
+        datasetId: async () => "d1",
+        context: async () => ({}) as never,
+      },
+    );
+    return handlers;
+  }
+
+  it("append the flavor's prompt sections to Orbit's prompt", async () => {
+    const before = flavored().get("before_agent_start")!;
+    const result = (await before(
+      { systemPrompt: "ORBIT" },
+      { model: { id: "m", provider: "p" } },
+    )) as {
+      systemPrompt: string;
+    };
+    expect(result.systemPrompt).toBe(
+      "ORBIT\n\nOpened on dataset d1.\n\n## Olit terms\n\n- **visualization**: a Galaxy plugin that renders a dataset.",
+    );
+  });
+
+  it("append a note to a Galaxy result an annotator has something to say about, and nothing else", async () => {
+    const result = flavored().get("tool_result")!;
+    const content = [{ type: "text", text: JSON.stringify({ data: [], success: true }) }];
+    expect(
+      await result({
+        toolName: "search_tools_by_name",
+        input: { query: "ngl" },
+        content,
+        isError: false,
+      }),
+    ).toEqual({
+      content: [...content, { type: "text", text: "\n\n[olit] that's a visualization" }],
+    });
+    // Not a Galaxy tool, an error, or text that isn't the envelope: left alone.
+    expect(
+      await result({ toolName: "run_python", input: {}, content, isError: false }),
+    ).toBeUndefined();
+    expect(
+      await result({ toolName: "search_tools_by_name", input: {}, content, isError: true }),
+    ).toBeUndefined();
+    expect(
+      await result({
+        toolName: "search_tools_by_name",
+        input: {},
+        content: [{ type: "text", text: "not json" }],
+        isError: false,
+      }),
+    ).toBeUndefined();
   });
 });

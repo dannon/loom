@@ -18,7 +18,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { registeredGalaxyTools } from "../../../../../extensions/loom/galaxy-tool-source";
 import { inventedEmbed, resolveArtifacts } from "../artifacts";
-import type { Artifact } from "../tool";
+import type { Annotate } from "../ops";
+import type { Artifact, Context } from "../tool";
+import type { AgentFlavor } from "../tools";
 
 export interface LayerHost {
   /** The product name a misroute names the tool's owner by, e.g. "Olit". */
@@ -89,4 +91,74 @@ export function registerBrowserLayers(api: ExtensionAPI, host: LayerHost): void 
     }
     return undefined;
   });
+}
+
+export interface FlavorLayerHost {
+  /** The section heading the flavor's prompt lines go under. */
+  brandName: string;
+  annotators?: readonly Annotate[];
+  promptSections?: AgentFlavor["promptSections"];
+  /** The dataset the bound conversation was opened on. */
+  datasetId: () => Promise<string | undefined>;
+  /** A tool call's context, for an annotator that asks Galaxy something. */
+  context: () => Promise<Context>;
+}
+
+/** A Galaxy result's payload: the envelope's `data`, when the text is the envelope. */
+function payloadOf(content: ReadonlyArray<{ type: string; text?: string }>): unknown {
+  const text = content.map((c) => (c.type === "text" ? (c.text ?? "") : "")).join("");
+  try {
+    return (JSON.parse(text) as { data?: unknown }).data;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * What a flavor adds to the brain: its prompt sections, appended to Orbit's system prompt, and its
+ * notes on Galaxy results (Olit's "that's a visualization, not a tool" after a catalog search),
+ * appended to what the model reads. Both after Orbit's own handlers.
+ */
+export function registerFlavorLayers(api: ExtensionAPI, host: FlavorLayerHost): void {
+  if (host.promptSections) {
+    const sectionsOf = host.promptSections;
+    api.on("before_agent_start", async (event, ctx) => {
+      const sections = sectionsOf({
+        model: ctx.model?.id,
+        provider: ctx.model?.provider,
+        datasetId: await host.datasetId(),
+      });
+      const blocks = [
+        ...(sections.afterIdentity ?? []),
+        ...(sections.terminology?.length
+          ? [`## ${host.brandName} terms\n\n${sections.terminology.join("\n")}`]
+          : []),
+        ...(sections.afterRouter ?? []),
+      ].filter(Boolean);
+      return blocks.length
+        ? { systemPrompt: [event.systemPrompt, ...blocks].join("\n\n") }
+        : undefined;
+    });
+  }
+  const annotators = host.annotators ?? [];
+  if (annotators.length) {
+    api.on("tool_result", async (event) => {
+      if (event.isError) return undefined;
+      if (!registeredGalaxyTools().some((t) => t.name === event.toolName)) return undefined;
+      const data = payloadOf(event.content as Array<{ type: string; text?: string }>);
+      if (data === undefined) return undefined;
+      const ctx = await host.context();
+      for (const annotate of annotators) {
+        const note = await annotate(
+          event.toolName,
+          event.input as Record<string, unknown>,
+          data,
+          ctx,
+        );
+        if (note)
+          return { content: [...event.content, { type: "text" as const, text: `\n\n${note}` }] };
+      }
+      return undefined;
+    });
+  }
 }
