@@ -157,7 +157,12 @@ registerToolCallCap(on, data.limits.maxToolCalls);
   "agent_settled",
   (e) => post({ type: "settled", aborted: e.aborted }),
 );
-orbit.loom(host.api);
+// Withheld tools are never registered, so the model isn't offered them; the gate refuses them anyway.
+const api = Object.create(host.api) as typeof host.api;
+api.registerTool = (def) => {
+  if (!WITHHELD_TOOLS.has(def.name)) host.api.registerTool(def);
+};
+orbit.loom(api);
 const registry = createRegistry();
 registry.install(host.seal());
 const { models, model } = await agentModels().connect(

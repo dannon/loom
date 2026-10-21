@@ -5,14 +5,18 @@
 import surface from "../../__surface__/server/tools.json";
 
 /**
- * User-defined tools, which run arbitrary code on Galaxy under the user's account, aren't offered
- * hosted; managing them (listing, deleting) goes with them until live acceptance decides otherwise.
+ * Tools hosted Orbit doesn't offer. User-defined tools run arbitrary code on Galaxy under the user's
+ * account; managing them (listing, deleting) goes with them until live acceptance decides otherwise.
+ * The lesson bank and the approval registry are local, per-install stores with no hosted home yet.
  */
 export const WITHHELD_TOOLS: ReadonlySet<string> = new Set([
   "create_user_tool",
   "run_user_tool",
   "list_user_tools",
   "delete_user_tool",
+  "lesson_propose",
+  "lessons_search",
+  "loom_propose",
 ]);
 
 /** The tools a hosted worker may run, from the pinned surface snapshot. */
