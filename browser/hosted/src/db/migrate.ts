@@ -75,6 +75,10 @@ export const HOST_MIGRATIONS: MigrationSet = {
         expires_at TIMESTAMPTZ NOT NULL
       )`,
     ],
+    [
+      // The user's LiteLLM virtual key (H9), sealed with ORBIT_TOKEN_KEY.
+      "ALTER TABLE orbit_users ADD COLUMN model_key BYTEA",
+    ],
   ],
 };
 

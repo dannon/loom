@@ -2,6 +2,7 @@
  * The host's settings, all from the environment, checked once at boot. A bad or missing setting
  * stops the host with every problem listed, rather than failing on first use mid-session.
  */
+import { parse as parseConnection } from "pg-connection-string";
 
 export interface HostConfig {
   /** Where browsers reach the host; sign-in redirects and cookies are built from it. */
@@ -20,6 +21,18 @@ export interface HostConfig {
   };
   /** Encrypts refresh tokens at rest (brief decision 8). */
   readonly tokenKey: Buffer;
+  readonly model: {
+    /** LiteLLM; workers reach the model through it with per-user virtual keys (H9). */
+    readonly litellmUrl: URL;
+    readonly adminKey: string;
+    readonly id: string;
+    readonly tpm: number;
+    readonly rpm: number;
+  };
+  /** Per user message: model turns, and tool calls (README decision 5). */
+  readonly turnLimits: { readonly maxSteps: number; readonly maxToolCalls: number };
+  /** When set, every turn is turned away with this notice: the global kill switch. */
+  readonly turnsDisabled: string | undefined;
   readonly lease: {
     readonly ttlMs: number;
     readonly renewMs: number;
@@ -39,16 +52,18 @@ export class ConfigError extends Error {
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const isLoopback = (url: URL) => LOOPBACK.has(url.hostname);
 
-// Parsed as well as matched, so the boot summary's own parse can't fail on a URL this accepted.
-const isPostgresUrl = (raw: string) => {
-  if (!/^postgres(ql)?:\/\//.test(raw)) return false;
+/**
+ * pg's own reading of a connection string: `postgres://user@/db?host=/socket`, which pg accepts,
+ * isn't a valid URL to the WHATWG parser (a user with no host).
+ */
+function parseDatabaseUrl(raw: string): ReturnType<typeof parseConnection> | undefined {
+  if (!/^postgres(ql)?:\/\//.test(raw)) return undefined;
   try {
-    new URL(raw);
-    return true;
+    return parseConnection(raw);
   } catch {
-    return false;
+    return undefined;
   }
-};
+}
 
 /** Read and check every setting, throwing a ConfigError that lists all the problems at once. */
 export function loadConfig(env: Record<string, string | undefined> = process.env): HostConfig {
@@ -96,7 +111,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (!Number.isInteger(port) || port < 1 || port > 65535) problems.push("ORBIT_PORT must be a port number");
 
   const databaseUrl = required("ORBIT_DATABASE_URL");
-  if (databaseUrl !== undefined && !isPostgresUrl(databaseUrl)) {
+  if (databaseUrl !== undefined && !parseDatabaseUrl(databaseUrl)) {
     problems.push("ORBIT_DATABASE_URL must be a postgres:// URL");
   }
 
@@ -116,6 +131,22 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     problems.push("ORBIT_TOKEN_KEY must be 32 bytes, base64-encoded (openssl rand -base64 32)");
   }
 
+  const litellmUrl = url("ORBIT_LITELLM_URL", required("ORBIT_LITELLM_URL"));
+  const adminKey = required("ORBIT_LITELLM_ADMIN_KEY");
+  const modelId = required("ORBIT_MODEL");
+  const count = (name: string, fallback: number): number => {
+    const raw = value(name);
+    if (raw === undefined) return fallback;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n <= 0) problems.push(`${name} must be a positive whole number`);
+    return n;
+  };
+  const tpm = count("ORBIT_MODEL_TPM", 100_000);
+  const rpm = count("ORBIT_MODEL_RPM", 30);
+  const turnsDisabled = value("ORBIT_TURNS_DISABLED");
+  const maxSteps = count("ORBIT_MAX_STEPS", 40);
+  const maxToolCalls = count("ORBIT_MAX_TOOL_CALLS", 60);
+
   const ttlMs = seconds("ORBIT_LEASE_TTL_SECONDS", 60);
   const renewMs = seconds("ORBIT_LEASE_RENEW_SECONDS", 15);
   const maxTurnMs = seconds("ORBIT_MAX_TURN_SECONDS", 30 * 60);
@@ -131,14 +162,18 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     galaxyLinkUrl: galaxyLinkUrl ?? new URL("/login/start", galaxyUrl!),
     oidc: { issuer: issuer!, clientId: clientId!, clientSecret },
     tokenKey,
+    model: { litellmUrl: litellmUrl!, adminKey: adminKey!, id: modelId!, tpm, rpm },
+    turnsDisabled,
+    turnLimits: { maxSteps, maxToolCalls },
     lease: { ttlMs, renewMs, maxTurnMs },
   };
 }
 
 /** The settings for the boot log. Secrets are named as set or not, never shown. */
 export function describeConfig(config: HostConfig): string {
-  const db = new URL(config.databaseUrl);
-  const where = `${db.hostname || db.searchParams.get("host") || "local socket"}${db.port ? `:${db.port}` : ""}${db.pathname}`;
+  // loadConfig already checked it parses.
+  const db = parseDatabaseUrl(config.databaseUrl)!;
+  const where = `${db.host || "local socket"}${db.port ? `:${db.port}` : ""}/${db.database ?? ""}`;
   const secs = (ms: number) => `${ms / 1000} s`;
   const lines = [
     ["public URL", `${config.publicUrl.origin} (listening on ${config.port})`],
@@ -149,6 +184,14 @@ export function describeConfig(config: HostConfig): string {
       `${config.oidc.issuer.href} as ${config.oidc.clientId} (client secret ${config.oidc.clientSecret ? "set" : "not set, public client"})`,
     ],
     ["token key", "set"],
+    [
+      "model",
+      `${config.model.id} via ${config.model.litellmUrl.origin} (admin key set), per user ${config.model.tpm} tpm / ${config.model.rpm} rpm`,
+    ],
+    [
+      "turns",
+      `${config.turnsDisabled ? `DISABLED: ${config.turnsDisabled}` : "enabled"}, at most ${config.turnLimits.maxSteps} steps and ${config.turnLimits.maxToolCalls} tool calls each`,
+    ],
     [
       "leases",
       `${secs(config.lease.ttlMs)} TTL, renewed every ${secs(config.lease.renewMs)}, turns end after ${secs(config.lease.maxTurnMs)}`,

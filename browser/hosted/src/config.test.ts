@@ -5,6 +5,7 @@ import { ConfigError, describeConfig, loadConfig } from "./config";
 const TOKEN_KEY = Buffer.alloc(32, 7).toString("base64");
 const CLIENT_SECRET = "client-secret-value-xyz";
 const DB_PASSWORD = "db-password-value-xyz";
+const ADMIN_KEY = "sk-litellm-admin-value-xyz";
 
 const DEV = {
   ORBIT_PUBLIC_URL: "http://localhost:7878",
@@ -13,6 +14,9 @@ const DEV = {
   ORBIT_OIDC_ISSUER: "https://login.galaxyproject.org/realms/galaxy-test",
   ORBIT_OIDC_CLIENT_ID: "orbit-dev",
   ORBIT_TOKEN_KEY: TOKEN_KEY,
+  ORBIT_LITELLM_URL: "https://litellm.galaxyproject.org",
+  ORBIT_LITELLM_ADMIN_KEY: ADMIN_KEY,
+  ORBIT_MODEL: "minimax",
 };
 
 const DEPLOYED = {
@@ -42,6 +46,9 @@ describe("loadConfig", () => {
       "ORBIT_OIDC_ISSUER is not set",
       "ORBIT_OIDC_CLIENT_ID is not set",
       "ORBIT_TOKEN_KEY is not set",
+      "ORBIT_LITELLM_URL is not set",
+      "ORBIT_LITELLM_ADMIN_KEY is not set",
+      "ORBIT_MODEL is not set",
     ]);
   });
 
@@ -55,6 +62,11 @@ describe("loadConfig", () => {
     expect(config.oidc.clientSecret).toBeUndefined();
     expect(config.tokenKey.length).toBe(32);
     expect(config.lease).toEqual({ ttlMs: 60_000, renewMs: 15_000, maxTurnMs: 1_800_000 });
+  });
+
+  it("takes a socket-style database URL, which pg accepts and WHATWG doesn't", () => {
+    const config = loadConfig({ ...DEV, ORBIT_DATABASE_URL: "postgres://orbit@/orbit?host=%2Fvar%2Frun%2Fpostgresql" });
+    expect(describeConfig(config)).toContain("/var/run/postgresql/orbit (password not set)");
   });
 
   it("boots a deployed host with a client secret", () => {
@@ -97,7 +109,7 @@ describe("loadConfig", () => {
 describe("describeConfig", () => {
   it("names which secrets are set and never shows them", () => {
     const summary = describeConfig(loadConfig(DEPLOYED));
-    for (const secret of [CLIENT_SECRET, DB_PASSWORD, TOKEN_KEY]) expect(summary).not.toContain(secret);
+    for (const secret of [CLIENT_SECRET, DB_PASSWORD, TOKEN_KEY, ADMIN_KEY]) expect(summary).not.toContain(secret);
     expect(summary).toContain("db:5432/orbit (password set)");
     expect(summary).toContain("as orbit (client secret set)");
     expect(summary).toContain("token key   set");
