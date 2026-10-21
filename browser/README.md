@@ -101,7 +101,9 @@ need the repo root installed. `npm run preflight:orbit` builds a worker that boo
 through the production config and loads it in a browser-worker realm;
 `e2e/orbit-preflight-drive.cjs` does the same in a real browser, built and dev.
 `node scripts/compare-default-bundle.mjs <ref>` checks that the default bundle is byte-identical
-to `<ref>`'s.
+to `<ref>`'s. The flag build keeps its own conversation store and submission ledger (`-orbit`
+files), so it never reads what a default build kept. `EXPECT_BRAIN=orbit bash e2e/run-all.sh` runs
+the e2e tiers against a flag build and fails a drive the default brain answered.
 
 `npm run dev` against a local Galaxy and a model:
 
