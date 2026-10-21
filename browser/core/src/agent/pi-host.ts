@@ -52,6 +52,7 @@ import {
   type PromptInput,
   type Submission,
   type SubmissionId,
+  type ToolExecutionApi,
   type ToolExecutionResult,
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
@@ -217,6 +218,16 @@ export interface PiHostOptions {
     conversationId: ConversationId,
     call: FinishedCall,
     result: ToolExecutionResult,
+  ) => void | Promise<void>;
+  /**
+   * Runs inside every tool's execute, once it has a result, with pi-durable's execution api: the
+   * one place a shell can commit durable work (create a task, say) as part of the call itself.
+   */
+  afterExecute?: (
+    name: string,
+    result: { content: ToolResultMessage["content"]; details: unknown; isError: boolean },
+    api: ToolExecutionApi,
+    conversationId: ConversationId,
   ) => void | Promise<void>;
   /** sessionManager.getSessionId(); the conversation id by default. */
   sessionId?: () => string;
@@ -941,10 +952,18 @@ export function createPiHost(options: PiHostOptions): PiHost {
 
   // ── registrations ──────────────────────────────────────────────────────────────────────────
 
+  /** The tools declared to the model: every registration but the hidden ones, which pi keeps unreachable. */
+  const declared = () => [...tools.values()].filter((t) => t.exposure !== "hidden");
+
   function wrap(def: AnyTool): ToolRegistration {
+    // A call a reload interrupts reruns on recovery only when its tool says it changes nothing:
+    // the Galaxy source's read operations. Orbit's own tools carry no annotations and stay unsafe,
+    // and a submission's recovery is the ledger's job, not a replay's.
+    const replay = def.annotations?.readOnlyHint === true ? "safe" : "unsafe";
     return defineTool({
       name: def.name,
       description: def.description,
+      replay,
       // Two pi-ai copies in the program: Orbit's TypeBox schema is passed through untouched so
       // pi-ai validates it as it does today (strict for @sinclair/typebox, see the orbit test).
       parameters: def.parameters as unknown as TSchema,
@@ -960,11 +979,19 @@ export function createPiHost(options: PiHostOptions): PiHost {
         };
         try {
           const r = await def.execute(api.callId, args, chord.abortSignal, onUpdate, toolCtx);
-          return {
+          const result = {
             content: r.content ?? [],
             details: json(r.details) ?? {},
             isError: r.isError === true,
           };
+          if (options.afterExecute) {
+            try {
+              await options.afterExecute(def.name, result, api, api.conversationId);
+            } catch (error) {
+              handlerError("after_execute", error);
+            }
+          }
+          return result;
         } catch (error) {
           if (chord.abortSignal?.aborted) {
             // Rethrown under the abort, so pi-durable runs no afterTool for this call.
@@ -1022,7 +1049,7 @@ export function createPiHost(options: PiHostOptions): PiHost {
     },
     sendMessage: (message: { customType: string }) => refused("sendMessage", message.customType),
     appendEntry: (customType: string) => refused("appendEntry", customType),
-    getActiveTools: () => lastOffered ?? [...tools.keys()],
+    getActiveTools: () => lastOffered ?? declared().map((t) => t.name),
     setModel: async (model: { provider: string; id: string }) => {
       if (!bound) {
         refused("setModel", `${model.provider}/${model.id}`);
@@ -1039,7 +1066,9 @@ export function createPiHost(options: PiHostOptions): PiHost {
         name: t.name,
         description: t.description,
         parameters: t.parameters,
-        exposure: "direct" as const,
+        // Only "hidden" changes anything here; every other exposure is declared like "direct".
+        exposure: t.exposure === "hidden" ? ("hidden" as const) : ("direct" as const),
+        ...(t.annotations ? { annotations: t.annotations } : {}),
         sourceInfo: SOURCE,
       })),
     getCommands: () =>
@@ -1367,7 +1396,7 @@ export function createPiHost(options: PiHostOptions): PiHost {
     }
     return defineExtension({
       name: options.name,
-      tools: [...tools.values()].map(wrap),
+      tools: declared().map(wrap),
       sections: [section(options.name, render, { tag: false })],
       hooks: [
         hook(GenerationTask, {
