@@ -21,9 +21,13 @@ import { galaxyOpsEntry } from "../../../../../extensions/loom/galaxy-ops-tools"
 import { createPage, listHistoryPages } from "../../../../../extensions/loom/galaxy-pages-api";
 import { galaxyBackgroundIdle } from "../../../../../extensions/loom/galaxy-reconcile";
 import { captureLateSubmission } from "../../../../../extensions/loom/galaxy-submission-capture";
+import { isSubmissionTool } from "../../../../../extensions/loom/galaxy-submission";
 import { setRecordStore } from "../../../../../extensions/loom/record-store";
+import {
+  createMemoryLedger,
+  type SubmissionLedger,
+} from "../../../../../extensions/loom/submission-ledger";
 import { createPageRecordStore } from "../../../../../extensions/loom/record-store-page";
-import { createMemoryLedger } from "../../../../../extensions/loom/submission-ledger";
 import { registerArtifactKinds } from "../../artifacts/kinds";
 import { DEFAULT_BRAND, noteTag } from "../brand";
 import { Binding, FollowUps, heldBy } from "../documents";
@@ -40,7 +44,7 @@ import type { OpenRequest, PageMessage, Waiting, WorkerMessage } from "../worker
 import { bootOrbit, type OrbitBoot } from "./boot";
 import { setOrbitCwd } from "./env";
 import { orbitGrant } from "./grants";
-import { openFileLedger, opfsFile } from "./ledger";
+import { openLedger, opfsFile } from "./ledger";
 
 /** How long a conversation being left gets to finish its tool calls' end events. */
 const SETTLE_MS = 30_000;
@@ -57,21 +61,29 @@ let detach: (() => Promise<unknown>) | undefined;
 let held: Waiting;
 let readOnly = false;
 
+/**
+ * Confirmations waiting on the user. `run` marks one a run's tool call opened (it has the call's
+ * signal); one a command opened (/approve) isn't the run's to withdraw when the run ends.
+ */
 const confirms = new Map<
   number,
-  { conversation: ConversationId | undefined; resolve: (approved: boolean) => void }
+  { conversation: ConversationId | undefined; run: boolean; resolve: (approved: boolean) => void }
 >();
 let confirmId = 0;
 
 /** A confirm from Orbit, through the page's dialog; withdrawn when the call it gates stops. */
 function ask(title: string, message: string, id: ConversationId | undefined, signal?: AbortSignal) {
   return new Promise<boolean | undefined>((resolve) => {
+    if (signal?.aborted) {
+      resolve(undefined);
+      return;
+    }
     const key = confirmId++;
     const settle = (answer: boolean | undefined) => {
       if (!confirms.delete(key)) return;
       resolve(answer);
     };
-    confirms.set(key, { conversation: id, resolve: settle });
+    confirms.set(key, { conversation: id, run: signal !== undefined, resolve: settle });
     signal?.addEventListener(
       "abort",
       () => {
@@ -84,10 +96,10 @@ function ask(title: string, message: string, id: ConversationId | undefined, sig
   });
 }
 
-/** Decline what `id`'s run is waiting on, so that run can end. */
-function decline(id: ConversationId) {
+/** Decline what `id` is waiting on, so its run can end; at a run's end, only what the run opened. */
+function decline(id: ConversationId, runOnly = false) {
   for (const [key, waiting] of confirms) {
-    if (waiting.conversation !== id) continue;
+    if (waiting.conversation !== id || (runOnly && !waiting.run)) continue;
     post({ type: "withdrawn", id: key });
     waiting.resolve(false);
   }
@@ -180,7 +192,7 @@ async function show(next: Conversation, reason: SessionReason) {
   post({ type: "events", events: [stream.snapshot] });
   stream.start(async (events) => {
     post({ type: "events", events });
-    if (events.some((e) => e.type === "run_end")) decline(next.id);
+    if (events.some((e) => e.type === "run_end")) decline(next.id, true);
     await postHeld();
   });
   detach = () => stream.stop();
@@ -190,6 +202,8 @@ async function show(next: Conversation, reason: SessionReason) {
 }
 
 async function open(request: OpenRequest) {
+  // A second open (the other-tab handover) finds the brain already booted in this worker.
+  if (orbit) return;
   const brand = flavor.brand ?? DEFAULT_BRAND;
   const capabilities = request.config.capabilities ?? ["llm", "local", "read", "write"];
   // Refused before anything is opened: a grant Orbit can't map is not one to guess at.
@@ -207,7 +221,7 @@ async function open(request: OpenRequest) {
     },
   );
   let storage: Storage = new MemoryStorage();
-  let ledger = createMemoryLedger();
+  let ledger: SubmissionLedger = createMemoryLedger();
   if (user !== undefined) {
     await holdStorage(`${brand.id}:storage`, {
       steal: request.steal,
@@ -218,7 +232,10 @@ async function open(request: OpenRequest) {
       },
     });
     ({ storage, unkept } = await openStorage(`${brand.id}-${user}-orbit`, brand.id));
-    ledger = await openFileLedger(opfsFile(`${brand.id}-${user}-orbit-ledger.json`));
+    // Its own files, like the storage, and the same fallback to memory when they can't be opened.
+    const opened = await openLedger(opfsFile(`${brand.id}-${user}-orbit-ledger.json`));
+    ledger = opened.ledger;
+    unkept ??= opened.unkept;
   }
   const url = new URL(galaxy.root, self.location.href).href.replace(/\/+$/, "");
   const python = browserPython(request.pyodideURL);
@@ -275,13 +292,22 @@ async function open(request: OpenRequest) {
     ui: {
       ask: async (request, id, signal) =>
         request.kind === "confirm" ? ask(request.title, request.message, id, signal) : undefined,
-      notify: (text, level, id) =>
-        post({ type: "notice", level, text, ...(id === undefined ? {} : { conversationId: id }) }),
+      notify: (text, level, id) => {
+        // The page shows one conversation; a notice for another one (a late capture after a
+        // switch, say) would land in the wrong chat.
+        if (id !== undefined && id !== conversation?.id) {
+          console.info(`[orbit] notice for conversation ${String(id)}:`, text);
+          return;
+        }
+        post({ type: "notice", level, text, ...(id === undefined ? {} : { conversationId: id }) });
+      },
     },
     host: {
       models: { getModel: (provider, id) => runtime?.models?.getModel(provider, id) },
       beforeStart: installRecord,
-      onLateCompletion: (_id, call, result) => captureLateSubmission(call.id, call.name, result),
+      // Only a submission has anything to capture; any other late call is just finished.
+      onLateCompletion: (_id, call, result) =>
+        isSubmissionTool(call.name) ? captureLateSubmission(call.id, call.name, result) : undefined,
     },
   });
   runtime = await Runtime.open({
@@ -351,11 +377,20 @@ function onMessage({ data }: MessageEvent<PageMessage>) {
 async function handle(data: PageMessage) {
   if (data.type === "submit") {
     const current = conversation!;
-    // The user's own message lets settled work start runs again, as it does for the default brain.
-    await current.commit(async (tx) => {
-      Object.assign(await tx.doc(FollowUps, current.id), { automatic: 0, paused: false });
-    }, context);
-    await orbit!.host.submit(data.text, { source: "interactive" });
+    const host = orbit!.host;
+    const command =
+      data.text.startsWith("/") && host.commands.has(data.text.slice(1).split(" ")[0]);
+    // The user's own message lets settled work start runs again, as it does for the default
+    // brain; a command (/pending, say) isn't a message to the agent.
+    if (!command) {
+      await current.commit(async (tx) => {
+        Object.assign(await tx.doc(FollowUps, current.id), { automatic: 0, paused: false });
+      }, context);
+    }
+    const submitted = await host.submit(data.text, { source: "interactive" });
+    // A command, a handled input or a busy refusal starts no run, so no stream event will tell
+    // the page it's idle again.
+    if (!submitted) post({ type: "quiet" });
   } else if (data.type === "reset") {
     const left = conversation!;
     const bound = await runtime!.harness.snapshot(Binding, left.id, context);

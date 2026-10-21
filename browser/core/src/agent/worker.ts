@@ -61,6 +61,8 @@ export type WorkerMessage =
   /** A confirmation the agent no longer waits on. */
   | { type: "withdrawn"; id: number }
   | { type: "reply"; id: number; value?: unknown; error?: string }
+  /** The page's message started no run (a slash command): nothing is busy. */
+  | { type: "quiet" }
   /** Something the brain told the user outside a turn: a slash command's answer, a notice. */
   | {
       type: "notice";

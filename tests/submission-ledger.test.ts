@@ -192,8 +192,10 @@ describe("the memory ledger", () => {
     release();
     await pending;
     fail = true;
-    // A submission whose entry can't be written down is stopped before its request goes out.
+    // A submission whose entry can't be written down is stopped before its request goes out,
+    // and leaves no entry behind to hold the record open.
     await expect(ledger.dispatched(entry("c2"))).rejects.toThrow("quota exceeded");
+    expect((await ledger.open("/a/notebook.md")).map((e) => e.callId)).toEqual(["c1"]);
   });
 
   it("remembers a delivered mid-flight failure, so the next tick can't announce it again", async () => {

@@ -29,7 +29,9 @@ export function vendorSkills(): VendorSkillsSource {
       const url = BODIES[`${ROOT}${target}`];
       if (!url) return null;
       const response = await fetch(url);
-      return response.ok ? response.text() : null;
+      // A failed fetch is a failure, not a file the tree doesn't have.
+      if (!response.ok) throw new Error(`${target} could not be loaded (HTTP ${response.status})`);
+      return response.text();
     },
   };
 }

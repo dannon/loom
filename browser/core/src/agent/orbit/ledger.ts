@@ -44,6 +44,23 @@ export async function openFileLedger(file: LedgerFile): Promise<SubmissionLedger
   });
 }
 
+/**
+ * The file ledger, or an in-memory one with the reason when the file can't be opened (a private
+ * window, site data blocked): the worker starts either way, as it does without its storage.
+ */
+export async function openLedger(
+  file: LedgerFile,
+): Promise<{ ledger: SubmissionLedger; unkept?: string }> {
+  try {
+    return { ledger: await openFileLedger(file) };
+  } catch (error) {
+    return {
+      ledger: createMemoryLedger(),
+      unkept: `its Galaxy submissions can't be kept across a reload (${String((error as Error)?.message ?? error)})`,
+    };
+  }
+}
+
 /** A file in the origin's private file system. */
 export function opfsFile(name: string): LedgerFile {
   const handle = navigator.storage
@@ -71,12 +88,16 @@ export function opfsFile(name: string): LedgerFile {
       ).createSyncAccessHandle;
       if (sync) {
         const access = await sync.call(file);
+        // Written over the old text first and cut to length after, so a worker killed partway
+        // leaves something that doesn't parse (and starts empty with a warning), never a file
+        // that reads as a valid, shorter ledger. Awaited: Safari's first handle was async.
         try {
-          access.truncate(0);
-          access.write(bytes, { at: 0 });
-          access.flush();
+          await access.write(bytes, { at: 0 });
+          await access.flush();
+          await access.truncate(bytes.length);
+          await access.flush();
         } finally {
-          access.close();
+          await access.close();
         }
         return;
       }
