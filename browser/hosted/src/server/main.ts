@@ -58,6 +58,7 @@ async function main(): Promise<void> {
     publicUrl: config.publicUrl,
     galaxyUrl: config.galaxyUrl,
     galaxyLinkUrl: config.galaxyLinkUrl,
+    log,
   };
 
   // /healthz is open to anyone, so Keycloak is asked at most every ten seconds.

@@ -29,6 +29,7 @@ export interface AuthContext {
   readonly galaxyLinkUrl: URL;
   /** Tests stand in for Galaxy's account check. */
   readonly fetch?: typeof fetch;
+  readonly log?: (message: string) => void;
 }
 
 export function readCookie(req: IncomingMessage, name: string): string | undefined {
@@ -180,12 +181,18 @@ async function linkedToGalaxy(context: AuthContext, sub: string, accessToken: st
       headers: { authorization: `Bearer ${accessToken}` },
       redirect: "manual",
     });
-  } catch {
+  } catch (error) {
+    context.log?.(`account link check: Galaxy unreachable (${(error as Error).message}); letting ${sub} in`);
     return true;
   }
-  if (response.status === 401 || response.status === 403) return false;
-  if (!response.ok) return true;
+  // Galaxy's answer here is what decides who gets the link page, so it's worth seeing.
+  if (response.status === 401 || response.status === 403 || !response.ok) {
+    const said = (await response.text().catch(() => "")).slice(0, 200).replace(/\s+/g, " ");
+    context.log?.(`account link check for ${sub}: Galaxy answered ${response.status} ${said}`);
+    return response.ok || (response.status !== 401 && response.status !== 403);
+  }
   const body = (await response.json().catch(() => ({}))) as { id?: unknown };
+  if (typeof body.id !== "string") context.log?.(`account link check for ${sub}: Galaxy answered as anonymous`);
   if (typeof body.id === "string") {
     await context.pool.query("UPDATE orbit_users SET galaxy_user_id = $2 WHERE sub = $1", [sub, body.id]);
     return true;
