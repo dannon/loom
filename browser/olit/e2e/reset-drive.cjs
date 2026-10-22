@@ -1,8 +1,10 @@
 // Reset leaves the old conversation behind with Galaxy work still running. That work may finish
 // and update the old conversation's record, but it must not start a model request nobody sees.
+// Under Orbit's brain the old record catches up when its conversation is next shown, not before.
 const playwright = require("playwright");
 const BROWSER = process.env.BROWSER || "chromium";
 const STUB = "http://127.0.0.1:8099";
+const ORBIT = process.env.EXPECT_BRAIN === "orbit";
 const LAUNCH = `${STUB}/plugins/visualizations/olit?dataset_id=dreset&frame=1`;
 
 const results = [];
@@ -12,7 +14,16 @@ function check(name, ok, detail) {
 }
 
 const get = async (path) => (await fetch(`${STUB}${path}`)).json();
-const record = async () => (await get("/__pages")).pages.find((p) => p.history_id === "h-dreset");
+// Orbit's brain keeps its job blocks on the page as base64 carriers (galaxy-markdown-adapter.ts).
+const decoded = (content) =>
+    content.replace(/^\[[a-z]+-[a-z]+:v1\]: #[a-z]+ "([A-Za-z0-9+/=]+)"[ \t]*$/gm, (_, b64) =>
+        Buffer.from(b64, "base64").toString("utf8"));
+const record = async () => {
+    const page = (await get("/__pages")).pages.find((p) => p.history_id === "h-dreset");
+    return page && { ...page, content: decoded(page.content || "") };
+};
+// Each brain's line for a job it just submitted.
+const SUBMITTED = ORBIT ? /job_id: jreset1\b[\s\S]*status: in_progress/ : /jreset1`? — submitted/;
 const shown = (frame, pattern, ms = 120000) =>
     frame.locator(`text=${pattern}`).first().waitFor({ timeout: ms }).then(() => true, () => false);
 
@@ -34,19 +45,25 @@ const shown = (frame, pattern, ms = 120000) =>
     await frame.locator("#input").fill("run cat on it");
     await frame.locator("#send-btn").click();
     check("the tool run is submitted", await shown(frame, "Submitted.", 60000));
-    check("the record notes the job as submitted", /jreset1`? — submitted/.test((await record())?.content || ""));
+    check("the record notes the job as submitted", SUBMITTED.test((await record())?.content || ""));
 
     await frame.locator("#reset-btn").click();
     check("Reset starts a new conversation", await shown(frame, "Started a new conversation", 30000));
     const before = (await get("/__seen")).calls;
 
     await fetch(`${STUB}/__job?state=ok`);
-    let finished = false;
-    for (let i = 0; i < 40 && !finished; i++) {
-        await page.waitForTimeout(1000);
-        finished = /finished \(ok\)/.test((await record())?.content || "");
+    if (ORBIT) {
+        // Orbit's watch polls only the conversation on the page; this record waits for its next show.
+        console.log("SKIP  the old conversation's record shows the job finished  — not until it is shown again");
+        await page.waitForTimeout(5000);
+    } else {
+        let finished = false;
+        for (let i = 0; i < 40 && !finished; i++) {
+            await page.waitForTimeout(1000);
+            finished = /finished \(ok\)/.test((await record())?.content || "");
+        }
+        check("the old conversation's record shows the job finished", finished);
     }
-    check("the old conversation's record shows the job finished", finished);
     // Past the watch's next poll, so a follow-up would have been sent by now.
     await page.waitForTimeout(3000);
     const after = (await get("/__seen")).calls;
