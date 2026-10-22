@@ -21,7 +21,7 @@ import { createConfirm } from "./confirm-modal";
 import { DEFAULT_BRAND, type Brand } from "./agent/brand";
 import { AgentClient } from "./agent/client";
 import { briefly, connectGalaxy, type Galaxy } from "./agent/galaxy";
-import type { GalaxyStatus } from "./agent/prompt";
+import type { GalaxyStatus } from "./agent/galaxy-status";
 import { WHAT } from "./agent/markers";
 import type { Settled } from "./agent/watch";
 import type { SessionDocument } from "./agent/saved";
@@ -248,7 +248,7 @@ export async function mountOrbitBrowser(
     } else if (outcome.exhausted) {
       // Orbit has no step cap; this one's must not look like completion.
       info('I ran out of steps for one turn while still working. Say "continue" to pick it up.');
-    } else if (!outcome.spoke && !outcome.done) {
+    } else if (!outcome.spoke) {
       info("The model ended the turn without a reply. Ask again, or rephrase.");
     }
     if (el.save) el.save.textContent = "Save";

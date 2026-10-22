@@ -7,15 +7,14 @@ import { allOperations } from "@galaxyproject/galaxy-ops/browser";
 
 import { DEFAULT_COMPACTION_POLICY } from "@earendil-works/pi-durable";
 
-import { registeredGalaxyTools } from "../../../../extensions/loom/galaxy-tool-source";
+import { registeredGalaxyTools } from "../../../../extensions/orbit/galaxy-tool-source";
 import { MAX_AUTO_FOLLOW_UPS } from "./documents";
-import { MAX_STEPS } from "./extension";
 import { galaxyTools } from "./galaxy-tools";
 import { Headless } from "./headless";
 import { connect, keyVariable } from "./model";
 import { processTools } from "./processes";
 import { pythonTool } from "./python";
-import { LOOP } from "./runtime";
+import { LOOP, MAX_TURNS } from "./runtime";
 import { defaultEndpoint, PROVIDERS, resolve } from "./providers";
 import type { AgentTool, Capability, Python } from "./tool";
 import type { AgentFlavor } from "./tools";
@@ -272,7 +271,7 @@ async function llmRequest() {
 function loop() {
   return {
     keep_recent_tokens: DEFAULT_COMPACTION_POLICY.keepRecentTokens,
-    max_steps: MAX_STEPS,
+    max_steps: MAX_TURNS,
     reserve_tokens: DEFAULT_COMPACTION_POLICY.reserveTokens,
     tool_execution: LOOP.toolExecution,
   };

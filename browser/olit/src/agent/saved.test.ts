@@ -12,7 +12,7 @@ import { Binding, json, text } from "@galaxyproject/orbit-browser/testing";
 import { visualizationStore } from "./fake-visualizations";
 import { olitFlavor } from "./flavor";
 import { connectGalaxy } from "@galaxyproject/orbit-browser/testing";
-import { artifactsOf } from "@galaxyproject/orbit-browser/artifacts";
+import { artifactsOf, registerArtifactKinds } from "@galaxyproject/orbit-browser/artifacts";
 import { artifactsIn, context, Runtime } from "@galaxyproject/orbit-browser/testing";
 import type { SessionDocument } from "@galaxyproject/orbit-browser/agent";
 import { usageTotals } from "@galaxyproject/orbit-browser/testing";
@@ -59,13 +59,15 @@ const opened: Runtime[] = [];
 
 const CONFIG = { galaxy_root: ROOT, ai_base_url: LLM, ai_model: "m", ai_api_key: KEY };
 
+// The worker registers the flavor's artifact kinds; here, the test does.
+registerArtifactKinds(olitFlavor.artifactKinds ?? []);
+
 /** A browser's storage and conversations, without a brain: what a save keeps is all in them. */
 async function machine(storage: Storage = new MemoryStorage()) {
   const runtime = await Runtime.open({
     storage,
     config: CONFIG,
-    python,
-    flavor: olitFlavor,
+    brand: olitFlavor.brand,
     extensions: [],
   });
   opened.push(runtime);

@@ -4,7 +4,7 @@
  */
 import type { AgentEvent, ConversationId } from "@earendil-works/pi-durable";
 
-import type { GalaxyStatus } from "./prompt";
+import type { GalaxyStatus } from "./galaxy-status";
 import type { Placement, RuntimeConfig } from "./runtime";
 import type { SessionDocument } from "./saved";
 import type { RecordSummary } from "./notebook";
