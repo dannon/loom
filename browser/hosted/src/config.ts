@@ -114,7 +114,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   }
 
   const galaxyUrl = url("ORBIT_GALAXY_URL", required("ORBIT_GALAXY_URL"));
-  // Users' tokens go to Galaxy and the admin key to LiteLLM: never in clear beyond this machine.
+  // Users' tokens go to Galaxy and the service key to LiteLLM: never in clear beyond this machine.
   const secure = (name: string, at: URL | undefined) => {
     if (at && at.protocol !== "https:" && !isLoopback(at)) problems.push(`${name} must be https unless it is localhost`);
   };
