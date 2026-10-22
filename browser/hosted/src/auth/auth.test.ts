@@ -4,7 +4,7 @@ import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { migrate } from "../db/migrate";
-import { freshDatabase } from "../test-db";
+import { freshDatabase, testDatabase } from "../test-db";
 import { createTokenCache } from "../tokens/token-cache";
 import { TokenUnavailable } from "../worker/galaxy-fetch";
 import { startMockOidc, type MockOidc } from "./mock-oidc";
@@ -33,7 +33,7 @@ const UNMAPPED = () =>
   );
 
 beforeAll(async () => {
-  pool = new pg.Pool({ ...(await freshDatabase("orbit_hosted_auth")), max: 6 });
+  pool = new pg.Pool({ ...(await freshDatabase(testDatabase("orbit_hosted_auth"))), max: 6 });
   await migrate(pool);
   keycloak = await startMockOidc({ clientSecret: "s3cret" });
   oidc = await connectOidc({ issuer: keycloak.issuer, clientId: "orbit", clientSecret: "s3cret", allowHttp: true });

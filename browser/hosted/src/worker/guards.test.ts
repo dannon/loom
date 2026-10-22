@@ -6,7 +6,7 @@ import { migrate } from "../db/migrate";
 import { LeaseFence } from "../lease/lease-fence";
 import { acquireLease } from "../lease/leases";
 import { bumpLeaseGen, LeaseLostError } from "../storage/postgres-storage";
-import { ensureDatabase } from "../test-db";
+import { ensureDatabase, testDatabase } from "../test-db";
 import { fencedFetch } from "./fenced-fetch";
 import { registerSurfaceGate, registerToolCallCap } from "./guards";
 
@@ -51,7 +51,7 @@ describe("the fenced global fetch", () => {
   let pool: pg.Pool;
 
   beforeAll(async () => {
-    pool = new pg.Pool({ ...(await ensureDatabase("orbit_hosted_guards")), max: 2 });
+    pool = new pg.Pool({ ...(await ensureDatabase(testDatabase("orbit_hosted_guards"))), max: 2 });
     await migrate(pool);
   });
 

@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "../db/migrate";
 import { acquireLease, releaseLease } from "../lease/leases";
 import { bumpLeaseGen } from "../storage/postgres-storage";
-import { ensureDatabase } from "../test-db";
+import { ensureDatabase, testDatabase } from "../test-db";
 import { startStandIn, type StandIn } from "../test-stand-in";
 import { bundleWorker, nodeEdges } from "./bundle";
 import { WITHHELD_TOOLS } from "./guards";
@@ -18,7 +18,7 @@ import { runWorker, TEST_TOKEN, type Running, type Tokens } from "./test-workers
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRATCH = join(HERE, "..", "..", ".scratch", "worker");
-const DATABASE = "orbit_hosted_worker";
+const DATABASE = testDatabase("orbit_hosted_worker");
 const LEASE_LOST = 75;
 
 let pool: pg.Pool;
