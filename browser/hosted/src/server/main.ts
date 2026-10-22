@@ -6,7 +6,6 @@
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { fileURLToPath } from "node:url";
-import pg from "pg";
 import { PgBoss } from "pg-boss";
 
 import { connectOidc } from "../auth/oidc";
@@ -14,6 +13,7 @@ import type { AuthContext } from "../auth/routes";
 import { refreshForUser } from "../auth/sessions";
 import { ConfigError, describeConfig, loadConfig } from "../config";
 import { migrate } from "../db/migrate";
+import { createPool } from "../db/pool";
 import { Dispatcher } from "../dispatch/dispatcher";
 import { galaxyPageCreator, galaxyPageRetitler } from "../dispatch/pages";
 import { liteLlmModels } from "../model/litellm";
@@ -36,7 +36,7 @@ async function main(): Promise<void> {
   }
   console.log(describeConfig(config));
 
-  const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 20 });
+  const pool = createPool({ connectionString: config.databaseUrl, max: 20 }, log);
   await migrate(pool);
   // A short queue cache, so a stately key that just went idle stops being skipped soon after.
   // The monitor fails a dead host's turn job by its heartbeat; the default minute between passes
