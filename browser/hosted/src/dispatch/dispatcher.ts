@@ -240,6 +240,12 @@ export class Dispatcher {
     await this.#send({ conversationId });
   }
 
+  /** The last page on the conversation closed: its quiet period counts from now. */
+  unwatched(conversationId: string): void {
+    const live = this.#live.get(conversationId);
+    if (live) live.quietSince = Date.now();
+  }
+
   /** Ask the conversation's worker for a fresh snapshot; false when no worker is running it. */
   snapshot(conversationId: string): boolean {
     const live = this.#live.get(conversationId);

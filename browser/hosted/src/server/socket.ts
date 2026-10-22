@@ -131,7 +131,8 @@ export class Sockets {
     let watching: string | undefined;
     const send = (message: ToPage) => ws.send(JSON.stringify(message));
     const unwatch = () => {
-      if (watching) this.#watching.get(watching)?.delete(ws);
+      const left = watching ? this.#watching.get(watching) : undefined;
+      if (left?.delete(ws) && left.size === 0) this.#c.dispatcher.unwatched(watching!);
       watching = undefined;
     };
     ws.on("close", () => {
