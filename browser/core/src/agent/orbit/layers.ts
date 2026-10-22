@@ -4,7 +4,7 @@
  *
  * - `{{artifact}}` tokens in a Galaxy or shell tool's text arguments become the fenced block of
  *   the artifact they name, from what this conversation's results carried; a token inside a fence,
- *   or one naming nothing, refuses the call with the browser brain's own sentence.
+ *   or one naming nothing, refuses the call with the sentence the browser has always used.
  * - A page write that still holds an embed the model made up (an image link to a chart, say) is
  *   refused: Galaxy would render it as text.
  * - A Galaxy call aimed at one of the shell's own tools (run_tool with tool_id "lineage_report",
@@ -40,7 +40,7 @@ const PAGE_TEXT = ["content", "section_content"];
 
 const article = (word: string) => (/^[aeiou]/i.test(word) ? "an" : "a");
 
-/** The browser brain's refusal for a Galaxy call aimed at one of the shell's tools, or undefined. */
+/** The refusal for a Galaxy call aimed at one of the shell's own tools, or undefined. */
 export function misrouted(
   input: Record<string, unknown>,
   own: ReadonlySet<string>,

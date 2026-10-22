@@ -85,8 +85,8 @@ call.
 
 ```bash
 npm install        # the whole workspace, from browser/
-npm run dev        # builds (fetching Pyodide and the skills corpus on first run), then serves
-npm test           # unit tests, linting, type checks, vendored-file checks, browser tests
+npm run dev        # builds (fetching Pyodide on first run), then serves
+npm test           # unit tests, linting, type checks, browser tests
 npm run stale      # where the pinned upstreams stand
 ```
 
@@ -95,15 +95,12 @@ npm run stale      # where the pinned upstreams stand
 `npm run typecheck` and `npm run test:unit` in `core/` also need the repo root installed (`npm ci`
 at the top level; CI does both). Neither package is a dependency of this workspace.
 
-The agent worker can also boot Orbit's own brain (`extensions/orbit`) in place of the browser's,
-behind a build-time flag: `VITE_ORBIT_BRAIN=orbit` (default `browser`). Orbit-brain builds also
-need the repo root installed. `npm run preflight:orbit` builds a worker that boots the brain
-through the production config and loads it in a browser-worker realm;
-`e2e/orbit-preflight-drive.cjs` does the same in a real browser, built and dev.
-`node scripts/compare-default-bundle.mjs <ref>` checks that the default bundle is byte-identical
-to `<ref>`'s. The flag build keeps its own conversation store and submission ledger (`-orbit`
-files), so it never reads what a default build kept. `EXPECT_BRAIN=orbit bash e2e/run-all.sh` runs
-the e2e tiers against a flag build and fails a drive the default brain answered.
+The agent worker runs Orbit's brain (`extensions/orbit`), so every build needs the repo root
+installed too. `npm run preflight:orbit` builds a worker that boots the brain through the
+production config and loads it in a browser-worker realm; `e2e/orbit-preflight-drive.cjs` does the
+same in a real browser, built and dev. The worker keeps its conversation store and submission
+ledger in files of its own (`-orbit`), apart from what the browser's earlier brain kept, and the
+e2e tiers check that each drive was answered by Orbit's brain (`e2e/brain.cjs`).
 
 `npm run dev` against a local Galaxy and a model:
 

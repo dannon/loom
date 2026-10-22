@@ -1,8 +1,7 @@
 /**
- * Orbit's brain (extensions/orbit) installed in the agent worker, behind VITE_ORBIT_BRAIN: the
- * seams it reads instead of a Node host, set once per worker before the brain registers, then the
- * brain itself on pi-host. Only orbit/worker.ts imports this, and only under the flag, so the
- * default worker never loads it.
+ * Orbit's brain (extensions/orbit) installed in the agent worker: the seams it reads instead of a
+ * Node host, set once per worker (or per Headless session) before the brain registers, then the
+ * brain itself on pi-host.
  *
  * Order matters: the env shim comes first (Orbit reads process at import), the profile before the
  * brain registers (registration reads it), and every seam before session_start.

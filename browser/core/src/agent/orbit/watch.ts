@@ -64,7 +64,7 @@ export function pollDelay(polls: number, pollMs: number): number {
   return Math.min(pollMs * 2 ** Math.max(0, polls - 6), pollMs * 12);
 }
 
-/** The task's name, shared with the default brain's watch: the page and drives know it by it. */
+/** The task's name, kept from the browser's earlier brain: the page and drives know it by it. */
 export const ORBIT_WATCH = "olit.galaxy-watch";
 
 /**

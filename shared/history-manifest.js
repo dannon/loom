@@ -12,7 +12,6 @@ export const MANIFEST_MAX = 40;
  */
 const cell = (value) =>
   String(value ?? "")
-     
     .replace(/[\u0000-\u001f\u007f`]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
