@@ -4,7 +4,7 @@
  *
  * A flavor's own skills (Olit's visualization skill) join the shipped galaxy-skills repo as extra
  * targets: a repo Orbit doesn't ship is fetched from GitHub, and there's no repo to fetch these
- * from. The core's own notebook skill isn't carried: it teaches the browser brain's record tools.
+ * from.
  */
 import catalog from "../../../../../extensions/loom/vendor/skills/_catalog.json";
 import manifest from "../../../../../extensions/loom/vendor/skills/_manifest.json";

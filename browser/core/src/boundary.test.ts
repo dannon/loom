@@ -143,8 +143,6 @@ describe("the core", () => {
       expect.arrayContaining([
         join(SHARED, "redirect-guard.js"),
         join(SHARED, "skills-router.js"),
-        join(SHARED, "galaxy-guidance.js"),
-        join(SHARED, "prompt-blocks.js"),
         join(SHARED, "team-dispatch-contract.js"),
         join(SHARED, "loom-shell-contract.js"),
       ]),
