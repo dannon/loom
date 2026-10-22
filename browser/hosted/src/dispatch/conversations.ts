@@ -12,10 +12,12 @@ export interface ConversationRow {
   readonly pageId: string | null;
   readonly durableConversationId: string | null;
   readonly interrupted: boolean;
+  /** Paused on an unanswered confirm; it asks again when the user comes back. */
+  readonly paused: boolean;
   readonly lastActiveAt: Date;
 }
 
-const COLUMNS = `id, owner_sub, title, store_id, page_id, durable_conversation_id, interrupted, last_active_at`;
+const COLUMNS = `id, owner_sub, title, store_id, page_id, durable_conversation_id, interrupted, paused, last_active_at`;
 
 type Row = {
   id: string;
@@ -25,6 +27,7 @@ type Row = {
   page_id: string | null;
   durable_conversation_id: string | null;
   interrupted: boolean;
+  paused: boolean;
   last_active_at: Date;
 };
 
@@ -36,6 +39,7 @@ const fromRow = (row: Row): ConversationRow => ({
   pageId: row.page_id,
   durableConversationId: row.durable_conversation_id,
   interrupted: row.interrupted,
+  paused: row.paused,
   lastActiveAt: row.last_active_at,
 });
 

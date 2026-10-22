@@ -89,6 +89,12 @@ export const HOST_MIGRATIONS: MigrationSet = {
       // Keycloak session and the others idle out on their own.
       "ALTER TABLE orbit_sessions ADD COLUMN last_used_at TIMESTAMPTZ NOT NULL DEFAULT now()",
     ],
+    [
+      // A run paused on a confirm nobody answered (README decision 17). It resumes when the user comes
+      // back to the conversation, not from the sweeper: asking again with nobody there would only
+      // take a worker for another wait.
+      "ALTER TABLE orbit_conversations ADD COLUMN paused BOOLEAN NOT NULL DEFAULT false",
+    ],
   ],
 };
 
@@ -125,9 +131,11 @@ async function migratePgBoss(pool: Pool): Promise<void> {
       await client.query("ROLLBACK").catch(() => undefined);
       throw error;
     } finally {
-      await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_LOCK]).catch((unlockError: Error) => {
-        broken ??= unlockError;
-      });
+      await client
+        .query("SELECT pg_advisory_unlock($1)", [MIGRATION_LOCK])
+        .catch((unlockError: Error) => {
+          broken ??= unlockError;
+        });
     }
   } finally {
     client.release(broken);

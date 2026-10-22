@@ -61,7 +61,12 @@ export type ToWorker =
   /** Post a fresh snapshot of the conversation, for a browser that just connected. */
   | { readonly cmd: "snapshot" }
   | ({ readonly cmd: "token"; readonly id: number } & TokenAnswer)
-  | { readonly cmd: "close" };
+  | { readonly cmd: "close" }
+  /**
+   * Idle release: close as `close` does, but only at a quiet point (nothing asking, no unfinished
+   * task); otherwise say `not-quiet` and carry on.
+   */
+  | { readonly cmd: "release" };
 
 export type FromWorker =
   | {
@@ -86,4 +91,6 @@ export type FromWorker =
   | { readonly type: "settled"; readonly aborted: boolean }
   | { readonly type: "report"; readonly message: string }
   | { readonly type: "reach"; readonly api: string }
-  | { readonly type: "closed"; readonly error?: string };
+  | { readonly type: "closed"; readonly error?: string }
+  /** A release refused: the conversation has work in hand, so the worker stays. */
+  | { readonly type: "not-quiet" };

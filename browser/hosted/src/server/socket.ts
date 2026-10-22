@@ -72,6 +72,11 @@ export class Sockets {
     });
   }
 
+  /** Whether any page has the conversation open; a watched conversation keeps its worker. */
+  watched(conversationId: string): boolean {
+    return (this.#watching.get(conversationId)?.size ?? 0) > 0;
+  }
+
   /** The dispatcher's events, sent to every page watching the conversation. */
   deliver(conversationId: string, event: FromWorker | DispatchEvent): void {
     const watchers = this.#watching.get(conversationId);
@@ -220,6 +225,8 @@ export class Sockets {
           afterSnapshot(undefined);
         }
         await fromStore();
+        // Paused on a confirm nobody answered: coming back is the answer to wait for, so it asks again.
+        if (conversation.paused && !this.#c.turnsDisabled) await dispatcher.resume(id);
         return;
       }
       case "submit":
@@ -303,6 +310,12 @@ export class Sockets {
         return { type: "withdrawn", id: event.id };
       case "notify":
         return { type: "notice", text: event.text, level: event.level };
+      case "paused":
+        return {
+          type: "notice",
+          text: "Orbit paused this conversation while it waited for your answer. Open it again or send a message and it will ask again.",
+          level: "info",
+        };
       case "waiting":
         return {
           type: "notice",
