@@ -411,6 +411,7 @@ async function open(request: OpenRequest) {
           ? (await runtime!.harness.snapshot(Binding, conversation.id, context))?.datasetId
           : undefined,
       context: callContext,
+      galaxyStatus: () => runtime?.galaxyStatus,
     },
     ownSkills: ownSkillFiles(flavor.skills ?? {}, brand.id),
     readSkill: env.readSkill,

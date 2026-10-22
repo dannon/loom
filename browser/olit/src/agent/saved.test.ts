@@ -187,7 +187,10 @@ describe("a saved Olit visualization is a restorable conversation", { timeout: 3
 
     const two = await running({ id, document: (await saved.load(id))! });
     await two.turn("second");
-    expect((await two.export()).session.usage).toEqual({
+    const exported = await two.export();
+    // Two real turns, one on each machine.
+    expect(exported.session.turn).toBe(2);
+    expect(exported.session.usage).toEqual({
       input: 20,
       output: 10,
       cost: null,

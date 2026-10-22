@@ -25,8 +25,8 @@ const SOURCE = "src/agent";
 const SKIPPED = ["skills/"];
 
 /**
- * Where the flavor's pieces sit on disk. The core finds its own (its sources, prompt, skills
- * corpus and lock) through the flavor's dependency on it, so a flavor names only its own paths.
+ * Where the flavor's pieces sit on disk. The core finds its own sources through the flavor's
+ * dependency on it, and Orbit's skills beside the core, so a flavor names only its own paths.
  */
 export interface DescribeLayout {
   /** The flavor's package root; its `src/agent` modules are described beside the core's. */

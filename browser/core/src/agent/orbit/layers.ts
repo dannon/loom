@@ -21,6 +21,17 @@ import { inventedEmbed, resolveArtifacts } from "../artifacts";
 import type { Annotate } from "../tools";
 import type { Artifact, Context } from "../tool";
 import type { AgentFlavor } from "../tools";
+import { GALAXY_UNREACHABLE, type GalaxyStatus } from "../galaxy-status";
+import { galaxyUnavailableBlock } from "../../../../../shared/prompt-blocks.js";
+
+/**
+ * What the model is told when Galaxy didn't answer as the session opened. Orbit can't tell on its
+ * own: in the worker the page's cookie authenticates, so Orbit always has credentials.
+ */
+export const GALAXY_UNAVAILABLE = galaxyUnavailableBlock({
+  cause: "Galaxy did not answer, so no Galaxy tool or workflow can run in this session.",
+  remedy: "say so plainly and ask the user to check that the server is up and reload the page",
+});
 
 export interface LayerHost {
   /** The product name a misroute names the tool's owner by, e.g. "Olit". */
@@ -105,6 +116,8 @@ export interface FlavorLayerHost {
   datasetId: () => Promise<string | undefined>;
   /** A tool call's context, for an annotator that asks Galaxy something. */
   context: () => Promise<Context>;
+  /** Whether Galaxy answered when the session opened, once the runtime knows. */
+  galaxyStatus?: () => GalaxyStatus | undefined;
 }
 
 /** A Galaxy result's payload: the envelope's `data`, when the text is the envelope. */
@@ -131,7 +144,12 @@ export function registerFlavorLayers(api: ExtensionAPI, host: FlavorLayerHost): 
     });
     // Orbit's prompt names no product: the shell's identity leads, as in the browser brain, and
     // stays a stable prefix ahead of Orbit's cached prompt.
-    const before = [`You are ${host.brandName}.`, ...(sections?.afterIdentity ?? [])];
+    const unreachable = host.galaxyStatus?.() === GALAXY_UNREACHABLE;
+    const before = [
+      `You are ${host.brandName}.`,
+      ...(unreachable ? [GALAXY_UNAVAILABLE] : []),
+      ...(sections?.afterIdentity ?? []),
+    ];
     const after = [
       ...(sections?.terminology?.length
         ? [`## ${host.brandName} terms\n\n${sections.terminology.join("\n")}`]

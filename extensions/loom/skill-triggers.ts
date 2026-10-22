@@ -17,6 +17,8 @@ import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { appendActivityEvent } from "./activity";
 import { findConfusablesMatch } from "./confusables";
+import { plainToolName, withoutControlTokens } from "./control-tokens";
+import { registeredGalaxyTools } from "./galaxy-tool-source";
 import { fetchFailureHintForText } from "./fetch-failure-hint";
 import { hasFailedTransition, INVOCATION_FAILED_HINT } from "./invocation-failure-hint";
 import { getNotebookPath } from "./state";
@@ -43,6 +45,14 @@ export interface SkillTrigger {
   hint(ctx: HintContext): string | null;
 }
 
+const SCHEDULED_RE = /"state"\s*:\s*"scheduled"/;
+
+export const INVOCATION_STATE_HINT =
+  "[loom] An invocation's `state` here is Galaxy's scheduling state: `scheduled` says the steps " +
+  "were queued, not that its jobs are running or succeeded. Before telling the user a workflow " +
+  "is running or done, check the invocation itself (`galaxy_invocation_check_one`), which reads " +
+  "its jobs.";
+
 // agent-loop.js wording when dispatch finds no tool by that exact name.
 const NOT_FOUND_RE = /^Tool\s+(\S+)\s+not found\b/;
 
@@ -62,6 +72,9 @@ export const skillTriggers = (family: GalaxyToolFamily): readonly SkillTrigger[]
     on: "error",
     hint: ({ toolName, text, activeTools }) => {
       if (!NOT_FOUND_RE.test(text)) return null;
+      // A harmony control token leaked into the name: what comes before it is the tool meant.
+      const plain = plainToolName(toolName);
+      if (plain !== toolName && activeTools().includes(plain)) return `Did you mean \`${plain}\`?`;
       const match = findConfusablesMatch(toolName, activeTools());
       return match
         ? `Did you mean \`${match}\`? The tool name you called contains Unicode confusables (visually similar non-Latin characters).`
@@ -87,11 +100,23 @@ export const skillTriggers = (family: GalaxyToolFamily): readonly SkillTrigger[]
     hint: () => iwcCandidatesHint(family),
   },
   {
-    // A dataset Galaxy failed to fetch, in any result that carries datasets: the next url the
-    // model writes from memory is a guess, and for ENA and SRA always a wrong one.
+    // A dataset Galaxy failed to fetch, in a Galaxy result that carries datasets: the next url
+    // the model writes from memory is a guess, and for ENA and SRA always a wrong one.
     id: "fetch-failed",
     on: "success",
-    hint: ({ text }) => fetchFailureHintForText(text),
+    hint: ({ toolName, text }) =>
+      text.includes("Failed to fetch url") &&
+      registeredGalaxyTools().some((tool) => tool.name === toolName)
+        ? fetchFailureHintForText(text)
+        : null,
+  },
+  {
+    // A listed invocation's `state` is Galaxy's scheduling state, which reads "scheduled" over a
+    // failed job; the poller only rolls up the jobs of invocations this conversation started.
+    id: "invocation-state",
+    tools: new Set([family.tool("get_invocations")]),
+    on: "success",
+    hint: ({ text }) => (SCHEDULED_RE.test(text) ? INVOCATION_STATE_HINT : null),
   },
 ];
 
@@ -143,12 +168,19 @@ export function registerSkillTriggers(pi: ExtensionAPI, family: GalaxyToolFamily
     const msg = event.message;
     if (msg.role !== "toolResult" || !msg.toolName) return;
 
+    // Scrubbed before anything reads it, so a replayed result can't parse as a call.
+    const content = msg.content.map((c) =>
+      c.type === "text" && typeof c.text === "string" && c.text.includes("<|")
+        ? { ...c, text: withoutControlTokens(c.text) }
+        : c,
+    );
+    const scrubbed = content.some((c, i) => c !== msg.content[i]);
     const applied = applySkillTriggers(
-      { toolName: msg.toolName, isError: !!msg.isError, content: msg.content },
+      { toolName: msg.toolName, isError: !!msg.isError, content },
       () => pi.getActiveTools(),
       triggers,
     );
-    if (!applied) return;
+    if (!applied) return scrubbed ? { message: { ...msg, content } } : undefined;
 
     const notebook = getNotebookPath();
     if (notebook) {

@@ -73,7 +73,7 @@ async function llmTargets(): Promise<Record<string, { root: string; path: string
 
 /** The commit this bundle was built from; a deployed copy cannot be identified without it. */
 function buildCommit(): string {
-  // Pinned when two builds are compared byte for byte (scripts/compare-default-bundle.mjs).
+  // Pinned when two builds are compared byte for byte.
   if (process.env.LOOM_BUILD_COMMIT !== undefined) return process.env.LOOM_BUILD_COMMIT;
   try {
     return execFileSync("git", ["rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim();
