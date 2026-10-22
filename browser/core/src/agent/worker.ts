@@ -10,6 +10,7 @@ import type { SessionDocument } from "./saved";
 import type { RecordSummary } from "./notebook";
 import type { AgentFlavor } from "./tools";
 import type { Settled } from "./watch";
+import { browserEnv } from "./orbit/browser-env";
 import { startOrbitWorker } from "./orbit/worker";
 
 export interface OpenRequest {
@@ -75,5 +76,6 @@ export type PageMessage =
 
 /** Run this worker as the agent, with what `agentFlavor` adds to it. */
 export function startAgentWorker(agentFlavor: AgentFlavor): void {
-  startOrbitWorker(agentFlavor);
+  const receive = startOrbitWorker(agentFlavor, browserEnv);
+  self.onmessage = (event: MessageEvent<PageMessage>) => receive(event.data);
 }

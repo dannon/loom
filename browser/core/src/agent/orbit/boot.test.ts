@@ -122,8 +122,8 @@ describe("the Orbit worker's open", () => {
       fetched.push(String(input));
       return json({});
     });
-    const { startOrbitWorker } = await import("./worker");
-    startOrbitWorker({});
+    const { startAgentWorker } = await import("../worker");
+    startAgentWorker({});
     self.onmessage!({
       data: {
         type: "open",

@@ -25,6 +25,7 @@ import {
   type SubmissionLedger,
 } from "../../../../../extensions/orbit/submission-ledger";
 import { setInstructionSource } from "../../../../../extensions/orbit/user-instructions";
+import { setRecordStore } from "../../../../../extensions/orbit/record-store";
 import { setVendorSkillsSource } from "../../../../../extensions/orbit/vendor-skills";
 import { setCapabilityProfile } from "../../../../../shared/capability-profile.js";
 import { setConfigSource } from "../../../../../shared/config-source.js";
@@ -37,7 +38,7 @@ import {
   type FlavorLayerHost,
   type LayerHost,
 } from "./layers";
-import { vendorSkills, type OwnSkillFile } from "./skills";
+import { vendorSkills, type OwnSkillFile, type SkillReader } from "./skills";
 
 /** What the model is told to ask for when Galaxy refuses the page's sign-in. */
 export const WORKER_AUTH_REMEDY =
@@ -73,6 +74,8 @@ export interface OrbitBootOptions {
   flavorLayers?: FlavorLayerHost;
   /** A flavor's own skills, offered beside the vendored ones. */
   ownSkills?: OwnSkillFile[];
+  /** How a shipped skill body is read, where fetching it beside the bundle won't do (Node). */
+  readSkill?: SkillReader;
   /** The browser shell's durable tasks: the watch. */
   tasks?: AnyTask[];
   /** What a reconcile that saw a run end wakes instead of polling: the bound conversation's watch. */
@@ -95,7 +98,14 @@ let booted = false;
 export function installOrbitSeams(
   options: Pick<
     OrbitBootOptions,
-    "capabilities" | "galaxy" | "ledger" | "secrets" | "extras" | "ownSkills" | "pollWake"
+    | "capabilities"
+    | "galaxy"
+    | "ledger"
+    | "secrets"
+    | "extras"
+    | "ownSkills"
+    | "readSkill"
+    | "pollWake"
   >,
 ): void {
   const grant = orbitGrant(options.capabilities);
@@ -114,7 +124,7 @@ export function installOrbitSeams(
   setConfigSource({ load: () => structuredClone(WORKER_CONFIG), secrets: options.secrets });
   // The page has no standing instructions file to hand over yet.
   setInstructionSource({ files: () => [] });
-  setVendorSkillsSource(vendorSkills(options.ownSkills));
+  setVendorSkillsSource(vendorSkills(options.ownSkills, options.readSkill));
   setGalaxyTransport({
     fetch: options.galaxy.fetch,
     // getGalaxyConfig needs a key to call Galaxy connected. Without a dev key the page's cookie
@@ -151,6 +161,23 @@ export function registerOrbit(
 /** Seal the host's registrations beside the browser shell's own extension and its tasks. */
 export function sealOrbit(host: PiHost, tasks: AnyTask[] = []): Extension[] {
   return [host.seal(), defineExtension({ name: "browser-shell", tasks })];
+}
+
+/**
+ * Undo what bootOrbit installed, so another boot can follow in the same process: Node hosts one
+ * session after another (Headless); a browser worker boots once and never needs this.
+ */
+export function closeOrbit(): void {
+  setCapabilityProfile(null);
+  setConfigSource(null);
+  setInstructionSource(null);
+  setVendorSkillsSource(null);
+  setGalaxyTransport(null);
+  setSubmissionLedger(null);
+  setPollWake(null);
+  setGalaxyToolSource(null);
+  setRecordStore(null);
+  booted = false;
 }
 
 /** Install Orbit's seams and register the brain. Once per worker: the seams are process-wide. */

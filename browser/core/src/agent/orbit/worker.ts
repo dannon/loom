@@ -3,8 +3,9 @@
  * (extensions/orbit) on pi-host. The runtime holds the model, compaction, storage and the
  * conversations; every conversation change goes through pi's session lifecycle.
  *
- * What it takes from where it runs comes through an OrbitWorkerEnv: a browser worker's by default,
- * or Node's for Headless (headless.ts), which drives the same protocol in-process.
+ * What it takes from where it runs comes through an OrbitWorkerEnv: a browser worker's
+ * (browser-env.ts, from worker.ts), or Node's for Headless (headless.ts), which drives the same
+ * protocol in-process.
  *
  * Its storage and its submission ledger are its own files (`-orbit`), apart from what the
  * browser's earlier brain kept.
@@ -47,18 +48,16 @@ import { recordsOn, slugForSession, type RecordSummary } from "../notebook";
 import type { SessionReason } from "../pi-host";
 import type { Submission } from "@earendil-works/pi-durable";
 import { processTools } from "../processes";
-import { browserPython, pythonTool } from "../python";
+import { pythonTool } from "../python";
 import { artifactsIn, context, Runtime, type Placement } from "../runtime";
-import { holdStorage, openStorage } from "../storage";
 import { galaxyOps, type AgentFlavor } from "../tools";
 import type { Python } from "../tool";
 import { adaptTool, galaxyExtras, granted, type ShellToolHost } from "./adapter";
 import type { OpenRequest, PageMessage, Waiting, WorkerMessage } from "../worker";
-import { bootOrbit, type OrbitBoot } from "./boot";
+import { bootOrbit, closeOrbit, type OrbitBoot } from "./boot";
 import { setOrbitCwd } from "./env";
 import { orbitGrant } from "./grants";
-import { openLedger, opfsFile } from "./ledger";
-import { ownSkillFiles } from "./skills";
+import { ownSkillFiles, type SkillReader } from "./skills";
 import { orbitWatch, wakeups } from "./watch";
 
 /** How long a conversation being left gets to finish its tool calls' end events. */
@@ -80,32 +79,14 @@ export interface OrbitWorkerEnv {
   ): Promise<{ storage: Storage; ledger: SubmissionLedger; unkept?: string }>;
   /** The directory each conversation's record key and side files go under. */
   root: string;
+  /** How a shipped skill body is read, where fetching it beside the bundle won't do (Node). */
+  readSkill?: SkillReader;
+  /** Where a provider's key may come from besides the config (Node's environment). */
+  vars?: Record<string, string | undefined>;
 }
 
-/** A browser worker: the page through postMessage, OPFS behind a tab lock, Pyodide. */
-const browserEnv: OrbitWorkerEnv = {
-  post: (message) => self.postMessage(message),
-  base: () => self.location.href,
-  python: (request) => browserPython(request.pyodideURL),
-  keep: async (brand, user, request) => {
-    if (user === undefined) return { storage: new MemoryStorage(), ledger: createMemoryLedger() };
-    await holdStorage(`${brand.id}:storage`, {
-      steal: request.steal,
-      waiting: () => post({ type: "waiting" }),
-      lost: () => {
-        post({ type: "lost" });
-        self.close();
-      },
-    });
-    const { storage, unkept } = await openStorage(`${brand.id}-${user}-orbit`, brand.id);
-    // Its own files, like the storage, and the same fallback to memory when they can't be opened.
-    const opened = await openLedger(opfsFile(`${brand.id}-${user}-orbit-ledger.json`));
-    return { storage, ledger: opened.ledger, unkept: unkept ?? opened.unkept };
-  },
-  root: "/orbit",
-};
-
-let env: OrbitWorkerEnv = browserEnv;
+/** Where the worker runs: set by startOrbitWorker before anything else. */
+let env: OrbitWorkerEnv;
 const post = (message: WorkerMessage) => env.post(message);
 
 let flavor: AgentFlavor = {};
@@ -434,7 +415,11 @@ async function open(request: OpenRequest) {
       context: callContext,
     },
     ownSkills: ownSkillFiles(flavor.skills ?? {}, brand.id),
-    secrets: () => [runtime?.apiKey].filter((s): s is string => typeof s === "string"),
+    readSkill: env.readSkill,
+    secrets: () =>
+      [runtime?.apiKey, request.config.galaxy_key].filter(
+        (s): s is string => typeof s === "string",
+      ),
     ui: {
       ask: async (request, id, signal) =>
         request.kind === "confirm" ? ask(request.title, request.message, id, signal) : undefined,
@@ -474,6 +459,7 @@ async function open(request: OpenRequest) {
   runtime = await Runtime.open({
     storage,
     config: request.config,
+    env: env.vars,
     python,
     flavor,
     extensions: orbit.extensions,
@@ -535,19 +521,40 @@ function inOrder(work: () => Promise<unknown>) {
 }
 
 /**
- * Run this worker as the agent on Orbit's brain, with what `agentFlavor` adds to the shell. In a
- * browser worker it listens on `self`; given an environment, it hands back the function that takes
- * the page's messages instead.
+ * Run the agent on Orbit's brain where `environment` says, with what `agentFlavor` adds to the
+ * shell: what it hands back takes the page's messages.
  */
 export function startOrbitWorker(
   agentFlavor: AgentFlavor,
-  environment?: OrbitWorkerEnv,
+  environment: OrbitWorkerEnv,
 ): (message: PageMessage) => void {
   flavor = agentFlavor;
-  env = environment ?? browserEnv;
+  env = environment;
   registerArtifactKinds(flavor.artifactKinds ?? []);
-  if (!environment) self.onmessage = onMessage;
   return (data) => onMessage({ data } as MessageEvent<PageMessage>);
+}
+
+/**
+ * End the shown conversation's session and forget the brain, so another can start in this process
+ * (Headless, one session after another). A browser worker ends with its page instead.
+ */
+export async function stopOrbitWorker(): Promise<void> {
+  try {
+    if (conversation && orbit) await leave(conversation);
+  } finally {
+    await detach?.();
+    detach = undefined;
+    await runtime?.close();
+    if (orbit) closeOrbit();
+    runtime = undefined;
+    orbit = undefined;
+    conversation = undefined;
+    choosing = undefined;
+    held = undefined;
+    readOnly = false;
+    confirms.clear();
+    queue = Promise.resolve();
+  }
 }
 
 /** The worker's state, for Headless: what a page reads off the protocol, read directly. */
