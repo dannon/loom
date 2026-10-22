@@ -10,7 +10,7 @@ import { TokenUnavailable } from "../worker/galaxy-fetch";
 import { startMockOidc, type MockOidc } from "./mock-oidc";
 import { connectOidc, type Oidc } from "./oidc";
 import { handleAuth, SESSION_COOKIE, type AuthContext } from "./routes";
-import { refreshForUser } from "./sessions";
+import { findSession, hashSessionId, refreshForUser } from "./sessions";
 
 const KEY = Buffer.alloc(32, 9);
 
@@ -212,6 +212,35 @@ describe("refresh", () => {
     expect(both.map((t) => typeof t.token)).toEqual(["string", "string"]);
     const [after] = await sessionRows("dave");
     expect(after!.refresh_token.equals(before!.refresh_token)).toBe(false);
+  });
+
+  it("refreshes the session the user last used, not the newest, so an older browser in use stays signed in", async () => {
+    const laptop = new Browser();
+    await laptop.signIn("dora");
+    await new Browser().signIn("dora");
+    const laptopId = laptop.cookies.get(SESSION_COOKIE)!;
+    const refreshTokenOf = async (id: string) =>
+      (await pool.query<{ refresh_token: Buffer }>("SELECT refresh_token FROM orbit_sessions WHERE id_hash = $1", [hashSessionId(id)]))
+        .rows[0]!.refresh_token;
+    const before = await refreshTokenOf(laptopId);
+    expect(await findSession(pool, laptopId)).toMatchObject({ sub: "dora" });
+    await refreshForUser(pool, KEY, oidc)("dora");
+    expect((await refreshTokenOf(laptopId)).equals(before)).toBe(false);
+  });
+
+  it("still finds a session at once while a refresh has its row locked", async () => {
+    const browser = new Browser();
+    await browser.signIn("dora");
+    const id = browser.cookies.get(SESSION_COOKIE)!;
+    const holder = await pool.connect();
+    try {
+      await holder.query("BEGIN");
+      await holder.query("SELECT 1 FROM orbit_sessions WHERE id_hash = $1 FOR UPDATE", [hashSessionId(id)]);
+      expect(await findSession(pool, id)).toMatchObject({ sub: "dora" });
+    } finally {
+      await holder.query("ROLLBACK");
+      holder.release();
+    }
   });
 
   it("ends the session when Keycloak revoked it, as auth", async () => {

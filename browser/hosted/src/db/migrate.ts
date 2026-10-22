@@ -84,6 +84,11 @@ export const HOST_MIGRATIONS: MigrationSet = {
       // with the user instead.
       "ALTER TABLE orbit_users DROP COLUMN model_key",
     ],
+    [
+      // Which of a user's sessions the refresh uses: the one in use, since each holds its own
+      // Keycloak session and the others idle out on their own.
+      "ALTER TABLE orbit_sessions ADD COLUMN last_used_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+    ],
   ],
 };
 
