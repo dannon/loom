@@ -17,7 +17,7 @@ const NOT_GALAXY: Record<string, string> = {
   "agent/galaxy.ts": "the transport itself, for Galaxy and, as a tool call's `web`, other hosts",
   "agent/python.ts": "Pyodide's own static files for the realm, without credentials",
   "agent/providers.ts": "a local model server's /props",
-  "agent/orbit/skills.ts": "Orbit's vendored skill bodies, served beside the worker bundle",
+  "agent/orbit/browser-env.ts": "Orbit's vendored skill bodies, served beside the worker bundle",
 };
 
 function sources(dir: string): string[] {
