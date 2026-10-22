@@ -36,6 +36,7 @@ let dispatcher: Dispatcher;
 let server: Server;
 let origin: string;
 let killSwitch: string | undefined;
+let sockets: Sockets | undefined;
 
 const unusedOidc = {} as Oidc;
 
@@ -43,8 +44,17 @@ beforeAll(async () => {
   pool = new pg.Pool({ ...(await freshDatabase(DATABASE)), max: 8 });
   await migrate(pool);
   standIn = await startStandIn();
-  const bundle = await bundleWorker(join(HERE, "..", "worker", "boot.ts"), join(HERE, "..", "..", ".scratch", "server", "boot.mjs"));
-  boss = new PgBoss({ host: SOCKET, database: DATABASE, user: userInfo().username, schedule: false, supervise: false });
+  const bundle = await bundleWorker(
+    join(HERE, "..", "worker", "boot.ts"),
+    join(HERE, "..", "..", ".scratch", "server", "boot.mjs"),
+  );
+  boss = new PgBoss({
+    host: SOCKET,
+    database: DATABASE,
+    user: userInfo().username,
+    schedule: false,
+    supervise: false,
+  });
   boss.on("error", () => undefined);
   await boss.start();
   // The public URL has to be known before the server is built, so find a free port first.
@@ -53,7 +63,9 @@ beforeAll(async () => {
   origin = `http://127.0.0.1:${(probe.address() as AddressInfo).port}`;
   await new Promise((resolve) => probe.close(resolve));
   // A token per user, so a test can tell whose a Galaxy request went out as.
-  const tokens = createTokenCache({ refresh: async (sub) => ({ token: `token-${sub}`, expiresAt: Date.now() + 600_000 }) });
+  const tokens = createTokenCache({
+    refresh: async (sub) => ({ token: `token-${sub}`, expiresAt: Date.now() + 600_000 }),
+  });
   const auth: AuthContext = {
     pool,
     oidc: unusedOidc,
@@ -63,7 +75,6 @@ beforeAll(async () => {
     galaxyUrl: new URL(standIn.origin),
     galaxyLinkUrl: new URL("/login/start", standIn.origin),
   };
-  let sockets: Sockets | undefined;
   dispatcher = new Dispatcher({
     pool,
     boss,
@@ -74,7 +85,12 @@ beforeAll(async () => {
     lease: { ttlMs: 60_000, renewMs: 15_000, maxTurnMs: 60_000 },
     limits: { maxTurns: 6, maxToolCalls: 20, outputBytes: 1 << 22 },
     tokens,
-    modelFor: (sub) => ({ baseUrl: `${standIn.origin}/v1`, id: "m", apiKey: "model-key-0123456789", user: sub }),
+    modelFor: (sub) => ({
+      baseUrl: `${standIn.origin}/v1`,
+      id: "m",
+      apiKey: "model-key-0123456789",
+      user: sub,
+    }),
     pageFor: async (conversation) => `page-${conversation.id}`,
     onEvent: (id, event) => sockets?.deliver(id, event),
     retryDelayMs: () => 300,
@@ -128,7 +144,9 @@ class Page {
     this.ws.on("message", (raw) => this.received.push(JSON.parse(String(raw)) as ToPage));
     this.opened = new Promise((resolve, reject) => {
       this.ws.once("open", () => resolve());
-      this.ws.once("unexpected-response", (_req, res) => reject(new Error(`HTTP ${res.statusCode}`)));
+      this.ws.once("unexpected-response", (_req, res) =>
+        reject(new Error(`HTTP ${res.statusCode}`)),
+      );
       this.ws.once("error", reject);
     });
   }
@@ -157,15 +175,22 @@ async function until<T>(
   }
 }
 
-const modelSaw = (text: string) => standIn.seen.filter((s) => s.to === "model" && s.userText === text).length;
+const modelSaw = (text: string) =>
+  standIn.seen.filter((s) => s.to === "model" && s.userText === text).length;
 const userEntries = (events: AgentEvent[], text: string) =>
   events
     .filter((e): e is Extract<AgentEvent, { type: "snapshot" }> => e.type === "snapshot")
     .at(-1)
     ?.entries.filter((e) => {
       // A user message is a pi.user entry carrying the model's view of it.
-      const { kind, model } = e as { kind?: string; model?: Array<{ role?: string; content?: unknown }> };
-      return kind === "pi.user" && (model ?? []).some((m) => m.role === "user" && textOf(m.content) === text);
+      const { kind, model } = e as {
+        kind?: string;
+        model?: Array<{ role?: string; content?: unknown }>;
+      };
+      return (
+        kind === "pi.user" &&
+        (model ?? []).some((m) => m.role === "user" && textOf(m.content) === text)
+      );
     }) ?? [];
 
 describe("the WebSocket", () => {
@@ -188,15 +213,15 @@ describe("the WebSocket", () => {
     await until(() => page.events().some((e) => e.type === "snapshot"), "the stored snapshot");
     page.send({ type: "submit", conversationId: c.id, text: "hello there" });
     await until(() => modelSaw("hello there") > 0, "the model to hear it");
-    await until(
-      () => page.events().some((e) => e.type === "run_end"),
-      "the run to end",
-    );
+    await until(() => page.events().some((e) => e.type === "run_end"), "the run to end");
 
     const again = new Page(cookie);
     await again.opened;
     again.send({ type: "open", conversationId: c.id });
-    await until(() => userEntries(again.events(), "hello there").length > 0, "a snapshot from the worker");
+    await until(
+      () => userEntries(again.events(), "hello there").length > 0,
+      "a snapshot from the worker",
+    );
     expect(userEntries(again.events(), "hello there")).toHaveLength(1);
     page.close();
     again.close();
@@ -259,9 +284,36 @@ describe("the WebSocket", () => {
     await page.opened;
     page.send({ type: "submit", conversationId: c.id, text: "not yours" });
     page.send({ type: "open", conversationId: c.id });
-    await until(() => page.received.filter((m) => m.type === "failed").length >= 2, "both refusals");
+    await until(
+      () => page.received.filter((m) => m.type === "failed").length >= 2,
+      "both refusals",
+    );
     expect(page.received.some((m) => m.type === "events")).toBe(false);
     expect(modelSaw("not yours")).toBe(0);
+    page.close();
+  });
+
+  it("still readies a page that opened a running conversation whose worker exited before its snapshot", async () => {
+    const { sub, cookie } = await signedIn();
+    const c = await createConversation(pool, sub);
+    const page = new Page(cookie);
+    await page.opened;
+    // A worker that is live when the page opens and gone before it answers the snapshot request.
+    const { isLive, snapshot } = dispatcher;
+    let asked!: () => void;
+    const snapshotAsked = new Promise<void>((resolve) => (asked = resolve));
+    dispatcher.isLive = (id) => id === c.id || isLive.call(dispatcher, id);
+    dispatcher.snapshot = (id) => (id === c.id ? (asked(), true) : snapshot.call(dispatcher, id));
+    try {
+      page.send({ type: "open", conversationId: c.id });
+      await snapshotAsked;
+    } finally {
+      dispatcher.isLive = isLive;
+      dispatcher.snapshot = snapshot;
+    }
+    sockets!.deliver(c.id, { type: "worker-exit", code: 75 });
+    await until(() => page.received.some((m) => m.type === "ready"), "ready");
+    expect(page.events().some((e) => e.type === "snapshot")).toBe(true);
     page.close();
   });
 
@@ -274,7 +326,8 @@ describe("the WebSocket", () => {
     const puts = standIn.galaxyCalls("PUT", "/api/histories/h1");
     page.send({ type: "submit", conversationId: c.id, text: "DELETE_H1" });
     const confirm = await until(
-      () => page.received.find((m): m is Extract<ToPage, { type: "confirm" }> => m.type === "confirm"),
+      () =>
+        page.received.find((m): m is Extract<ToPage, { type: "confirm" }> => m.type === "confirm"),
       "the confirm",
     );
     expect(confirm.title).toBe("Confirm destructive Galaxy operation");
@@ -284,7 +337,8 @@ describe("the WebSocket", () => {
     await back.opened;
     back.send({ type: "open", conversationId: c.id });
     const shown = await until(
-      () => back.received.find((m): m is Extract<ToPage, { type: "confirm" }> => m.type === "confirm"),
+      () =>
+        back.received.find((m): m is Extract<ToPage, { type: "confirm" }> => m.type === "confirm"),
       "the confirm, again",
     );
     expect(shown.id).toBe(confirm.id);
@@ -302,7 +356,10 @@ describe("the WebSocket", () => {
     try {
       page.send({ type: "submit", conversationId: c.id, text: "while paused" });
       // failed, which takes the shell out of its busy state, rather than a notice that would leave it there.
-      const refused = await until(() => page.received.find((m) => m.type === "failed"), "the refusal");
+      const refused = await until(
+        () => page.received.find((m) => m.type === "failed"),
+        "the refusal",
+      );
       expect(refused).toEqual({ type: "failed", message: "Orbit is paused for maintenance." });
       expect(modelSaw("while paused")).toBe(0);
     } finally {
@@ -324,16 +381,28 @@ describe("two users side by side", () => {
         const page = new Page(who.cookie);
         await page.opened;
         page.send({ type: "open", conversationId: conversation.id });
-        return { who, conversation, page, history: `h${randomUUID().replace(/-/g, "").slice(0, 12)}` };
+        return {
+          who,
+          conversation,
+          page,
+          history: `h${randomUUID().replace(/-/g, "").slice(0, 12)}`,
+        };
       }),
     );
     const from = standIn.seen.length;
     // At the same time, each reading a history of their own.
     for (const { page, conversation, history } of pages) {
-      page.send({ type: "submit", conversationId: conversation.id, text: `READ_HISTORY ${history}` });
+      page.send({
+        type: "submit",
+        conversationId: conversation.id,
+        text: `READ_HISTORY ${history}`,
+      });
     }
     for (const { page, history } of pages) {
-      await until(() => standIn.galaxyCalls("GET", `/api/histories/${history}`) > 0, `${history} to be read`);
+      await until(
+        () => standIn.galaxyCalls("GET", `/api/histories/${history}`) > 0,
+        `${history} to be read`,
+      );
       await until(() => page.events().some((e) => e.type === "run_end"), "the run to end");
     }
     const [a, b] = pages as [(typeof pages)[0], (typeof pages)[0]];
@@ -345,18 +414,24 @@ describe("two users side by side", () => {
     // Every Galaxy request about one user's history or page went out as that user.
     const galaxy = standIn.seen.slice(from).filter((s) => s.to === "galaxy");
     for (const request of galaxy) {
-      const owner =
-        request.path.endsWith(a.history) ? alice.sub : request.path.endsWith(b.history) ? bob.sub : undefined;
+      const owner = request.path.endsWith(a.history)
+        ? alice.sub
+        : request.path.endsWith(b.history)
+          ? bob.sub
+          : undefined;
       const page = /page-([0-9a-f-]{36})/.exec(request.path)?.[1];
       const expected = owner ?? (page ? theirs.get(page) : undefined);
       if (expected) expect(request.authorization).toBe(`Bearer token-${expected}`);
-      expect([`Bearer token-${alice.sub}`, `Bearer token-${bob.sub}`]).toContain(request.authorization);
+      expect([`Bearer token-${alice.sub}`, `Bearer token-${bob.sub}`]).toContain(
+        request.authorization,
+      );
     }
     expect(galaxy.filter((s) => s.path.endsWith(a.history)).length).toBeGreaterThan(0);
     // Separate pages, and no Galaxy token ever reached the model.
-    const rows = await pool.query<{ page_id: string }>("SELECT page_id FROM orbit_conversations WHERE id = ANY($1)", [
-      pages.map((p) => p.conversation.id),
-    ]);
+    const rows = await pool.query<{ page_id: string }>(
+      "SELECT page_id FROM orbit_conversations WHERE id = ANY($1)",
+      [pages.map((p) => p.conversation.id)],
+    );
     expect(new Set(rows.rows.map((r) => r.page_id)).size).toBe(2);
     const toModel = standIn.seen.slice(from).filter((s) => s.to === "model");
     for (const request of toModel) expect(request.body).not.toContain("token-");
@@ -370,11 +445,19 @@ describe("the HTTP API", () => {
     const { sub, cookie } = await signedIn();
     const mine = await createConversation(pool, sub);
     await createConversation(pool, (await signedIn()).sub);
-    const list = (await (await fetch(`${origin}/api/conversations`, { headers: { cookie } })).json()) as Array<{ id: string }>;
+    const list = (await (
+      await fetch(`${origin}/api/conversations`, { headers: { cookie } })
+    ).json()) as Array<{ id: string }>;
     expect(list.map((c) => c.id)).toEqual([mine.id]);
-    const refused = await fetch(`${origin}/api/conversations`, { method: "POST", headers: { cookie, origin: "https://evil.test" } });
+    const refused = await fetch(`${origin}/api/conversations`, {
+      method: "POST",
+      headers: { cookie, origin: "https://evil.test" },
+    });
     expect(refused.status).toBe(403);
-    const created = await fetch(`${origin}/api/conversations`, { method: "POST", headers: { cookie, origin } });
+    const created = await fetch(`${origin}/api/conversations`, {
+      method: "POST",
+      headers: { cookie, origin },
+    });
     expect(created.status).toBe(201);
     expect((await fetch(`${origin}/api/conversations`)).status).toBe(401);
   });
