@@ -170,8 +170,9 @@ export async function handleAuth(context: AuthContext, req: IncomingMessage, res
 /**
  * Whether Galaxy knows this Keycloak identity yet. Galaxy maps `sub` to an account through its own
  * OIDC login and refuses a token it can't map, so a user who has never signed in to Galaxy through
- * Keycloak is sent there once. A Galaxy that can't be reached isn't a reason to stop the sign-in:
- * the first Galaxy call reports it.
+ * Keycloak is sent there once. Only that refusal means unlinked: any other failure -- unreachable,
+ * a 5xx, some other 401 -- isn't something signing in to Galaxy would fix, so the sign-in goes
+ * ahead and the first Galaxy call reports it as the Galaxy error it is.
  */
 async function linkedToGalaxy(context: AuthContext, sub: string, accessToken: string): Promise<boolean> {
   const fetchImpl = context.fetch ?? fetch;
@@ -185,20 +186,38 @@ async function linkedToGalaxy(context: AuthContext, sub: string, accessToken: st
     context.log?.(`account link check: Galaxy unreachable (${(error as Error).message}); letting ${sub} in`);
     return true;
   }
-  // Galaxy's answer here is what decides who gets the link page, so it's worth seeing.
-  if (response.status === 401 || response.status === 403 || !response.ok) {
-    const said = (await response.text().catch(() => "")).slice(0, 200).replace(/\s+/g, " ");
-    context.log?.(`account link check for ${sub}: Galaxy answered ${response.status} ${said}`);
-    return response.ok || (response.status !== 401 && response.status !== 403);
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    const unmapped = response.status === 401 && unmappedToken(text);
+    // Galaxy's answer here is what decides who gets the link page, so it's worth seeing.
+    const said = text.slice(0, 200).replace(/\s+/g, " ");
+    context.log?.(
+      `account link check for ${sub}: Galaxy answered ${response.status} ${said}${unmapped ? "" : `; letting ${sub} in`}`,
+    );
+    return !unmapped;
   }
   const body = (await response.json().catch(() => ({}))) as { id?: unknown };
-  if (typeof body.id !== "string") context.log?.(`account link check for ${sub}: Galaxy answered as anonymous`);
   if (typeof body.id === "string") {
     await context.pool.query("UPDATE orbit_users SET galaxy_user_id = $2 WHERE sub = $1", [sub, body.id]);
-    return true;
+  } else {
+    // An anonymous answer means no Galaxy OIDC backend would decode the token at all -- configuration,
+    // not a missing link.
+    context.log?.(`account link check for ${sub}: Galaxy answered as anonymous; letting ${sub} in`);
   }
-  // Galaxy answers an anonymous caller with an empty user rather than a 401.
-  return false;
+  return true;
+}
+
+/**
+ * Galaxy's refusal of a token it decoded but couldn't match to a user (authnz
+ * `_match_access_token_to_user_in_provider`). Its other bearer-token 401s carry different words.
+ */
+function unmappedToken(body: string): boolean {
+  try {
+    const message = (JSON.parse(body) as { err_msg?: unknown }).err_msg;
+    return typeof message === "string" && message.startsWith("Cannot locate user");
+  } catch {
+    return false;
+  }
 }
 
 const escape = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
