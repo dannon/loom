@@ -146,7 +146,8 @@ export class Dispatcher {
     this.#working = true;
     // The sweeper: a turn cut off by a crash or a restart resumes without waiting for a new message.
     if (this.#o.turnsDisabled?.()) return;
-    for (const id of await interruptedConversations(this.#o.pool)) await this.#send({ conversationId: id });
+    for (const id of await interruptedConversations(this.#o.pool))
+      await this.#send({ conversationId: id });
   }
 
   /**
@@ -192,7 +193,10 @@ export class Dispatcher {
 
   /** What the conversation is waiting on the user for. */
   pendingAsks(conversationId: string): Array<{ id: number; request: AskRequest }> {
-    return [...(this.#live.get(conversationId)?.asks ?? [])].map(([id, request]) => ({ id, request }));
+    return [...(this.#live.get(conversationId)?.asks ?? [])].map(([id, request]) => ({
+      id,
+      request,
+    }));
   }
 
   /**
@@ -238,10 +242,15 @@ export class Dispatcher {
   async #retry(job: TurnJob, why: string): Promise<void> {
     const attempt = (job.attempt ?? 0) + 1;
     if (attempt >= MAX_ATTEMPTS && why !== "busy") {
-      this.#o.onEvent(job.conversationId, { type: "failed", message: "Orbit couldn't start this conversation's turn. Send a message to try again." });
+      this.#o.onEvent(job.conversationId, {
+        type: "failed",
+        message: "Orbit couldn't start this conversation's turn. Send a message to try again.",
+      });
       return;
     }
-    const delay = this.#o.retryDelayMs?.(attempt) ?? Math.min(30_000, 500 * 2 ** attempt) * (0.75 + Math.random() / 2);
+    const delay =
+      this.#o.retryDelayMs?.(attempt) ??
+      Math.min(30_000, 500 * 2 ** attempt) * (0.75 + Math.random() / 2);
     await this.#send({ conversationId: job.conversationId, attempt }, delay);
   }
 
@@ -253,7 +262,11 @@ export class Dispatcher {
     } finally {
       this.#handling.delete(conversationId);
       // A message that came while this handler ran, and found no turn to take it, still needs one.
-      if (!this.#stopping && !this.#live.get(conversationId)?.turn && (await this.#hasInbox(conversationId))) {
+      if (
+        !this.#stopping &&
+        !this.#live.get(conversationId)?.turn &&
+        (await this.#hasInbox(conversationId))
+      ) {
         await this.#send({ conversationId });
       }
     }
@@ -265,7 +278,9 @@ export class Dispatcher {
     const paused = this.#o.turnsDisabled?.();
     if (this.#stopping || paused) {
       // Mid-restart, or the kill switch: leave the inbox for the sweeper of a host that may run turns.
-      await pool.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [conversationId]);
+      await pool.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [
+        conversationId,
+      ]);
       if (paused) this.#o.onEvent(conversationId, { type: "failed", message: paused });
       return;
     }
@@ -288,7 +303,12 @@ export class Dispatcher {
           [conversation.ownerSub, conversationId, this.#o.hostId, this.#o.lease.maxTurnMs],
         );
         if (rowCount === 0) throw new Busy("the user's loop");
-        const gen = await acquireLeaseInTransaction(client, conversation.storeId, holder, this.#o.lease.ttlMs);
+        const gen = await acquireLeaseInTransaction(
+          client,
+          conversation.storeId,
+          holder,
+          this.#o.lease.ttlMs,
+        );
         if (gen === undefined) throw new Busy("the lease");
         return gen;
       });
@@ -311,7 +331,9 @@ export class Dispatcher {
     }
     if (this.#stopping) {
       await release();
-      await pool.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [conversationId]);
+      await pool.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [
+        conversationId,
+      ]);
       return;
     }
     try {
@@ -340,14 +362,17 @@ export class Dispatcher {
       const live = this.#live.get(conversationId);
       if (live?.turn) this.#endTurn(live, "interrupted");
       else await release();
-      await pool.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [conversationId]);
+      await pool.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [
+        conversationId,
+      ]);
       await this.#retry(job, "failed");
     }
   }
 
   /** The handler's wait: until the run settles, or until it asks the user, who may take a while. */
   async #untilSettledOrAsking(live: Live, turn: Turn): Promise<void> {
-    const asking = live.asks.size > 0 ? Promise.resolve() : this.#next(live, "ask").then(() => undefined);
+    const asking =
+      live.asks.size > 0 ? Promise.resolve() : this.#next(live, "ask").then(() => undefined);
     asking.catch(() => undefined);
     await Promise.race([turn.done, asking]);
   }
@@ -384,8 +409,12 @@ export class Dispatcher {
       await this.#releaseLoop(live.sub, id);
       // A restart's close settles the run as aborted; it still has to resume on the next host.
       const interrupted = how === "interrupted" || this.#stopping;
-      await pool.query("UPDATE orbit_conversations SET interrupted = $2 WHERE id = $1", [id, interrupted]);
-      if (!this.#stopping && !this.#handling.has(id) && (await this.#hasInbox(id))) await this.#send({ conversationId: id });
+      await pool.query("UPDATE orbit_conversations SET interrupted = $2 WHERE id = $1", [
+        id,
+        interrupted,
+      ]);
+      if (!this.#stopping && !this.#handling.has(id) && (await this.#hasInbox(id)))
+        await this.#send({ conversationId: id });
     }, `ending the turn for ${id}`);
   }
 
@@ -397,28 +426,39 @@ export class Dispatcher {
   }
 
   #releaseLoop(sub: string, conversationId: string): Promise<unknown> {
-    return this.#o.pool.query("DELETE FROM orbit_live_loops WHERE user_sub = $1 AND conversation_id = $2 AND holder = $3", [
-      sub,
-      conversationId,
-      this.#o.hostId,
-    ]);
+    return this.#o.pool.query(
+      "DELETE FROM orbit_live_loops WHERE user_sub = $1 AND conversation_id = $2 AND holder = $3",
+      [sub, conversationId, this.#o.hostId],
+    );
   }
 
   async #hasInbox(conversationId: string): Promise<boolean> {
-    const { rowCount } = await this.#o.pool.query("SELECT 1 FROM orbit_inbox WHERE conversation_id = $1 LIMIT 1", [conversationId]);
+    const { rowCount } = await this.#o.pool.query(
+      "SELECT 1 FROM orbit_inbox WHERE conversation_id = $1 LIMIT 1",
+      [conversationId],
+    );
     return (rowCount ?? 0) > 0;
   }
 
-  async #boot(conversation: ConversationRow, holder: string, leaseGen: number): Promise<Live & { resuming: boolean }> {
+  async #boot(
+    conversation: ConversationRow,
+    holder: string,
+    leaseGen: number,
+  ): Promise<Live & { resuming: boolean }> {
     const { pool } = this.#o;
     const pageId = conversation.pageId ?? (await this.#o.pageFor(conversation));
     if (conversation.pageId === null) {
-      await pool.query("UPDATE orbit_conversations SET page_id = $2 WHERE id = $1", [conversation.id, pageId]);
+      await pool.query("UPDATE orbit_conversations SET page_id = $2 WHERE id = $1", [
+        conversation.id,
+        pageId,
+      ]);
     }
     const data: WorkerData = {
       storeId: conversation.storeId,
       leaseGen,
-      ...(conversation.durableConversationId ? { conversationId: conversation.durableConversationId } : {}),
+      ...(conversation.durableConversationId
+        ? { conversationId: conversation.durableConversationId }
+        : {}),
       database: this.#o.databaseUrl,
       galaxyUrl: this.#o.galaxyUrl,
       pageId,
@@ -440,22 +480,27 @@ export class Dispatcher {
     };
     this.#live.set(conversation.id, live);
     worker.on("message", (message: FromWorker) => this.#onMessage(live, message));
-    worker.on("error", (error) => this.#o.log?.(`worker for ${conversation.id} failed: ${error.message}`));
-    worker.once("exit", (code) => this.#track(() => this.#onExit(live, code), `the exit of ${conversation.id}'s worker`));
+    worker.on("error", (error) =>
+      this.#o.log?.(`worker for ${conversation.id} failed: ${error.message}`),
+    );
+    worker.once("exit", (code) =>
+      this.#track(() => this.#onExit(live, code), `the exit of ${conversation.id}'s worker`),
+    );
 
     const ready = (await this.#next(live, "ready")) as Extract<FromWorker, { type: "ready" }>;
     if (conversation.durableConversationId === null) {
-      await pool.query("UPDATE orbit_conversations SET durable_conversation_id = $2 WHERE id = $1", [
-        conversation.id,
-        ready.conversationId,
-      ]);
+      await pool.query(
+        "UPDATE orbit_conversations SET durable_conversation_id = $2 WHERE id = $1",
+        [conversation.id, ready.conversationId],
+      );
     }
     live.renew = setInterval(() => {
       renewLease(pool, live.storeId, holder, this.#o.lease.ttlMs).then(
         (held) => {
           if (!held) void worker.terminate();
         },
-        (error: Error) => this.#o.log?.(`lease renewal for ${conversation.id} failed: ${error.message}`),
+        (error: Error) =>
+          this.#o.log?.(`lease renewal for ${conversation.id} failed: ${error.message}`),
       );
       // A turn that runs (or waits on the user) keeps the user's live loop for as long as it lasts.
       if (live.turn) {
@@ -484,10 +529,15 @@ export class Dispatcher {
     // Busy with a run Orbit started (a greeting, an auto-resume follow-up): let it finish, then retry.
     for (let attempt = 0; ; attempt++) {
       live.worker.postMessage({ cmd: "submit", text });
-      const ack = (await this.#next(live, "submitted")) as Extract<FromWorker, { type: "submitted" }>;
+      const ack = (await this.#next(live, "submitted")) as Extract<
+        FromWorker,
+        { type: "submitted" }
+      >;
       if (ack.admitted) {
         if (live.turn) live.turn.running = true;
-        await this.#o.pool.query("DELETE FROM orbit_inbox WHERE id = ANY($1::bigint[])", [rows.map((r) => r.id)]);
+        await this.#o.pool.query("DELETE FROM orbit_inbox WHERE id = ANY($1::bigint[])", [
+          rows.map((r) => r.id),
+        ]);
         return true;
       }
       if (attempt >= 20) throw new Error(`Conversation ${live.conversationId} stayed busy`);
@@ -530,7 +580,8 @@ export class Dispatcher {
       live.waiters.delete(waiter);
       waiter.resolve(message);
     }
-    if (message.type !== "submitted" && message.type !== "closed") this.#o.onEvent(live.conversationId, message);
+    if (message.type !== "submitted" && message.type !== "closed")
+      this.#o.onEvent(live.conversationId, message);
   }
 
   async #onExit(live: Live, code: number): Promise<void> {
@@ -542,7 +593,19 @@ export class Dispatcher {
     const { pool } = this.#o;
     // Cut off mid-turn (a crash, the turn cap, a restart) or holding an ask: resume it later. A lost
     // lease means another host has the conversation, and it's theirs to resume.
-    if (live.turn || live.asks.size > 0) {
+    const cutOff = live.turn !== undefined || live.asks.size > 0;
+    if (cutOff && code !== LEASE_LOST_EXIT_CODE) {
+      await pool
+        .query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [
+          live.conversationId,
+        ])
+        .catch(() => undefined);
+    }
+    // Let the next worker take the lease without waiting out the TTL; its acquire still bumps. Before
+    // the turn ends, since ending it sends any waiting message's turn, which would otherwise find the
+    // lease held and tell the user it's waiting on another conversation.
+    await releaseLease(pool, live.storeId, live.holder).catch(() => undefined);
+    if (cutOff) {
       if (code === LEASE_LOST_EXIT_CODE) {
         const turn = live.turn;
         live.turn = undefined;
@@ -551,11 +614,8 @@ export class Dispatcher {
         await this.#releaseLoop(live.sub, live.conversationId).catch(() => undefined);
       } else {
         this.#endTurn(live, "interrupted");
-        await pool.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [live.conversationId]).catch(() => undefined);
       }
     }
-    // Let the next worker take the lease without waiting out the TTL; its acquire still bumps.
-    await releaseLease(pool, live.storeId, live.holder).catch(() => undefined);
     this.#o.onEvent(live.conversationId, { type: "worker-exit", code });
   }
 

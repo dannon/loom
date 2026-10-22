@@ -32,7 +32,10 @@ const dispatchers: Dispatcher[] = [];
 beforeAll(async () => {
   pool = new pg.Pool({ ...(await freshDatabase(DATABASE)), max: 8 });
   await migrate(pool);
-  bundle = await bundleWorker(join(HERE, "..", "worker", "boot.ts"), join(HERE, "..", "..", ".scratch", "dispatch", "boot.mjs"));
+  bundle = await bundleWorker(
+    join(HERE, "..", "worker", "boot.ts"),
+    join(HERE, "..", "..", ".scratch", "dispatch", "boot.mjs"),
+  );
   standIn = await startStandIn();
 });
 
@@ -57,15 +60,26 @@ interface Host {
   readonly spawned: Array<{ storeId: string; worker: Worker }>;
 }
 
-async function host(name = "host", concurrency?: number, turnsDisabled?: () => string | undefined): Promise<Host> {
-  const boss = new PgBoss({ host: SOCKET, database: DATABASE, user: userInfo().username, schedule: false, supervise: false });
+async function host(
+  name = "host",
+  concurrency?: number,
+  turnsDisabled?: () => string | undefined,
+  hostPool: pg.Pool = pool,
+): Promise<Host> {
+  const boss = new PgBoss({
+    host: SOCKET,
+    database: DATABASE,
+    user: userInfo().username,
+    schedule: false,
+    supervise: false,
+  });
   boss.on("error", () => undefined);
   await boss.start();
   bosses.push(boss);
   const events = new Map<string, Event[]>();
   const spawned: Host["spawned"] = [];
   const dispatcher = new Dispatcher({
-    pool,
+    pool: hostPool,
     boss,
     bundle,
     hostId: `${name}-${randomUUID()}`,
@@ -73,8 +87,15 @@ async function host(name = "host", concurrency?: number, turnsDisabled?: () => s
     galaxyUrl: standIn.origin,
     lease: { ttlMs: 60_000, renewMs: 15_000, maxTurnMs: 60_000 },
     limits: { maxTurns: 6, maxToolCalls: 20, outputBytes: 1 << 22 },
-    tokens: createTokenCache({ refresh: async () => ({ token: "access", expiresAt: Date.now() + 600_000 }) }),
-    modelFor: (sub) => ({ baseUrl: `${standIn.origin}/v1`, id: "m", apiKey: "model-key-0123456789", user: sub }),
+    tokens: createTokenCache({
+      refresh: async () => ({ token: "access", expiresAt: Date.now() + 600_000 }),
+    }),
+    modelFor: (sub) => ({
+      baseUrl: `${standIn.origin}/v1`,
+      id: "m",
+      apiKey: "model-key-0123456789",
+      user: sub,
+    }),
     pageFor: async () => "p1",
     onEvent: (id, event) => {
       if (process.env.DISPATCH_LOG) console.log(`[${name}] ${id.slice(0, 8)} ${event.type}`);
@@ -115,21 +136,29 @@ async function until<T>(
   }
 }
 
-const of = (h: Host, id: string, type: Event["type"]) => (h.events.get(id) ?? []).filter((e) => e.type === type);
+const of = (h: Host, id: string, type: Event["type"]) =>
+  (h.events.get(id) ?? []).filter((e) => e.type === type);
 const asked = (h: Host, id: string, n = 1) =>
   until(() => of(h, id, "ask")[n - 1] as Extract<Event, { type: "ask" }> | undefined, `ask #${n}`);
 const settledCount = (h: Host, id: string) => of(h, id, "settled").length;
-const modelSaw = (text: string) => standIn.seen.filter((s) => s.to === "model" && s.userText === text).length;
+const modelSaw = (text: string) =>
+  standIn.seen.filter((s) => s.to === "model" && s.userText === text).length;
 
 describe("dispatch", () => {
   it("a sticky worker's second turn runs on the same worker with no generation change", async () => {
     const h = await host();
     const c = await createConversation(pool, await user());
     await h.dispatcher.submit(c.id, `hello ${c.id}`);
-    await until(() => modelSaw(`hello ${c.id}`) > 0 && settledCount(h, c.id) >= 1, "the first turn");
+    await until(
+      () => modelSaw(`hello ${c.id}`) > 0 && settledCount(h, c.id) >= 1,
+      "the first turn",
+    );
     const gen = await currentLeaseGen(pool, c.storeId);
     await h.dispatcher.submit(c.id, `hello again ${c.id}`);
-    await until(() => modelSaw(`hello again ${c.id}`) > 0 && settledCount(h, c.id) >= 2, "the second turn");
+    await until(
+      () => modelSaw(`hello again ${c.id}`) > 0 && settledCount(h, c.id) >= 2,
+      "the second turn",
+    );
     expect(await currentLeaseGen(pool, c.storeId)).toBe(gen);
     expect(h.spawned.filter((w) => w.storeId === c.storeId)).toHaveLength(1);
   });
@@ -206,7 +235,10 @@ describe("dispatch", () => {
     expect((await getConversation(pool, c.id))?.interrupted).toBe(true);
     const second = await host("after");
     await until(() => settledCount(second, c.id) >= 1, "the resumed run to settle", 20_000);
-    await until(async () => !(await getConversation(pool, c.id))?.interrupted, "the interruption to clear");
+    await until(
+      async () => !(await getConversation(pool, c.id))?.interrupted,
+      "the interruption to clear",
+    );
   });
 
   it("the kill switch stops every turn, queued ones included, and they run once it's lifted", async () => {
@@ -249,8 +281,14 @@ describe("dispatch", () => {
     const second = await host("after");
     const again = await asked(second, c.id);
     second.dispatcher.answer(c.id, again.id, true);
-    await until(() => standIn.galaxyCalls("PUT", "/api/histories/h1") === puts + 1, "the delete, once");
-    await until(async () => !(await getConversation(pool, c.id))?.interrupted, "the interruption to clear");
+    await until(
+      () => standIn.galaxyCalls("PUT", "/api/histories/h1") === puts + 1,
+      "the delete, once",
+    );
+    await until(
+      async () => !(await getConversation(pool, c.id))?.interrupted,
+      "the interruption to clear",
+    );
   });
 
   it("a crashed worker's conversation resumes on the next turn, on a fresh worker", async () => {
@@ -267,6 +305,33 @@ describe("dispatch", () => {
     expect(await currentLeaseGen(pool, c.storeId)).toBe(gen! + 1);
     h.dispatcher.answer(c.id, again.id, true);
     await until(() => modelSaw("after the crash") > 0, "the new message's turn");
+  });
+
+  it("a crash with a message in the inbox resends the turn only once the dead worker's lease is gone", async () => {
+    // A slow lease release, so a turn sent before it would find the lease still held.
+    const query = pool.query.bind(pool) as (...args: unknown[]) => Promise<unknown>;
+    const slowRelease = new Proxy(pool, {
+      get(target, prop) {
+        if (prop === "query") {
+          return (text: unknown, ...rest: unknown[]) =>
+            typeof text === "string" && text.startsWith("DELETE FROM orbit_leases")
+              ? new Promise((resolve) => setTimeout(resolve, 1500)).then(() => query(text, ...rest))
+              : query(text, ...rest);
+        }
+        const value = Reflect.get(target, prop, target) as unknown;
+        return typeof value === "function"
+          ? (value as (...args: unknown[]) => unknown).bind(target)
+          : value;
+      },
+    });
+    const h = await host("host", undefined, undefined, slowRelease);
+    const c = await createConversation(pool, await user());
+    await h.dispatcher.submit(c.id, `SLOW ${c.id}`);
+    await until(() => modelSaw(`SLOW ${c.id}`) > 0, "the slow run to start");
+    await h.dispatcher.submit(c.id, `queued behind the crash ${c.id}`);
+    await h.spawned.find((w) => w.storeId === c.storeId)!.worker.terminate();
+    await until(() => modelSaw(`queued behind the crash ${c.id}`) > 0, "the queued message's turn");
+    expect(of(h, c.id, "waiting")).toEqual([]);
   });
 
   it("two hosts can't both hold a conversation: the second sends the turn back instead of booting", async () => {
@@ -289,9 +354,15 @@ describe("the conversation's Galaxy page", () => {
     const sent: Array<{ url: string; auth: string | null; body: Record<string, unknown> }> = [];
     const create = galaxyPageCreator({
       galaxyUrl: "https://galaxy.test",
-      tokens: createTokenCache({ refresh: async () => ({ token: "user-token", expiresAt: Date.now() + 600_000 }) }),
+      tokens: createTokenCache({
+        refresh: async () => ({ token: "user-token", expiresAt: Date.now() + 600_000 }),
+      }),
       fetch: (async (url: string, init: RequestInit) => {
-        sent.push({ url, auth: new Headers(init.headers).get("authorization"), body: JSON.parse(String(init.body)) });
+        sent.push({
+          url,
+          auth: new Headers(init.headers).get("authorization"),
+          body: JSON.parse(String(init.body)),
+        });
         return Response.json({ id: "page-7" });
       }) as typeof fetch,
     });
@@ -301,7 +372,12 @@ describe("the conversation's Galaxy page", () => {
       {
         url: "https://galaxy.test/api/pages",
         auth: "Bearer user-token",
-        body: { slug: `orbit-${c.id}`, title: "Variant calling", content_format: "markdown", content: "" },
+        body: {
+          slug: `orbit-${c.id}`,
+          title: "Variant calling",
+          content_format: "markdown",
+          content: "",
+        },
       },
     ]);
     expect(sent[0]!.body.slug).toMatch(/^[a-z0-9-]+$/);
