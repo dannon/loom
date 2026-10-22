@@ -11,11 +11,11 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createRegistry, Harness, watchEvents } from "@earendil-works/pi-durable";
 import * as orbit from "orbit-brain";
 import * as vendor from "orbit-vendor-skills";
-import pg from "pg";
 
 import { agentModels } from "../../../core/src/agent/model";
 import { createPiHost, type AskAnswer } from "../../../core/src/agent/pi-host";
 import { resolve as resolveTarget } from "../../../core/src/agent/providers";
+import { createPool } from "../db/pool";
 import { LeaseFence } from "../lease/lease-fence";
 import { LeaseLostError, PostgresStorage } from "../storage/postgres-storage";
 import { fencedFetch } from "./fenced-fetch";
@@ -41,7 +41,7 @@ process.env.ORBIT_FRESH_SESSION = "1";
 // 2. Storage and the fence. A lost lease exits the thread with 75 (LeaseFence's default here), and
 // from then on nothing leaves the worker: not a commit, not a Galaxy write, not a model call.
 // Two connections: commits are serialized per store anyway, and every live worker holds a pool.
-const pool = new pg.Pool({ connectionString: data.database, max: 2 });
+const pool = createPool({ connectionString: data.database, max: 2 }, (message) => post({ type: "report", message }));
 const fence = new LeaseFence({ storeId: data.storeId, leaseGen: data.leaseGen, db: pool });
 const storage = fence.storage(await PostgresStorage.open(pool, data.storeId, { leaseGen: data.leaseGen }));
 const network = globalThis.fetch;
