@@ -11,7 +11,7 @@ import manifest from "../../../../../extensions/orbit/vendor/skills/_manifest.js
 import type { SkillEntry } from "../../../../../extensions/orbit/skills-discovery";
 import type { VendorSkillsSource } from "../../../../../extensions/orbit/vendor-skills";
 import { SKILLS_SURFACE_ID } from "../../../../../shared/skills-router.js";
-import { parseFrontmatter } from "../skills";
+import { parseFrontmatter } from "../../../../../extensions/orbit/skills-discovery";
 
 /** The repo flavor skills are offered under: the one Orbit ships and reads from the package. */
 const HOST_REPO = "galaxy-skills";

@@ -27,10 +27,9 @@ async function boot(capabilities: string[], withShell = false) {
 /** The browser's extras and shell tools as orbit/worker.ts builds them, over an inert host. */
 async function shellPieces(capabilities: string[]) {
   const { adaptTool, galaxyExtras, granted } = await import("./adapter");
-  const { galaxyTools } = await import("../galaxy-tools");
+  const { galaxyTools } = await import("../galaxy-extras");
   const { pythonTool } = await import("../python");
   const { processTools } = await import("../processes");
-  const { galaxyOpsEntry } = await import("../../../../../extensions/orbit/galaxy-ops-tools");
   const host = {
     clients: () => ({}) as never,
     conversation: () => undefined,
@@ -41,7 +40,7 @@ async function shellPieces(capabilities: string[]) {
   const tools = [pythonTool(), ...processTools()].filter((t) => granted(t, capabilities));
   return {
     // Under Node the full galaxy-ops entry loads, which has download_dataset of its own.
-    extras: galaxyExtras(galaxyTools(), host, galaxyOpsEntry().operations),
+    extras: galaxyExtras(galaxyTools(), host),
     shellTools: tools.map((t) => adaptTool(t, host)),
     layers: { brandName: "Olit", shellTools: () => new Set<string>(), artifacts: async () => [] },
   };

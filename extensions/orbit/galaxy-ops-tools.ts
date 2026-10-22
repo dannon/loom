@@ -322,7 +322,11 @@ function bridgeTool(bridge: GalaxyBridge, policy: GalaxyOpPolicy | undefined): G
 export type GalaxyExtra = GalaxyTool & { annotations: { readOnlyHint: boolean } };
 
 export interface GalaxyOpsToolSourceOptions {
-  /** Tools the shell supplies because its galaxy-ops entry lacks them; appended as given. */
+  /**
+   * Tools the shell supplies because its galaxy-ops entry lacks them, or in place of the entry's
+   * own: the browser's upload_file reads its in-memory files, where the Node entry's (hidden)
+   * reads a disk the shell doesn't have. Appended as given; an operation they name is left out.
+   */
   extras?: readonly GalaxyExtra[];
   policies?: Record<string, GalaxyOpPolicy>;
 }
@@ -338,7 +342,8 @@ export function createGalaxyOpsToolSource(
   return {
     tools() {
       // A snapshot: allOperations is one array both entries share, and grows when the other loads.
-      const ops = [...allOperations];
+      const supplied = new Set((options.extras ?? []).map((tool) => tool.name));
+      const ops = allOperations.filter((op) => !supplied.has(op.name));
       const widened = new Map(WIDENED.map((bridge) => [bridge.op.name, bridge]));
       return [
         ...ops.map((op) => {

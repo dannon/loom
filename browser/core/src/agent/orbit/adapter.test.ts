@@ -157,12 +157,12 @@ describe("the grant and the extras", () => {
     expect(granted(organize, ["llm", "read", "local", "write"])).toBe(true);
   });
 
-  it("leaves out an extra the galaxy-ops entry already has, and wraps the rest", async () => {
+  it("wraps each extra as a Galaxy tool", async () => {
     const { h } = host();
     const download = { ...echo, name: "download_dataset" };
     const upload = { ...echo, name: "upload_file", capability: "write" as const };
-    const extras = galaxyExtras([download, upload], h, ["upload_file"]);
-    expect(extras.map((t) => t.name)).toEqual(["download_dataset"]);
+    const extras = galaxyExtras([download, upload], h);
+    expect(extras.map((t) => t.name)).toEqual(["download_dataset", "upload_file"]);
     const result = await run(extras[0]);
     expect(result.details).toMatchObject({ galaxy: { tool: "download_dataset" } });
   });
@@ -180,7 +180,7 @@ describe("the grant and the extras", () => {
         return { jobs: [{ id: "aaaa000000000001" }], outputs: [] };
       },
     };
-    const [extra] = galaxyExtras([upload], h, []);
+    const [extra] = galaxyExtras([upload], h);
     await run(extra, { path: "out.csv", history_id: "h1" });
     expect(seenAtRun).toMatchObject([{ toolName: "upload_file", state: "dispatched" }]);
     expect(await submissionLedger().open("/orbit/1/notebook.md")).toMatchObject([

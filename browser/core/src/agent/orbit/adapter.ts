@@ -29,7 +29,7 @@ import {
 /** What a browser tool reads beyond its arguments, for the conversation a call runs in. */
 export interface ShellToolHost {
   /** Galaxy clients and Python for one call, ended by its abort signal. */
-  clients(signal: AbortSignal | undefined): Pick<Context, "galaxy" | "web" | "ops" | "python">;
+  clients(signal: AbortSignal | undefined): Pick<Context, "galaxy" | "web" | "python">;
   /** The conversation the call runs in: the bound one. */
   conversation(): ConversationId | undefined;
   binding(id: ConversationId): Promise<Binding>;
@@ -111,15 +111,9 @@ export function adaptTool(tool: AgentTool, host: ShellToolHost): GalaxyTool {
 
 /**
  * The extras as Galaxy tools: wrapped like the source's own, so they get its deadline, its spill,
- * `details.galaxy`, and for upload_file the submission ledger. One the loaded galaxy-ops entry
- * already has is left out, so a build that resolves the Node entry can't register a name twice.
+ * `details.galaxy`, and for upload_file the submission ledger. The source leaves out any operation
+ * of the same name (the Node entry's own upload_file), so the shell's is the one registered.
  */
-export function galaxyExtras(
-  tools: readonly AgentTool[],
-  host: ShellToolHost,
-  has: readonly string[],
-): GalaxyExtra[] {
-  return tools
-    .filter((tool) => !has.includes(tool.name))
-    .map((tool) => wrapGalaxyTool(adaptTool(tool, host)) as GalaxyExtra);
+export function galaxyExtras(tools: readonly AgentTool[], host: ShellToolHost): GalaxyExtra[] {
+  return tools.map((tool) => wrapGalaxyTool(adaptTool(tool, host)) as GalaxyExtra);
 }

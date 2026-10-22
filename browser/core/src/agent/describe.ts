@@ -9,7 +9,7 @@ import { DEFAULT_COMPACTION_POLICY } from "@earendil-works/pi-durable";
 
 import { registeredGalaxyTools } from "../../../../extensions/orbit/galaxy-tool-source";
 import { MAX_AUTO_FOLLOW_UPS } from "./documents";
-import { galaxyTools } from "./galaxy-tools";
+import { galaxyTools } from "./galaxy-extras";
 import { Headless } from "./headless";
 import { connect, keyVariable } from "./model";
 import { processTools } from "./processes";
@@ -18,7 +18,7 @@ import { LOOP, MAX_TURNS } from "./runtime";
 import { defaultEndpoint, PROVIDERS, resolve } from "./providers";
 import type { AgentTool, Capability, Python } from "./tool";
 import type { AgentFlavor } from "./tools";
-import { DEFAULT_BRAND, noteTag, type Brand } from "./brand";
+import { DEFAULT_BRAND, type Brand } from "./brand";
 
 const SCHEMA = 1;
 const SOURCE = "src/agent";
@@ -201,7 +201,7 @@ async function tools(flavor: AgentFlavor, brand: Brand) {
       t,
     ]),
   );
-  const extras = new Set(galaxyTools(noteTag(brand)).map((t) => t.name));
+  const extras = new Set(galaxyTools().map((t) => t.name));
   const galaxy = new Set(full.galaxy);
   // The result shape galaxy-ops declares for each operation and reads back in its own tests.
   const declared = new Map(allOperations.map((op) => [op.name, op.result ?? null]));

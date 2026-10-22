@@ -18,7 +18,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { registeredGalaxyTools } from "../../../../../extensions/orbit/galaxy-tool-source";
 import { inventedEmbed, resolveArtifacts } from "../artifacts";
-import type { Annotate } from "../ops";
+import type { Annotate } from "../tools";
 import type { Artifact, Context } from "../tool";
 import type { AgentFlavor } from "../tools";
 

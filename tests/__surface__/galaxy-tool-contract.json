@@ -1,6 +1,6 @@
 {
   "sources": {
-    "browser": "bare/src/__surface__/request-plain.json + olit/src/agent/__surface__/traits.json",
+    "browser": "bare/src/__surface__/request-plain.json + olit/src/agent/__surface__/request-plain.json",
     "orbit": "@galaxyproject/galaxy-ops 0.3.1 allOperations (Node entry)",
     "parameters": "createGalaxyOpsToolSource().tools() (root galaxy-ops + Loom bridges)"
   },
@@ -70,7 +70,6 @@
     "list_jobs",
     "list_visualizations",
     "loom_propose",
-    "notebook_resume",
     "organize_datasets",
     "run_python",
     "save_visualization",
@@ -83,10 +82,8 @@
     "get_visualization_details",
     "get_visualization_options",
     "list_visualizations",
-    "notebook_resume",
     "save_visualization",
     "show_visualization",
-    "upload_file",
     "vega_dataset"
   ],
   "orbitOnly": [],
@@ -98,5 +95,13 @@
       "get_page(content_hash)"
     ]
   },
-  "knownDifferences": { "parameters": {} }
+  "knownDifferences": {
+    "parameters": {
+      "download_dataset": {
+        "browserOnly": [],
+        "upstreamOnly": ["file_path", "use_default_filename", "require_ok_state"]
+      },
+      "upload_file": { "browserOnly": ["file_name", "file_type", "dbkey"], "upstreamOnly": [] }
+    }
+  }
 }

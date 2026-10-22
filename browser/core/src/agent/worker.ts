@@ -7,7 +7,7 @@ import type { AgentEvent, ConversationId } from "@earendil-works/pi-durable";
 import type { GalaxyStatus } from "./galaxy-status";
 import type { Placement, RuntimeConfig } from "./runtime";
 import type { SessionDocument } from "./saved";
-import type { RecordSummary } from "./notebook";
+import type { RecordSummary } from "./records";
 import type { AgentFlavor } from "./tools";
 import type { Settled } from "./watch";
 import { browserEnv } from "./orbit/browser-env";

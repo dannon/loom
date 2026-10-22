@@ -20,7 +20,6 @@ import {
   type Storage,
 } from "@earendil-works/pi-durable";
 
-import { galaxyOpsEntry } from "../../../../../extensions/orbit/galaxy-ops-tools";
 import { registeredGalaxyTools } from "../../../../../extensions/orbit/galaxy-tool-source";
 import { createPage, listHistoryPages } from "../../../../../extensions/orbit/galaxy-pages-api";
 import { pollGalaxyNow } from "../../../../../extensions/orbit/galaxy-poller";
@@ -40,17 +39,17 @@ import {
 } from "../../../../../extensions/orbit/submission-ledger";
 import { createPageRecordStore } from "../../../../../extensions/orbit/record-store-page";
 import { registerArtifactKinds } from "../../artifacts/kinds";
-import { DEFAULT_BRAND, noteTag, type Brand } from "../brand";
+import { DEFAULT_BRAND, type Brand } from "../brand";
 import { Binding, FollowUps, heldBy } from "../documents";
 import { connectGalaxy, connectWeb, galaxyFetch } from "../galaxy";
-import { galaxyTools } from "../galaxy-tools";
-import { recordsOn, slugForSession, type RecordSummary } from "../notebook";
+import { galaxyTools } from "../galaxy-extras";
+import { recordsOn, slugForSession, type RecordSummary } from "../records";
 import type { SessionReason } from "../pi-host";
 import type { Submission } from "@earendil-works/pi-durable";
 import { processTools } from "../processes";
 import { pythonTool } from "../python";
 import { artifactsIn, context, Runtime, type Placement } from "../runtime";
-import { galaxyOps, type AgentFlavor } from "../tools";
+import type { AgentFlavor } from "../tools";
 import type { Python } from "../tool";
 import { adaptTool, galaxyExtras, granted, type ShellToolHost } from "./adapter";
 import type { OpenRequest, PageMessage, Waiting, WorkerMessage } from "../worker";
@@ -349,7 +348,6 @@ async function open(request: OpenRequest) {
     clients: (signal) => ({
       galaxy: connectGalaxy({ ...galaxyOptions, signal }),
       web: connectWeb(signal),
-      ops: galaxyOps({ ...galaxyOptions, signal }),
       python: { ...python, run: (code) => python.run(code, signal) },
     }),
     conversation: () => conversation?.id,
@@ -391,7 +389,7 @@ async function open(request: OpenRequest) {
     },
     ledger,
     // The grant filters these with every other Galaxy tool (upload_file is a writer).
-    extras: galaxyExtras(galaxyTools(noteTag(brand)), shell, galaxyOpsEntry().operations),
+    extras: galaxyExtras(galaxyTools(), shell),
     shellTools: shellTools.map((t) => adaptTool(t, shell)),
     layers: {
       brandName: brand.name,

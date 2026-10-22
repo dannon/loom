@@ -20,12 +20,12 @@ interface RequestTool {
 const bare = JSON.parse(
   readFileSync(join(BROWSER, "bare", "src", "__surface__", "request-plain.json"), "utf-8"),
 ) as { tools: RequestTool[] };
-const olitTraits = JSON.parse(
-  readFileSync(join(BROWSER, "olit", "src", "agent", "__surface__", "traits.json"), "utf-8"),
-) as Array<{ name: string }>;
+const olit = JSON.parse(
+  readFileSync(join(BROWSER, "olit", "src", "agent", "__surface__", "request-plain.json"), "utf-8"),
+) as { tools: RequestTool[] };
 
 const browserTools = new Map(bare.tools.map((t) => [t.function.name, t.function]));
-const olitOnly = olitTraits.map((t) => t.name).filter((name) => !browserTools.has(name));
+const olitOnly = olit.tools.map((t) => t.function.name).filter((name) => !browserTools.has(name));
 const browserNames = [...browserTools.keys(), ...olitOnly];
 
 // Orbit's Galaxy tools: one per galaxy-ops operation on the Node entry. The
@@ -71,7 +71,8 @@ describe("the browser's Galaxy tools against Orbit's", () => {
   it("pins the shared tools, the browser-only tools and the known differences", async () => {
     const contract = {
       sources: {
-        browser: "bare/src/__surface__/request-plain.json + olit/src/agent/__surface__/traits.json",
+        browser:
+          "bare/src/__surface__/request-plain.json + olit/src/agent/__surface__/request-plain.json",
         orbit: `@galaxyproject/galaxy-ops ${opsVersion} allOperations (Node entry)`,
         parameters: "createGalaxyOpsToolSource().tools() (root galaxy-ops + Loom bridges)",
       },

@@ -18,7 +18,7 @@ import { Binding, FollowUps, Sessions } from "./documents";
 import { DEFAULT_BRAND, type Brand } from "./brand";
 import { connectGalaxy, type Galaxy } from "./galaxy";
 import { agentModels } from "./model";
-import type { RecordSummary } from "./notebook";
+import type { RecordSummary } from "./records";
 import { probeWindow, resolve, type LlmConfig, type Target } from "./providers";
 import { modelsOf, SCHEMA, thisBuild, usageTotals, type SessionDocument } from "./saved";
 import type { Capability } from "./tool";

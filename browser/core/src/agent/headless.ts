@@ -19,7 +19,7 @@ import {
 
 import { createMemoryLedger } from "../../../../extensions/orbit/submission-ledger";
 import { Binding } from "./documents";
-import type { RecordSummary } from "./notebook";
+import type { RecordSummary } from "./records";
 import { orbitSession, startOrbitWorker, stopOrbitWorker, submitText } from "./orbit/worker";
 import { readShippedSkill } from "./orbit/skills-node";
 import { ORBIT_WATCH } from "./orbit/watch";
