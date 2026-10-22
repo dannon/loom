@@ -18,6 +18,7 @@ import { capabilityProfile } from "../../shared/capability-profile.js";
 import { installedRecordStore, installedRecordStoreFor } from "./record-store-seam";
 
 export {
+  addRecordStore,
   installedRecordStore,
   installedRecordStoreFor,
   setRecordStore,

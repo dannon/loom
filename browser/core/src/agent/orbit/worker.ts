@@ -24,7 +24,11 @@ import { pollGalaxyNow } from "../../../../../extensions/loom/galaxy-poller";
 import { galaxyBackgroundIdle } from "../../../../../extensions/loom/galaxy-reconcile";
 import { captureLateSubmission } from "../../../../../extensions/loom/galaxy-submission-capture";
 import { isSubmissionTool } from "../../../../../extensions/loom/galaxy-submission";
-import { setRecordStore } from "../../../../../extensions/loom/record-store";
+import {
+  addRecordStore,
+  installedRecordStoreFor,
+  setRecordStore,
+} from "../../../../../extensions/loom/record-store";
 import { setCurrentHistoryId } from "../../../../../extensions/loom/state";
 import {
   createMemoryLedger,
@@ -131,6 +135,17 @@ const makeWatch = (pollMs?: number) =>
     bound: (id) => conversation?.id === id,
     recordKey: pageKey,
     poll: (options) => pollGalaxyNow(options),
+    background: async (id) => {
+      const key = pageKey(id);
+      // Not shown since this worker started (a reload): its store comes from its binding.
+      if (!installedRecordStoreFor(key)) {
+        const bound = await runtime!.harness.snapshot(Binding, id, context);
+        // No page yet: nothing has been written that could move.
+        if (!bound?.pageId) return false;
+        addRecordStore(await recordFor(id));
+      }
+      return (await pollGalaxyNow({ recordKey: key })).inProgress > 0;
+    },
     delivered: (recordKey, keys) => submissionLedger().delivered(recordKey, keys),
     settled: (id, settled) => {
       if (conversation?.id === id) post({ type: "settled", settled });
@@ -148,45 +163,47 @@ async function watchNow(id: ConversationId, recover = false) {
   wake(id);
 }
 
-/**
- * Install `id`'s record store before its session starts. Its page is made on the first write
- * that has something in it, attached to the conversation's history and found again by slug, and
- * bound in the conversation's Binding doc before any content goes up.
- */
+/** Install `id`'s record store before its session starts. */
 async function installRecord(id: ConversationId) {
+  const store = await recordFor(id);
+  setOrbitCwd(`/orbit/${id}`);
+  setRecordStore(store);
+}
+
+/**
+ * `id`'s record store. Its page is made on the first write that has something in it, attached to
+ * the conversation's history and found again by slug, and bound in the conversation's Binding doc
+ * before any content goes up.
+ */
+async function recordFor(id: ConversationId) {
   const harness = runtime!.harness;
   const bound = await harness.snapshot(Binding, id, context);
   const brand = flavor.brand ?? DEFAULT_BRAND;
   const slug = slugForSession(bound?.sessionId ?? String(id), orbitBrand(brand));
-  setOrbitCwd(`/orbit/${id}`);
-  setRecordStore(
-    createPageRecordStore({
-      key: pageKey(id),
-      pageId: bound?.pageId,
-      create: async () => {
-        if (readOnly) throw new Error("A read-only launch keeps no record.");
-        if (!bound?.historyId)
-          throw new Error("This conversation has no Galaxy history to keep its record in.");
-        const existing = (await listHistoryPages(bound.historyId)).find(
-          (page) => page.slug === slug,
-        );
-        if (existing) return existing.id;
-        return (
-          await createPage({
-            title: `${brand.name} record`,
-            content: "",
-            history_id: bound.historyId,
-            slug,
-          })
-        ).id;
-      },
-      bind: async (pageId) => {
-        await harness.commit(async (tx) => {
-          (await tx.doc(Binding, id)).pageId = pageId;
-        }, context);
-      },
-    }),
-  );
+  return createPageRecordStore({
+    key: pageKey(id),
+    pageId: bound?.pageId,
+    create: async () => {
+      if (readOnly) throw new Error("A read-only launch keeps no record.");
+      if (!bound?.historyId)
+        throw new Error("This conversation has no Galaxy history to keep its record in.");
+      const existing = (await listHistoryPages(bound.historyId)).find((page) => page.slug === slug);
+      if (existing) return existing.id;
+      return (
+        await createPage({
+          title: `${brand.name} record`,
+          content: "",
+          history_id: bound.historyId,
+          slug,
+        })
+      ).id;
+    },
+    bind: async (pageId) => {
+      await harness.commit(async (tx) => {
+        (await tx.doc(Binding, id)).pageId = pageId;
+      }, context);
+    },
+  });
 }
 
 /** Follow-ups queued for the user while the conversation is idle, and why. */

@@ -11,8 +11,10 @@
  * once nothing is in flight, waiting on enrichment, sent and uncaptured, or undelivered: the
  * ledger is the capture barrier, so a capture that takes several ticks keeps it alive.
  *
- * For a conversation the page isn't showing it polls nothing (Orbit's poller works on the bound
- * record) and waits for the conversation to be shown again, with no timer and no writes.
+ * For a conversation the page isn't showing, it keeps the record current through `background`
+ * (a tick pinned to that record: blocks move, nothing is announced or followed up) for as long as
+ * work is in flight, then waits for the conversation to be shown again with no timer and no
+ * commits. The follow-up waits in the ledger and goes out on the first tick after the show.
  */
 import {
   defineDoc,
@@ -58,6 +60,11 @@ export interface OrbitWatchOptions {
   /** The record key Orbit's poller pins for this conversation. */
   recordKey(conversationId: ConversationId): string;
   poll(options: PollOptions): Promise<TickResult>;
+  /**
+   * One tick on an unshown conversation's record, and whether it still has work in flight; without
+   * it, an unshown conversation's record waits for the show.
+   */
+  background?(conversationId: ConversationId): Promise<boolean>;
   delivered(recordKey: string, keys: readonly string[]): Promise<void>;
   /** Tell the page some watched work settled. */
   settled(conversationId: ConversationId, settled: Settled): void;
@@ -153,10 +160,18 @@ export function orbitWatch(options: OrbitWatchOptions) {
       tick: async (current, runtime, context) => {
         const id = current.input.conversationId;
         const checkpoint = current.state.checkpoint as WatchState;
-        // Until the page shows it: no timer and no writes, just the wake an attach sends.
-        while (!options.bound(id)) {
+        // Until the page shows it: the record kept current while its work runs, then no timer and
+        // no commits, just the wake an attach sends.
+        for (let polls = 0; !options.bound(id);) {
           if (runtime.signal.aborted) return;
-          await pause(id, undefined, runtime.signal);
+          let busy = false;
+          try {
+            busy = (await options.background?.(id)) ?? false;
+          } catch (error) {
+            runtime.report(error);
+            busy = true;
+          }
+          await pause(id, busy ? pollDelay(++polls, pollMs) : undefined, runtime.signal);
         }
         /** The next checkpoint, from the task as it stands now: ticks always move on. */
         const next = (now: { state: { checkpoint: unknown } }, change: Partial<WatchState>) => {
