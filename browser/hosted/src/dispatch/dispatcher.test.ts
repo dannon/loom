@@ -265,7 +265,11 @@ describe("dispatch", () => {
     expect(dead.spawned.filter((w) => w.storeId === c.storeId)).toHaveLength(0);
     const next = await host("next", undefined, undefined, true);
     await next.dispatcher.submit(c.id, `after the crash ${c.id}`);
-    await until(() => modelSaw(`after the crash ${c.id}`) > 0, "the turn behind the dead job", 30_000);
+    await until(
+      () => modelSaw(`after the crash ${c.id}`) > 0,
+      "the turn behind the dead job",
+      30_000,
+    );
   });
 
   it("the kill switch stops every turn, queued ones included, and they run once it's lifted", async () => {
@@ -361,6 +365,20 @@ describe("dispatch", () => {
     expect(of(h, c.id, "waiting")).toEqual([]);
   });
 
+  it("a worker that crashes mid-run is replaced at once, and the run resumes without a new message", async () => {
+    const h = await host();
+    const c = await createConversation(pool, await user());
+    await h.dispatcher.submit(c.id, `SLOW ${c.id}`);
+    await until(() => modelSaw(`SLOW ${c.id}`) > 0, "the slow run to start");
+    await h.spawned.find((w) => w.storeId === c.storeId)!.worker.terminate();
+    await until(
+      () => h.spawned.filter((w) => w.storeId === c.storeId).length === 2,
+      "a fresh worker",
+    );
+    await until(() => settledCount(h, c.id) >= 1, "the resumed run to settle");
+    await until(async () => !(await getConversation(pool, c.id))?.interrupted, "the mark to clear");
+  });
+
   it("two hosts can't both hold a conversation: the second sends the turn back instead of booting", async () => {
     const a = await host("a");
     const c = await createConversation(pool, await user());
@@ -415,9 +433,16 @@ describe("the conversation's Galaxy page", () => {
     let status = 200;
     const retitle = galaxyPageRetitler({
       galaxyUrl: "https://galaxy.test",
-      tokens: createTokenCache({ refresh: async () => ({ token: "user-token", expiresAt: Date.now() + 600_000 }) }),
+      tokens: createTokenCache({
+        refresh: async () => ({ token: "user-token", expiresAt: Date.now() + 600_000 }),
+      }),
       fetch: (async (url: string, init: RequestInit) => {
-        sent.push({ url, method: init.method, auth: new Headers(init.headers).get("authorization"), body: JSON.parse(String(init.body)) });
+        sent.push({
+          url,
+          method: init.method,
+          auth: new Headers(init.headers).get("authorization"),
+          body: JSON.parse(String(init.body)),
+        });
         return Response.json({}, { status });
       }) as typeof fetch,
     });
@@ -430,7 +455,12 @@ describe("the conversation's Galaxy page", () => {
     expect(await titleIfUntitled(pool, c.id, "something else")).toBeUndefined();
     await retitle(titled!);
     expect(sent).toEqual([
-      { url: "https://galaxy.test/api/pages/page-7", method: "PUT", auth: "Bearer user-token", body: { title: "Call variants" } },
+      {
+        url: "https://galaxy.test/api/pages/page-7",
+        method: "PUT",
+        auth: "Bearer user-token",
+        body: { title: "Call variants" },
+      },
     ]);
     status = 500;
     await expect(retitle(titled!)).rejects.toThrow("HTTP 500");
