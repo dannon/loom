@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { pageContentProblem } from "./page-edit";
+import { pageContentProblem } from "../../../../shared/galaxy-page-cells.js";
 
 import {
   CHAT_FORMATTING,

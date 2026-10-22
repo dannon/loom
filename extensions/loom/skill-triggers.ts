@@ -17,6 +17,7 @@ import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { appendActivityEvent } from "./activity";
 import { findConfusablesMatch } from "./confusables";
+import { fetchFailureHintForText } from "./fetch-failure-hint";
 import { hasFailedTransition, INVOCATION_FAILED_HINT } from "./invocation-failure-hint";
 import { getNotebookPath } from "./state";
 import type { GalaxyToolFamily } from "../../shared/galaxy-tool-family.js";
@@ -84,6 +85,13 @@ export const skillTriggers = (family: GalaxyToolFamily): readonly SkillTrigger[]
     tools: new Set([family.tool("recommend_iwc_workflows"), family.tool("search_iwc_workflows")]),
     on: "success",
     hint: () => iwcCandidatesHint(family),
+  },
+  {
+    // A dataset Galaxy failed to fetch, in any result that carries datasets: the next url the
+    // model writes from memory is a guess, and for ENA and SRA always a wrong one.
+    id: "fetch-failed",
+    on: "success",
+    hint: ({ text }) => fetchFailureHintForText(text),
   },
 ];
 
