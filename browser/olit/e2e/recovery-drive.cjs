@@ -5,8 +5,8 @@
 const playwright = require("playwright");
 const BROWSER = process.env.BROWSER || "chromium";
 const STUB = "http://127.0.0.1:8099";
-// Each brain heads the record it puts before the user's message in its own words (e2e/brain.cjs).
-const RECORD_HEADING = process.env.EXPECT_BRAIN === "orbit" ? "## Notebook (project log)" : "The record (current contents)";
+// The heading of the record the brain puts before the user's message.
+const RECORD_HEADING = "## Notebook (project log)";
 const LAUNCH = `${STUB}/plugins/visualizations/olit?dataset_id=drecover&frame=1`;
 
 const results = [];

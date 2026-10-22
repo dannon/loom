@@ -119,21 +119,6 @@ export function defines(settings: Partial<Env> = {}): Record<string, string> {
   };
 }
 
-export type Brain = "browser" | "orbit";
-
-/**
- * Which brain the agent worker boots: the browser's own runtime, or Orbit's (extensions/loom)
- * behind pi-host. Read from the environment here rather than in defines(settings), because a
- * build passes no settings and the flag has to reach the bundle Galaxy serves.
- */
-export function orbitBrain(): Brain {
-  const value = process.env.VITE_ORBIT_BRAIN ?? "browser";
-  if (value !== "browser" && value !== "orbit") {
-    throw new Error(`VITE_ORBIT_BRAIN=${value} is not a brain (browser | orbit).`);
-  }
-  return value;
-}
-
 const shim = (name: string) =>
   fileURLToPath(new URL(`./src/agent/orbit/shims/${name}`, import.meta.url));
 const ROOT_MODULES = fileURLToPath(new URL("../../node_modules", import.meta.url));
@@ -252,12 +237,15 @@ const servePyodide = (flavorRoot: string): Plugin => ({
 
 export function orbitBrowserVite({
   command,
+  mode,
   flavorRoot,
   galaxyPaths = [],
   page = "src/main.ts",
   worker = "src/worker.ts",
 }: {
   command: "build" | "serve";
+  /** Vite's mode: under vitest ("test") the code runs in Node, with Node's own modules. */
+  mode?: string;
   /** The flavor package's directory: where static/ is built and served from. */
   flavorRoot: string;
   /** More paths the dev server forwards to Galaxy, for what only the flavor fetches. */
@@ -267,8 +255,8 @@ export function orbitBrowserVite({
   worker?: string;
 }): UserConfig {
   const { env, missing } = readEnv();
-  const brain = orbitBrain();
-  const orbit = brain === "orbit";
+  // The aliases and the builtin guard stand Node out of the worker's way; tests run under Node.
+  const forWorker = mode !== "test";
   // Only the dev server reads these; a build is compiled without them.
   const llm = command === "serve" ? llmProxy(env) : { root: "http://127.0.0.1:11434", path: "/v1" };
   if (command === "serve" && missing.length) {
@@ -281,7 +269,7 @@ export function orbitBrowserVite({
       outDir: path.resolve(flavorRoot, "static"),
       emptyOutDir: true,
       rollupOptions: {
-        ...(orbit ? { onwarn: orbitOnwarn } : {}),
+        onwarn: orbitOnwarn,
         output: {
           manualChunks: () => "app.js",
           entryFileNames: "[name].js",
@@ -292,14 +280,13 @@ export function orbitBrowserVite({
     },
     define: {
       ...(command === "build" ? defines() : defines(env)),
-      "process.env.orbit_brain": JSON.stringify(brain),
     },
     plugins: [
       ...(command === "build" ? [copyPyodide] : [servePyodide(flavorRoot)]),
-      ...(orbit ? [orbitGuard] : []),
+      ...(forWorker ? [orbitGuard] : []),
     ],
     resolve: {
-      ...(orbit ? { alias: orbitAliases() } : {}),
+      ...(forWorker ? { alias: orbitAliases() } : {}),
       // Orbit's chat UI is imported from ../app/src/renderer, where a bare import would look for
       // app/'s or the repo root's node_modules. Those aren't installed when only browser/ is, and
       // chat-markdown.ts has to configure the same `marked` the chat UI renders with.
@@ -313,14 +300,10 @@ export function orbitBrowserVite({
           searchForWorkspaceRoot(flavorRoot),
           fileURLToPath(new URL("../../app/src/renderer", import.meta.url)),
           fileURLToPath(new URL("../../shared", import.meta.url)),
-          // Orbit's brain and what it imports, under the flag.
-          ...(orbit
-            ? [
-                fileURLToPath(new URL("../../extensions", import.meta.url)),
-                fileURLToPath(new URL("../../lessons", import.meta.url)),
-                ROOT_MODULES,
-              ]
-            : []),
+          // Orbit's brain and what it imports.
+          fileURLToPath(new URL("../../extensions", import.meta.url)),
+          fileURLToPath(new URL("../../lessons", import.meta.url)),
+          ROOT_MODULES,
         ],
       },
       proxy: {
@@ -346,11 +329,12 @@ export function orbitBrowserVite({
     },
     worker: {
       format: "es",
-      ...(orbit ? { plugins: () => [orbitGuard] } : {}),
+      plugins: () => (forWorker ? [orbitGuard] : []),
       // One file: WebKit runs a worker's entry module again when a chunk imports from it, and
       // the second copy takes over the worker's messages without its state.
       rollupOptions: {
-        ...(orbit ? { onwarn: orbitOnwarn } : {}),
+        // Vite's type for this block leaves onwarn out; rollup still takes it.
+        ...{ onwarn: orbitOnwarn },
         output: { inlineDynamicImports: true },
       },
     },
@@ -363,7 +347,7 @@ export function orbitBrowserVite({
       entries: ["index.html", page, worker],
       exclude: ["@sqlite.org/sqlite-wasm"],
       // Orbit's root-installed deps, named so the optimizer doesn't find them mid-drive and reload.
-      ...(orbit ? { include: ["@sinclair/typebox", "yaml", "openapi-fetch"] } : {}),
+      include: ["@sinclair/typebox", "yaml", "openapi-fetch"],
     },
   };
 }

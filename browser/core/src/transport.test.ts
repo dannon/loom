@@ -49,7 +49,6 @@ describe("the Galaxy transport", () => {
       "agent/galaxy.ts",
       "agent/orbit/worker.ts",
       "agent/runtime.ts",
-      "agent/worker.ts",
       "shell.ts",
     ]);
   });

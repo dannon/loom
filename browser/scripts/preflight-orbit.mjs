@@ -2,8 +2,8 @@
 /**
  * `npm run preflight:orbit`: can Orbit's brain build and load in the agent worker at all?
  *
- * Builds core/src/agent/orbit/preflight.html through the production config with
- * VITE_ORBIT_BRAIN=orbit, checks the worker bundle for Node-only packages that got past the
+ * Builds core/src/agent/orbit/preflight.html through the production config, checks the worker
+ * bundle for Node-only packages that got past the
  * aliases, prints its size, then runs it in a realm with only browser-worker globals
  * (orbit-worker-realm.mjs). The worker boots extensions/loom on pi-host and writes and re-reads a
  * registry attempt, and posts { ok, mode, tools }. Exits non-zero on any failure.
@@ -48,7 +48,7 @@ const built = spawnSync(
   ],
   {
     cwd: browser,
-    env: { ...process.env, VITE_ORBIT_BRAIN: "orbit", PREFLIGHT_OUT: out },
+    env: { ...process.env, PREFLIGHT_OUT: out },
     stdio: "inherit",
   },
 );

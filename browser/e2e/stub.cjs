@@ -5,10 +5,6 @@ const path = require("path");
 // What Galaxy refuses on a page, in its own words; the brain and the conformance test check the same.
 const { pageContentProblem } = require("../../shared/galaxy-page-cells.js");
 
-// Which brain the drives run against (e2e/brain.cjs): a script that names a brain's own tool
-// picks the other brain's variant under EXPECT_BRAIN=orbit.
-const BRAIN = process.env.EXPECT_BRAIN || "browser";
-
 // The plugin package: its manifest and the static/ Galaxy serves.
 const ROOT = path.join(__dirname, "..", "olit");
 // Where Galaxy serves a visualization plugin from, and the host page it renders.
@@ -497,21 +493,18 @@ const server = http.createServer(async (req, res) => {
         if (script === "echo") return answer(message(String(last.role === "user" ? last.content : "")));
         if (script === "linked") return answer(message("Dataset 0123456789abcdef is ready."));
         if (script === "reset-watch") {
-            // Open the record, run a tool, then say so; anything asked after that is a follow-up.
-            // Orbit's brain has no record to open first: its capture writes the run into the record.
+            // Run a tool, then say so; anything asked after that is a follow-up. There is no record
+            // to open first: the brain's capture writes the run into the record.
             const tools = (body.messages || []).filter((m) => m.role === "tool").length;
-            const call = (name, args) => [{ id: `call_${tools}`, type: "function", function: { name, arguments: JSON.stringify(args) } }];
-            const steps = BRAIN === "orbit" ? ["run_tool"] : ["notebook_resume", "run_tool"];
-            const step = steps[tools];
-            if (step === "notebook_resume") return answer(message("", call("notebook_resume", {})));
-            if (step === "run_tool") return answer(message("", call("run_tool", { history_id: "h-dreset", tool_id: "cat1", inputs: {} })));
+            if (tools === 0) {
+                const args = { history_id: "h-dreset", tool_id: "cat1", inputs: {} };
+                return answer(message("", [{ id: "call_0", type: "function", function: { name: "run_tool", arguments: JSON.stringify(args) } }]));
+            }
             return answer(message("Submitted."));
         }
         if (script === "record") {
-            // Orbit's brain makes its record on the first thing it writes there: a run's block.
-            const call = BRAIN === "orbit"
-                ? { name: "run_tool", arguments: JSON.stringify({ history_id: "h-drecover", tool_id: "cat1", inputs: {} }) }
-                : { name: "notebook_resume", arguments: "{}" };
+            // The record is made on the first thing written there: a run's block.
+            const call = { name: "run_tool", arguments: JSON.stringify({ history_id: "h-drecover", tool_id: "cat1", inputs: {} }) };
             return answer(last.role === "tool"
                 ? message("Noted in the record.")
                 : message("", [{ id: "call_1", type: "function", function: call }]));

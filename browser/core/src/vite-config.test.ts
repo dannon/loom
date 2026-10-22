@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it } from "vitest";
 
-import { defines, orbitBrain, orbitBrowserVite } from "../vite";
+import { defines, orbitBrowserVite } from "../vite";
 
-const ENV = ["VITE_ORBIT_BRAIN", "LOOM_BUILD_COMMIT", "LOOM_BUILD_TIME"] as const;
+const ENV = ["LOOM_BUILD_COMMIT", "LOOM_BUILD_TIME"] as const;
 const saved = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
 
 afterEach(() => {
@@ -16,20 +16,11 @@ afterEach(() => {
 const config = (command: "build" | "serve") =>
   orbitBrowserVite({ command, flavorRoot: "/tmp/flavor" });
 
-describe("the Orbit brain flag", () => {
-  it("defaults to the browser brain, with no aliases", () => {
-    delete process.env.VITE_ORBIT_BRAIN;
-    const built = config("build");
-    expect(built.define?.["process.env.orbit_brain"]).toBe('"browser"');
-    expect(built.resolve).not.toHaveProperty("alias");
-    expect(built.worker).not.toHaveProperty("plugins");
-  });
-
-  // A build calls defines() with no settings, so a flag read there would reach only the dev server.
+describe("Orbit's brain in the worker", () => {
+  // The worker's only brain: every build and the dev server stand Node out of its way.
   it.each(["build", "serve"] as const)("reaches the %s config with the aliases", (command) => {
-    process.env.VITE_ORBIT_BRAIN = "orbit";
     const c = config(command);
-    expect(c.define?.["process.env.orbit_brain"]).toBe('"orbit"');
+    expect(c.define).not.toHaveProperty("process.env.orbit_brain");
     const aliases = c.resolve?.alias as Array<{ find: RegExp; replacement: string }>;
     expect(
       aliases.some((a) => a.find.test("node:fs") && a.replacement.endsWith("shims/fs.ts")),
@@ -38,10 +29,12 @@ describe("the Orbit brain flag", () => {
     expect(c.worker).toHaveProperty("plugins");
   });
 
-  it("refuses a value that isn't a brain", () => {
-    process.env.VITE_ORBIT_BRAIN = "orbiter";
-    expect(() => orbitBrain()).toThrow(/VITE_ORBIT_BRAIN=orbiter/);
-    expect(() => config("build")).toThrow(/not a brain/);
+  it("leaves Node's own modules to tests, which run under Node", () => {
+    const c = orbitBrowserVite({ command: "serve", mode: "test", flavorRoot: "/tmp/flavor" });
+    expect(c.resolve).not.toHaveProperty("alias");
+    expect(
+      c.plugins?.some((p) => (p as { name?: string })?.name === "orbit-browser-node-guard"),
+    ).toBe(false);
   });
 });
 
