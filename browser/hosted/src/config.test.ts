@@ -5,7 +5,7 @@ import { ConfigError, describeConfig, loadConfig } from "./config";
 const TOKEN_KEY = Buffer.alloc(32, 7).toString("base64");
 const CLIENT_SECRET = "client-secret-value-xyz";
 const DB_PASSWORD = "db-password-value-xyz";
-const MODEL_KEY = "sk-litellm-service-value-xyz";
+const MODEL_KEY = "sk-model-service-value-xyz";
 
 const DEV = {
   ORBIT_PUBLIC_URL: "http://localhost:7878",
@@ -14,8 +14,8 @@ const DEV = {
   ORBIT_OIDC_ISSUER: "https://login.galaxyproject.org/realms/galaxy-test",
   ORBIT_OIDC_CLIENT_ID: "orbit-dev",
   ORBIT_TOKEN_KEY: TOKEN_KEY,
-  ORBIT_LITELLM_URL: "https://litellm.galaxyproject.org",
-  ORBIT_LITELLM_KEY: MODEL_KEY,
+  ORBIT_MODEL_URL: "https://litellm.galaxyproject.org",
+  ORBIT_MODEL_KEY: MODEL_KEY,
   ORBIT_MODEL: "minimax",
 };
 
@@ -46,8 +46,8 @@ describe("loadConfig", () => {
       "ORBIT_OIDC_ISSUER is not set",
       "ORBIT_OIDC_CLIENT_ID is not set",
       "ORBIT_TOKEN_KEY is not set",
-      "ORBIT_LITELLM_URL is not set",
-      "ORBIT_LITELLM_KEY is not set",
+      "ORBIT_MODEL_URL is not set",
+      "ORBIT_MODEL_KEY is not set",
       "ORBIT_MODEL is not set",
     ]);
   });
@@ -93,9 +93,9 @@ describe("loadConfig", () => {
   });
 
   it("sends tokens and the model key only over TLS beyond localhost", () => {
-    expect(problems({ ...DEV, ORBIT_GALAXY_URL: "http://galaxy.example.org", ORBIT_LITELLM_URL: "http://litellm.example.org" })).toEqual([
+    expect(problems({ ...DEV, ORBIT_GALAXY_URL: "http://galaxy.example.org", ORBIT_MODEL_URL: "http://litellm.example.org" })).toEqual([
       "ORBIT_GALAXY_URL must be https unless it is localhost",
-      "ORBIT_LITELLM_URL must be https unless it is localhost",
+      "ORBIT_MODEL_URL must be https unless it is localhost",
     ]);
   });
 

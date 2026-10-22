@@ -77,8 +77,8 @@ export class Stack {
         ORBIT_OIDC_ISSUER: this.keycloak.issuer.href,
         ORBIT_OIDC_CLIENT_ID: "orbit-dev",
         ORBIT_TOKEN_KEY: Buffer.alloc(32, 1).toString("base64"),
-        ORBIT_LITELLM_URL: this.standIn.origin,
-        ORBIT_LITELLM_KEY: "sk-soak-service",
+        ORBIT_MODEL_URL: this.standIn.origin,
+        ORBIT_MODEL_KEY: "sk-soak-service",
         ORBIT_MODEL: "m",
         // A dead host's lease runs out in seconds rather than a minute, so the fault scripts don't idle.
         ORBIT_LEASE_TTL_SECONDS: "10",
