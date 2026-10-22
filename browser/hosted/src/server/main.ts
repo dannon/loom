@@ -39,7 +39,15 @@ async function main(): Promise<void> {
   const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 20 });
   await migrate(pool);
   // A short queue cache, so a stately key that just went idle stops being skipped soon after.
-  const boss = new PgBoss({ connectionString: config.databaseUrl, schedule: false, queueCacheIntervalSeconds: 5 });
+  // The monitor fails a dead host's turn job by its heartbeat; the default minute between passes
+  // would leave that conversation stuck for up to a minute and a half after a crash.
+  const boss = new PgBoss({
+    connectionString: config.databaseUrl,
+    schedule: false,
+    queueCacheIntervalSeconds: 5,
+    superviseIntervalSeconds: 10,
+    monitorIntervalSeconds: 10,
+  });
   boss.on("error", (error: Error) => log(`pg-boss: ${error.message}`));
   await boss.start();
 

@@ -64,6 +64,7 @@ async function host(
   name = "host",
   concurrency?: number,
   turnsDisabled?: () => string | undefined,
+  supervise = false,
   hostPool: pg.Pool = pool,
 ): Promise<Host> {
   const boss = new PgBoss({
@@ -71,7 +72,8 @@ async function host(
     database: DATABASE,
     user: userInfo().username,
     schedule: false,
-    supervise: false,
+    supervise,
+    ...(supervise && { superviseIntervalSeconds: 1, monitorIntervalSeconds: 1 }),
   });
   boss.on("error", () => undefined);
   await boss.start();
@@ -102,6 +104,7 @@ async function host(
       events.set(id, [...(events.get(id) ?? []), event]);
     },
     retryDelayMs: () => 300,
+    jobHeartbeatSeconds: 10,
     concurrency,
     turnsDisabled,
     log: process.env.DISPATCH_LOG ? (m) => console.log(`[${name}] ${m}`) : undefined,
@@ -241,6 +244,30 @@ describe("dispatch", () => {
     );
   });
 
+  it("a running turn is marked from its start, so a host killed outright leaves it for the sweeper", async () => {
+    const h = await host();
+    const c = await createConversation(pool, await user());
+    await h.dispatcher.submit(c.id, `SLOW ${c.id}`);
+    await until(() => modelSaw(`SLOW ${c.id}`) > 0, "the slow run to start");
+    expect((await getConversation(pool, c.id))?.interrupted).toBe(true);
+    await until(() => settledCount(h, c.id) >= 1, "the run to settle");
+    await until(async () => !(await getConversation(pool, c.id))?.interrupted, "the mark to clear");
+  });
+
+  it("a turn job a dead host left active stops blocking the conversation once its heartbeat goes stale", async () => {
+    const dead = await host("dead");
+    const c = await createConversation(pool, await user());
+    // The dead host claimed a turn and was killed before finishing it: active, and nobody beating.
+    await bosses[0]!.offWork("turn");
+    await bosses[0]!.send("turn", { conversationId: c.id }, { singletonKey: c.id });
+    const [claimed] = await bosses[0]!.fetch("turn");
+    expect(claimed?.data).toEqual({ conversationId: c.id });
+    expect(dead.spawned.filter((w) => w.storeId === c.storeId)).toHaveLength(0);
+    const next = await host("next", undefined, undefined, true);
+    await next.dispatcher.submit(c.id, `after the crash ${c.id}`);
+    await until(() => modelSaw(`after the crash ${c.id}`) > 0, "the turn behind the dead job", 30_000);
+  });
+
   it("the kill switch stops every turn, queued ones included, and they run once it's lifted", async () => {
     const paused = await host("paused", undefined, () => "Orbit is paused.");
     const c = await createConversation(pool, await user());
@@ -324,7 +351,7 @@ describe("dispatch", () => {
           : value;
       },
     });
-    const h = await host("host", undefined, undefined, slowRelease);
+    const h = await host("host", undefined, undefined, false, slowRelease);
     const c = await createConversation(pool, await user());
     await h.dispatcher.submit(c.id, `SLOW ${c.id}`);
     await until(() => modelSaw(`SLOW ${c.id}`) > 0, "the slow run to start");
