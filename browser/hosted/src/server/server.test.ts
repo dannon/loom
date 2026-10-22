@@ -16,6 +16,7 @@ import { createSession } from "../auth/sessions";
 import { migrate } from "../db/migrate";
 import { createConversation } from "../dispatch/conversations";
 import { Dispatcher } from "../dispatch/dispatcher";
+import { galaxyPageRetitler } from "../dispatch/pages";
 import { freshDatabase } from "../test-db";
 import { startStandIn, textOf, type StandIn } from "../test-stand-in";
 import { createTokenCache } from "../tokens/token-cache";
@@ -78,12 +79,15 @@ beforeAll(async () => {
     onEvent: (id, event) => sockets?.deliver(id, event),
     retryDelayMs: () => 300,
   });
+  const retitle = galaxyPageRetitler({ galaxyUrl: standIn.origin, tokens });
   sockets = new Sockets({
     auth,
     dispatcher,
     get turnsDisabled() {
       return killSwitch;
     },
+    retitlePage: (conversation) =>
+      conversation.pageId === "page-unreachable" ? Promise.reject(new Error("Galaxy is down")) : retitle(conversation),
   });
   server = createHostServer({ auth, sockets, health: async () => ({ postgres: true }) });
   const port = Number(new URL(origin).port);
@@ -196,6 +200,25 @@ describe("the WebSocket", () => {
     expect(userEntries(again.events(), "hello there")).toHaveLength(1);
     page.close();
     again.close();
+  });
+
+  it("carries the first message's title to a Galaxy page made before there was one, and a failure doesn't stop the turn", async () => {
+    for (const pageId of ["page-generic", "page-unreachable"]) {
+      const { sub, cookie } = await signedIn();
+      const c = await createConversation(pool, sub);
+      await pool.query("UPDATE orbit_conversations SET page_id = $2 WHERE id = $1", [c.id, pageId]);
+      const page = new Page(cookie);
+      await page.opened;
+      page.send({ type: "open", conversationId: c.id });
+      await until(() => page.received.some((m) => m.type === "ready"), "ready");
+      const text = `Name the page ${pageId}`;
+      page.send({ type: "submit", conversationId: c.id, text });
+      await until(() => modelSaw(text) > 0, "the model to hear it");
+      await until(() => page.events().some((e) => e.type === "run_end"), "the run to end");
+      const retitled = standIn.seen.filter((s) => s.to === "galaxy" && s.method === "PUT" && s.path === `/api/pages/${pageId}`);
+      expect(retitled.map((s) => s.authorization)).toEqual(pageId === "page-generic" ? [`Bearer token-${sub}`] : []);
+      page.close();
+    }
   });
 
   it("survives an upgrade request it can't parse", async () => {

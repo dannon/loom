@@ -7,33 +7,54 @@ import { fetchSameOriginOnly } from "../../../../shared/redirect-guard.js";
 import type { TokenCache } from "../tokens/token-cache";
 import type { ConversationRow } from "./conversations";
 
-export function galaxyPageCreator(options: {
+interface PageOptions {
   readonly galaxyUrl: string;
   readonly tokens: TokenCache;
   readonly fetch?: typeof fetch;
-}): (conversation: ConversationRow) => Promise<string> {
+}
+
+/** A request to Galaxy's pages API as the conversation's owner. */
+async function asOwner(options: PageOptions, ownerSub: string, path: string, method: string, body: unknown): Promise<Response> {
+  const token = await options.tokens.token(ownerSub);
+  return fetchSameOriginOnly(
+    new URL(path, options.galaxyUrl).href,
+    {
+      method,
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    { fetchImpl: options.fetch, serverLabel: "The Galaxy server" },
+  );
+}
+
+export function galaxyPageCreator(options: PageOptions): (conversation: ConversationRow) => Promise<string> {
   return async (conversation) => {
-    const token = await options.tokens.token(conversation.ownerSub);
-    const response = await fetchSameOriginOnly(
-      new URL("/api/pages", options.galaxyUrl).href,
-      {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({
-          // Galaxy wants a slug unique per user, of lowercase letters, digits and dashes.
-          slug: `orbit-${conversation.id.toLowerCase()}`,
-          title: conversation.title ?? "Orbit conversation",
-          content_format: "markdown",
-          content: "",
-        }),
-      },
-      { fetchImpl: options.fetch, serverLabel: "The Galaxy server" },
-    );
+    const response = await asOwner(options, conversation.ownerSub, "/api/pages", "POST", {
+      // Galaxy wants a slug unique per user, of lowercase letters, digits and dashes.
+      slug: `orbit-${conversation.id.toLowerCase()}`,
+      title: conversation.title ?? "Orbit conversation",
+      content_format: "markdown",
+      content: "",
+    });
     if (!response.ok) {
       throw new Error(`Galaxy refused to create the conversation's page: HTTP ${response.status}`);
     }
     const page = (await response.json()) as { id?: unknown };
     if (typeof page.id !== "string") throw new Error("Galaxy created the page but didn't say its id");
     return page.id;
+  };
+}
+
+/**
+ * Give an existing page the conversation's title. A page made before the conversation had one is
+ * named generically; a title-only update changes the page's name without adding a revision.
+ */
+export function galaxyPageRetitler(options: PageOptions): (conversation: ConversationRow) => Promise<void> {
+  return async (conversation) => {
+    if (conversation.pageId === null || conversation.title === null) return;
+    const response = await asOwner(options, conversation.ownerSub, `/api/pages/${encodeURIComponent(conversation.pageId)}`, "PUT", {
+      title: conversation.title,
+    });
+    if (!response.ok) throw new Error(`Galaxy refused to retitle the conversation's page: HTTP ${response.status}`);
   };
 }
