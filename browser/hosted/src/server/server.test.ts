@@ -347,6 +347,32 @@ describe("the WebSocket", () => {
     back.close();
   });
 
+  it("takes a confirm's first answer from either of two pages, and closes the other page's dialog", async () => {
+    const { sub, cookie } = await signedIn();
+    const c = await createConversation(pool, sub);
+    const one = new Page(cookie);
+    const two = new Page(cookie);
+    await Promise.all([one.opened, two.opened]);
+    one.send({ type: "open", conversationId: c.id });
+    two.send({ type: "open", conversationId: c.id });
+    await until(() => two.received.some((m) => m.type === "ready"), "the second page");
+    const puts = standIn.galaxyCalls("PUT", "/api/histories/h1");
+    one.send({ type: "submit", conversationId: c.id, text: "DELETE_H1" });
+    const confirmOf = (page: Page) => page.received.find((m): m is Extract<ToPage, { type: "confirm" }> => m.type === "confirm");
+    const asked = await until(() => confirmOf(one), "the confirm");
+    await until(() => confirmOf(two), "the confirm on the other page");
+    one.send({ type: "confirmed", conversationId: c.id, id: asked.id, approved: true });
+    await until(
+      () => two.received.some((m) => m.type === "withdrawn" && m.id === asked.id),
+      "the other page's dialog to close",
+    );
+    expect(one.received.some((m) => m.type === "withdrawn")).toBe(false);
+    two.send({ type: "confirmed", conversationId: c.id, id: asked.id, approved: false });
+    await until(() => standIn.galaxyCalls("PUT", "/api/histories/h1") === puts + 1, "the delete");
+    one.close();
+    two.close();
+  });
+
   it("turns every message away with the kill switch's notice", async () => {
     const { sub, cookie } = await signedIn();
     const c = await createConversation(pool, sub);

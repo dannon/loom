@@ -186,11 +186,12 @@ export class Dispatcher {
     this.#live.get(conversationId)?.worker.postMessage({ cmd: "stop" });
   }
 
-  /** The user's answer to an ask; ignored for an ask the worker already withdrew. */
-  answer(conversationId: string, id: number, value: AskAnswer): void {
+  /** The user's answer to an ask; false, and ignored, for one already answered or withdrawn. */
+  answer(conversationId: string, id: number, value: AskAnswer): boolean {
     const live = this.#live.get(conversationId);
-    if (!live?.asks.delete(id)) return;
+    if (!live?.asks.delete(id)) return false;
     live.worker.postMessage({ cmd: "answer", id, value });
+    return true;
   }
 
   /** Whether the conversation has a worker on this host now. */
