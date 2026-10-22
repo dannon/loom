@@ -1,11 +1,12 @@
 /**
  * The whole service on this machine against stand-ins: a Keycloak (signs in "dev-user" at once, as
- * the public orbit-dev client), a model, Galaxy and LiteLLM, and a fresh database. Runs the built
+ * the public orbit-dev client), a model endpoint and Galaxy, and a fresh database. Runs the built
  * host (npm run build first) on http://127.0.0.1:7878 until interrupted.
  *
  *   cd browser/hosted && node --import tsx scripts/dev-stack.ts
  *
- * ORBIT_LITELLM_URL, ORBIT_LITELLM_KEY and ORBIT_MODEL, when set, point it at a real model instead.
+ * ORBIT_MODEL_URL, ORBIT_MODEL_KEY and ORBIT_MODEL, when set, point it at a real model instead (TACC's
+ * endpoint directly, or LiteLLM).
  */
 import { spawn } from "node:child_process";
 import { userInfo } from "node:os";
@@ -26,24 +27,28 @@ keycloak.user = "dev-user";
 const standIn = await startStandIn();
 
 // ORBIT_HOST_BUNDLE runs a copy elsewhere, e.g. to check dist/ needs nothing beside it.
-const host = spawn(process.execPath, [process.env.ORBIT_HOST_BUNDLE ?? join(ROOT, "dist", "host.mjs")], {
-  stdio: "inherit",
-  env: {
-    PATH: process.env.PATH,
-    ORBIT_PUBLIC_URL: "http://127.0.0.1:7878",
-    ORBIT_PORT: "7878",
-    ORBIT_DATABASE_URL: `postgres://${userInfo().username}@/${DATABASE}?host=${encodeURIComponent(SOCKET)}`,
-    ORBIT_GALAXY_URL: standIn.origin,
-    ORBIT_OIDC_ISSUER: keycloak.issuer.href,
-    ORBIT_OIDC_CLIENT_ID: "orbit-dev",
-    ORBIT_TOKEN_KEY: Buffer.alloc(32, 1).toString("base64"),
-    // A real model when these are set (e.g. TACC's proxy); the stand-in's scripted one otherwise.
-    ORBIT_LITELLM_URL: process.env.ORBIT_LITELLM_URL ?? standIn.origin,
-    ORBIT_LITELLM_KEY: process.env.ORBIT_LITELLM_KEY ?? "sk-dev-service",
-    ORBIT_MODEL: process.env.ORBIT_MODEL ?? "m",
+const host = spawn(
+  process.execPath,
+  [process.env.ORBIT_HOST_BUNDLE ?? join(ROOT, "dist", "host.mjs")],
+  {
+    stdio: "inherit",
+    env: {
+      PATH: process.env.PATH,
+      ORBIT_PUBLIC_URL: "http://127.0.0.1:7878",
+      ORBIT_PORT: "7878",
+      ORBIT_DATABASE_URL: `postgres://${userInfo().username}@/${DATABASE}?host=${encodeURIComponent(SOCKET)}`,
+      ORBIT_GALAXY_URL: standIn.origin,
+      ORBIT_OIDC_ISSUER: keycloak.issuer.href,
+      ORBIT_OIDC_CLIENT_ID: "orbit-dev",
+      ORBIT_TOKEN_KEY: Buffer.alloc(32, 1).toString("base64"),
+      // A real model when these are set (e.g. TACC's proxy); the stand-in's scripted one otherwise.
+      ORBIT_MODEL_URL: process.env.ORBIT_MODEL_URL ?? standIn.origin,
+      ORBIT_MODEL_KEY: process.env.ORBIT_MODEL_KEY ?? "sk-dev-service",
+      ORBIT_MODEL: process.env.ORBIT_MODEL ?? "m",
+    },
   },
-});
-console.log(`stand-ins: Keycloak ${keycloak.issuer.href}, model/Galaxy/LiteLLM ${standIn.origin}`);
+);
+console.log(`stand-ins: Keycloak ${keycloak.issuer.href}, model/Galaxy ${standIn.origin}`);
 const stop = () => {
   host.kill("SIGTERM");
   host.once("exit", () => process.exit(0));

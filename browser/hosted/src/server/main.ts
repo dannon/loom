@@ -16,7 +16,7 @@ import { migrate } from "../db/migrate";
 import { createPool } from "../db/pool";
 import { Dispatcher } from "../dispatch/dispatcher";
 import { galaxyPageCreator, galaxyPageRetitler } from "../dispatch/pages";
-import { liteLlmModels } from "../model/litellm";
+import { endpointModels } from "../model/endpoint";
 import { createTokenCache } from "../tokens/token-cache";
 import { createHostServer } from "./http";
 import { Sockets } from "./socket";
@@ -101,7 +101,7 @@ async function main(): Promise<void> {
       outputBytes: 8 * 1024 * 1024,
     },
     tokens,
-    modelFor: liteLlmModels({ url: config.model.litellmUrl, key: config.model.key, model: config.model.id }),
+    modelFor: endpointModels({ url: config.model.url, key: config.model.key, model: config.model.id }),
     pageFor: galaxyPageCreator({ galaxyUrl: config.galaxyUrl.href, tokens }),
     compileCache: process.env.ORBIT_COMPILE_CACHE ?? fileURLToPath(new URL("./.compile-cache", import.meta.url)),
     onEvent: (id, event) => sockets?.deliver(id, event),

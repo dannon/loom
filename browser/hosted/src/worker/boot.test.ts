@@ -104,7 +104,7 @@ describe("the worker bootstrap", () => {
     expect(await running.waitFor("submitted")).toEqual({ type: "submitted", admitted: true });
     await running.waitFor("settled");
     expect(standIn.galaxyCalls("GET", "/api/histories/h1")).toBe(before + 1);
-    // The service key is shared; each request names its user for LiteLLM's spend log.
+    // The service key is shared; each request names its user for the endpoint's usage log.
     const sent = standIn.seen.slice(from).filter((s) => s.to === "model");
     expect(sent.length).toBeGreaterThan(0);
     for (const request of sent) expect(JSON.parse(request.body!).user).toBe("user-sub-1");

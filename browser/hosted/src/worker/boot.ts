@@ -176,7 +176,7 @@ const connected = await agentModels().connect(
   resolveTarget({ ai_base_url: data.model.baseUrl, ai_model: data.model.id, ai_api_key: data.model.apiKey }),
 );
 const { model } = connected;
-// Every worker shares the service key; the request's `user` is what tells LiteLLM whose spend it is.
+// Every worker shares the service key; the request's `user` is what tells the endpoint whose usage it is.
 type Options = Parameters<typeof connected.models.streamSimple>[2];
 const tagged = (options: Options): Options => ({
   ...options,

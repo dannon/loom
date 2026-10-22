@@ -22,8 +22,8 @@ export interface HostConfig {
   /** Encrypts refresh tokens at rest (brief decision 8). */
   readonly tokenKey: Buffer;
   readonly model: {
-    /** LiteLLM; workers reach the model through it on Orbit's one service key (H9). */
-    readonly litellmUrl: URL;
+    /** An OpenAI-compatible endpoint (TACC's, or LiteLLM in front of it), on Orbit's one service key (H9). */
+    readonly url: URL;
     readonly key: string;
     readonly id: string;
   };
@@ -108,7 +108,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 
   const portRaw = value("ORBIT_PORT");
   const port = portRaw === undefined ? 7878 : Number(portRaw);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) problems.push("ORBIT_PORT must be a port number");
+  if (!Number.isInteger(port) || port < 1 || port > 65535)
+    problems.push("ORBIT_PORT must be a port number");
 
   const databaseUrl = required("ORBIT_DATABASE_URL");
   if (databaseUrl !== undefined && !parseDatabaseUrl(databaseUrl)) {
@@ -116,9 +117,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   }
 
   const galaxyUrl = url("ORBIT_GALAXY_URL", required("ORBIT_GALAXY_URL"));
-  // Users' tokens go to Galaxy and the service key to LiteLLM: never in clear beyond this machine.
+  // Users' tokens go to Galaxy and the service key to the model endpoint: never in clear beyond this machine.
   const secure = (name: string, at: URL | undefined) => {
-    if (at && at.protocol !== "https:" && !isLoopback(at)) problems.push(`${name} must be https unless it is localhost`);
+    if (at && at.protocol !== "https:" && !isLoopback(at))
+      problems.push(`${name} must be https unless it is localhost`);
   };
   secure("ORBIT_GALAXY_URL", galaxyUrl);
   const galaxyLinkUrl = url("ORBIT_GALAXY_LINK_URL", value("ORBIT_GALAXY_LINK_URL"));
@@ -127,7 +129,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const clientSecret = value("ORBIT_OIDC_CLIENT_SECRET");
   // A public client is the dev setup (orbit-dev); a deployed host signs in as the confidential client.
   if (clientSecret === undefined && publicUrl && !isLoopback(publicUrl)) {
-    problems.push("ORBIT_OIDC_CLIENT_SECRET is not set; only a localhost host may use a public client");
+    problems.push(
+      "ORBIT_OIDC_CLIENT_SECRET is not set; only a localhost host may use a public client",
+    );
   }
 
   const tokenKeyRaw = required("ORBIT_TOKEN_KEY");
@@ -136,9 +140,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     problems.push("ORBIT_TOKEN_KEY must be 32 bytes, base64-encoded (openssl rand -base64 32)");
   }
 
-  const litellmUrl = url("ORBIT_LITELLM_URL", required("ORBIT_LITELLM_URL"));
-  secure("ORBIT_LITELLM_URL", litellmUrl);
-  const modelKey = required("ORBIT_LITELLM_KEY");
+  const modelUrl = url("ORBIT_MODEL_URL", required("ORBIT_MODEL_URL"));
+  secure("ORBIT_MODEL_URL", modelUrl);
+  const modelKey = required("ORBIT_MODEL_KEY");
   const modelId = required("ORBIT_MODEL");
   const count = (name: string, fallback: number): number => {
     const raw = value(name);
@@ -155,7 +159,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const renewMs = seconds("ORBIT_LEASE_RENEW_SECONDS", 15);
   const maxTurnMs = seconds("ORBIT_MAX_TURN_SECONDS", 30 * 60);
   // Renewing at most every half TTL leaves one missed renewal before the lease can be taken.
-  if (renewMs * 2 > ttlMs) problems.push("ORBIT_LEASE_RENEW_SECONDS must be at most half of ORBIT_LEASE_TTL_SECONDS");
+  if (renewMs * 2 > ttlMs)
+    problems.push("ORBIT_LEASE_RENEW_SECONDS must be at most half of ORBIT_LEASE_TTL_SECONDS");
   // A worker costs about 100 MB and a cold start under a second (bench/soak), so idle ones go soon.
   const releaseMs = seconds("ORBIT_IDLE_RELEASE_SECONDS", 10 * 60);
   // Decision 17: a confirm unanswered for ten minutes pauses its conversation and frees the worker.
@@ -170,7 +175,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     galaxyLinkUrl: galaxyLinkUrl ?? new URL("/login/start", galaxyUrl!),
     oidc: { issuer: issuer!, clientId: clientId!, clientSecret },
     tokenKey,
-    model: { litellmUrl: litellmUrl!, key: modelKey!, id: modelId! },
+    model: { url: modelUrl!, key: modelKey!, id: modelId! },
     turnsDisabled,
     turnLimits: { maxSteps, maxToolCalls },
     lease: { ttlMs, renewMs, maxTurnMs },
@@ -193,10 +198,7 @@ export function describeConfig(config: HostConfig): string {
       `${config.oidc.issuer.href} as ${config.oidc.clientId} (client secret ${config.oidc.clientSecret ? "set" : "not set, public client"})`,
     ],
     ["token key", "set"],
-    [
-      "model",
-      `${config.model.id} via ${config.model.litellmUrl.origin} (service key set)`,
-    ],
+    ["model", `${config.model.id} via ${config.model.url.origin} (service key set)`],
     [
       "turns",
       `${config.turnsDisabled ? `DISABLED: ${config.turnsDisabled}` : "enabled"}, at most ${config.turnLimits.maxSteps} steps and ${config.turnLimits.maxToolCalls} tool calls each`,
@@ -210,5 +212,7 @@ export function describeConfig(config: HostConfig): string {
       `released after ${secs(config.idle.releaseMs)} quiet with no page open; an unanswered confirm pauses after ${secs(config.idle.askPauseMs)}`,
     ],
   ];
-  return ["Orbit host configuration:", ...lines.map(([k, v]) => `  ${k!.padEnd(11)} ${v}`)].join("\n");
+  return ["Orbit host configuration:", ...lines.map(([k, v]) => `  ${k!.padEnd(11)} ${v}`)].join(
+    "\n",
+  );
 }
