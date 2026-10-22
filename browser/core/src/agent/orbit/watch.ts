@@ -159,6 +159,11 @@ export function wakeups() {
         );
       });
     },
+    /** Forget every waiter and early wake, for a worker starting over (ids repeat). */
+    clear() {
+      waiting.clear();
+      early.clear();
+    },
   };
 }
 

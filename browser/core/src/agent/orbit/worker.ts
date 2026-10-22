@@ -149,7 +149,7 @@ function decline(id: ConversationId, runOnly = false) {
 const pageKey = (id: ConversationId) => `${env.root}/${id}/notebook.md`;
 
 /** A conversation's watch, sleeping between ticks, woken when something asks it to look now. */
-const { wake, woken } = wakeups();
+const { wake, woken, clear: clearWakeups } = wakeups();
 
 let watch: ReturnType<typeof orbitWatch>;
 
@@ -278,8 +278,12 @@ async function show(next: Conversation, reason: SessionReason) {
     if (previous && previous.id !== next.id) {
       try {
         await enter(previous, "resume");
+        // A reset made `next` its history's conversation; the one shown again is that again.
+        await runtime!.continues(previous);
       } catch (again) {
         // Nothing is shown now: messages wait for the next open rather than reach a half-bound one.
+        await detach?.();
+        detach = undefined;
         conversation = undefined;
         console.error("[orbit] could not go back to the conversation that was shown:", again);
       }
@@ -313,9 +317,29 @@ async function enter(next: Conversation, reason: SessionReason) {
   await postHeld();
 }
 
+/** Bumped when the worker stops: an open still in flight from before then must not boot. */
+let generation = 0;
+let opening = false;
+
+/** Throw if the worker stopped since `started`, an open in flight then being abandoned. */
+function current(started: number) {
+  if (started !== generation) throw new Error("The worker stopped while the session was opening.");
+}
+
 async function open(request: OpenRequest) {
-  // A second open (the other-tab handover) finds the brain already booted in this worker.
-  if (orbit) return;
+  // A second open (the other-tab handover) finds the brain already booted, or booting, in this
+  // worker.
+  if (orbit || opening) return;
+  opening = true;
+  const started = generation;
+  try {
+    await boot(request, started);
+  } finally {
+    if (started === generation) opening = false;
+  }
+}
+
+async function boot(request: OpenRequest, started: number) {
   const brand = flavor.brand ?? DEFAULT_BRAND;
   const capabilities = request.config.capabilities ?? ["llm", "local", "read", "write"];
   // Refused before anything is opened: a grant Orbit can't map is not one to guess at.
@@ -333,6 +357,7 @@ async function open(request: OpenRequest) {
     },
   );
   const keeping = await env.keep(brand, user, request);
+  current(started);
   const { storage, ledger } = keeping;
   unkept ??= keeping.unkept;
   const url = new URL(galaxy.root, env.base()).href.replace(/\/+$/, "");
@@ -455,13 +480,18 @@ async function open(request: OpenRequest) {
         isSubmissionTool(call.name) ? captureLateSubmission(call.id, call.name, result) : undefined,
     },
   });
-  runtime = await Runtime.open({
+  const opened = await Runtime.open({
     storage,
     config: request.config,
     env: env.vars,
     brand,
     extensions: orbit.extensions,
   });
+  if (started !== generation) {
+    await opened.close();
+    current(started);
+  }
+  runtime = opened;
   if (request.saved) {
     return begin(await runtime.open(request.saved.document, request.saved.id), "resume", unkept);
   }
@@ -543,7 +573,11 @@ export async function stopOrbitWorker(): Promise<void> {
     await detach?.();
     detach = undefined;
     await runtime?.close();
-    if (orbit) closeOrbit();
+    // Unconditionally: a boot that threw after installing the seams left no `orbit` to say so.
+    closeOrbit();
+    clearWakeups();
+    generation++;
+    opening = false;
     runtime = undefined;
     orbit = undefined;
     conversation = undefined;
@@ -557,7 +591,7 @@ export async function stopOrbitWorker(): Promise<void> {
 
 /** The worker's state, for Headless: what a page reads off the protocol, read directly. */
 export function orbitSession() {
-  return { runtime, conversation, host: orbit?.host };
+  return { runtime, conversation, host: orbit?.host, open: opening || !!orbit || !!runtime };
 }
 
 /**
@@ -565,14 +599,15 @@ export function orbitSession() {
  * a command. What pi-host handed back, or nothing when no run starts (a command, a refusal).
  */
 export async function submitText(text: string): Promise<Submission | undefined> {
-  const current = conversation!;
-  const host = orbit!.host;
+  if (!conversation || !orbit) throw new Error("No conversation is shown to submit to.");
+  const shown = conversation;
+  const host = orbit.host;
   const command = text.startsWith("/") && host.commands.has(text.slice(1).split(" ")[0]);
   // The user's own message lets settled work start runs again; a command (/pending, say) isn't a
   // message to the agent.
   if (!command) {
-    await current.commit(async (tx) => {
-      Object.assign(await tx.doc(FollowUps, current.id), { automatic: 0, paused: false });
+    await shown.commit(async (tx) => {
+      Object.assign(await tx.doc(FollowUps, shown.id), { automatic: 0, paused: false });
     }, context);
   }
   return host.submit(text, { source: "interactive" });
@@ -613,7 +648,11 @@ async function handle(data: PageMessage) {
   } else if (data.type === "saved") {
     await reply(data.id, () => runtime!.saved(conversation!, data.savedId, data.document));
   } else if (data.type === "recover") {
-    if (!choosing) return;
+    if (!choosing) {
+      // One the page sends twice is already answered; one with nothing shown would wait forever.
+      if (!conversation) failed(new Error("No offered session is waiting to be chosen."));
+      return;
+    }
     const { placement, records, unkept } = choosing;
     choosing = undefined;
     const record = records.find((r) => r.pageId === data.pageId);
