@@ -24,6 +24,7 @@ import { orbitSession, startOrbitWorker, stopOrbitWorker, submitText } from "./o
 import { readShippedSkill } from "./orbit/skills-node";
 import { ORBIT_WATCH } from "./orbit/watch";
 import { context, type Placement, type RuntimeConfig } from "./runtime";
+import type { SessionDocument } from "./saved";
 import type { Python } from "./tool";
 import type { AgentFlavor } from "./tools";
 import type { Settled } from "./watch";
@@ -43,6 +44,8 @@ export interface HeadlessOptions {
   flavor?: AgentFlavor;
   /** How a confirmation the brain asks for is answered: declined unless this says otherwise. */
   confirm?: (title: string, message: string) => boolean;
+  /** A saved session to open on, as a page opened on a saved visualization does. */
+  saved?: { id: string; document: SessionDocument };
 }
 
 const timeout = (ms: number) =>
@@ -118,7 +121,12 @@ export class Headless {
     });
     this.send({
       type: "open",
-      request: { pyodideURL: "", config: this.config, placement },
+      request: {
+        pyodideURL: "",
+        config: this.config,
+        placement,
+        ...(this.options.saved ? { saved: this.options.saved } : {}),
+      },
     });
     await until(() => this.posted.some((m) => /^(ready|recoverable|failed)$/.test(m.type)), 60_000);
     const failed = this.posted.find((m) => m.type === "failed");
