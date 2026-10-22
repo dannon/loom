@@ -11,10 +11,14 @@ export function setOrbitCwd(dir: string): void {
   cwd = dir;
 }
 
-const g = globalThis as unknown as { process?: unknown; Buffer?: unknown };
+const g = globalThis as unknown as { process?: Record<string, unknown>; Buffer?: unknown };
 
-if (!g.process) {
-  g.process = {
+// Member by member: the dev server's defines leave a process with only `env` on it.
+const proc = (g.process ??= {});
+for (const [name, value] of Object.entries(nodeProcess())) proc[name] ??= value;
+
+function nodeProcess(): Record<string, unknown> {
+  return {
     env: {} as Record<string, string | undefined>,
     argv: [] as string[],
     cwd: () => cwd,
