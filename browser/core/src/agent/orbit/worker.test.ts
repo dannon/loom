@@ -122,8 +122,8 @@ async function worker(
     onmessage: undefined as undefined | ((event: { data: unknown }) => void),
   };
   vi.stubGlobal("self", self);
-  const { startOrbitWorker } = await import("./worker");
-  startOrbitWorker(flavor);
+  const { startAgentWorker } = await import("../worker");
+  startAgentWorker(flavor);
   const send = (data: unknown) => self.onmessage!({ data });
   const seen = (type: string) => posted.filter((m) => m.type === type);
   send({

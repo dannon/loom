@@ -77,8 +77,15 @@ const opened: Headless[] = [];
 async function turn(replies: Reply[], over: Partial<HeadlessConfig> = {}) {
   const requests = server(replies);
   const session = await Headless.open(
-    { galaxy_root: ROOT, ai_base_url: LLM, ai_model: "test-model", ai_api_key: "sk-x", ...over },
-    { python, pollMs: 10, flavor: olitFlavor },
+    {
+      galaxy_root: ROOT,
+      ai_base_url: LLM,
+      ai_model: "test-model",
+      ai_api_key: "sk-x",
+      poll_ms: 10,
+      ...over,
+    },
+    { python, flavor: olitFlavor },
   );
   opened.push(session);
   const result = await session.turn("hi");
@@ -91,7 +98,9 @@ const results = (entries: readonly EntryRecord[]) =>
     .filter((m): m is Extract<Message, { role: "toolResult" }> => m.role === "toolResult")
     .map((m) => contentText(m.content));
 
-const pretty = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
+/** As written, with the session's own directory (it varies per run) named for what it is. */
+const pretty = (value: unknown) =>
+  `${JSON.stringify(value, null, 2)}\n`.replaceAll(opened[0]?.root ?? "\0", "<session>");
 
 beforeAll(() => {
   // The prompt carries today's date.

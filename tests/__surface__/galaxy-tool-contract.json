@@ -53,14 +53,23 @@
   ],
   "browserOnly": [
     "ena_runs",
-    "finish",
+    "galaxy_invocation_check_all",
+    "galaxy_invocation_check_one",
+    "galaxy_invocation_record",
+    "galaxy_job_record",
+    "galaxy_read_output",
+    "get_job_logs",
     "get_visualization",
     "get_visualization_details",
     "get_visualization_options",
     "gtn_fetch",
     "gtn_search",
+    "lesson_propose",
+    "lessons_search",
     "lineage_report",
+    "list_jobs",
     "list_visualizations",
+    "loom_propose",
     "notebook_resume",
     "organize_datasets",
     "run_python",
@@ -74,8 +83,10 @@
     "get_visualization_details",
     "get_visualization_options",
     "list_visualizations",
+    "notebook_resume",
     "save_visualization",
     "show_visualization",
+    "upload_file",
     "vega_dataset"
   ],
   "orbitOnly": [],
@@ -87,27 +98,5 @@
       "get_page(content_hash)"
     ]
   },
-  "upstreamPending": [
-    "get_invocations.offset",
-    "get_invocations.sort_by",
-    "get_invocations.sort_desc",
-    "get_invocations.include_terminal",
-    "get_tool_details.tool_version",
-    "get_workflow_input_template.version",
-    "get_user_tool"
-  ],
-  "knownDifferences": {
-    "parameters": {
-      "get_job_details": { "browserOnly": [], "upstreamOnly": ["job_id"] },
-      "download_dataset": {
-        "browserOnly": [],
-        "upstreamOnly": ["file_path", "use_default_filename", "require_ok_state"]
-      },
-      "upload_file": { "browserOnly": ["file_name", "file_type", "dbkey"], "upstreamOnly": [] }
-    },
-    "forkOnly": [
-      { "tool": "get_job_details", "param": "job_stderr", "in": "description" },
-      { "tool": "get_job_details", "param": "tool_stderr", "in": "description" }
-    ]
-  }
+  "knownDifferences": { "parameters": {} }
 }

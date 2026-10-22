@@ -1,7 +1,6 @@
 /**
- * Orbit's vendored skills tree for the worker: the catalog and manifest inline, the bodies as
- * files beside the bundle, fetched when skills_fetch reads one. Inlining the bodies would put
- * 2.3 MB of text in the worker bundle that most sessions never read.
+ * Orbit's vendored skills tree: the catalog and manifest inline, the bodies read by the host's own
+ * reader when skills_fetch asks for one.
  *
  * A flavor's own skills (Olit's visualization skill) join the shipped galaxy-skills repo as extra
  * targets: a repo Orbit doesn't ship is fetched from GitHub, and there's no repo to fetch these
@@ -13,14 +12,6 @@ import type { SkillEntry } from "../../../../../extensions/loom/skills-discovery
 import type { VendorSkillsSource } from "../../../../../extensions/loom/vendor-skills";
 import { SKILLS_SURFACE_ID } from "../../../../../shared/skills-router.js";
 import { parseFrontmatter } from "../skills";
-
-const ROOT = "../../../../../extensions/loom/vendor/skills/";
-
-const BODIES = import.meta.glob("../../../../../extensions/loom/vendor/skills/**/*", {
-  query: "?url",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
 
 /** The repo flavor skills are offered under: the one Orbit ships and reads from the package. */
 const HOST_REPO = "galaxy-skills";
@@ -42,8 +33,21 @@ export function ownSkillFiles(files: Record<string, string>, brandId: string): O
   });
 }
 
-/** A source that answers only manifest targets, as the file tree under Node does. */
-export function vendorSkills(own: readonly OwnSkillFile[] = []): VendorSkillsSource {
+/** A shipped skill file's text by its manifest target, or null when there's none. */
+export type SkillReader = (target: string) => Promise<string | null>;
+
+/** No shipped bodies: a host that serves them passes its own reader. */
+const noBodies: SkillReader = async () => null;
+
+/**
+ * A source that answers only manifest targets, as the file tree under Node does. `readBody` reads
+ * a shipped body the way the host can: fetched beside the worker bundle (browser-env.ts), or
+ * through the bundler under Node (skills-node.ts).
+ */
+export function vendorSkills(
+  own: readonly OwnSkillFile[] = [],
+  readBody: SkillReader = noBodies,
+): VendorSkillsSource {
   const shipped = manifest as { files: Array<{ target: string; plugin: string }> };
   const ownText = new Map(own.map((f) => [f.target, f.text]));
   const entries: SkillEntry[] = own.flatMap((file) => {
@@ -75,12 +79,7 @@ export function vendorSkills(own: readonly OwnSkillFile[] = []): VendorSkillsSou
       if (!targets.has(target)) return null;
       const ownBody = ownText.get(target);
       if (ownBody !== undefined) return ownBody;
-      const url = BODIES[`${ROOT}${target}`];
-      if (!url) return null;
-      const response = await fetch(url);
-      // A failed fetch is a failure, not a file the tree doesn't have.
-      if (!response.ok) throw new Error(`${target} could not be loaded (HTTP ${response.status})`);
-      return response.text();
+      return readBody(target);
     },
   };
 }
