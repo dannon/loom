@@ -23,7 +23,7 @@ import { AgentClient } from "./agent/client";
 import { briefly, connectGalaxy, type Galaxy } from "./agent/galaxy";
 import type { GalaxyStatus } from "./agent/galaxy-status";
 import { WHAT } from "./agent/markers";
-import type { Settled } from "./agent/watch";
+import type { Settled } from "./agent/orbit/watch";
 import type { SessionDocument } from "./agent/saved";
 import {
   kindsWithoutRenderer,

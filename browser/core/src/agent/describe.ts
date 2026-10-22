@@ -203,8 +203,10 @@ async function tools(flavor: AgentFlavor, brand: Brand) {
   );
   const extras = new Set(galaxyTools().map((t) => t.name));
   const galaxy = new Set(full.galaxy);
-  // The result shape galaxy-ops declares for each operation and reads back in its own tests.
-  const declared = new Map(allOperations.map((op) => [op.name, op.result ?? null]));
+  // Only an operation that declares one has it (galaxy-ops 0.3.1 declares none); the key stays.
+  const declared = new Map(
+    allOperations.map((op) => [op.name, (op as { result?: unknown }).result ?? null]),
+  );
   const out: Record<string, unknown> = {};
   for (const { function: tool } of full.tools) {
     const params = tool.parameters as { properties?: Record<string, any>; required?: string[] };

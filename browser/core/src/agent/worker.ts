@@ -9,7 +9,7 @@ import type { Placement, RuntimeConfig } from "./runtime";
 import type { SessionDocument } from "./saved";
 import type { RecordSummary } from "./records";
 import type { AgentFlavor } from "./tools";
-import type { Settled } from "./watch";
+import type { Settled } from "./orbit/watch";
 import { browserEnv } from "./orbit/browser-env";
 import { startOrbitWorker } from "./orbit/worker";
 

@@ -27,7 +27,7 @@ import { context, type Placement, type RuntimeConfig } from "./runtime";
 import type { SessionDocument } from "./saved";
 import type { Python } from "./tool";
 import type { AgentFlavor } from "./tools";
-import type { Settled } from "./watch";
+import type { Settled } from "./orbit/watch";
 import type { PageMessage, WorkerMessage } from "./worker";
 
 export interface HeadlessConfig extends RuntimeConfig {
