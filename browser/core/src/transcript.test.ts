@@ -86,6 +86,15 @@ describe("a restored conversation renders a step the way it ended", () => {
 });
 
 describe("what the user sees of messages written for the model", () => {
+  it("shows Orbit's automatic follow-up as a line too", () => {
+    const { chat, hooks, view: v } = view();
+    v.apply([
+      snapshot([user("[Loom automatic Galaxy follow-up] The background poller observed these.")]),
+    ]);
+    expect(chat.addUserMessage).not.toHaveBeenCalled();
+    expect(hooks.info).toHaveBeenCalledWith("Checking the Galaxy results that just landed.");
+  });
+
   it("shows an automatic follow-up as a line, not as something the user wrote", () => {
     const { chat, hooks, view: v } = view();
     v.apply([snapshot([user(`${FOLLOW_UP_MARK} These runs reached a terminal state.`)])]);
