@@ -145,6 +145,9 @@ describe("the Orbit worker", { timeout: 30_000 }, () => {
     expect(seen("ready")[0]).toMatchObject({ brain: "orbit" });
     // The page shows the conversation from a snapshot on.
     expect(seen("events")[0]).toMatchObject({ events: [{ type: "snapshot" }] });
+    // The brain's history defaults go to the conversation's, past session_start's reset.
+    const { getCurrentHistoryId } = await import("../../../../../extensions/loom/state");
+    expect(getCurrentHistoryId()).toBe("h1");
   });
 
   describe("a history with earlier records", () => {
