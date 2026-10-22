@@ -127,7 +127,8 @@ export class Tab {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#listeners.delete(listener);
-        reject(new Error(`Timed out on ${this.user.sub}'s tab: ${this.received.slice(-5).map((m) => m.type).join(",")}`));
+        const last = this.received.slice(-5).map((m) => (m.type === "notice" ? `notice "${m.text}"` : m.type === "failed" ? `failed "${m.message}"` : m.type));
+        reject(new Error(`Timed out on ${this.user.sub}'s tab: ${last.join(", ")}`));
       }, timeoutMs);
       const listener = () => {
         const got = check();
