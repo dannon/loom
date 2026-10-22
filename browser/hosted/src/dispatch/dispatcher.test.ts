@@ -259,6 +259,8 @@ describe("dispatch", () => {
     const c = await createConversation(pool, await user());
     // The dead host claimed a turn and was killed before finishing it: active, and nobody beating.
     await bosses[0]!.offWork("turn");
+    // The dead host's sweeper queued turns for conversations earlier tests left interrupted.
+    await bosses[0]!.deleteAllJobs("turn");
     await bosses[0]!.send("turn", { conversationId: c.id }, { singletonKey: c.id });
     const [claimed] = await bosses[0]!.fetch("turn");
     expect(claimed?.data).toEqual({ conversationId: c.id });
