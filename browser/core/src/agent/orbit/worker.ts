@@ -320,26 +320,36 @@ async function enter(next: Conversation, reason: SessionReason) {
 /** Bumped when the worker stops: an open still in flight from before then must not boot. */
 let generation = 0;
 let opening = false;
+/** Bumped by each open that goes ahead: an earlier one still waiting is superseded by it. */
+let attempt = 0;
 
-/** Throw if the worker stopped since `started`, an open in flight then being abandoned. */
-function current(started: number) {
-  if (started !== generation) throw new Error("The worker stopped while the session was opening.");
+/** An open another took over from: it stops without a word, the newer one answering the page. */
+class Superseded extends Error {}
+
+/** Throw if the worker stopped, or a newer open took over, since this open began. */
+function current(started: { generation: number; attempt: number }) {
+  if (started.generation !== generation)
+    throw new Error("The worker stopped while the session was opening.");
+  if (started.attempt !== attempt) throw new Superseded();
 }
 
 async function open(request: OpenRequest) {
-  // A second open (the other-tab handover) finds the brain already booted, or booting, in this
-  // worker.
-  if (orbit || opening) return;
+  // Once booted, a second open (the other-tab handover) finds the brain here already. While one
+  // is still booting, only "Use it here" goes ahead: the open it follows waits on the other tab's
+  // lock, perhaps for good.
+  if (orbit || (opening && !request.steal)) return;
   opening = true;
-  const started = generation;
+  const started = { generation, attempt: ++attempt };
   try {
     await boot(request, started);
+  } catch (err) {
+    if (!(err instanceof Superseded)) throw err;
   } finally {
-    if (started === generation) opening = false;
+    if (started.generation === generation && started.attempt === attempt) opening = false;
   }
 }
 
-async function boot(request: OpenRequest, started: number) {
+async function boot(request: OpenRequest, started: { generation: number; attempt: number }) {
   const brand = flavor.brand ?? DEFAULT_BRAND;
   const capabilities = request.config.capabilities ?? ["llm", "local", "read", "write"];
   // Refused before anything is opened: a grant Orbit can't map is not one to guess at.
@@ -487,9 +497,11 @@ async function boot(request: OpenRequest, started: number) {
     brand,
     extensions: orbit.extensions,
   });
-  if (started !== generation) {
-    await opened.close();
+  try {
     current(started);
+  } catch (err) {
+    await opened.close();
+    throw err;
   }
   runtime = opened;
   if (request.saved) {
