@@ -13,7 +13,7 @@ import { ensureDatabase } from "../test-db";
 import { startStandIn, type StandIn } from "../test-stand-in";
 import { bundleWorker, nodeEdges } from "./bundle";
 import { WITHHELD_TOOLS } from "./guards";
-import type { WorkerData } from "./protocol";
+import { SESSION_POISONED_EXIT_CODE, type WorkerData } from "./protocol";
 import { runWorker, TEST_TOKEN, type Running, type Tokens } from "./test-workers";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -148,6 +148,39 @@ describe("the worker bootstrap", () => {
     running.worker.postMessage({ cmd: "submit", text: "hello again" });
     expect(await running.exited).toBe(LEASE_LOST);
     expect(standIn.modelCalls()).toBe(before);
+  });
+
+  it("exits for a reopen when a dropped database connection fails a commit and poisons its session", async () => {
+    const { data, running } = await started();
+    await settledIn(running);
+    // Hold the store's row so the next commit waits on it, then drop that waiting connection.
+    const blocker = new pg.Client({ ...(await ensureDatabase(DATABASE)) });
+    await blocker.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT 1 FROM durable_stores WHERE store_id = $1 FOR UPDATE", [data.storeId]);
+      running.worker.postMessage({ cmd: "submit", text: "hello again" });
+      const waiting = async () => {
+        const { rows } = await pool.query<{ pid: number }>(
+          "SELECT pid FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock' AND pid <> $2",
+          [DATABASE, (await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]!.pid],
+        );
+        return rows;
+      };
+      let rows = await waiting();
+      for (let i = 0; rows.length === 0 && i < 200; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        rows = await waiting();
+      }
+      expect(rows.length).toBeGreaterThan(0);
+      await pool.query("SELECT pg_terminate_backend(pid) FROM unnest($1::int[]) AS pid", [rows.map((r) => r.pid)]);
+    } finally {
+      await blocker.query("ROLLBACK");
+      await blocker.end();
+    }
+    expect(await Promise.race([running.exited, new Promise((resolve) => setTimeout(() => resolve("still running"), 10_000))])).toBe(
+      SESSION_POISONED_EXIT_CODE,
+    );
   });
 });
 

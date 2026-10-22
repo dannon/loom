@@ -21,12 +21,19 @@ import { LeaseLostError, PostgresStorage } from "../storage/postgres-storage";
 import { fencedFetch } from "./fenced-fetch";
 import { hostedGalaxyFetch, TokenUnavailable } from "./galaxy-fetch";
 import { registerSurfaceGate, registerToolCallCap, WITHHELD_TOOLS } from "./guards";
-import type { FromWorker, TokenAnswer, ToWorker, WorkerData } from "./protocol";
+import { SESSION_POISONED_EXIT_CODE, type FromWorker, type TokenAnswer, type ToWorker, type WorkerData } from "./protocol";
 import { installTripwire } from "./tripwire";
 
 const data = workerData as WorkerData;
 const port = parentPort!;
 const post = (message: FromWorker) => port.postMessage(message);
+/**
+ * pi-durable poisons a session whose commit failed after storage took it (a connection dropped
+ * mid-commit) and refuses everything after, asking for a reopen. A fresh worker is that reopen.
+ */
+const reopenIfPoisoned = (error: unknown) => {
+  if (error instanceof Error && error.message.startsWith("Session is poisoned")) process.exit(SESSION_POISONED_EXIT_CODE);
+};
 const ctx = BACKGROUND_CONTEXT;
 const reopen = data.conversationId !== undefined;
 
@@ -198,6 +205,7 @@ const harness = await Harness.open(
     onReport: (error) => {
       fence.check(error);
       post({ type: "report", message: error instanceof Error ? error.message : String(error) });
+      reopenIfPoisoned(error);
     },
   },
   ctx,
@@ -228,8 +236,10 @@ async function restream(): Promise<void> {
 }
 
 /** What went wrong, for the host's log; never the error's own object, which can carry request data. */
-const report = (error: unknown) =>
+const report = (error: unknown) => {
   post({ type: "report", message: error instanceof Error ? error.message : String(error) });
+  reopenIfPoisoned(error);
+};
 
 port.on("message", (message: ToWorker) => {
   switch (message.cmd) {

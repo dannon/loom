@@ -12,6 +12,12 @@ export type TokenAnswer =
   | { readonly token: string }
   | { readonly failure: TokenFailure | { readonly kind: "lease"; readonly message: string } };
 
+/**
+ * A worker exits with this when pi-durable poisons its session (a commit failed after storage took
+ * it), which only a reopen clears; the host treats it as a crash and resumes on a fresh worker.
+ */
+export const SESSION_POISONED_EXIT_CODE = 70;
+
 export interface WorkerData {
   /** The pi-durable store this conversation lives in, and the lease generation the worker holds. */
   readonly storeId: string;
