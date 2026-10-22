@@ -85,8 +85,9 @@ let timer: ReturnType<typeof setInterval> | null = null;
  * rather than a boolean lets a caller wait for the one already in flight.
  */
 let inFlightTick: Promise<TickRun> | null = null;
-/** The record the running tick was pinned to, if a caller named one. */
+/** The record the running tick was pinned to, if a caller named one, and the record it runs on. */
 let inFlightPinned: string | undefined;
+let inFlightKey: string | null = null;
 /**
  * Bumped by every startGalaxyPoller. A tick that spans a session switch still
  * writes by the record key it pinned, but finds this moved and leaves the new
@@ -718,16 +719,20 @@ function invocationHooks(nbPath: string): InvocationPersistHooks {
 /** Run a poll tick now, or hand back the one already running. */
 function tick(options: PollOptions = {}): Promise<TickRun> {
   const key = options.recordKey ?? getNotebookPath();
-  // A tick pinned to another record answers for that record only: wait it out.
-  if (inFlightTick && inFlightPinned !== undefined && inFlightPinned !== key) {
+  // A pinned tick answers for its own record only, and a pinned caller wants its own: when either
+  // side is pinned and the records differ, wait the running one out.
+  const pinned = inFlightPinned !== undefined || options.recordKey !== undefined;
+  if (inFlightTick && pinned && inFlightKey !== key) {
     const after = () => tick(options);
     return inFlightTick.then(after, after);
   }
   if (inFlightTick) return inFlightTick;
   inFlightPinned = options.recordKey;
+  inFlightKey = key;
   inFlightTick = runTick(options).finally(() => {
     inFlightTick = null;
     inFlightPinned = undefined;
+    inFlightKey = null;
   });
   return inFlightTick;
 }
@@ -938,7 +943,8 @@ async function runTick(options: PollOptions): Promise<TickRun> {
     // out with this one. A tick whose session switched to another record
     // leaves them there for the next tick on this one.
     if (tickNotebook && current()) run.transitions = await deliverEvents(tickNotebook);
-    tickCount++;
+    // The count paces the bound record's reconcile; an unshown record's tick runs no capture hook.
+    if (options.recordKey === undefined || current()) tickCount++;
     // Reconcile and enrichment read whichever record is bound when they run, so a tick whose
     // session moved to another record leaves them to that session's own ticks.
     if (captureHook && current()) {

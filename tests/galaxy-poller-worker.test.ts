@@ -20,6 +20,7 @@ import {
   pollerIdle,
   pollGalaxyNow,
   setCaptureTickHook,
+  setPollTickHook,
   startGalaxyPoller,
   stopGalaxyPoller,
 } from "../extensions/orbit/galaxy-poller";
@@ -318,6 +319,26 @@ describe("the poller on the desktop, across a switch to another record", () => {
       expect(shown.transitions.map((t) => t.key)).toEqual([
         terminalEventKey("job", "job-9", "completed"),
       ]);
+    });
+
+    it("feeds neither the panel nor capture, nor takes a turn of the bound record's reconcile", async () => {
+      const panel = vi.fn(async () => {});
+      const capture = vi.fn(async (_tick: number) => {});
+      setPollTickHook(panel);
+      setCaptureTickHook(capture);
+      try {
+        startGalaxyPoller(notify, resume);
+        await pollGalaxyNow();
+        const [before] = capture.mock.calls[0];
+        await pollGalaxyNow({ recordKey: other });
+        expect(panel).toHaveBeenCalledTimes(1);
+        expect(capture).toHaveBeenCalledTimes(1);
+        await pollGalaxyNow();
+        expect(capture.mock.calls[1][0]).toBe(before + 1);
+      } finally {
+        setPollTickHook(null);
+        setCaptureTickHook(null);
+      }
     });
 
     it("isn't answered by a tick already running on the bound record", async () => {
