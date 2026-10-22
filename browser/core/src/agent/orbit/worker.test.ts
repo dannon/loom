@@ -18,11 +18,13 @@ const json = (body: unknown, status = 200) =>
 type Message = { type: string; [key: string]: unknown };
 
 /** A fake Galaxy holding pages, and a hold the test can put on one page's writes. */
-function galaxy() {
+function galaxy(
+  seed: Array<{ id: string; slug: string; content: string; deleted?: boolean }> = [],
+) {
   const pages = new Map<
     string,
-    { id: string; slug: string; history_id: string; content: string }
-  >();
+    { id: string; slug: string; history_id: string; content: string; deleted?: boolean }
+  >(seed.map((page) => [page.id, { history_id: "h1", ...page }]));
   const puts: string[] = [];
   let created = 0;
   let hold: { page: string; gate: Promise<void> } | undefined;
@@ -81,9 +83,10 @@ async function worker(
   answers: Array<() => Response>,
   capabilities = ["llm", "read", "write"],
   config: Record<string, unknown> = {},
+  seed: Parameters<typeof galaxy>[0] = [],
 ) {
   vi.resetModules();
-  const fake = galaxy();
+  const fake = galaxy(seed);
   let asked = 0;
   const prompts: string[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -121,9 +124,10 @@ async function worker(
       placement: { historyId: "h1" },
     },
   });
-  await vi.waitFor(() => expect(seen("ready").length + seen("failed").length).toBe(1), {
-    timeout: 10_000,
-  });
+  await vi.waitFor(
+    () => expect(seen("ready").length + seen("failed").length + seen("recoverable").length).toBe(1),
+    { timeout: 10_000 },
+  );
   return { fake, posted, send, seen, prompts };
 }
 
@@ -141,6 +145,54 @@ describe("the Orbit worker", { timeout: 30_000 }, () => {
     expect(seen("ready")[0]).toMatchObject({ brain: "orbit" });
     // The page shows the conversation from a snapshot on.
     expect(seen("events")[0]).toMatchObject({ events: [{ type: "snapshot" }] });
+  });
+
+  describe("a history with earlier records", () => {
+    // Orbit's own record, the browser brain's, and a deleted one of Orbit's.
+    const seed = [
+      { id: "page-old", slug: "orbit-orbit-sess-a", content: "Earlier analysis notes." },
+      { id: "page-browser", slug: "orbit-sess-b", content: "The browser brain's." },
+      { id: "page-gone", slug: "orbit-orbit-sess-c", content: "Deleted.", deleted: true },
+    ];
+    const submit = [
+      () => toolCall("run_tool", { history_id: "h1", tool_id: "cat1", inputs: {} }),
+      () => text("submitted"),
+    ];
+
+    it("offers only Orbit's live records, and starts nothing until the user picks", async () => {
+      const { fake, seen } = await worker([], undefined, undefined, seed);
+      expect(seen("recoverable")).toHaveLength(1);
+      expect(seen("recoverable")[0].records).toEqual([
+        expect.objectContaining({ pageId: "page-old", sessionId: "sess-a" }),
+      ]);
+      expect(seen("ready")).toEqual([]);
+      expect(seen("events")).toEqual([]);
+      expect(fake.pages.size).toBe(3);
+    });
+
+    it("continues the picked record: the model reads it and the run lands on that page", async () => {
+      const { fake, send, seen, prompts } = await worker(submit, undefined, undefined, seed);
+      send({ type: "recover", pageId: "page-old" });
+      await vi.waitFor(() => expect(seen("ready")).toHaveLength(1), { timeout: 10_000 });
+      expect(seen("ready")[0]).toMatchObject({ brain: "orbit" });
+      send({ type: "submit", text: "run cat on it" });
+      await vi.waitFor(() => expect(fake.puts).toContain("page-old"), { timeout: 10_000 });
+      expect(prompts[0]).toContain("Earlier analysis notes.");
+      expect(fake.pages.size).toBe(3);
+    });
+
+    it("starts a new record when the user picks none", async () => {
+      const { fake, send, seen } = await worker(submit, undefined, undefined, seed);
+      send({ type: "recover" });
+      await vi.waitFor(() => expect(seen("ready")).toHaveLength(1), { timeout: 10_000 });
+      send({ type: "submit", text: "run cat on it" });
+      await vi.waitFor(() => expect(fake.pages.size).toBe(4), { timeout: 10_000 });
+      const made = [...fake.pages.values()].at(-1)!;
+      expect(made.slug).toMatch(/^orbit-orbit-/);
+      expect(made.slug).not.toBe("orbit-orbit-sess-a");
+      expect(made.history_id).toBe("h1");
+      expect(fake.puts).not.toContain("page-old");
+    });
   });
 
   it("answers a slash command with a notice and tells the page nothing is running", async () => {
