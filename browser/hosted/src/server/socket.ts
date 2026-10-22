@@ -227,7 +227,8 @@ export class Sockets {
         }
         await fromStore();
         // Paused on a confirm nobody answered: coming back is the answer to wait for, so it asks again.
-        if (conversation.paused && !this.#c.turnsDisabled) await dispatcher.resume(id);
+        // Mid-pause counts too; the row isn't marked until the worker has closed.
+        if ((conversation.paused || dispatcher.pausing(id)) && !this.#c.turnsDisabled) await dispatcher.resume(id);
         return;
       }
       case "submit":

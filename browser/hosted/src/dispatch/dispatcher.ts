@@ -235,9 +235,15 @@ export class Dispatcher {
    * reruns the call and asks again.
    */
   async resume(conversationId: string): Promise<void> {
-    if (this.#stopping || this.#handling.has(conversationId) || this.#live.has(conversationId))
-      return;
+    if (this.#stopping || this.#handling.has(conversationId)) return;
+    // Mid-pause, the turn waits for the closing worker to go first, as a message would.
+    if (this.#live.has(conversationId) && !this.pausing(conversationId)) return;
     await this.#send({ conversationId });
+  }
+
+  /** Whether the conversation's worker is being closed for an unanswered confirm, not yet marked paused. */
+  pausing(conversationId: string): boolean {
+    return this.#live.get(conversationId)?.releasing?.why === "pause";
   }
 
   /** The last page on the conversation closed: its quiet period counts from now. */
@@ -256,10 +262,10 @@ export class Dispatcher {
 
   /** What the conversation is waiting on the user for. */
   pendingAsks(conversationId: string): Array<{ id: number; request: AskRequest }> {
-    return [...(this.#live.get(conversationId)?.asks ?? [])].map(([id, { request }]) => ({
-      id,
-      request,
-    }));
+    const live = this.#live.get(conversationId);
+    // A closing worker's asks are about to be withdrawn, and an answer to one is dropped.
+    if (!live || live.releasing) return [];
+    return [...live.asks].map(([id, { request }]) => ({ id, request }));
   }
 
   /**

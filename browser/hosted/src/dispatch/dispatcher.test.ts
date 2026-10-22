@@ -537,6 +537,30 @@ describe("idle release and the unanswered-confirm pause", () => {
     ).toHaveLength(1);
   });
 
+  it("a page that opens while the pause is closing the worker resumes it, and the old ask isn't shown", async () => {
+    let h!: Host;
+    const c = await createConversation(pool, await user());
+    let during: { pausing: boolean; asks: number } | undefined;
+    h = await host("pause-window", undefined, undefined, false, {
+      idle: { releaseMs: 60_000, askPauseMs: 1_000, checkMs: 100 },
+      log: (message) => {
+        if (message !== `pausing ${c.id}`) return;
+        during = { pausing: h.dispatcher.pausing(c.id), asks: h.dispatcher.pendingAsks(c.id).length };
+        void h.dispatcher.resume(c.id);
+      },
+    });
+    await h.dispatcher.submit(c.id, "DELETE_H1");
+    await asked(h, c.id);
+    const again = await asked(h, c.id, 2);
+    expect(during).toEqual({ pausing: true, asks: 0 });
+    await sleep(500);
+    expect(of(h, c.id, "ask")).toHaveLength(2);
+    expect(h.dispatcher.pausing(c.id)).toBe(false);
+    expect((await getConversation(pool, c.id))?.paused).toBe(false);
+    h.dispatcher.answer(c.id, again.id, false);
+    await until(() => settledCount(h, c.id) >= 1, "the run to settle");
+  });
+
   it("a message to a paused conversation resumes it and asks again before the message's turn", async () => {
     const h = await host("pause-submit", undefined, undefined, false, {
       idle: { releaseMs: 60_000, askPauseMs: 1_000, checkMs: 100 },
