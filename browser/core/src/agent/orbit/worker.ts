@@ -1,11 +1,13 @@
 /**
- * The agent worker under VITE_ORBIT_BRAIN=orbit: the page protocol worker.ts speaks, answered by
- * Orbit's brain (extensions/loom) on pi-host instead of the browser's own. The runtime (model,
- * compaction, storage, conversations) is the same Runtime; what differs is the brain installed in
- * it and that every conversation change goes through pi's session lifecycle.
+ * The agent worker: the page protocol worker.ts speaks, answered by Orbit's brain
+ * (extensions/loom) on pi-host. The runtime holds the model, compaction, storage and the
+ * conversations; every conversation change goes through pi's session lifecycle.
  *
- * Its storage and its submission ledger are its own files (`-orbit`), so a flag build never reads
- * or rewrites what the default brain kept.
+ * What it takes from where it runs comes through an OrbitWorkerEnv: a browser worker's by default,
+ * or Node's for Headless (headless.ts), which drives the same protocol in-process.
+ *
+ * Its storage and its submission ledger are its own files (`-orbit`), apart from what the
+ * browser's earlier brain kept.
  */
 import {
   InboxDoc,
@@ -43,11 +45,13 @@ import { connectGalaxy, connectWeb, galaxyFetch } from "../galaxy";
 import { galaxyTools } from "../galaxy-tools";
 import { recordsOn, slugForSession, type RecordSummary } from "../notebook";
 import type { SessionReason } from "../pi-host";
+import type { Submission } from "@earendil-works/pi-durable";
 import { processTools } from "../processes";
 import { browserPython, pythonTool } from "../python";
 import { artifactsIn, context, Runtime, type Placement } from "../runtime";
 import { holdStorage, openStorage } from "../storage";
 import { galaxyOps, type AgentFlavor } from "../tools";
+import type { Python } from "../tool";
 import { adaptTool, galaxyExtras, granted, type ShellToolHost } from "./adapter";
 import type { OpenRequest, PageMessage, Waiting, WorkerMessage } from "../worker";
 import { bootOrbit, type OrbitBoot } from "./boot";
@@ -62,7 +66,47 @@ const SETTLE_MS = 30_000;
 /** What a retried Galaxy request may wait in all: the watch's own backoff does the rest. */
 const RETRY_BUDGET_MS = 5_000;
 
-const post = (message: WorkerMessage) => self.postMessage(message);
+/** What the worker takes from where it runs. */
+export interface OrbitWorkerEnv {
+  post(message: WorkerMessage): void;
+  /** The address a relative Galaxy root resolves against. */
+  base(): string;
+  python(request: OpenRequest): Python;
+  /** Storage and the submission ledger for this Galaxy user; memory when the user is unknown. */
+  keep(
+    brand: Brand,
+    user: string | undefined,
+    request: OpenRequest,
+  ): Promise<{ storage: Storage; ledger: SubmissionLedger; unkept?: string }>;
+  /** The directory each conversation's record key and side files go under. */
+  root: string;
+}
+
+/** A browser worker: the page through postMessage, OPFS behind a tab lock, Pyodide. */
+const browserEnv: OrbitWorkerEnv = {
+  post: (message) => self.postMessage(message),
+  base: () => self.location.href,
+  python: (request) => browserPython(request.pyodideURL),
+  keep: async (brand, user, request) => {
+    if (user === undefined) return { storage: new MemoryStorage(), ledger: createMemoryLedger() };
+    await holdStorage(`${brand.id}:storage`, {
+      steal: request.steal,
+      waiting: () => post({ type: "waiting" }),
+      lost: () => {
+        post({ type: "lost" });
+        self.close();
+      },
+    });
+    const { storage, unkept } = await openStorage(`${brand.id}-${user}-orbit`, brand.id);
+    // Its own files, like the storage, and the same fallback to memory when they can't be opened.
+    const opened = await openLedger(opfsFile(`${brand.id}-${user}-orbit-ledger.json`));
+    return { storage, ledger: opened.ledger, unkept: unkept ?? opened.unkept };
+  },
+  root: "/orbit",
+};
+
+let env: OrbitWorkerEnv = browserEnv;
+const post = (message: WorkerMessage) => env.post(message);
 
 let flavor: AgentFlavor = {};
 let runtime: Runtime | undefined;
@@ -122,7 +166,7 @@ function decline(id: ConversationId, runOnly = false) {
 }
 
 /** The record page's key for a conversation: under its own pseudo directory. */
-const pageKey = (id: ConversationId) => `/orbit/${id}/notebook.md`;
+const pageKey = (id: ConversationId) => `${env.root}/${id}/notebook.md`;
 
 /** A conversation's watch, sleeping between ticks, woken when something asks it to look now. */
 const { wake, woken } = wakeups();
@@ -168,7 +212,7 @@ async function watchNow(id: ConversationId, recover = false) {
 /** Install `id`'s record store before its session starts. */
 async function installRecord(id: ConversationId) {
   const store = await recordFor(id);
-  setOrbitCwd(`/orbit/${id}`);
+  setOrbitCwd(`${env.root}/${id}`);
   setRecordStore(store);
 }
 
@@ -308,26 +352,12 @@ async function open(request: OpenRequest) {
       return undefined;
     },
   );
-  let storage: Storage = new MemoryStorage();
-  let ledger: SubmissionLedger = createMemoryLedger();
-  if (user !== undefined) {
-    await holdStorage(`${brand.id}:storage`, {
-      steal: request.steal,
-      waiting: () => post({ type: "waiting" }),
-      lost: () => {
-        post({ type: "lost" });
-        self.close();
-      },
-    });
-    ({ storage, unkept } = await openStorage(`${brand.id}-${user}-orbit`, brand.id));
-    // Its own files, like the storage, and the same fallback to memory when they can't be opened.
-    const opened = await openLedger(opfsFile(`${brand.id}-${user}-orbit-ledger.json`));
-    ledger = opened.ledger;
-    unkept ??= opened.unkept;
-  }
-  const url = new URL(galaxy.root, self.location.href).href.replace(/\/+$/, "");
+  const keeping = await env.keep(brand, user, request);
+  const { storage, ledger } = keeping;
+  unkept ??= keeping.unkept;
+  const url = new URL(galaxy.root, env.base()).href.replace(/\/+$/, "");
   watch = makeWatch(request.config.poll_ms);
-  const python = browserPython(request.pyodideURL);
+  const python = env.python(request);
   const galaxyOptions = {
     root: galaxy.root,
     key: request.config.galaxy_key,
@@ -504,11 +534,43 @@ function inOrder(work: () => Promise<unknown>) {
   queue = queue.then(work).catch(failed);
 }
 
-/** Run this worker as the agent on Orbit's brain, with what `agentFlavor` adds to the shell. */
-export function startOrbitWorker(agentFlavor: AgentFlavor): void {
+/**
+ * Run this worker as the agent on Orbit's brain, with what `agentFlavor` adds to the shell. In a
+ * browser worker it listens on `self`; given an environment, it hands back the function that takes
+ * the page's messages instead.
+ */
+export function startOrbitWorker(
+  agentFlavor: AgentFlavor,
+  environment?: OrbitWorkerEnv,
+): (message: PageMessage) => void {
   flavor = agentFlavor;
+  env = environment ?? browserEnv;
   registerArtifactKinds(flavor.artifactKinds ?? []);
-  self.onmessage = onMessage;
+  if (!environment) self.onmessage = onMessage;
+  return (data) => onMessage({ data } as MessageEvent<PageMessage>);
+}
+
+/** The worker's state, for Headless: what a page reads off the protocol, read directly. */
+export function orbitSession() {
+  return { runtime, conversation, host: orbit?.host };
+}
+
+/**
+ * The user's message to the shown conversation: settled work may start runs again, unless it is
+ * a command. What pi-host handed back, or nothing when no run starts (a command, a refusal).
+ */
+export async function submitText(text: string): Promise<Submission | undefined> {
+  const current = conversation!;
+  const host = orbit!.host;
+  const command = text.startsWith("/") && host.commands.has(text.slice(1).split(" ")[0]);
+  // The user's own message lets settled work start runs again; a command (/pending, say) isn't a
+  // message to the agent.
+  if (!command) {
+    await current.commit(async (tx) => {
+      Object.assign(await tx.doc(FollowUps, current.id), { automatic: 0, paused: false });
+    }, context);
+  }
+  return host.submit(text, { source: "interactive" });
 }
 
 function onMessage({ data }: MessageEvent<PageMessage>) {
@@ -528,18 +590,7 @@ function onMessage({ data }: MessageEvent<PageMessage>) {
 
 async function handle(data: PageMessage) {
   if (data.type === "submit") {
-    const current = conversation!;
-    const host = orbit!.host;
-    const command =
-      data.text.startsWith("/") && host.commands.has(data.text.slice(1).split(" ")[0]);
-    // The user's own message lets settled work start runs again, as it does for the default
-    // brain; a command (/pending, say) isn't a message to the agent.
-    if (!command) {
-      await current.commit(async (tx) => {
-        Object.assign(await tx.doc(FollowUps, current.id), { automatic: 0, paused: false });
-      }, context);
-    }
-    const submitted = await host.submit(data.text, { source: "interactive" });
+    const submitted = await submitText(data.text);
     // A command, a handled input or a busy refusal starts no run, so no stream event will tell
     // the page it's idle again.
     if (!submitted) post({ type: "quiet" });
