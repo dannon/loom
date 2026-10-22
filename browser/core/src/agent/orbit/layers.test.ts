@@ -123,7 +123,7 @@ describe("the flavor layers", () => {
     return handlers;
   }
 
-  it("append the flavor's prompt sections to Orbit's prompt", async () => {
+  it("lead with the shell's identity and the flavor's opening lines, then Orbit's prompt and the flavor's terms", async () => {
     const before = flavored().get("before_agent_start")!;
     const result = (await before(
       { systemPrompt: "ORBIT" },
@@ -132,7 +132,7 @@ describe("the flavor layers", () => {
       systemPrompt: string;
     };
     expect(result.systemPrompt).toBe(
-      "ORBIT\n\nOpened on dataset d1.\n\n## Olit terms\n\n- **visualization**: a Galaxy plugin that renders a dataset.",
+      "You are Olit.\n\nOpened on dataset d1.\n\nORBIT\n\n## Olit terms\n\n- **visualization**: a Galaxy plugin that renders a dataset.",
     );
   });
 
