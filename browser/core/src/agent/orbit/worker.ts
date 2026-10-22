@@ -25,6 +25,7 @@ import { galaxyBackgroundIdle } from "../../../../../extensions/loom/galaxy-reco
 import { captureLateSubmission } from "../../../../../extensions/loom/galaxy-submission-capture";
 import { isSubmissionTool } from "../../../../../extensions/loom/galaxy-submission";
 import { setRecordStore } from "../../../../../extensions/loom/record-store";
+import { setCurrentHistoryId } from "../../../../../extensions/loom/state";
 import {
   createMemoryLedger,
   submissionLedger,
@@ -237,6 +238,9 @@ async function show(next: Conversation, reason: SessionReason) {
   detach = () => stream.stop();
   await orbit!.host.attach(harness, next, context);
   await orbit!.host.start(reason);
+  // After session_start, which clears it: the brain's history defaults (an upload, the init gate)
+  // go to the history this conversation works in.
+  setCurrentHistoryId((await harness.snapshot(Binding, next.id, context))?.historyId ?? null);
   // Whatever happened while the conversation wasn't shown, or before a reload, the watch's first
   // tick finds: answered submissions with no block, runs that finished, events never delivered.
   await watchNow(next.id, true);
