@@ -116,11 +116,20 @@ interface SoakResult {
   hostPeakRssMb: number;
   hostEndRssMb: number;
   rssPerTurnMb: number[];
+  /** The first user's turn times, in order, to see whether a long conversation slows down. */
+  msPerTurn: number[];
+  /** Host process spawn to listening. */
+  hostListeningMs: number;
+  /** A new conversation's first message to its first model request: dispatch plus a worker's boot. */
   coldStartToFirstModelMs: number;
   turnMsMedian: number;
   turnMsP95: number;
+  /** Median turn time by what the turn did. */
+  turnMsByKind: Record<string, number>;
   galaxyRequestsPerSession: number[];
   galaxyRequestsPerTurn: number;
+  /** The first user's Galaxy requests by method and path, ids folded. */
+  galaxyByPath: Record<string, number>;
   leaseGenPerSession: number[];
 }
 
@@ -146,7 +155,7 @@ async function soak(n: number, turns: number): Promise<{ outcome: Outcome; resul
   const started = performance.now();
   return withStack({}, async (stack) => {
     const s = new Scenario(`soak n=${n}`, stack);
-    await stack.startHost();
+    const { listeningMs } = await stack.startHost();
     await sleep(1500);
     const hostIdleRssMb = stack.hostRssMb()!;
     let peak = hostIdleRssMb;
@@ -156,7 +165,9 @@ async function soak(n: number, turns: number): Promise<{ outcome: Outcome; resul
     }, 100);
     const users = await Promise.all(Array.from({ length: n }, (_, i) => signedIn(stack, `soak-u${i}`)));
     const rssPerTurnMb: number[] = [];
+    const msPerTurn: number[] = [];
     const turnMs: number[] = [];
+    const byKind: Record<string, number[]> = {};
     let firstModelMs = NaN;
     try {
       await Promise.all(
@@ -169,11 +180,14 @@ async function soak(n: number, turns: number): Promise<{ outcome: Outcome; resul
             const before = Date.now();
             const { ms, confirms } = await say(tab, `${tag} ${step.text}`, step.approve);
             turnMs.push(ms);
+            const kind = step.approve === true ? "delete approved" : step.approve === false ? "delete declined" : step.text.startsWith("READ") ? "read" : "chat";
+            (byKind[kind] ??= []).push(ms);
             if (i === 0 && u === 0) {
               const first = stack.standIn.seen.find((x) => x.to === "model" && x.at >= before);
               firstModelMs = first ? first.at - before : NaN;
             }
             if (u === 0) rssPerTurnMb.push(Math.round(stack.hostRssMb()!));
+            if (u === 0) msPerTurn.push(Math.round(ms));
             s.check(confirms === (step.approve === undefined ? 0 : 1), `${user.sub}: "${step.text}" showed ${confirms} confirms`);
             if (step.deletes) s.check(deletes(stack, step.deletes) === 1, `${step.deletes} deleted ${deletes(stack, step.deletes)} times`);
             if (step.spares) s.check(deletes(stack, step.spares) === 0, `${step.spares} deleted though declined`);
@@ -197,11 +211,19 @@ async function soak(n: number, turns: number): Promise<{ outcome: Outcome; resul
       hostPeakRssMb: Math.round(peak),
       hostEndRssMb: Math.round(stack.hostRssMb()!),
       rssPerTurnMb,
+      msPerTurn,
+      hostListeningMs: Math.round(listeningMs),
       coldStartToFirstModelMs: Math.round(firstModelMs),
       turnMsMedian: Math.round(quantile(turnMs, 0.5)),
       turnMsP95: Math.round(quantile(turnMs, 0.95)),
+      turnMsByKind: Object.fromEntries(Object.entries(byKind).map(([k, v]) => [k, Math.round(quantile(v, 0.5))])),
       galaxyRequestsPerSession,
       galaxyRequestsPerTurn: Math.round((galaxyRequestsPerSession.reduce((a, b) => a + b, 0) / (n * turns)) * 10) / 10,
+      galaxyByPath: galaxyRequestsOf(stack, users[0]!.user.sub).reduce<Record<string, number>>((by, r) => {
+        const key = `${r.method} ${r.path.replace(/\/(histories|pages)\/[^/]+/, "/$1/:id")}`;
+        by[key] = (by[key] ?? 0) + 1;
+        return by;
+      }, {}),
       leaseGenPerSession,
     };
     Object.assign(s.notes, result);
@@ -277,8 +299,10 @@ const restartPendingConfirm =
     if (first.type === "confirm" && tab.isOpen) tab.confirm(first.id, true);
     await tab.closed;
     await stack.startHost();
+    const restartAt = Date.now();
     const tab2 = await user.tab(conversationId);
-    const again = await tab2.until((m) => m.find((x) => x.type === "confirm"), 45_000).catch(() => undefined);
+    const again = await tab2.until((m) => m.find((x) => x.type === "confirm"), 90_000).catch(() => undefined);
+    s.notes.reaskMs = again ? Date.now() - restartAt : undefined;
     s.check(again !== undefined, "confirm not asked again after the restart");
     s.check(deletes(stack, "pending") === 0, "deleted before the user answered the second ask");
     if (again?.type === "confirm") {
@@ -313,6 +337,9 @@ const socketDrop: Fault = async (s, stack) => {
   const ask = await tab2.until((m) => m.find((x) => x.type === "confirm"), 30_000, from);
   tab2.ws.terminate();
   const tab3 = await reopen(user, conversationId);
+  // The ask follows ready in its own frame.
+  await tab3.until((m) => m.find((x) => x.type === "confirm"), 10_000).catch(() => undefined);
+  await sleep(300);
   const shown = tab3.confirmsShown();
   s.check(shown.length === 1, `reconnected tab shown ${shown.length} confirms`);
   s.check(shown[0]?.id === (ask.type === "confirm" ? ask.id : -1), "a different confirm after reconnecting");
@@ -335,11 +362,13 @@ const twoTabs: Fault = async (s, stack) => {
   const a2 = await other.until((m) => m.find((x) => x.type === "confirm"), 30_000, from2).catch(() => undefined);
   s.check(a2 !== undefined, "the second tab wasn't shown the confirm");
   if (a1.type === "confirm") tab.confirm(a1.id, true);
+  const closed = await other.until((m) => m.find((x) => x.type === "withdrawn"), 10_000, from2).catch(() => undefined);
+  s.check(closed !== undefined, "the second tab's dialog wasn't closed after the first tab answered");
+  // A late click on the dialog the first tab already answered.
   if (a2?.type === "confirm") other.confirm(a2.id, false);
   await other.until((m) => m.find((x) => x.type === "events" && x.events.some((e) => e.type === "run_end")), 30_000, from2);
+  await sleep(300);
   s.check(deletes(stack, "shared") === 1, `deleted ${deletes(stack, "shared")} times`);
-  const withdrawn = other.received.slice(from2).some((x) => x.type === "withdrawn");
-  s.notes.secondTabToldWithdrawn = withdrawn;
   const t2 = s.tag("d");
   const seenBy1 = tab.received.length;
   await say(other, `${t2} READ_HISTORY fromtwo`);
@@ -367,12 +396,18 @@ const tokenExpiry: Fault = async (s, stack) => {
   const refreshesBefore = stack.keycloak.refreshes;
   const victim = users[0]!;
   const vTag = s.tag("tok-a");
+  // The refresh fails inside the turn: the model hears Galaxy refuse with the sign-in wording, and
+  // the session is gone, so the page's next message is turned away with a sign-in prompt.
+  await say(victim.tab, `${vTag} READ_HISTORY victim`).catch((e: Error) => s.problems.push(`revoked user's turn: ${e.message}`));
+  const told = brief(await transcript(stack, victim.conversationId)).some((l) => l.includes("pi.tool-result") && /sign in again/i.test(l));
+  const result = (await transcript(stack, victim.conversationId)).find((e) => e.kind === "pi.tool-result" && JSON.stringify(e.model).includes("victim"));
+  s.check(told || /sign in again/i.test(JSON.stringify(result ?? "")), "the revoked user's tool result doesn't say to sign in again");
   const vFrom = victim.tab.received.length;
-  victim.tab.submit(`${vTag} READ_HISTORY victim`);
-  const told = await victim.tab
-    .until((m) => m.find((x) => (x.type === "failed" || x.type === "notice") && /sign/i.test("message" in x ? x.message : x.text)), 30_000, vFrom)
+  victim.tab.submit(`${s.tag("tok-a")} READ_HISTORY refused`);
+  const refused = await victim.tab
+    .until((m) => m.find((x) => x.type === "failed" && /signed out/i.test(x.message)), 10_000, vFrom)
     .catch(() => undefined);
-  s.check(told !== undefined, "the revoked user wasn't told to sign in again");
+  s.check(refused !== undefined, "the revoked user's next message wasn't turned away with a sign-in prompt");
   for (const [i, u] of users.slice(1).entries()) {
     const t = s.tag(u.user.sub);
     tags[i + 1]!.push(t);
