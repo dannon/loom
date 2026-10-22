@@ -118,31 +118,30 @@ function payloadOf(content: ReadonlyArray<{ type: string; text?: string }>): unk
 }
 
 /**
- * What a flavor adds to the brain: its prompt sections, appended to Orbit's system prompt, and its
- * notes on Galaxy results (Olit's "that's a visualization, not a tool" after a catalog search),
- * appended to what the model reads. Both after Orbit's own handlers.
+ * What a flavor adds to the brain: who the agent is and its prompt sections, around Orbit's system
+ * prompt, and its notes on Galaxy results (Olit's "that's a visualization, not a tool" after a
+ * catalog search), appended to what the model reads. Both after Orbit's own handlers.
  */
 export function registerFlavorLayers(api: ExtensionAPI, host: FlavorLayerHost): void {
-  if (host.promptSections) {
-    const sectionsOf = host.promptSections;
-    api.on("before_agent_start", async (event, ctx) => {
-      const sections = sectionsOf({
-        model: ctx.model?.id,
-        provider: ctx.model?.provider,
-        datasetId: await host.datasetId(),
-      });
-      const blocks = [
-        ...(sections.afterIdentity ?? []),
-        ...(sections.terminology?.length
-          ? [`## ${host.brandName} terms\n\n${sections.terminology.join("\n")}`]
-          : []),
-        ...(sections.afterRouter ?? []),
-      ].filter(Boolean);
-      return blocks.length
-        ? { systemPrompt: [event.systemPrompt, ...blocks].join("\n\n") }
-        : undefined;
+  api.on("before_agent_start", async (event, ctx) => {
+    const sections = host.promptSections?.({
+      model: ctx.model?.id,
+      provider: ctx.model?.provider,
+      datasetId: await host.datasetId(),
     });
-  }
+    // Orbit's prompt names no product: the shell's identity leads, as in the browser brain, and
+    // stays a stable prefix ahead of Orbit's cached prompt.
+    const before = [`You are ${host.brandName}.`, ...(sections?.afterIdentity ?? [])];
+    const after = [
+      ...(sections?.terminology?.length
+        ? [`## ${host.brandName} terms\n\n${sections.terminology.join("\n")}`]
+        : []),
+      ...(sections?.afterRouter ?? []),
+    ];
+    return {
+      systemPrompt: [...before, event.systemPrompt, ...after].filter(Boolean).join("\n\n"),
+    };
+  });
   const annotators = host.annotators ?? [];
   if (annotators.length) {
     api.on("tool_result", async (event) => {
