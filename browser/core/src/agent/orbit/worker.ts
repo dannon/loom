@@ -136,6 +136,8 @@ const makeWatch = (pollMs?: number) =>
     recordKey: pageKey,
     poll: (options) => pollGalaxyNow(options),
     background: async (id) => {
+      // A watch resumed while the runtime is still opening: busy, so it looks again shortly.
+      if (!runtime) return true;
       const key = pageKey(id);
       // Not shown since this worker started (a reload): its store comes from its binding.
       if (!installedRecordStoreFor(key)) {

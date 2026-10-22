@@ -8,7 +8,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getState, getNotebookPath, getCurrentHistoryId } from "./state";
+import { getState, getNotebookPath, getCurrentHistoryId, setCurrentHistoryId } from "./state";
 import { recordStore } from "./record-store";
 import { isTeamDispatchEnabled } from "./teams/is-enabled";
 import { isSessionIndexEnabled } from "./session-index/is-enabled";
@@ -24,7 +24,8 @@ import {
 } from "./skills-discovery";
 import { findGalaxyPageBlocks } from "./galaxy-page-binding";
 import { isLocalExecDisabled, isLocalShellDisabled } from "./local-exec.js";
-import { galaxyCredentials, galaxyGet } from "./galaxy-api.js";
+import { GalaxyApiError, galaxyCredentials, galaxyGet } from "./galaxy-api.js";
+import { capabilityProfile } from "../../shared/capability-profile.js";
 import { resolveWorkspaceStateDirName, type WorkspaceStateDirName } from "./workspace-state-dir";
 import { SRA_IMPORT_GUIDANCE } from "./sra-import-gate";
 import { galaxyRecoveryGuidance } from "./galaxy-recovery";
@@ -164,10 +165,13 @@ ${galaxyPageMarkdownGuidance(galaxyToolFamily())}
 `;
 }
 
+/** How long a turn waits for the listing before it goes without one. */
+const HISTORY_LISTING_MS = 5_000;
+
 /**
  * The current history and its datasets, listed fresh each turn so the model names inputs by
  * the ids Galaxy has now, not ones it remembers. Nothing until a history is current and Galaxy
- * is connected.
+ * is connected; a history Galaxy no longer has stops being current.
  */
 export async function buildHistoryBindingBlock(): Promise<string> {
   const historyId = getCurrentHistoryId();
@@ -176,12 +180,21 @@ export async function buildHistoryBindingBlock(): Promise<string> {
   let manifest: string;
   try {
     manifest = historyManifestBlock({
-      items: await galaxyGet(`/${historyContentsPath(historyId)}`),
+      items: await galaxyGet(
+        `/${historyContentsPath(historyId)}`,
+        AbortSignal.timeout(HISTORY_LISTING_MS),
+      ),
     });
   } catch (error) {
+    if (error instanceof GalaxyApiError && error.status === 404) {
+      setCurrentHistoryId(null);
+      return "";
+    }
     manifest = historyManifestBlock({ error });
   }
-  return historyBindingBlock(historyId, manifest);
+  // Only the browser shell shows the history beside the chat; elsewhere it is the one the
+  // session last made or was given.
+  return historyBindingBlock(historyId, manifest, { shown: capabilityProfile().ui === "worker" });
 }
 
 /**

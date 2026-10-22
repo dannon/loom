@@ -6,6 +6,19 @@
 export const MANIFEST_MAX = 40;
 
 /**
+ * A field as one short line of plain text. Names come from uploads and imports: a newline or a
+ * backtick in one could otherwise open a heading or a code span of its own inside the block.
+ * @param {unknown} value
+ */
+const cell = (value) =>
+  String(value ?? "")
+     
+    .replace(/[\u0000-\u001f\u007f`]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+
+/**
  * The contents request, relative to Galaxy's `api/`: newest first, live and visible only.
  * @param {string} historyId
  */
@@ -41,7 +54,7 @@ export function historyManifestBlock({ items, error }) {
   const rows = items.slice(0, MANIFEST_MAX).reverse();
   const lines = rows.map(
     (d) =>
-      `- **${d.hid}**: ${d.name} (${d.extension ?? d.collection_type}, ${d.state ?? d.populated_state}) -- id \`${d.id}\``,
+      `- **${cell(d.hid)}**: ${cell(d.name)} (${cell(d.extension ?? d.collection_type)}, ${cell(d.state ?? d.populated_state)}) -- id \`${cell(d.id)}\``,
   );
   const more = items.length > MANIFEST_MAX ? `\n_(showing the ${MANIFEST_MAX} most recent)_` : "";
   return (
@@ -63,15 +76,17 @@ export function historyManifestBlock({ items, error }) {
 }
 
 /**
- * The binding: the history the session works in, and its manifest under it.
+ * The binding: the history the session works in, and its manifest under it. `shown` is for a
+ * shell that has the history on screen beside the chat, where it is the one the user sees.
  * @param {string} historyId
  * @param {string} manifest
+ * @param {{ shown?: boolean }} [options]
  */
-export function historyBindingBlock(historyId, manifest) {
+export function historyBindingBlock(historyId, manifest, { shown = true } = {}) {
+  const seen = shown ? " That history is the one the\nuser is looking at." : "";
   return `## Galaxy binding
 
-This session is working in **history \`${historyId}\`**. That history is the one the
-user is looking at. **Pass \`history_id="${historyId}"\` when you run a tool or invoke a
+This session is working in **history \`${historyId}\`**.${seen} **Pass \`history_id="${historyId}"\` when you run a tool or invoke a
 workflow** -- omit it and Galaxy puts the outputs in a new history the user never opened,
 where they will not find them.${manifest ? `\n\n${manifest}` : ""}`;
 }
