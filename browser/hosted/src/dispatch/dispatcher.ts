@@ -686,10 +686,10 @@ export class Dispatcher {
     for (const waiter of live.waiters) waiter.reject(new Error(`The worker exited with ${code}`));
     live.waiters.clear();
     const { pool } = this.#o;
+    // Paused on purpose: it waits for the user, not the sweeper or a crash retry.
+    const pausing = live.releasing?.why === "pause" && code !== LEASE_LOST_EXIT_CODE;
     // Cut off mid-turn (a crash, the turn cap, a restart) or holding an ask: resume it later. A lost
     // lease means another host has the conversation, and it's theirs to resume.
-    // A pause closed it on purpose: it waits for the user, not the sweeper or a crash retry.
-    const pausing = live.releasing?.why === "pause" && code !== LEASE_LOST_EXIT_CODE;
     const cutOff = live.turn !== undefined || live.asks.size > 0;
     if (cutOff && !pausing && code !== LEASE_LOST_EXIT_CODE) {
       await pool
@@ -702,10 +702,20 @@ export class Dispatcher {
     // the turn ends, since ending it sends any waiting message's turn, which would otherwise find the
     // lease held and tell the user it's waiting on another conversation.
     await releaseLease(pool, live.storeId, live.holder).catch(() => undefined);
-    if (cutOff) {
-      if (pausing) {
-        this.#endTurn(live, "interrupted");
-      } else if (code === LEASE_LOST_EXIT_CODE) {
+    if (pausing) {
+      if (live.turn) this.#endTurn(live, "interrupted");
+      else {
+        // The close settled the run (and ended the turn) before the exit; make sure the pause stuck.
+        await live.ending;
+        await pool
+          .query(
+            "UPDATE orbit_conversations SET interrupted = false, paused = true WHERE id = $1",
+            [live.conversationId],
+          )
+          .catch(() => undefined);
+      }
+    } else if (cutOff) {
+      if (code === LEASE_LOST_EXIT_CODE) {
         const turn = live.turn;
         live.turn = undefined;
         clearTimeout(turn?.cap);
