@@ -22,7 +22,7 @@ const flag = (name: string) => {
 };
 const verbose = args.includes("--verbose");
 const PORT = Number(flag("port") ?? 7931);
-if (PORT < 7900 || PORT > 7999) throw new Error("Use a port in 7900-7999");
+if (PORT < 7900 || PORT > 8099) throw new Error("Use a port in 7900-8099");
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -484,6 +484,135 @@ const postgresBlip: Fault = async (s, stack) => {
   }
 };
 
+/** Wait for a host log line containing `text`. */
+async function hostLogged(stack: Stack, text: string, timeoutMs = 30_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!stack.log.some((l) => l.includes(text))) {
+    if (Date.now() > deadline) throw new Error(`The host never logged "${text}"`);
+    await sleep(50);
+  }
+}
+
+/** Whether any worker holds the conversation's lease. */
+async function leaseHeld(stack: Stack, conversationId: string): Promise<boolean> {
+  const { rowCount } = await stack.pool.query(
+    "SELECT 1 FROM orbit_leases l JOIN orbit_conversations c ON c.store_id = l.store_id WHERE c.id = $1",
+    [conversationId],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/**
+ * The page closes and the conversation sits quiet: its worker is released. Opening it again shows the
+ * stored transcript without a worker; the next message boots one that resumes from the store, with no
+ * greeting, and a delete after it runs once.
+ */
+const idleRelease: Fault = async (s, stack) => {
+  await stack.startHost({ ORBIT_IDLE_RELEASE_SECONDS: "2" });
+  const { user, conversationId, tab } = await signedIn(stack, "fault-f");
+  const t1 = s.tag("f");
+  await say(tab, `${t1} READ_HISTORY beforeidle`);
+  // Open in a page, it stays past the quiet period.
+  await sleep(3_500);
+  s.check(!stack.log.some((l) => l.includes(`releasing ${conversationId}`)), "released while a page had it open");
+  s.notes.rssLiveMb = Math.round(stack.hostRssMb() ?? 0);
+  tab.close();
+  await tab.closed;
+  const closedAt = Date.now();
+  await hostLogged(stack, `releasing ${conversationId}`, 15_000);
+  s.notes.releasedAfterMs = Date.now() - closedAt;
+  const deadline = Date.now() + 15_000;
+  while ((await leaseHeld(stack, conversationId)) && Date.now() < deadline) await sleep(100);
+  s.check(!(await leaseHeld(stack, conversationId)), "the lease wasn't given back after the release");
+  await sleep(1_000);
+  s.notes.rssReleasedMb = Math.round(stack.hostRssMb() ?? 0);
+  const genReleased = await leaseGen(stack, conversationId);
+  const modelCalls = stack.standIn.modelCalls();
+  const tab2 = await reopen(user, conversationId);
+  await sleep(1_000);
+  s.check(!(await leaseHeld(stack, conversationId)), "reopening a released conversation started a worker");
+  s.check(stack.standIn.modelCalls() === modelCalls, "the model was called before the next message");
+  const t2 = s.tag("f");
+  const cold = await say(tab2, `${t2} DELETE_HISTORY afteridle`, true).catch((e: Error) => {
+    s.problems.push(`after the release: ${e.message}`);
+    return undefined;
+  });
+  s.notes.firstTurnAfterReleaseMs = cold && Math.round(cold.ms);
+  s.check(cold?.confirms === 1, `the delete after the release asked ${cold?.confirms} times`);
+  const t3 = s.tag("f");
+  await say(tab2, `${t3} hello again`).catch((e: Error) => s.problems.push(`unusable afterwards: ${e.message}`));
+  await settled(stack, conversationId, [t1, t2, t3]).catch((e: Error) => s.problems.push(e.message));
+  s.check(deletes(stack, "afteridle") === 1, `deleted ${deletes(stack, "afteridle")} times`);
+  s.check((await leaseGen(stack, conversationId)) === genReleased + 1, "the next message didn't take the lease once, on a fresh worker");
+  // The delete's call, its answer, and hello: nothing else, so no greeting.
+  s.check(stack.standIn.modelCalls() - modelCalls === 3, `${stack.standIn.modelCalls() - modelCalls} model calls after the release, expected 3`);
+  await s.transcriptOk(conversationId, [t1, t2, t3]);
+};
+
+/**
+ * A destructive confirm goes unanswered: the conversation pauses, the page's dialog is withdrawn, and
+ * the user's other conversation runs meanwhile. Coming back asks again, once; a yes deletes once.
+ */
+const askPause: Fault = async (s, stack) => {
+  await stack.startHost({ ORBIT_ASK_PAUSE_SECONDS: "3" });
+  const { user, conversationId, tab } = await signedIn(stack, "fault-g");
+  const t1 = s.tag("g");
+  const from = tab.received.length;
+  tab.submit(`${t1} DELETE_HISTORY unanswered`);
+  const first = await tab.until((m) => m.find((x) => x.type === "confirm"), 30_000, from);
+  const askedAt = Date.now();
+  const firstId = first.type === "confirm" ? first.id : -1;
+  await tab.until((m) => m.find((x) => x.type === "withdrawn" && x.id === firstId), 30_000, from).catch(() =>
+    s.problems.push("the unanswered dialog was never withdrawn"),
+  );
+  s.notes.pausedAfterMs = Date.now() - askedAt;
+  s.check(
+    tab.received.slice(from).some((m) => m.type === "notice" && /paused/i.test(m.text)),
+    "the page wasn't told the conversation paused",
+  );
+  // A late yes from the old dialog must not count.
+  tab.confirm(firstId, true);
+  await sleep(500);
+  s.check(deletes(stack, "unanswered") === 0, "deleted without an answer to a live ask");
+  const { rows } = await stack.pool.query<{ paused: boolean; interrupted: boolean }>(
+    "SELECT paused, interrupted FROM orbit_conversations WHERE id = $1",
+    [conversationId],
+  );
+  s.check(rows[0]?.paused === true && rows[0]?.interrupted === false, `marked ${JSON.stringify(rows[0])} rather than paused`);
+  s.check(!(await leaseHeld(stack, conversationId)), "the paused conversation still holds a worker");
+  // The user's live loop is free: their other conversation runs now, not after the ask.
+  const otherId = await user.newConversation();
+  const otherTab = await reopen(user, otherId);
+  const to = s.tag("g2");
+  const other = await say(otherTab, `${to} READ_HISTORY meanwhile`).catch((e: Error) => {
+    s.problems.push(`the user's other conversation: ${e.message}`);
+    return undefined;
+  });
+  s.notes.otherConversationMs = other && Math.round(other.ms);
+  s.check(!otherTab.received.some((m) => m.type === "notice" && /waiting/i.test(m.text)), "the other conversation waited on the paused one");
+  otherTab.close();
+  tab.close();
+  await tab.closed;
+  // Coming back asks again, once, even with two tabs opening at once.
+  const backAt = Date.now();
+  const [tab2, tab3] = await Promise.all([user.tab(conversationId), user.tab(conversationId)]);
+  const again = await tab2.until((m) => m.find((x) => x.type === "confirm"), 30_000).catch(() => undefined);
+  s.notes.reaskMs = again ? Date.now() - backAt : undefined;
+  s.check(again !== undefined, "not asked again on coming back");
+  await sleep(1_000);
+  s.check(tab2.confirmsShown().length === 1, `the returning tab was shown ${tab2.confirmsShown().length} confirms`);
+  s.check(tab3.confirmsShown().length === 1, `the second returning tab was shown ${tab3.confirmsShown().length} confirms`);
+  s.check(deletes(stack, "unanswered") === 0, "deleted before the second ask was answered");
+  if (again?.type === "confirm") tab2.confirm(again.id, true);
+  await settled(stack, conversationId, [t1]).catch((e: Error) => s.problems.push(e.message));
+  await sleep(500);
+  s.check(deletes(stack, "unanswered") === 1, `history deleted ${deletes(stack, "unanswered")} times`);
+  const t2 = s.tag("g");
+  await say(tab2, `${t2} READ_HISTORY afterpause`).catch((e: Error) => s.problems.push(`unusable afterwards: ${e.message}`));
+  await s.transcriptOk(conversationId, [t1, t2]);
+  await s.transcriptOk(otherId, [to]);
+};
+
 const FAULTS: Record<string, { fault: Fault; accessTtlS?: number }> = {
   "sigkill-mid-turn": { fault: killMidTurn("SIGKILL") },
   "sigterm-mid-turn": { fault: killMidTurn("SIGTERM") },
@@ -494,6 +623,8 @@ const FAULTS: Record<string, { fault: Fault; accessTtlS?: number }> = {
   "token-refresh-failure": { fault: tokenExpiry, accessTtlS: 35 },
   "kill-switch": { fault: killSwitch },
   "postgres-blip": { fault: postgresBlip },
+  "idle-release": { fault: idleRelease },
+  "ask-pause": { fault: askPause },
 };
 
 async function runFault(name: string): Promise<Outcome> {
