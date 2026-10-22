@@ -2,10 +2,10 @@ import pg from "pg";
 import { afterAll, expect, it } from "vitest";
 
 import { withTransaction } from "../storage/postgres-storage";
-import { connection, dropDatabase, freshDatabase } from "../test-db";
+import { connection, dropDatabase, freshDatabase, testDatabase } from "../test-db";
 import { createPool } from "./pool";
 
-const DATABASE = "orbit_hosted_pool";
+const DATABASE = testDatabase("orbit_hosted_pool");
 
 afterAll(async () => {
   await dropDatabase(DATABASE);

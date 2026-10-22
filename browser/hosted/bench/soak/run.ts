@@ -9,6 +9,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { testDatabase } from "../../src/test-db";
 import { User, type Tab } from "./client";
 import { brief, deletes, galaxyRequestsOf, idle, leaseGen, settled, transcript, transcriptProblems } from "./checks";
 import { Stack } from "./stack";
@@ -58,7 +59,7 @@ class Scenario {
 
 let dbCounter = 0;
 async function withStack<T>(options: { accessTtlS?: number }, run: (stack: Stack) => Promise<T>): Promise<T> {
-  const stack = await Stack.start({ database: `orbit_soak_${process.pid}_${++dbCounter}`, port: PORT, verbose, ...options });
+  const stack = await Stack.start({ database: testDatabase(`orbit_soak_${process.pid}_${++dbCounter}`), port: PORT, verbose, ...options });
   try {
     return await run(stack);
   } finally {

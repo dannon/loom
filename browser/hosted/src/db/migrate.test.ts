@@ -4,12 +4,12 @@ import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { migratePostgresStorage, PostgresStorage } from "../storage/postgres-storage";
-import { dropDatabase, freshDatabase } from "../test-db";
+import { dropDatabase, freshDatabase, testDatabase } from "../test-db";
 import { HOST_MIGRATIONS, migrate } from "./migrate";
 
-const EMPTY = "orbit_hosted_migrate_empty";
-const SPIKE = "orbit_hosted_migrate_spike";
-const NEWER = "orbit_hosted_migrate_newer";
+const EMPTY = testDatabase("orbit_hosted_migrate_empty");
+const SPIKE = testDatabase("orbit_hosted_migrate_spike");
+const NEWER = testDatabase("orbit_hosted_migrate_newer");
 
 const pools: pg.Pool[] = [];
 const poolFor = async (name: string) => {

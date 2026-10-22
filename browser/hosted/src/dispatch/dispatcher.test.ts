@@ -9,7 +9,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { migrate } from "../db/migrate";
 import { currentLeaseGen } from "../storage/postgres-storage";
-import { freshDatabase } from "../test-db";
+import { freshDatabase, testDatabase } from "../test-db";
 import { startStandIn, type StandIn } from "../test-stand-in";
 import { createTokenCache } from "../tokens/token-cache";
 import { bundleWorker } from "../worker/bundle";
@@ -20,7 +20,7 @@ import { Dispatcher, type DispatchEvent } from "./dispatcher";
 import { galaxyPageCreator, galaxyPageRetitler } from "./pages";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const DATABASE = "orbit_hosted_dispatch";
+const DATABASE = testDatabase("orbit_hosted_dispatch");
 const SOCKET = process.env.PGHOST ?? "/tmp";
 
 let pool: pg.Pool;

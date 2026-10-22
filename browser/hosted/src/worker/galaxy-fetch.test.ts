@@ -7,7 +7,7 @@ import { migrate } from "../db/migrate";
 import { LeaseFence } from "../lease/lease-fence";
 import { acquireLease } from "../lease/leases";
 import { bumpLeaseGen, LeaseLostError } from "../storage/postgres-storage";
-import { ensureDatabase } from "../test-db";
+import { ensureDatabase, testDatabase } from "../test-db";
 import { answerTokenRequest } from "../tokens/serve";
 import { createTokenCache } from "../tokens/token-cache";
 import { hostedGalaxyFetch, TokenUnavailable, type TokenFailure } from "./galaxy-fetch";
@@ -17,7 +17,7 @@ const GALAXY = "https://galaxy.test";
 let pool: pg.Pool;
 
 beforeAll(async () => {
-  pool = new pg.Pool({ ...(await ensureDatabase("orbit_hosted_galaxy_fetch")), max: 4 });
+  pool = new pg.Pool({ ...(await ensureDatabase(testDatabase("orbit_hosted_galaxy_fetch"))), max: 4 });
   await migrate(pool);
 });
 

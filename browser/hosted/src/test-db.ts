@@ -7,6 +7,15 @@ import pg from "pg";
 const HOST = process.env.PGHOST ?? "/tmp";
 const PORT = Number(process.env.PGPORT ?? 5432);
 
+/**
+ * A test database's name on this machine. Worktrees running the suites at once would drop each
+ * other's databases, so ORBIT_TEST_DB_PREFIX moves every one of them under a prefix of their own.
+ */
+export const testDatabase = (name: string): string => {
+  const prefix = process.env.ORBIT_TEST_DB_PREFIX;
+  return prefix ? name.replace(/^(orbit_hosted_|orbit_soak_)/, prefix) : name;
+};
+
 export const connection = (database: string): pg.PoolConfig => ({ host: HOST, port: PORT, database });
 
 async function admin<T>(run: (client: pg.Client) => Promise<T>): Promise<T> {

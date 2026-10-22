@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { migrate } from "../db/migrate";
 import { currentLeaseGen, LeaseLostError, PostgresStorage } from "../storage/postgres-storage";
-import { ensureDatabase } from "../test-db";
+import { ensureDatabase, testDatabase } from "../test-db";
 import { acquireLease, acquireLeaseInTransaction, releaseLease, renewLease } from "./leases";
 
 const TTL = 60_000;
@@ -14,7 +14,7 @@ const TTL = 60_000;
 let pool: pg.Pool;
 
 beforeAll(async () => {
-  pool = new pg.Pool({ ...(await ensureDatabase("orbit_hosted_leases")), max: 8 });
+  pool = new pg.Pool({ ...(await ensureDatabase(testDatabase("orbit_hosted_leases"))), max: 8 });
   await migrate(pool);
 });
 

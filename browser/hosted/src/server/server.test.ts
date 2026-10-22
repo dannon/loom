@@ -17,7 +17,7 @@ import { migrate } from "../db/migrate";
 import { createConversation } from "../dispatch/conversations";
 import { Dispatcher } from "../dispatch/dispatcher";
 import { galaxyPageRetitler } from "../dispatch/pages";
-import { freshDatabase } from "../test-db";
+import { freshDatabase, testDatabase } from "../test-db";
 import { startStandIn, textOf, type StandIn } from "../test-stand-in";
 import { createTokenCache } from "../tokens/token-cache";
 import { bundleWorker } from "../worker/bundle";
@@ -25,7 +25,7 @@ import { createHostServer } from "./http";
 import { Sockets, type ToPage } from "./socket";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const DATABASE = "orbit_hosted_server";
+const DATABASE = testDatabase("orbit_hosted_server");
 const SOCKET = process.env.PGHOST ?? "/tmp";
 const KEY = Buffer.alloc(32, 5);
 

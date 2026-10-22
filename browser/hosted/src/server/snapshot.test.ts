@@ -7,13 +7,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "../db/migrate";
 import { createConversation, getConversation } from "../dispatch/conversations";
 import { PostgresStorage } from "../storage/postgres-storage";
-import { freshDatabase } from "../test-db";
+import { freshDatabase, testDatabase } from "../test-db";
 import { storedSnapshot } from "./snapshot";
 
 let pool: pg.Pool;
 
 beforeAll(async () => {
-  pool = new pg.Pool({ ...(await freshDatabase("orbit_hosted_snapshot")), max: 4 });
+  pool = new pg.Pool({ ...(await freshDatabase(testDatabase("orbit_hosted_snapshot"))), max: 4 });
   await migrate(pool);
 });
 

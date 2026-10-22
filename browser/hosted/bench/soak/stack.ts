@@ -12,14 +12,14 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 
 import { startMockOidc, type MockOidc } from "../../src/auth/mock-oidc";
-import { connection, dropDatabase, freshDatabase } from "../../src/test-db";
+import { connection, dropDatabase, freshDatabase, testDatabase } from "../../src/test-db";
 import { startStandIn, type StandIn } from "../../src/test-stand-in";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SOCKET = process.env.PGHOST ?? "/tmp";
 
 export interface StackOptions {
-  /** Must start orbit_soak_: the harness drops it when done. */
+  /** Must start orbit_soak_ (or ORBIT_TEST_DB_PREFIX): the harness drops it when done. */
   readonly database: string;
   readonly port: number;
   /** Access-token lifetime at the stand-in Keycloak; short enough to make the host refresh mid-run. */
@@ -54,7 +54,7 @@ export class Stack {
   }
 
   static async start(options: StackOptions): Promise<Stack> {
-    if (!options.database.startsWith("orbit_soak_")) throw new Error(`Refusing database ${options.database}`);
+    if (!options.database.startsWith(testDatabase("orbit_soak_"))) throw new Error(`Refusing database ${options.database}`);
     if (!existsSync(join(ROOT, "dist", "host.mjs"))) throw new Error("No dist/host.mjs: run npm run build first");
     await freshDatabase(options.database);
     const keycloak = await startMockOidc({ clientId: "orbit-dev", accessTtlS: options.accessTtlS });
