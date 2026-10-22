@@ -77,12 +77,7 @@ async function connect(page) {
 
     const { prompts } = await (await fetch(`${STUB}/__seen`)).json();
     const system = prompts[0] && prompts[0].text;
-    if (process.env.EXPECT_BRAIN === "orbit") {
-        // Orbit's brain has no per-turn dataset listing yet; it tells the model to look the history up.
-        console.log("SKIP  the turn lists the history's datasets  — Orbit's brain lists none");
-    } else {
-        check("the turn lists the history's datasets", /Datasets in this history.*peptide\.pdb/.test(prompts[0]?.tail || ""));
-    }
+    check("the turn lists the history's datasets", /Datasets in this history.*peptide\.pdb/.test(prompts[0]?.tail || ""));
     check(
         "the system prompt is the session's own, without the plugin XML's",
         !!system && /"role":"system","content":"You are Olit\./.test(system) && !/co-scientist that orchestrates/.test(system),
