@@ -20,7 +20,17 @@ let oidc: Oidc;
 let server: Server;
 let base: URL;
 /** What the stand-in Galaxy says about whoever asks. */
-let galaxyKnowsUser = true;
+let galaxyAnswer: () => Response;
+const KNOWN = () => Response.json({ id: "galaxy-user-1" });
+// Galaxy's own words for a decoded token with no account behind it.
+const UNMAPPED = () =>
+  Response.json(
+    {
+      err_msg: "Cannot locate user by access token. The user should log into Galaxy at least once with this OIDC provider.",
+      err_code: 401001,
+    },
+    { status: 401 },
+  );
 
 beforeAll(async () => {
   pool = new pg.Pool({ ...(await freshDatabase("orbit_hosted_auth")), max: 6 });
@@ -38,8 +48,7 @@ beforeAll(async () => {
     publicUrl: base,
     galaxyUrl: new URL("https://galaxy.test"),
     galaxyLinkUrl: new URL("https://galaxy.test/login/start"),
-    fetch: (async () =>
-      galaxyKnowsUser ? Response.json({ id: "galaxy-user-1" }) : Response.json({ err_msg: "unknown" }, { status: 403 })) as typeof fetch,
+    fetch: (async () => galaxyAnswer()) as typeof fetch,
   };
   server.on("request", (req, res) => {
     handleAuth(context, req, res).then(
@@ -64,7 +73,7 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  galaxyKnowsUser = true;
+  galaxyAnswer = KNOWN;
   keycloak.down = false;
 });
 
@@ -129,12 +138,34 @@ describe("Keycloak sign-in", () => {
   });
 
   it("sends a user Galaxy doesn't know yet to link their account once", async () => {
-    galaxyKnowsUser = false;
+    galaxyAnswer = UNMAPPED;
     const browser = new Browser();
     const landed = await browser.signIn("bob");
     expect(landed.headers.get("location")).toBe("/auth/link");
     const page = await (await browser.go(new URL("/auth/link", base))).text();
     expect(page).toContain("https://galaxy.test/login/start");
+  });
+
+  it("lets the user in when Galaxy fails some other way, rather than sending them to link", async () => {
+    const failures: Array<[string, () => Response]> = [
+      ["an invalid-token 401", () => Response.json({ err_msg: "Invalid access token.", err_code: 401001 }, { status: 401 })],
+      ["a 401 that isn't Galaxy's JSON", () => new Response("Unauthorized", { status: 401 })],
+      ["a 403", () => Response.json({ err_msg: "forbidden" }, { status: 403 })],
+      ["a crash", () => new Response("Internal Server Error", { status: 500 })],
+      ["an outage", () => new Response("Bad Gateway", { status: 502 })],
+      ["an anonymous answer", () => Response.json({})],
+      [
+        "an unreachable Galaxy",
+        () => {
+          throw new TypeError("fetch failed");
+        },
+      ],
+    ];
+    for (const [what, answer] of failures) {
+      galaxyAnswer = answer;
+      const landed = await new Browser().signIn("carol");
+      expect(landed.headers.get("location"), what).toBe("/");
+    }
   });
 
   it("keeps the refresh token sealed at rest", async () => {
