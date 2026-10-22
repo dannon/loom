@@ -482,7 +482,9 @@ const server = http.createServer(async (req, res) => {
         const messages = body.messages || [];
         const last = messages[messages.length - 1] || {};
         if (script === "two-artifacts") {
-            const turns = messages.filter((m) => m.role === "user").length;
+            // A turn is a run of user messages: Orbit's brain puts its notebook context just before
+            // the user's own message, and pi sends that as a user message too.
+            const turns = messages.filter((m, i) => m.role === "user" && messages[i + 1]?.role !== "user").length;
             return answer(last.role === "tool"
                 ? message(`Chart ${turns} is open.`)
                 : message("", showTitled(turns < 2 ? "First Chart" : "Second Chart")));
