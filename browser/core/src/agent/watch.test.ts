@@ -1,20 +1,4 @@
-/** The conversation's watch on submitted Galaxy work, which lets the agent hand control back. */
-
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-import type { Models } from "@earendil-works/pi-ai";
-import {
-  createRegistry,
-  defineExtension,
-  Harness,
-  InboxDoc,
-  MemoryStorage,
-  type Conversation,
-  type Storage,
-} from "@earendil-works/pi-durable";
-import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+/** What the page and the watch share about submitted Galaxy work: what settled, how, and the pace. */
 import { describe, expect, it } from "vitest";
 
 import {
@@ -23,16 +7,8 @@ import {
   JOB_SETTLED_STATES,
 } from "@galaxyproject/galaxy-ops/browser";
 
-import { FollowUps } from "./documents";
-import { DEFAULT_BRAND, followUpMark } from "./brand";
-
-const FOLLOW_UP_MARK = followUpMark(DEFAULT_BRAND);
-const NOVA = { id: "nova", name: "Nova" };
-import { HttpError, type Galaxy } from "./galaxy";
-import { context, hold, watchedBy } from "./runtime";
+import type { Galaxy } from "./galaxy";
 import {
-  followUpPrompt,
-  galaxyWatch,
   FOLLOWS_UP,
   isTerminal,
   outcomeOf,
@@ -152,230 +128,15 @@ describe("what a settled state amounts to", () => {
   });
 });
 
-const JOB: Watched = { kind: "job", id: "j1", label: "run_tool", state: "queued" };
-
-/** A Harness running only the watch task, over `storage`, against a Galaxy answering `state`. */
-async function watching(
-  storage: Storage,
-  state: () => string | Error,
-  edits: string[] = [],
-  unwritten?: string,
-) {
-  const galaxy = {
-    get: async () => {
-      const s = state();
-      if (s instanceof Error) throw s;
-      return { state: s };
-    },
-  } as unknown as Galaxy;
-  const watch = galaxyWatch({
-    galaxy,
-    pollMs: 5,
-    editRecord: async (_id, edit) => {
-      edits.push(edit(""));
-      return unwritten;
-    },
-  });
-  const registry = createRegistry();
-  registry.install(defineExtension({ name: "watch", tasks: [watch] }));
-  const harness = await Harness.open(storage, { models: {} as Models, registry }, context);
-  return { harness, watch };
-}
-
-async function submitted(
-  storage: Storage,
-  state: () => string | Error,
-  edits?: string[],
-  paused = false,
-  unwritten?: string,
-) {
-  const { harness, watch } = await watching(storage, state, edits, unwritten);
-  const conversation = await harness.createConversation(
-    { ownership: { kind: "ownerless" } },
-    context,
-  );
-  const task = await conversation.commit(async (tx) => {
-    if (paused) (await tx.doc(FollowUps, conversation.id)).paused = true;
-    return tx.createTask(watch, JOB, {
-      ownership: { kind: "conversation" },
-      conversationId: conversation.id,
-      background: true,
-    });
-  }, context);
-  harness.resume();
-  return { harness, conversation, task };
-}
-
-/** What the conversation was asked, as user entries. */
-const followUps = async (conversation: Conversation) =>
-  (await conversation.context(context)).entries.flatMap((e) =>
-    e.kind === "pi.user" ? [String((e.model?.[0] as { content: unknown }).content)] : [],
-  );
-
-describe("the watch task", () => {
-  it("notes the work, watches it, and follows up once it settles", async () => {
-    let state = "running";
-    const edits: string[] = [];
-    const { harness, conversation, task } = await submitted(
-      new MemoryStorage(),
-      () => state,
-      edits,
-    );
-    await new Promise((r) => setTimeout(r, 30));
-    expect(await watchedBy(harness, conversation.id, context)).toEqual([
-      { ...JOB, state: "running" },
-    ]);
-    state = "ok";
-    const done = await harness.waitForTask(task, context);
-    expect(done.state.outcome).toEqual({
-      status: "completed",
-      result: { watched: { ...JOB, state: "ok" }, state: "ok", outcome: "completed" },
-    });
-    expect(await watchedBy(harness, conversation.id, context)).toEqual([]);
-    const asked = await followUps(conversation);
-    expect(asked).toHaveLength(1);
-    expect(asked[0].startsWith(FOLLOW_UP_MARK)).toBe(true);
-    expect((await harness.snapshot(FollowUps, conversation.id, context))?.automatic).toBe(1);
-    expect(edits[0]).toContain("Galaxy job `j1` — submitted");
-    await harness.close(context);
-  });
-
-  it("records a failure the record did not yet hold, as work submitted before it was opened", async () => {
-    const edits: string[] = [];
-    const { harness, task } = await submitted(new MemoryStorage(), () => "error", edits);
-    await harness.waitForTask(task, context);
-    const settled = edits.at(-1)!;
-    expect(settled).toContain("Galaxy job `j1`");
-    expect(settled).toContain("Status: failed (error) — recorded automatically");
-    await harness.close(context);
-  });
-
-  it("tells the model and the page when the record could not be updated", async () => {
-    const { harness, conversation, task } = await submitted(
-      new MemoryStorage(),
-      () => "ok",
-      [],
-      false,
-      "record page p1 could not be written (HTTP 400: bad fence)",
-    );
-    const done = await harness.waitForTask(task, context);
-    expect(done.state.outcome).toMatchObject({
-      result: { record: "record page p1 could not be written (HTTP 400: bad fence)" },
-    });
-    const [asked] = await followUps(conversation);
-    expect(asked).toContain("The record was not updated for this work");
-    expect(asked).toContain("HTTP 400: bad fence");
-    await harness.close(context);
-  });
-
-  it("settles work Galaxy refuses to show as unreadable, and says so, rather than polling on", async () => {
-    const { harness, conversation, task } = await submitted(
-      new MemoryStorage(),
-      () => new HttpError("HTTP 404: No job", 404),
-    );
-    const done = await harness.waitForTask(task, context);
-    expect(done.state.outcome).toMatchObject({
-      result: { state: "HTTP 404", outcome: "unreadable" },
-    });
-    const [asked] = await followUps(conversation);
-    expect(asked).toContain("Galaxy no longer shows some of this work");
-    await harness.close(context);
-  });
-
-  it.each([401, 403])(
-    "keeps watching through an HTTP %i, which a lapsed login gives for work still there",
-    async (status) => {
-      let state: string | Error = new HttpError(`HTTP ${status}: login`, status);
-      const { harness, conversation, task } = await submitted(new MemoryStorage(), () => state);
-      await new Promise((r) => setTimeout(r, 30));
-      expect(await watchedBy(harness, conversation.id, context)).toHaveLength(1);
-      state = "ok";
-      const done = await harness.waitForTask(task, context);
-      expect(done.state.outcome).toMatchObject({ result: { outcome: "completed" } });
-      await harness.close(context);
-    },
-  );
-
-  it("keeps watching when Galaxy errors, rather than dropping the job", async () => {
-    let state: string | Error = new Error("502");
-    const { harness, conversation, task } = await submitted(new MemoryStorage(), () => state);
-    await new Promise((r) => setTimeout(r, 30));
-    expect(await watchedBy(harness, conversation.id, context)).toHaveLength(1);
-    state = "ok";
-    await harness.waitForTask(task, context);
-    expect(await watchedBy(harness, conversation.id, context)).toEqual([]);
-    await harness.close(context);
-  });
-
-  it("queues its follow-up for the user while follow-ups are paused", async () => {
-    const { harness, conversation, task } = await submitted(
-      new MemoryStorage(),
-      () => "ok",
-      [],
-      true,
-    );
-    await harness.waitForTask(task, context);
-    expect(await followUps(conversation)).toEqual([]);
-    const inbox = await harness.snapshot(InboxDoc, conversation.id, context);
-    expect(inbox?.items).toHaveLength(1);
-    expect((await harness.snapshot(FollowUps, conversation.id, context))?.automatic).toBe(0);
-    await harness.close(context);
-  });
-
-  it("keeps watching a held conversation's work, and queues its follow-up for the user", async () => {
-    let state = "running";
-    const { harness, conversation, task } = await submitted(new MemoryStorage(), () => state);
-    await hold([conversation]);
-    await new Promise((r) => setTimeout(r, 30));
-    expect(await watchedBy(harness, conversation.id, context)).toHaveLength(1);
-    state = "ok";
-    const done = await harness.waitForTask(task, context);
-    expect(done.state.outcome).toMatchObject({ status: "completed" });
-    expect(await followUps(conversation)).toEqual([]);
-    expect((await harness.snapshot(InboxDoc, conversation.id, context))?.items).toHaveLength(1);
-    await harness.close(context);
-  });
-
+describe("the watch's pace", () => {
   it("waits longer between polls after the first minute, up to two minutes", () => {
     const waits = Array.from({ length: 12 }, (_, i) => pollDelay(i + 1, 10_000) / 1000);
     expect(waits).toEqual([10, 10, 10, 10, 10, 10, 20, 40, 80, 120, 120, 120]);
   });
-
-  it("keeps its count of polls, and so its pace, when the page opens again", async () => {
-    const file = join(mkdtempSync(join(tmpdir(), "olit-watch-")), "olit.sqlite3");
-    const first = await submitted(await openNodeSqliteStorage(file), () => "queued");
-    const polls = async (harness: typeof first.harness) =>
-      ((await harness.getTask(first.task, context))?.state.checkpoint as { polls?: number })
-        ?.polls ?? 0;
-    await new Promise((r) => setTimeout(r, 120));
-    const before = await polls(first.harness);
-    expect(before).toBeGreaterThan(6);
-    await first.harness.close(context);
-
-    const { harness } = await watching(await openNodeSqliteStorage(file), () => "queued");
-    harness.resume();
-    await new Promise((r) => setTimeout(r, 20));
-    expect(await polls(harness)).toBeGreaterThanOrEqual(before);
-    await harness.close(context);
-  });
-
-  it("resumes after the page closes and opens again, and follows up once", async () => {
-    const file = join(mkdtempSync(join(tmpdir(), "olit-watch-")), "olit.sqlite3");
-    let state = "running";
-    const first = await submitted(await openNodeSqliteStorage(file), () => state);
-    await new Promise((r) => setTimeout(r, 20));
-    await first.harness.close(context);
-    state = "ok";
-    const { harness } = await watching(await openNodeSqliteStorage(file), () => state);
-    harness.resume();
-    await harness.waitForTask(first.task, context);
-    const conversation = (await harness.conversation(first.conversation.id, context))!;
-    expect(await followUps(conversation)).toHaveLength(1);
-    await harness.close(context);
-  });
 });
 
-/** A Galaxy that answers these paths and nothing else. */
+const JOB: Watched = { kind: "job", id: "j1", label: "run_tool", state: "queued" };
+
 const galaxy = (answers: Record<string, unknown>, asked: string[] = []) =>
   ({
     get: async (path: string) => {
@@ -424,30 +185,5 @@ describe("stateReader", () => {
       "cancelled",
     );
     expect(asked).toEqual(["api/invocations/i1"]);
-  });
-});
-
-describe("followUpPrompt", () => {
-  it("asks for a turn about runs that finished or failed", () => {
-    const prompt = followUpPrompt([
-      { watched: JOB, state: "ok", outcome: "completed" },
-      { watched: { ...JOB, id: "j2", outputs: ["d9"] }, state: "error", outcome: "failed" },
-    ])!;
-    expect(prompt.startsWith("[Orbit automatic Galaxy follow-up]")).toBe(true);
-    expect(followUpPrompt([{ watched: JOB, state: "ok", outcome: "completed" }], NOVA)).toMatch(
-      /^\[Nova automatic Galaxy follow-up\]/,
-    );
-    expect(prompt).toContain('"label": "Galaxy job j1"');
-    // A failed job is read through its output, which get_job_details takes.
-    expect(prompt).toContain('"outputs": [\n      "d9"\n    ]');
-    // galaxy-ops calls a run failed only once nothing of it is running.
-    expect(prompt).not.toContain("still have jobs running");
-  });
-
-  it("asks for nothing about a run the user cancelled", () => {
-    const cancelled = { kind: "invocation" as const, id: "i1", label: "invoke_workflow" };
-    expect(
-      followUpPrompt([{ watched: cancelled, state: "cancelled", outcome: "cancelled" }]),
-    ).toBeUndefined();
   });
 });

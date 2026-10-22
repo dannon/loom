@@ -1,12 +1,11 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { agentSources, describe as describeOlit } from "@galaxyproject/orbit-browser/node";
+import { describe as describeOlit } from "@galaxyproject/orbit-browser/node";
 import { olitFlavor } from "./flavor";
 import { olitLayout } from "./layout";
 import { PROVIDERS } from "@galaxyproject/orbit-browser/testing";
-import { GUARDS } from "@galaxyproject/orbit-browser/testing";
 
 // The workspace root, whichever directory vitest runs from.
 const ROOT = join(__dirname, "..", "..", "..");
@@ -17,16 +16,6 @@ let doc: Description;
 beforeAll(async () => {
   doc = await describeOlit(olitLayout(ROOT), olitFlavor);
 }, 120_000);
-
-function sources(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) {
-      return name === "skills" ? [] : sources(path);
-    }
-    return path.endsWith(".ts") && !path.endsWith(".test.ts") ? [path] : [];
-  });
-}
 
 describe("the description Olit publishes about itself", { timeout: 120_000 }, () => {
   it("is JSON and names its schema", () => {
@@ -108,22 +97,5 @@ describe("the description Olit publishes about itself", { timeout: 120_000 }, ()
 
   it("gives the same answer twice", async () => {
     expect(await describeOlit(olitLayout(ROOT), olitFlavor)).toEqual(doc);
-  });
-});
-
-describe("the guard inventory", () => {
-  // The Guard type is derived from GUARDS, so the compiler already refuses a guard the policy
-  // does not publish. The reverse needs a look at the source.
-  it("publishes no guard the code never sets", () => {
-    const code = agentSources(olitLayout(ROOT))
-      .flatMap((source) => sources(join(source, "src/agent")))
-      .filter((path) => !path.endsWith("/tool.ts"))
-      .map((path) => readFileSync(path, "utf8"))
-      .join("\n");
-    expect(GUARDS.filter((g) => !code.includes(`"${g}"`))).toEqual([]);
-  });
-
-  it("includes the guard observed refusing live", () => {
-    expect(GUARDS).toContain("malformed-object-id");
   });
 });

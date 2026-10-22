@@ -460,8 +460,7 @@ async function open(request: OpenRequest) {
     storage,
     config: request.config,
     env: env.vars,
-    python,
-    flavor,
+    brand,
     extensions: orbit.extensions,
   });
   if (request.saved) {
