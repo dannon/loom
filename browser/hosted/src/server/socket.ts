@@ -46,8 +46,11 @@ export class Sockets {
   readonly #server = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
   /** Who is watching each conversation. */
   readonly #watching = new Map<string, Set<WebSocket>>();
-  /** What a page that just opened a running conversation gets once the worker's snapshot reaches it. */
-  readonly #afterSnapshot = new Map<WebSocket, () => void>();
+  /**
+   * What a page that just opened a running conversation gets once the worker's snapshot reaches it,
+   * or, with `fromStore`, if the worker exits first.
+   */
+  readonly #afterSnapshot = new Map<WebSocket, (fromStore: boolean) => void>();
 
   constructor(context: SocketContext) {
     this.#c = context;
@@ -68,6 +71,14 @@ export class Sockets {
   deliver(conversationId: string, event: FromWorker | DispatchEvent): void {
     const watchers = this.#watching.get(conversationId);
     if (!watchers?.size) return;
+    // A worker gone before its snapshot never sends one, and a page waiting on it would never be ready.
+    if (event.type === "worker-exit") {
+      for (const ws of watchers) {
+        const then = this.#afterSnapshot.get(ws);
+        this.#afterSnapshot.delete(ws);
+        then?.(true);
+      }
+    }
     const message = this.#translate(conversationId, event);
     if (!message) return;
     const text = JSON.stringify(message);
@@ -77,7 +88,7 @@ export class Sockets {
       const then = snapshot ? this.#afterSnapshot.get(ws) : undefined;
       if (then) {
         this.#afterSnapshot.delete(ws);
-        then();
+        then(false);
       }
     }
   }
@@ -97,8 +108,13 @@ export class Sockets {
     if (req.headers.origin !== this.#c.auth.publicUrl.origin) return refuse("403 Forbidden");
     const session = await sessionOf(this.#c.auth, req).catch(() => undefined);
     if (!session) return refuse("401 Unauthorized");
-    const sessionId = readCookie(req, this.#c.auth.publicUrl.protocol === "https:" ? `__Host-${SESSION_COOKIE}` : SESSION_COOKIE)!;
-    this.#server.handleUpgrade(req, socket, head, (ws) => this.#connected(ws, session.sub, sessionId));
+    const sessionId = readCookie(
+      req,
+      this.#c.auth.publicUrl.protocol === "https:" ? `__Host-${SESSION_COOKIE}` : SESSION_COOKIE,
+    )!;
+    this.#server.handleUpgrade(req, socket, head, (ws) =>
+      this.#connected(ws, session.sub, sessionId),
+    );
   }
 
   #connected(ws: WebSocket, sub: string, sessionId: string): void {
@@ -128,13 +144,19 @@ export class Sockets {
             ws.close(4401, "signed out");
             return;
           }
-          return this.#handle(message, sub, send, (then) => this.#afterSnapshot.set(ws, then), (id) => {
-        unwatch();
-        watching = id;
-        const set = this.#watching.get(id) ?? new Set();
-        set.add(ws);
-        this.#watching.set(id, set);
-          });
+          return this.#handle(
+            message,
+            sub,
+            send,
+            (then) => (then ? this.#afterSnapshot.set(ws, then) : this.#afterSnapshot.delete(ws)),
+            (id) => {
+              unwatch();
+              watching = id;
+              const set = this.#watching.get(id) ?? new Set();
+              set.add(ws);
+              this.#watching.set(id, set);
+            },
+          );
         })
         .catch((error: Error) => {
           this.#c.log?.(`socket message failed: ${error.message}`);
@@ -147,7 +169,7 @@ export class Sockets {
     message: FromPage,
     sub: string,
     send: (message: ToPage) => void,
-    afterSnapshot: (then: () => void) => void,
+    afterSnapshot: (then: ((fromStore: boolean) => void) | undefined) => void,
     watch: (conversationId: string) => void,
   ): Promise<void> {
     const { dispatcher } = this.#c;
@@ -172,12 +194,25 @@ export class Sockets {
             if (shown) send(shown);
           }
         };
+        const fromStore = async () => {
+          send({ type: "events", events: [await storedSnapshot(this.#c.auth.pool, conversation)] });
+          greet();
+        };
         if (dispatcher.isLive(id)) {
-          afterSnapshot(greet);
+          afterSnapshot((stale) => {
+            if (!stale) return greet();
+            fromStore().catch((error: Error) => {
+              this.#c.log?.(`snapshot after worker exit failed: ${error.message}`);
+              send({
+                type: "failed",
+                message: "Orbit couldn't load this conversation. Reload to try again.",
+              });
+            });
+          });
           if (dispatcher.snapshot(id)) return;
+          afterSnapshot(undefined);
         }
-        send({ type: "events", events: [await storedSnapshot(this.#c.auth.pool, conversation)] });
-        greet();
+        await fromStore();
         return;
       }
       case "submit":
@@ -201,7 +236,11 @@ export class Sockets {
         return;
       case "confirmed":
         // Under the kill switch a paused run doesn't go on: a yes counts as a no.
-        dispatcher.answer(id, Number(message.id), message.approved === true && !this.#c.turnsDisabled);
+        dispatcher.answer(
+          id,
+          Number(message.id),
+          message.approved === true && !this.#c.turnsDisabled,
+        );
         return;
       case "reset": {
         // A new conversation; the old one stays in the list.
@@ -212,7 +251,11 @@ export class Sockets {
       case "switch":
       case "export":
       case "saved":
-        send({ type: "reply", id: Number(message.id), error: "Hosted Orbit sets the model and keeps conversations itself." });
+        send({
+          type: "reply",
+          id: Number(message.id),
+          error: "Hosted Orbit sets the model and keeps conversations itself.",
+        });
         return;
     }
   }
@@ -224,23 +267,40 @@ export class Sockets {
         return { type: "events", events: event.events };
       case "ask":
         if (event.request.kind === "confirm") {
-          return { type: "confirm", id: event.id, title: event.request.title, message: event.request.message };
+          return {
+            type: "confirm",
+            id: event.id,
+            title: event.request.title,
+            message: event.request.message,
+          };
         }
         // The shell only has a confirm dialog; anything else goes unanswered rather than hang.
         this.#c.dispatcher.answer(conversationId, event.id, undefined);
-        return { type: "notice", text: "Orbit asked something this page can't show yet, so it went unanswered.", level: "warning" };
+        return {
+          type: "notice",
+          text: "Orbit asked something this page can't show yet, so it went unanswered.",
+          level: "warning",
+        };
       case "ask-withdrawn":
         return { type: "withdrawn", id: event.id };
       case "notify":
         return { type: "notice", text: event.text, level: event.level };
       case "waiting":
-        return { type: "notice", text: "Waiting for your other conversation's turn to finish.", level: "info" };
+        return {
+          type: "notice",
+          text: "Waiting for your other conversation's turn to finish.",
+          level: "info",
+        };
       case "failed":
         return { type: "failed", message: event.message };
       case "worker-exit":
         // A lost lease means another host has the conversation; it says nothing to the user.
         if (event.code === 0 || event.code === 75) return undefined;
-        return { type: "notice", text: "Orbit restarted this conversation; it picks up where it left off.", level: "warning" };
+        return {
+          type: "notice",
+          text: "Orbit restarted this conversation; it picks up where it left off.",
+          level: "warning",
+        };
       default:
         return undefined;
     }
