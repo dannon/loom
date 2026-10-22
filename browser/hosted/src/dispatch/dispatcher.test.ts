@@ -15,9 +15,9 @@ import { createTokenCache } from "../tokens/token-cache";
 import { bundleWorker } from "../worker/bundle";
 import type { FromWorker } from "../worker/protocol";
 import { spawnWorker } from "../worker/spawn";
-import { createConversation, getConversation } from "./conversations";
+import { createConversation, getConversation, titleIfUntitled } from "./conversations";
 import { Dispatcher, type DispatchEvent } from "./dispatcher";
-import { galaxyPageCreator } from "./pages";
+import { galaxyPageCreator, galaxyPageRetitler } from "./pages";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DATABASE = "orbit_hosted_dispatch";
@@ -305,5 +305,31 @@ describe("the conversation's Galaxy page", () => {
       },
     ]);
     expect(sent[0]!.body.slug).toMatch(/^[a-z0-9-]+$/);
+  });
+
+  it("takes the conversation's title once it has one, through Galaxy's page update as the user", async () => {
+    const sent: Array<{ url: string; method?: string; auth: string | null; body: unknown }> = [];
+    let status = 200;
+    const retitle = galaxyPageRetitler({
+      galaxyUrl: "https://galaxy.test",
+      tokens: createTokenCache({ refresh: async () => ({ token: "user-token", expiresAt: Date.now() + 600_000 }) }),
+      fetch: (async (url: string, init: RequestInit) => {
+        sent.push({ url, method: init.method, auth: new Headers(init.headers).get("authorization"), body: JSON.parse(String(init.body)) });
+        return Response.json({}, { status });
+      }) as typeof fetch,
+    });
+    const c = await createConversation(pool, await user());
+    await retitle(c);
+    expect(sent).toEqual([]);
+    await pool.query("UPDATE orbit_conversations SET page_id = 'page-7' WHERE id = $1", [c.id]);
+    const titled = await titleIfUntitled(pool, c.id, "  Call variants\non chr6");
+    expect(titled).toMatchObject({ title: "Call variants", pageId: "page-7" });
+    expect(await titleIfUntitled(pool, c.id, "something else")).toBeUndefined();
+    await retitle(titled!);
+    expect(sent).toEqual([
+      { url: "https://galaxy.test/api/pages/page-7", method: "PUT", auth: "Bearer user-token", body: { title: "Call variants" } },
+    ]);
+    status = 500;
+    await expect(retitle(titled!)).rejects.toThrow("HTTP 500");
   });
 });

@@ -12,7 +12,7 @@ import type { WorkerMessage } from "../../../core/src/agent/worker";
 import type { AuthContext } from "../auth/routes";
 import { readCookie, SESSION_COOKIE, sessionOf } from "../auth/routes";
 import { findSession } from "../auth/sessions";
-import { createConversation, getConversation, titleIfUntitled } from "../dispatch/conversations";
+import { createConversation, getConversation, titleIfUntitled, type ConversationRow } from "../dispatch/conversations";
 import type { DispatchEvent, Dispatcher } from "../dispatch/dispatcher";
 import type { FromWorker } from "../worker/protocol";
 import { storedSnapshot } from "./snapshot";
@@ -35,6 +35,8 @@ export interface SocketContext {
   /** When set, turns are turned away with this notice: the kill switch. */
   readonly turnsDisabled?: string;
   readonly log?: (message: string) => void;
+  /** Carries a newly set title to the conversation's Galaxy page, when it already has one. */
+  readonly retitlePage?: (conversation: ConversationRow) => Promise<void>;
 }
 
 const MAX_MESSAGE_BYTES = 256 * 1024;
@@ -185,7 +187,13 @@ export class Sockets {
           return;
         }
         if (typeof message.text !== "string" || !message.text.trim()) return;
-        if (conversation.title === null) await titleIfUntitled(this.#c.auth.pool, id, message.text);
+        if (conversation.title === null) {
+          const titled = await titleIfUntitled(this.#c.auth.pool, id, message.text);
+          // Best effort and not awaited: a page left with its old name isn't worth holding up the turn.
+          if (titled?.pageId && this.#c.retitlePage) {
+            this.#c.retitlePage(titled).catch((error: Error) => this.#c.log?.(`page title for ${id}: ${error.message}`));
+          }
+        }
         await dispatcher.submit(id, message.text);
         return;
       case "stop":

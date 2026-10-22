@@ -15,7 +15,7 @@ import { refreshForUser } from "../auth/sessions";
 import { ConfigError, describeConfig, loadConfig } from "../config";
 import { migrate } from "../db/migrate";
 import { Dispatcher } from "../dispatch/dispatcher";
-import { galaxyPageCreator } from "../dispatch/pages";
+import { galaxyPageCreator, galaxyPageRetitler } from "../dispatch/pages";
 import { liteLlmModels } from "../model/litellm";
 import { createTokenCache } from "../tokens/token-cache";
 import { createHostServer } from "./http";
@@ -100,7 +100,13 @@ async function main(): Promise<void> {
     turnsDisabled: () => config.turnsDisabled,
     log,
   });
-  sockets = new Sockets({ auth, dispatcher, turnsDisabled: config.turnsDisabled, log });
+  sockets = new Sockets({
+    auth,
+    dispatcher,
+    turnsDisabled: config.turnsDisabled,
+    log,
+    retitlePage: galaxyPageRetitler({ galaxyUrl: config.galaxyUrl.href, tokens }),
+  });
 
   const server = createHostServer({
     auth,
