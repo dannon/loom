@@ -10,6 +10,9 @@
  * the conversation's sticky worker, booting one if there is none, and waits for the run to settle.
  * The lease is held for the worker's life and renewed on a timer; the generation moves only when a
  * new worker takes over (decision 9).
+ *
+ * Workers don't stay forever (idle.ts): a quiet conversation nobody has open gives its worker back
+ * at a quiet point, and a confirm left unanswered pauses its conversation until the user returns.
  */
 import { randomUUID } from "node:crypto";
 import type { Worker } from "node:worker_threads";
@@ -25,6 +28,7 @@ import type { TokenCache } from "../tokens/token-cache";
 import type { FromWorker, WorkerData } from "../worker/protocol";
 import { spawnWorker } from "../worker/spawn";
 import { getConversation, interruptedConversations, type ConversationRow } from "./conversations";
+import { idleAction, idleCheckMs, type IdleSettings } from "./idle";
 
 export const TURN_QUEUE = "turn";
 
@@ -34,7 +38,9 @@ export type DispatchEvent =
   | { readonly type: "waiting" }
   | { readonly type: "worker-exit"; readonly code: number }
   /** The turn couldn't start after several tries. */
-  | { readonly type: "failed"; readonly message: string };
+  | { readonly type: "failed"; readonly message: string }
+  /** A confirm went unanswered too long; the conversation asks again when the user comes back. */
+  | { readonly type: "paused" };
 
 export interface DispatcherOptions {
   readonly pool: Pool;
@@ -70,6 +76,10 @@ export interface DispatcherOptions {
    * outright leaves its job active, and the conversation's next job can't start until it isn't.
    */
   readonly jobHeartbeatSeconds?: number;
+  /** Idle release and the unanswered-confirm pause; without it, workers stay until shutdown. */
+  readonly idle?: IdleSettings & { readonly checkMs?: number };
+  /** Whether a page has the conversation open, which keeps its worker from being released. */
+  readonly watched?: (conversationId: string) => boolean;
   readonly spawn?: (bundle: string, data: WorkerData) => Worker;
   readonly log?: (message: string) => void;
 }
@@ -100,14 +110,25 @@ interface Live {
   readonly holder: string;
   readonly leaseGen: number;
   readonly worker: Worker;
-  /** Asks waiting on the user, so a page that (re)connects can show them. */
-  readonly asks: Map<number, AskRequest>;
+  /** Asks waiting on the user, so a page that (re)connects can show them, and when each was asked. */
+  readonly asks: Map<number, { readonly request: AskRequest; readonly at: number }>;
   readonly waiters: Set<Waiter>;
   renew?: NodeJS.Timeout;
   turn?: Turn;
   exited: boolean;
   /** Set when the host ends the worker on purpose (the turn cap, a lost lease), so its exit isn't a crash. */
   retired?: boolean;
+  /** The last turn's end bookkeeping (the live loop, the conversation's marks). */
+  ending?: Promise<unknown>;
+  /** Since when nothing has run, asked or watched; idle release counts from here. */
+  quietSince: number;
+  /** The host is closing the worker (idle release, or a pause); `done` once it's gone or stays. */
+  releasing?: {
+    readonly why: "idle" | "pause";
+    readonly done: Promise<void>;
+    readonly end: () => void;
+    timer?: NodeJS.Timeout;
+  };
 }
 
 type TurnJob = { conversationId: string; attempt?: number };
@@ -128,6 +149,7 @@ export class Dispatcher {
   readonly #crashes = new Map<string, number>();
   #working = false;
   #stopping = false;
+  #idleTimer?: NodeJS.Timeout;
 
   constructor(options: DispatcherOptions) {
     this.#o = options;
@@ -159,6 +181,11 @@ export class Dispatcher {
       },
     );
     this.#working = true;
+    const idle = this.#o.idle;
+    if (idle) {
+      this.#idleTimer = setInterval(() => this.#idleCheck(idle), idle.checkMs ?? idleCheckMs(idle));
+      this.#idleTimer.unref();
+    }
     // The sweeper: a turn cut off by a crash or a restart resumes without waiting for a new message.
     if (this.#o.turnsDisabled?.()) return;
     for (const id of await interruptedConversations(this.#o.pool))
@@ -186,30 +213,44 @@ export class Dispatcher {
     this.#live.get(conversationId)?.worker.postMessage({ cmd: "stop" });
   }
 
-  /** The user's answer to an ask; false, and ignored, for one already answered or withdrawn. */
+  /**
+   * The user's answer to an ask; false, and ignored, for one already answered or withdrawn. An answer
+   * that races a pause is dropped too: the call asks again on resume.
+   */
   answer(conversationId: string, id: number, value: AskAnswer): boolean {
     const live = this.#live.get(conversationId);
-    if (!live?.asks.delete(id)) return false;
+    if (!live || live.releasing || !live.asks.delete(id)) return false;
     live.worker.postMessage({ cmd: "answer", id, value });
     return true;
   }
 
-  /** Whether the conversation has a worker on this host now. */
+  /** Whether the conversation has a worker on this host now, other than one being closed. */
   isLive(conversationId: string): boolean {
-    return this.#live.has(conversationId);
+    const live = this.#live.get(conversationId);
+    return live !== undefined && !live.releasing;
+  }
+
+  /**
+   * The user came back to a conversation that paused on an unanswered confirm: start a worker, which
+   * reruns the call and asks again.
+   */
+  async resume(conversationId: string): Promise<void> {
+    if (this.#stopping || this.#handling.has(conversationId) || this.#live.has(conversationId))
+      return;
+    await this.#send({ conversationId });
   }
 
   /** Ask the conversation's worker for a fresh snapshot; false when no worker is running it. */
   snapshot(conversationId: string): boolean {
     const live = this.#live.get(conversationId);
-    if (!live) return false;
+    if (!live || live.releasing) return false;
     live.worker.postMessage({ cmd: "snapshot" });
     return true;
   }
 
   /** What the conversation is waiting on the user for. */
   pendingAsks(conversationId: string): Array<{ id: number; request: AskRequest }> {
-    return [...(this.#live.get(conversationId)?.asks ?? [])].map(([id, request]) => ({
+    return [...(this.#live.get(conversationId)?.asks ?? [])].map(([id, { request }]) => ({
       id,
       request,
     }));
@@ -222,6 +263,7 @@ export class Dispatcher {
    */
   async shutdown(timeoutMs = 10_000): Promise<void> {
     this.#stopping = true;
+    clearInterval(this.#idleTimer);
     // Workers close first, so each handler finishes and pg-boss records its job; a job left active
     // would hold the conversation's one active slot until it expired. A handler that boots a worker
     // meanwhile is caught by the second pass.
@@ -302,7 +344,12 @@ export class Dispatcher {
     }
     const conversation = await getConversation(pool, conversationId);
     if (!conversation) return;
-    const sticky = this.#live.get(conversationId);
+    let sticky = this.#live.get(conversationId);
+    // A worker on its way out can't take the turn; wait until it's gone (or decided to stay).
+    if (sticky?.releasing) {
+      await sticky.releasing.done;
+      sticky = this.#live.get(conversationId);
+    }
     // A turn already running here takes new messages when it ends.
     if (sticky?.turn) return;
     const holder = sticky?.holder ?? `${this.#o.hostId}/${randomUUID()}`;
@@ -327,10 +374,11 @@ export class Dispatcher {
         );
         if (gen === undefined) throw new Busy("the lease");
         // Marked for as long as the turn lasts, so a host killed outright (no exit handlers, no
-        // shutdown) still leaves the conversation for the next host's sweeper.
-        await client.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [
-          conversationId,
-        ]);
+        // shutdown) still leaves the conversation for the next host's sweeper. A pause ends here.
+        await client.query(
+          "UPDATE orbit_conversations SET interrupted = true, paused = false WHERE id = $1",
+          [conversationId],
+        );
         return gen;
       });
     } catch (error) {
@@ -426,27 +474,31 @@ export class Dispatcher {
     if (!turn) return;
     clearTimeout(turn.cap);
     live.turn = undefined;
+    live.quietSince = Date.now();
     turn.end();
     const { pool } = this.#o;
     const id = live.conversationId;
-    this.#track(async () => {
+    // However the close settles the run, a pause waits for the user rather than the sweeper.
+    const paused = live.releasing?.why === "pause";
+    live.ending = this.#track(async () => {
       await this.#releaseLoop(live.sub, id);
       // A restart's close settles the run as aborted; it still has to resume on the next host.
-      const interrupted = how === "interrupted" || this.#stopping;
-      await pool.query("UPDATE orbit_conversations SET interrupted = $2 WHERE id = $1", [
-        id,
-        interrupted,
-      ]);
+      const interrupted = !paused && (how === "interrupted" || this.#stopping);
+      await pool.query(
+        "UPDATE orbit_conversations SET interrupted = $2, paused = $3 WHERE id = $1",
+        [id, interrupted, paused],
+      );
       if (!this.#stopping && !this.#handling.has(id) && (await this.#hasInbox(id)))
         await this.#send({ conversationId: id });
     }, `ending the turn for ${id}`);
   }
 
-  #track(work: () => Promise<unknown>, what: string): void {
+  #track(work: () => Promise<unknown>, what: string): Promise<unknown> {
     const running = work()
       .catch((error: Error) => this.#o.log?.(`${what} failed: ${error.message}`))
       .finally(() => this.#settling.delete(running));
     this.#settling.add(running);
+    return running;
   }
 
   #releaseLoop(sub: string, conversationId: string): Promise<unknown> {
@@ -501,6 +553,7 @@ export class Dispatcher {
       asks: new Map(),
       waiters: new Set(),
       exited: false,
+      quietSince: Date.now(),
     };
     this.#live.set(conversation.id, live);
     worker.on("message", (message: FromWorker) => this.#onMessage(live, message));
@@ -587,7 +640,7 @@ export class Dispatcher {
         }).then((answer) => live.worker.postMessage({ cmd: "token", id: message.id, ...answer }));
         return;
       case "ask":
-        live.asks.set(message.id, message.request);
+        live.asks.set(message.id, { request: message.request, at: Date.now() });
         break;
       case "ask-withdrawn":
         live.asks.delete(message.id);
@@ -601,6 +654,15 @@ export class Dispatcher {
         return;
       case "reach":
         return;
+      case "not-quiet": {
+        // Work in hand after all (a background task, a token wait); the quiet period starts over.
+        const releasing = live.releasing;
+        live.releasing = undefined;
+        live.quietSince = Date.now();
+        clearTimeout(releasing?.timer);
+        releasing?.end();
+        return;
+      }
     }
     for (const waiter of [...live.waiters]) {
       if (waiter.type !== message.type) continue;
@@ -620,8 +682,10 @@ export class Dispatcher {
     const { pool } = this.#o;
     // Cut off mid-turn (a crash, the turn cap, a restart) or holding an ask: resume it later. A lost
     // lease means another host has the conversation, and it's theirs to resume.
+    // A pause closed it on purpose: it waits for the user, not the sweeper or a crash retry.
+    const pausing = live.releasing?.why === "pause" && code !== LEASE_LOST_EXIT_CODE;
     const cutOff = live.turn !== undefined || live.asks.size > 0;
-    if (cutOff && code !== LEASE_LOST_EXIT_CODE) {
+    if (cutOff && !pausing && code !== LEASE_LOST_EXIT_CODE) {
       await pool
         .query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [
           live.conversationId,
@@ -633,7 +697,9 @@ export class Dispatcher {
     // lease held and tell the user it's waiting on another conversation.
     await releaseLease(pool, live.storeId, live.holder).catch(() => undefined);
     if (cutOff) {
-      if (code === LEASE_LOST_EXIT_CODE) {
+      if (pausing) {
+        this.#endTurn(live, "interrupted");
+      } else if (code === LEASE_LOST_EXIT_CODE) {
         const turn = live.turn;
         live.turn = undefined;
         clearTimeout(turn?.cap);
@@ -653,7 +719,57 @@ export class Dispatcher {
         }
       }
     }
+    const releasing = live.releasing;
+    if (releasing) {
+      clearTimeout(releasing.timer);
+      // After the turn's own bookkeeping, so the turn waiting on this release isn't undone by it.
+      await live.ending;
+      releasing.end();
+      return;
+    }
     this.#o.onEvent(live.conversationId, { type: "worker-exit", code });
+  }
+
+  /** Release workers that have sat quiet long enough, and pause conversations whose confirm waits too long. */
+  #idleCheck(settings: IdleSettings): void {
+    if (this.#stopping) return;
+    const now = Date.now();
+    for (const live of this.#live.values()) {
+      if (live.exited || live.releasing) continue;
+      const watched = this.#o.watched?.(live.conversationId) ?? false;
+      if (watched) live.quietSince = now;
+      const asked = [...live.asks.values()].map((a) => a.at);
+      const action = idleAction(
+        {
+          busy: live.turn !== undefined || this.#handling.has(live.conversationId),
+          oldestAskAt: asked.length ? Math.min(...asked) : undefined,
+          watched,
+          quietSince: live.quietSince,
+        },
+        now,
+        settings,
+      );
+      if (action) this.#release(live, action === "pause" ? "pause" : "idle");
+    }
+  }
+
+  /**
+   * Close a worker on purpose. Idle release asks the worker to close only at a quiet point; a pause
+   * closes it outright, which rejects the pending ask after the harness is sealed (the gate pause
+   * contract), so the call asks again when the conversation resumes.
+   */
+  #release(live: Live, why: "idle" | "pause"): void {
+    let end!: () => void;
+    const done = new Promise<void>((resolve) => (end = resolve));
+    live.releasing = { why, done, end };
+    this.#o.log?.(`${why === "pause" ? "pausing" : "releasing"} ${live.conversationId}`);
+    if (why === "pause") {
+      live.retired = true;
+      this.#o.onEvent(live.conversationId, { type: "paused" });
+    }
+    live.worker.postMessage({ cmd: why === "pause" ? "close" : "release" });
+    // A worker that doesn't finish closing is ended; recovery on the next boot covers what it held.
+    live.releasing.timer = setTimeout(() => void live.worker.terminate(), 10_000);
   }
 
   #next(live: Live, type: FromWorker["type"]): Promise<FromWorker> {

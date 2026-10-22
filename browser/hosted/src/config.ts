@@ -36,6 +36,8 @@ export interface HostConfig {
     readonly renewMs: number;
     readonly maxTurnMs: number;
   };
+  /** Idle release of workers, and how long a confirm waits before its conversation pauses. */
+  readonly idle: { readonly releaseMs: number; readonly askPauseMs: number };
 }
 
 export class ConfigError extends Error {
@@ -154,6 +156,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const maxTurnMs = seconds("ORBIT_MAX_TURN_SECONDS", 30 * 60);
   // Renewing at most every half TTL leaves one missed renewal before the lease can be taken.
   if (renewMs * 2 > ttlMs) problems.push("ORBIT_LEASE_RENEW_SECONDS must be at most half of ORBIT_LEASE_TTL_SECONDS");
+  // A worker costs about 100 MB and a cold start under a second (bench/soak), so idle ones go soon.
+  const releaseMs = seconds("ORBIT_IDLE_RELEASE_SECONDS", 10 * 60);
+  // Decision 17: a confirm unanswered for ten minutes pauses its conversation and frees the worker.
+  const askPauseMs = seconds("ORBIT_ASK_PAUSE_SECONDS", 10 * 60);
 
   if (problems.length > 0) throw new ConfigError(problems);
   return {
@@ -168,6 +174,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     turnsDisabled,
     turnLimits: { maxSteps, maxToolCalls },
     lease: { ttlMs, renewMs, maxTurnMs },
+    idle: { releaseMs, askPauseMs },
   };
 }
 
@@ -197,6 +204,10 @@ export function describeConfig(config: HostConfig): string {
     [
       "leases",
       `${secs(config.lease.ttlMs)} TTL, renewed every ${secs(config.lease.renewMs)}, turns end after ${secs(config.lease.maxTurnMs)}`,
+    ],
+    [
+      "workers",
+      `released after ${secs(config.idle.releaseMs)} quiet with no page open; an unanswered confirm pauses after ${secs(config.idle.askPauseMs)}`,
     ],
   ];
   return ["Orbit host configuration:", ...lines.map(([k, v]) => `  ${k!.padEnd(11)} ${v}`)].join("\n");

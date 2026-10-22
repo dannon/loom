@@ -62,6 +62,16 @@ describe("loadConfig", () => {
     expect(config.oidc.clientSecret).toBeUndefined();
     expect(config.tokenKey.length).toBe(32);
     expect(config.lease).toEqual({ ttlMs: 60_000, renewMs: 15_000, maxTurnMs: 1_800_000 });
+    expect(config.idle).toEqual({ releaseMs: 600_000, askPauseMs: 600_000 });
+  });
+
+  it("takes the idle release and confirm pause times in seconds, fractions included", () => {
+    const config = loadConfig({ ...DEV, ORBIT_IDLE_RELEASE_SECONDS: "90", ORBIT_ASK_PAUSE_SECONDS: "2.5" });
+    expect(config.idle).toEqual({ releaseMs: 90_000, askPauseMs: 2_500 });
+    expect(problems({ ...DEV, ORBIT_IDLE_RELEASE_SECONDS: "0", ORBIT_ASK_PAUSE_SECONDS: "soon" })).toEqual([
+      "ORBIT_IDLE_RELEASE_SECONDS must be a positive number of seconds",
+      "ORBIT_ASK_PAUSE_SECONDS must be a positive number of seconds",
+    ]);
   });
 
   it("takes a socket-style database URL, which pg accepts and WHATWG doesn't", () => {
@@ -120,6 +130,7 @@ describe("describeConfig", () => {
     expect(summary).toContain("db:5432/orbit (password set)");
     expect(summary).toContain("as orbit (client secret set)");
     expect(summary).toContain("token key   set");
+    expect(summary).toContain("released after 600 s quiet with no page open; an unanswered confirm pauses after 600 s");
   });
 
   it("says when the dev host signs in as a public client", () => {

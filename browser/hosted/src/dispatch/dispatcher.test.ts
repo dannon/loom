@@ -8,6 +8,7 @@ import { PgBoss } from "pg-boss";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { migrate } from "../db/migrate";
+import { storedSnapshot } from "../server/snapshot";
 import { currentLeaseGen } from "../storage/postgres-storage";
 import { freshDatabase, testDatabase } from "../test-db";
 import { startStandIn, type StandIn } from "../test-stand-in";
@@ -16,7 +17,7 @@ import { bundleWorker } from "../worker/bundle";
 import type { FromWorker } from "../worker/protocol";
 import { spawnWorker } from "../worker/spawn";
 import { createConversation, getConversation, titleIfUntitled } from "./conversations";
-import { Dispatcher, type DispatchEvent } from "./dispatcher";
+import { Dispatcher, type DispatcherOptions, type DispatchEvent } from "./dispatcher";
 import { galaxyPageCreator, galaxyPageRetitler } from "./pages";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -65,6 +66,7 @@ async function host(
   concurrency?: number,
   turnsDisabled?: () => string | undefined,
   supervise = false,
+  extra: Partial<DispatcherOptions> = {},
   hostPool: pg.Pool = pool,
 ): Promise<Host> {
   const boss = new PgBoss({
@@ -113,6 +115,7 @@ async function host(
       spawned.push({ storeId: data.storeId, worker });
       return worker;
     },
+    ...extra,
   });
   await dispatcher.start();
   dispatchers.push(dispatcher);
@@ -146,6 +149,32 @@ const asked = (h: Host, id: string, n = 1) =>
 const settledCount = (h: Host, id: string) => of(h, id, "settled").length;
 const modelSaw = (text: string) =>
   standIn.seen.filter((s) => s.to === "model" && s.userText === text).length;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** The stored transcript as kind and text, one line per entry, system entries left out. */
+async function transcript(id: string): Promise<string[]> {
+  const entries = (await storedSnapshot(pool, (await getConversation(pool, id))!))
+    .entries as unknown as Array<{
+    kind: string;
+    model?: Array<{ content: string | Array<{ type: string; text?: string; name?: string }> }>;
+  }>;
+  return entries
+    .filter((e) => e.kind !== "pi.system")
+    .map((e) => {
+      const text = (e.model ?? [])
+        .map((m) =>
+          typeof m.content === "string"
+            ? m.content
+            : m.content
+                .map((c) => (c.type === "toolCall" ? `call ${c.name}` : (c.text ?? "")))
+                .join(""),
+        )
+        .join("");
+      return `${e.kind} ${text}`.trim();
+    });
+}
+const leaseHeld = async (storeId: string) =>
+  ((await pool.query("SELECT 1 FROM orbit_leases WHERE store_id = $1", [storeId])).rowCount ?? 0) >
+  0;
 
 describe("dispatch", () => {
   it("a sticky worker's second turn runs on the same worker with no generation change", async () => {
@@ -357,7 +386,7 @@ describe("dispatch", () => {
           : value;
       },
     });
-    const h = await host("host", undefined, undefined, false, slowRelease);
+    const h = await host("host", undefined, undefined, false, {}, slowRelease);
     const c = await createConversation(pool, await user());
     await h.dispatcher.submit(c.id, `SLOW ${c.id}`);
     await until(() => modelSaw(`SLOW ${c.id}`) > 0, "the slow run to start");
@@ -393,6 +422,135 @@ describe("dispatch", () => {
     await until(() => of(b, c.id, "waiting").length > 0, "b to find the lease taken");
     expect(b.spawned.filter((w) => w.storeId === c.storeId)).toHaveLength(0);
     expect(modelSaw("from b")).toBe(0);
+  });
+});
+
+describe("idle release and the unanswered-confirm pause", () => {
+  it("releases a quiet worker once no page has it open, and the next message resumes from the store", async () => {
+    let watched = true;
+    const h = await host("idle", undefined, undefined, false, {
+      idle: { releaseMs: 800, askPauseMs: 60_000, checkMs: 100 },
+      watched: () => watched,
+    });
+    const c = await createConversation(pool, await user());
+    await h.dispatcher.submit(c.id, `first ${c.id}`);
+    await until(() => settledCount(h, c.id) >= 1, "the first turn");
+    const gen = await currentLeaseGen(pool, c.storeId);
+    // Open in a page: kept well past the quiet period.
+    await sleep(1_500);
+    expect(h.dispatcher.isLive(c.id)).toBe(true);
+    watched = false;
+    await until(() => !h.dispatcher.isLive(c.id), "the release");
+    await until(async () => !(await leaseHeld(c.storeId)), "the lease to be given back");
+    expect(of(h, c.id, "worker-exit")).toHaveLength(0);
+    expect(await getConversation(pool, c.id)).toMatchObject({ interrupted: false, paused: false });
+
+    await h.dispatcher.submit(c.id, `second ${c.id}`);
+    await until(() => settledCount(h, c.id) >= 2, "the turn after the release");
+    expect(h.spawned.filter((w) => w.storeId === c.storeId)).toHaveLength(2);
+    expect(await currentLeaseGen(pool, c.storeId)).toBe(gen! + 1);
+    expect(modelSaw(`second ${c.id}`)).toBe(1);
+    // No greeting on the fresh worker, and nothing the first one wrote shows up twice.
+    expect(await transcript(c.id)).toEqual([
+      `pi.user first ${c.id}`,
+      "pi.assistant ok",
+      `pi.user second ${c.id}`,
+      "pi.assistant ok",
+    ]);
+  });
+
+  it("a message that lands while the worker is being released waits for it and boots a fresh one", async () => {
+    let h!: Host;
+    const c = await createConversation(pool, await user());
+    h = await host("racing", undefined, undefined, false, {
+      idle: { releaseMs: 300, askPauseMs: 60_000, checkMs: 50 },
+      log: (message) => {
+        if (message === `releasing ${c.id}`)
+          void h.dispatcher.submit(c.id, `during the release ${c.id}`);
+      },
+    });
+    await h.dispatcher.submit(c.id, `before ${c.id}`);
+    await until(() => modelSaw(`during the release ${c.id}`) > 0, "the racing message's turn");
+    await until(() => settledCount(h, c.id) >= 2, "it to settle");
+    expect(h.spawned.filter((w) => w.storeId === c.storeId).length).toBeGreaterThanOrEqual(2);
+    expect(modelSaw(`during the release ${c.id}`)).toBe(1);
+    expect((await transcript(c.id)).filter((line) => line.startsWith("pi.user"))).toEqual([
+      `pi.user before ${c.id}`,
+      `pi.user during the release ${c.id}`,
+    ]);
+  });
+
+  it("an unanswered confirm pauses: the worker and the user's loop go, and coming back asks again, once", async () => {
+    const h = await host("pause", undefined, undefined, false, {
+      idle: { releaseMs: 300, askPauseMs: 2_000, checkMs: 100 },
+    });
+    const sub = await user();
+    const c = await createConversation(pool, sub);
+    const other = await createConversation(pool, sub);
+    const puts = standIn.galaxyCalls("PUT", "/api/histories/h1");
+    await h.dispatcher.submit(c.id, "DELETE_H1");
+    const first = await asked(h, c.id);
+    // Quiet and unwatched for longer than the release time, but a pending ask is never idle.
+    await sleep(1_000);
+    expect(h.dispatcher.isLive(c.id)).toBe(true);
+
+    await until(() => !h.dispatcher.isLive(c.id) && of(h, c.id, "paused").length > 0, "the pause");
+    await until(
+      async () => (await getConversation(pool, c.id))?.paused,
+      "the pause to be recorded",
+    );
+    expect((await getConversation(pool, c.id))?.interrupted).toBe(false);
+    expect(
+      (await pool.query("SELECT 1 FROM orbit_live_loops WHERE user_sub = $1", [sub])).rowCount,
+    ).toBe(0);
+    expect(of(h, c.id, "ask-withdrawn")).toHaveLength(1);
+    expect(h.dispatcher.answer(c.id, first.id, true)).toBe(false);
+    expect(standIn.galaxyCalls("PUT", "/api/histories/h1")).toBe(puts);
+    // Withdrawn by the close, not denied: the call has no result yet.
+    expect((await transcript(c.id)).filter((line) => line.startsWith("pi.tool-result"))).toEqual(
+      [],
+    );
+
+    // The user's other conversation runs while this one waits for them.
+    await h.dispatcher.submit(other.id, `meanwhile ${other.id}`);
+    await until(
+      () => modelSaw(`meanwhile ${other.id}`) > 0 && settledCount(h, other.id) >= 1,
+      "the other conversation's turn",
+    );
+
+    // Two tabs coming back at once still ask once.
+    await Promise.all([h.dispatcher.resume(c.id), h.dispatcher.resume(c.id)]);
+    const again = await asked(h, c.id, 2);
+    await sleep(500);
+    expect(of(h, c.id, "ask")).toHaveLength(2);
+    expect(standIn.galaxyCalls("PUT", "/api/histories/h1")).toBe(puts);
+    expect(h.dispatcher.answer(c.id, again.id, true)).toBe(true);
+    await until(() => standIn.galaxyCalls("PUT", "/api/histories/h1") === puts + 1, "the delete");
+    await until(async () => {
+      const row = await getConversation(pool, c.id);
+      return row && !row.paused && !row.interrupted && settledCount(h, c.id) >= 1;
+    }, "the run to finish");
+    await sleep(300);
+    expect(standIn.galaxyCalls("PUT", "/api/histories/h1")).toBe(puts + 1);
+    expect(
+      (await transcript(c.id)).filter((line) => line.startsWith("pi.tool-result")),
+    ).toHaveLength(1);
+  });
+
+  it("a message to a paused conversation resumes it and asks again before the message's turn", async () => {
+    const h = await host("pause-submit", undefined, undefined, false, {
+      idle: { releaseMs: 60_000, askPauseMs: 1_000, checkMs: 100 },
+    });
+    const c = await createConversation(pool, await user());
+    await h.dispatcher.submit(c.id, "DELETE_H1");
+    await asked(h, c.id);
+    await until(async () => (await getConversation(pool, c.id))?.paused, "the pause");
+    await h.dispatcher.submit(c.id, `back again ${c.id}`);
+    const again = await asked(h, c.id, 2);
+    expect(modelSaw(`back again ${c.id}`)).toBe(0);
+    h.dispatcher.answer(c.id, again.id, false);
+    await until(() => modelSaw(`back again ${c.id}`) > 0, "the message's turn after the answer");
+    expect((await getConversation(pool, c.id))?.paused).toBe(false);
   });
 });
 

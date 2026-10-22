@@ -106,6 +106,8 @@ async function main(): Promise<void> {
     compileCache: process.env.ORBIT_COMPILE_CACHE ?? fileURLToPath(new URL("./.compile-cache", import.meta.url)),
     onEvent: (id, event) => sockets?.deliver(id, event),
     turnsDisabled: () => config.turnsDisabled,
+    idle: config.idle,
+    watched: (id) => sockets?.watched(id) ?? false,
     log,
   });
   sockets = new Sockets({

@@ -11,6 +11,7 @@ const conversation: ConversationRow = {
   pageId: null,
   durableConversationId: null,
   interrupted: false,
+  paused: false,
   lastActiveAt: new Date(),
 };
 

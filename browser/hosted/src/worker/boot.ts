@@ -273,21 +273,50 @@ port.on("message", (message: ToWorker) => {
       if (!closing) restream().catch(report);
       return;
     case "close":
-      closing = true;
-      void events.stop().catch(() => undefined);
-      for (const resolve of tokenWaits.values()) resolve(CLOSED);
-      tokenWaits.clear();
-      harness
-        .close(ctx)
-        .then(
-          () => post({ type: "closed" }),
-          (error: unknown) => post({ type: "closed", error: error instanceof Error ? error.message : String(error) }),
-        )
-        // With the pool and the port closed the thread has nothing left and exits by itself.
-        .finally(() => pool.end().catch(() => undefined).finally(() => port.close()));
+      close();
+      return;
+    case "release":
+      quiet().then(
+        (yes) => {
+          if (closing) return;
+          if (yes) close();
+          else post({ type: "not-quiet" });
+        },
+        (error: unknown) => {
+          report(error);
+          post({ type: "not-quiet" });
+        },
+      );
       return;
   }
 });
+
+/**
+ * Close the harness first: sealing aborts every invocation, so a pending ask is rejected into an
+ * aborted runtime and its call asks again on resume (the gate pause contract), rather than denied.
+ */
+function close(): void {
+  if (closing) return;
+  closing = true;
+  void events.stop().catch(() => undefined);
+  for (const resolve of tokenWaits.values()) resolve(CLOSED);
+  tokenWaits.clear();
+  harness
+    .close(ctx)
+    .then(
+      () => post({ type: "closed" }),
+      (error: unknown) => post({ type: "closed", error: error instanceof Error ? error.message : String(error) }),
+    )
+    // With the pool and the port closed the thread has nothing left and exits by itself.
+    .finally(() => pool.end().catch(() => undefined).finally(() => port.close()));
+}
+
+/** A quiet point: nobody is being asked, no Galaxy request waits on a token, and every task is done. */
+async function quiet(): Promise<boolean> {
+  if (pending.size > 0 || tokenWaits.size > 0) return false;
+  const { tasks } = (await harness.inspect(ctx)) as unknown as { tasks: Array<{ record: { state: { status: string } } }> };
+  return pending.size === 0 && tasks.every((t) => t.record.state.status === "terminal");
+}
 
 await host.start(reopen ? "resume" : "new");
 harness.resume();
