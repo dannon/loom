@@ -27,7 +27,42 @@ import {
 import type { PollOptions, TickResult } from "../../../../../extensions/orbit/galaxy-poller";
 import type { TerminalEvent } from "../../../../../extensions/orbit/submission-ledger";
 import { FollowUps, heldBy } from "../documents";
-import { pollDelay, type Settled } from "../watch";
+
+export type WatchKind = "job" | "invocation" | "dataset";
+
+/** Galaxy work a conversation submitted, as the page names it. */
+export interface Watched {
+  kind: WatchKind;
+  id: string;
+  /** What to call it in the UI: the tool that submitted it. */
+  label: string;
+  state?: string;
+  outputs?: string[];
+}
+
+/**
+ * What a settled Galaxy state amounts to. A run the user cancelled did not fail, and it did not
+ * do what was asked either; a skipped job was skipped on purpose; a paused one waits on a failed
+ * input and runs only once someone acts; one Galaxy no longer shows is unreadable.
+ */
+export type Outcome = "completed" | "failed" | "cancelled" | "skipped" | "paused" | "unreadable";
+
+/** Watched work that reached a state it will not leave, as the page shows it. */
+export interface Settled {
+  watched: Watched;
+  state: string;
+  outcome: Outcome;
+  /** Why the record could not be updated for this work, when it could not. */
+  record?: string;
+}
+
+/**
+ * The wait after `polls` polls: `pollMs` for the first six, about a minute at Galaxy's pace, then
+ * doubling to twelve times it. Work is watched until it settles, however long that takes.
+ */
+export function pollDelay(polls: number, pollMs: number): number {
+  return Math.min(pollMs * 2 ** Math.max(0, polls - 6), pollMs * 12);
+}
 
 /** The task's name, shared with the default brain's watch: the page and drives know it by it. */
 export const ORBIT_WATCH = "olit.galaxy-watch";

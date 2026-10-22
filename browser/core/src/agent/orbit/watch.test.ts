@@ -20,8 +20,7 @@ import type { TerminalEvent } from "../../../../../extensions/orbit/submission-l
 import { text } from "../fake-model";
 import { agentModels } from "../model";
 import { resolve } from "../providers";
-import type { Settled } from "../watch";
-import { orbitWatch, wakeups, Watching } from "./watch";
+import { orbitWatch, pollDelay, wakeups, Watching, type Settled } from "./watch";
 
 const ctx = BACKGROUND_CONTEXT;
 const LLM = "http://llm.test/v1";
@@ -385,5 +384,12 @@ describe("wakeups", () => {
     wake(id);
     await new Promise((r) => setTimeout(r, 0));
     expect(again).toBe(true);
+  });
+});
+
+describe("the watch's pace", () => {
+  it("waits longer between polls after the first minute, up to two minutes", () => {
+    const waits = Array.from({ length: 12 }, (_, i) => pollDelay(i + 1, 10_000) / 1000);
+    expect(waits).toEqual([10, 10, 10, 10, 10, 10, 20, 40, 80, 120, 120, 120]);
   });
 });
