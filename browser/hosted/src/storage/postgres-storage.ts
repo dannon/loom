@@ -318,6 +318,10 @@ type RevisionRow = { seq: string; kind: "base" | "delta"; version: number; conte
 
 export async function withTransaction<T>(pool: Pool, run: (client: PoolClient) => Promise<T>, begin = "BEGIN"): Promise<T> {
   const client = await pool.connect();
+  // A dropped connection also fails the query in flight, which is where it's handled; the pool only
+  // listens to idle clients, so a checked-out one's 'error' would otherwise take the process down.
+  const dropped = () => undefined;
+  client.on("error", dropped);
   // Set when BEGIN, ROLLBACK or COMMIT fails: that connection is destroyed rather than reused.
   let broken: Error | undefined;
   try {
@@ -352,6 +356,7 @@ export async function withTransaction<T>(pool: Pool, run: (client: PoolClient) =
     if (committed.command !== "COMMIT") throw new TransactionAbortedError(committed.command);
     return result;
   } finally {
+    client.off("error", dropped);
     client.release(broken);
   }
 }
