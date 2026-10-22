@@ -21,6 +21,8 @@ export interface Seen {
   /** What a Galaxy request authenticated with. */
   readonly authorization?: string;
   readonly apiKey?: string;
+  /** Epoch ms the request arrived. */
+  readonly at: number;
 }
 
 export interface StandIn {
@@ -44,7 +46,9 @@ type Message = { role: string; content: unknown };
 /**
  * The model's script. READ_H1 reads history h1, DELETE_H1 deletes it (the destructive gate asks
  * first), KEEP_GOING calls a tool after every result until a tool call is refused, SLOW answers after
- * three seconds; anything else, and any tool result, gets "ok".
+ * three seconds; anything else, and any tool result, gets "ok". READ_HISTORY and DELETE_HISTORY name
+ * the history; PAUSE_AFTER_TOOL holds the answer to a tool result for three seconds, so a run can be cut
+ * off between a Galaxy call and the model's reply.
  */
 async function modelAnswer(messages: Message[]): Promise<Response> {
   const last = messages.at(-1)!;
@@ -55,6 +59,9 @@ async function modelAnswer(messages: Message[]): Promise<Response> {
   // READ_HISTORY <id>: read a history of the user's choosing, so a test can tell whose requests are whose.
   const named = last.role === "user" ? /READ_HISTORY (\w+)/.exec(said) : null;
   if (named) return toolCall("get_history_details", { history_id: named[1]! });
+  const doomed = last.role === "user" ? /DELETE_HISTORY (\w+)/.exec(said) : null;
+  if (doomed) return toolCall("update_history", { history_id: doomed[1]!, deleted: true });
+  if (last.role === "tool" && user.includes("PAUSE_AFTER_TOOL")) await new Promise((resolve) => setTimeout(resolve, 3000));
   if (last.role === "user" && said.includes("DELETE_H1")) {
     return toolCall("update_history", { history_id: "h1", deleted: true });
   }
@@ -76,6 +83,7 @@ export async function startStandIn(): Promise<StandIn> {
       const body = JSON.parse(raw) as { messages: Message[] };
       const last = body.messages.at(-1)!;
       seen.push({
+        at: Date.now(),
         to: "model",
         method: req.method!,
         path,
@@ -87,6 +95,7 @@ export async function startStandIn(): Promise<StandIn> {
       answer = await modelAnswer(body.messages);
     } else {
       seen.push({
+        at: Date.now(),
         to: "galaxy",
         method: req.method!,
         path,
