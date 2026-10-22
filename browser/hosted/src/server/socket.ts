@@ -12,7 +12,12 @@ import type { WorkerMessage } from "../../../core/src/agent/worker";
 import type { AuthContext } from "../auth/routes";
 import { readCookie, SESSION_COOKIE, sessionOf } from "../auth/routes";
 import { findSession } from "../auth/sessions";
-import { createConversation, getConversation, titleIfUntitled, type ConversationRow } from "../dispatch/conversations";
+import {
+  createConversation,
+  getConversation,
+  titleIfUntitled,
+  type ConversationRow,
+} from "../dispatch/conversations";
 import type { DispatchEvent, Dispatcher } from "../dispatch/dispatcher";
 import type { FromWorker } from "../worker/protocol";
 import { storedSnapshot } from "./snapshot";
@@ -147,6 +152,7 @@ export class Sockets {
           return this.#handle(
             message,
             sub,
+            ws,
             send,
             (then) => (then ? this.#afterSnapshot.set(ws, then) : this.#afterSnapshot.delete(ws)),
             (id) => {
@@ -168,6 +174,7 @@ export class Sockets {
   async #handle(
     message: FromPage,
     sub: string,
+    ws: WebSocket,
     send: (message: ToPage) => void,
     afterSnapshot: (then: ((fromStore: boolean) => void) | undefined) => void,
     watch: (conversationId: string) => void,
@@ -226,7 +233,9 @@ export class Sockets {
           const titled = await titleIfUntitled(this.#c.auth.pool, id, message.text);
           // Best effort and not awaited: a page left with its old name isn't worth holding up the turn.
           if (titled?.pageId && this.#c.retitlePage) {
-            this.#c.retitlePage(titled).catch((error: Error) => this.#c.log?.(`page title for ${id}: ${error.message}`));
+            this.#c
+              .retitlePage(titled)
+              .catch((error: Error) => this.#c.log?.(`page title for ${id}: ${error.message}`));
           }
         }
         await dispatcher.submit(id, message.text);
@@ -236,11 +245,20 @@ export class Sockets {
         return;
       case "confirmed":
         // Under the kill switch a paused run doesn't go on: a yes counts as a no.
-        dispatcher.answer(
-          id,
-          Number(message.id),
-          message.approved === true && !this.#c.turnsDisabled,
-        );
+        if (
+          dispatcher.answer(
+            id,
+            Number(message.id),
+            message.approved === true && !this.#c.turnsDisabled,
+          )
+        ) {
+          // The same dialog is open in the user's other tabs; it's settled now, so close it there.
+          const withdrawn = JSON.stringify({
+            type: "withdrawn",
+            id: Number(message.id),
+          } satisfies ToPage);
+          for (const other of this.#watching.get(id) ?? []) if (other !== ws) other.send(withdrawn);
+        }
         return;
       case "reset": {
         // A new conversation; the old one stays in the list.
