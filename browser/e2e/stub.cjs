@@ -6,8 +6,7 @@ const path = require("path");
 const { pageContentProblem } = require("../../shared/galaxy-page-cells.js");
 
 // Which brain the drives run against (e2e/brain.cjs): a script that names a brain's own tool
-// picks the other brain's variant under EXPECT_BRAIN=orbit. The record script has none yet:
-// recovering a record by its page isn't wired for Orbit's brain.
+// picks the other brain's variant under EXPECT_BRAIN=orbit.
 const BRAIN = process.env.EXPECT_BRAIN || "browser";
 
 // The plugin package: its manifest and the static/ Galaxy serves.
@@ -509,9 +508,13 @@ const server = http.createServer(async (req, res) => {
             return answer(message("Submitted."));
         }
         if (script === "record") {
+            // Orbit's brain makes its record on the first thing it writes there: a run's block.
+            const call = BRAIN === "orbit"
+                ? { name: "run_tool", arguments: JSON.stringify({ history_id: "h-drecover", tool_id: "cat1", inputs: {} }) }
+                : { name: "notebook_resume", arguments: "{}" };
             return answer(last.role === "tool"
                 ? message("Noted in the record.")
-                : message("", [{ id: "call_1", type: "function", function: { name: "notebook_resume", arguments: "{}" } }]));
+                : message("", [{ id: "call_1", type: "function", function: call }]));
         }
         return answer(last.role === "tool" ? message("Done.") : message("", deleteHistory));
     }

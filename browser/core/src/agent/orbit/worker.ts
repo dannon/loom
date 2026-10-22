@@ -32,14 +32,15 @@ import {
 } from "../../../../../extensions/loom/submission-ledger";
 import { createPageRecordStore } from "../../../../../extensions/loom/record-store-page";
 import { registerArtifactKinds } from "../../artifacts/kinds";
-import { DEFAULT_BRAND, noteTag } from "../brand";
+import { DEFAULT_BRAND, noteTag, type Brand } from "../brand";
 import { Binding, FollowUps, heldBy } from "../documents";
 import { connectGalaxy, connectWeb, galaxyFetch } from "../galaxy";
 import { galaxyTools } from "../galaxy-tools";
+import { recordsOn, slugForSession, type RecordSummary } from "../notebook";
 import type { SessionReason } from "../pi-host";
 import { processTools } from "../processes";
 import { browserPython, pythonTool } from "../python";
-import { artifactsIn, context, Runtime } from "../runtime";
+import { artifactsIn, context, Runtime, type Placement } from "../runtime";
 import { holdStorage, openStorage } from "../storage";
 import { galaxyOps, type AgentFlavor } from "../tools";
 import { adaptTool, galaxyExtras, granted, type ShellToolHost } from "./adapter";
@@ -62,6 +63,11 @@ let flavor: AgentFlavor = {};
 let runtime: Runtime | undefined;
 let orbit: OrbitBoot | undefined;
 let conversation: Conversation | undefined;
+/** The launch waiting on the user to pick one of its history's records, or a new session. */
+let choosing: { placement: Placement; records: RecordSummary[]; unkept?: string } | undefined;
+
+/** Orbit's records under their own slug, so neither brain offers the other's. */
+const orbitBrand = (brand: Brand): Brand => ({ ...brand, id: `${brand.id}-orbit` });
 let detach: (() => Promise<unknown>) | undefined;
 let held: Waiting;
 let readOnly = false;
@@ -150,7 +156,7 @@ async function installRecord(id: ConversationId) {
   const harness = runtime!.harness;
   const bound = await harness.snapshot(Binding, id, context);
   const brand = flavor.brand ?? DEFAULT_BRAND;
-  const slug = `${brand.id}-orbit-${bound?.sessionId ?? id}`;
+  const slug = slugForSession(bound?.sessionId ?? String(id), orbitBrand(brand));
   setOrbitCwd(`/orbit/${id}`);
   setRecordStore(
     createPageRecordStore({
@@ -401,10 +407,30 @@ async function open(request: OpenRequest) {
   }
   const kept = await runtime.kept(request.placement);
   if (kept) return begin(kept, "resume", unkept);
-  return begin(await runtime.create(request.placement), "startup", unkept);
+  // As in the browser brain: the history's records say which sessions it had, and the user says
+  // which one this is, if any.
+  let records: RecordSummary[] = [];
+  let recordsProblem: string | undefined;
+  try {
+    const historyId = request.placement.historyId;
+    records = historyId ? await recordsOn(runtime.galaxy, historyId, orbitBrand(brand)) : [];
+  } catch (e) {
+    recordsProblem = String((e as Error)?.message ?? e);
+  }
+  if (records.length) {
+    choosing = { placement: request.placement, records, unkept };
+    post({ type: "recoverable", records });
+    return;
+  }
+  return begin(await runtime.create(request.placement), "startup", unkept, recordsProblem);
 }
 
-async function begin(next: Conversation, reason: SessionReason, unkept?: string) {
+async function begin(
+  next: Conversation,
+  reason: SessionReason,
+  unkept?: string,
+  recordsProblem?: string,
+) {
   await show(next, reason);
   post({
     type: "ready",
@@ -412,6 +438,7 @@ async function begin(next: Conversation, reason: SessionReason, unkept?: string)
     unkept,
     galaxy: runtime!.galaxyStatus,
     galaxyProblem: runtime!.galaxyProblem,
+    recordsProblem,
   });
 }
 
@@ -484,10 +511,14 @@ async function handle(data: PageMessage) {
   } else if (data.type === "saved") {
     await reply(data.id, () => runtime!.saved(conversation!, data.savedId, data.document));
   } else if (data.type === "recover") {
-    // The Orbit brain's records aren't the browser brain's: nothing to choose among yet.
-    post({
-      type: "failed",
-      message: "Recovering a record isn't available under Orbit's brain yet.",
-    });
+    if (!choosing) return;
+    const { placement, records, unkept } = choosing;
+    choosing = undefined;
+    const record = records.find((r) => r.pageId === data.pageId);
+    await begin(
+      await runtime!.create({ ...placement, ...(record ? { record } : {}) }),
+      "startup",
+      unkept,
+    );
   }
 }
