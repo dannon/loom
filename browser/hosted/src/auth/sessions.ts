@@ -37,9 +37,20 @@ export async function createSession(db: Queryable, key: Buffer, tokens: TokenSet
   return id;
 }
 
+/** The live session behind a cookie id, marked as used so the user's refreshes go through it. */
 export async function findSession(db: Queryable, id: string): Promise<Session | undefined> {
+  // A row locked by a refresh is already the one in use, and waiting on it would hold this request
+  // for as long as Keycloak takes to answer: skip the mark and just read it.
   const { rows } = await db.query<{ user_sub: string; expires_at: Date }>(
-    "SELECT user_sub, expires_at FROM orbit_sessions WHERE id_hash = $1 AND expires_at > now()",
+    `WITH used AS (
+       UPDATE orbit_sessions SET last_used_at = now()
+        WHERE id_hash = (SELECT id_hash FROM orbit_sessions WHERE id_hash = $1 FOR UPDATE SKIP LOCKED)
+          AND expires_at > now()
+        RETURNING user_sub, expires_at)
+     SELECT user_sub, expires_at FROM used
+     UNION ALL
+     SELECT user_sub, expires_at FROM orbit_sessions
+      WHERE id_hash = $1 AND expires_at > now() AND NOT EXISTS (SELECT 1 FROM used)`,
     [hashSessionId(id)],
   );
   const row = rows[0];
@@ -71,7 +82,7 @@ export function refreshForUser(pool: Pool, key: Buffer, oidc: Oidc): (sub: strin
       const { rows } = await client.query<{ id_hash: string; refresh_token: Buffer }>(
         `SELECT id_hash, refresh_token FROM orbit_sessions
           WHERE user_sub = $1 AND expires_at > now()
-          ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+          ORDER BY last_used_at DESC LIMIT 1 FOR UPDATE`,
         [sub],
       );
       const row = rows[0];
