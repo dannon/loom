@@ -65,6 +65,8 @@ export class Headless {
   private launch: Placement = {};
   private offered: RecordSummary[] = [];
   private posted: WorkerMessage[] = [];
+  /** The first posted message `settle` hasn't read the Settled of. */
+  private settledFrom = 0;
   private send: (message: PageMessage) => void = () => {};
 
   private constructor(
@@ -86,8 +88,7 @@ export class Headless {
 
   static async open(config: HeadlessConfig, options: HeadlessOptions) {
     // Orbit's brain and the worker under it are the process's: one session at a time.
-    if (orbitSession().runtime)
-      throw new Error("A Headless session is already open in this process.");
+    if (orbitSession().open) throw new Error("A Headless session is already open in this process.");
     const root = realpathSync(mkdtempSync(join(tmpdir(), "orbit-headless-")));
     const session = new Headless(config, options, root, process.cwd());
     process.chdir(root);
@@ -109,6 +110,7 @@ export class Headless {
   /** Start the worker on `placement`: what it offers to continue, or nothing once it is ready. */
   private async boot(storage: Storage, placement: Placement): Promise<RecordSummary[]> {
     this.posted = [];
+    this.settledFrom = 0;
     this.launch = placement;
     this.send = startOrbitWorker(this.options.flavor ?? {}, {
       post: (message) => this.receive(message),
@@ -128,7 +130,11 @@ export class Headless {
         ...(this.options.saved ? { saved: this.options.saved } : {}),
       },
     });
-    await until(() => this.posted.some((m) => /^(ready|recoverable|failed)$/.test(m.type)), 60_000);
+    const answered = await until(
+      () => this.posted.some((m) => /^(ready|recoverable|failed)$/.test(m.type)),
+      60_000,
+    );
+    if (!answered) throw new Error("The worker neither opened the session nor failed within 60s.");
     const failed = this.posted.find((m) => m.type === "failed");
     if (failed) throw new Error(failed.message);
     const recoverable = this.posted.find((m) => m.type === "recoverable");
@@ -184,7 +190,6 @@ export class Headless {
    */
   async settle(timeoutSeconds: number) {
     const deadline = Date.now() + timeoutSeconds * 1000;
-    const from = this.posted.length;
     let pending = await this.watching();
     while (Date.now() < deadline) {
       for (const id of pending) {
@@ -201,9 +206,11 @@ export class Headless {
       pending = await this.watching();
       if (idle === "timeout" || !pending.length) break;
     }
+    // From where the last settle stopped: work can settle during a turn, before this was called.
     const settled = this.posted
-      .slice(from)
+      .slice(this.settledFrom)
       .flatMap((m) => (m.type === "settled" ? [m.settled as Settled] : []));
+    this.settledFrom = this.posted.length;
     return { settled, pending: pending.length, entries: await this.fresh() };
   }
 
@@ -225,9 +232,15 @@ export class Headless {
   async recover(pageId?: string) {
     const record = this.offered.find((r) => r.pageId === pageId);
     if (pageId && !record) throw new Error(`No offered record ${pageId}.`);
+    if (!this.offered.length)
+      throw new Error("Nothing is offered to recover: the session is open.");
     const from = this.posted.length;
     this.send({ type: "recover", ...(record ? { pageId } : {}) });
-    await until(() => this.posted.slice(from).some((m) => /^(ready|failed)$/.test(m.type)), 60_000);
+    const answered = await until(
+      () => this.posted.slice(from).some((m) => /^(ready|failed)$/.test(m.type)),
+      60_000,
+    );
+    if (!answered) throw new Error("The worker neither started the session nor failed within 60s.");
     const failed = this.posted.slice(from).find((m) => m.type === "failed");
     if (failed) throw new Error(failed.message);
     this.offered = [];

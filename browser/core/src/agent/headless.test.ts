@@ -73,7 +73,7 @@ function server(replies: Reply[], galaxy: Record<string, unknown> = {}) {
     const path = url.pathname.replace(/^\//, "");
     const body =
       path in galaxy ? galaxy[path] : path === "api/version" ? { version_major: "26.1" } : {};
-    return typeof body === "function" ? body() : json(body);
+    return typeof body === "function" ? body(request) : json(body);
   });
   return { requests, hits };
 }
@@ -281,6 +281,49 @@ describe("a restart, as a browser with nothing stored does it", { timeout: 30_00
     await session.recover();
     expect((await bound(session))?.sessionId).not.toBe("sess-7");
     expect((await bound(session))?.pageId).toBeUndefined();
+  });
+});
+
+describe("waiting for Galaxy work", { timeout: 30_000 }, () => {
+  const JOB = "aaaa000000000001";
+
+  it("hands back work that settled before settle was called", async () => {
+    let content = "";
+    server(
+      [
+        { calls: [{ name: "run_tool", args: { history_id: "h1", tool_id: "cat1", inputs: {} } }] },
+        { text: "submitted" },
+      ],
+      {
+        "api/tools": { jobs: [{ id: JOB, tool_id: "cat1", history_id: "h1" }], outputs: [] },
+        [`api/jobs/${JOB}`]: { id: JOB, state: "ok", tool_id: "cat1", history_id: "h1" },
+        // The record the watch writes the job's block into.
+        "api/pages": (request: Request) =>
+          json(request.method === "POST" ? { id: "p1", slug: "s", history_id: "h1" } : []),
+        "api/pages/p1": async (request: Request) => {
+          if (request.method === "PUT")
+            content = ((await request.json()) as { content: string }).content;
+          return json({ id: "p1", slug: "s", history_id: "h1", content, content_editor: content });
+        },
+      },
+    );
+    const session = await open({ history_id: "h1" });
+    await session.turn("run cat");
+    // Settled while nobody was waiting: between the turn and the call to settle.
+    const posted = (session as unknown as { posted: Array<{ type: string }> }).posted;
+    await vi.waitFor(() => expect(posted.some((m) => m.type === "settled")).toBe(true), {
+      timeout: 10_000,
+    });
+    const { settled } = await session.settle(5);
+    expect(settled.map((s) => s.outcome)).toContain("completed");
+    // Handed back once.
+    expect((await session.settle(1)).settled).toEqual([]);
+  });
+
+  it("refuses to recover when nothing is on offer, rather than wait for an answer", async () => {
+    server([]);
+    const session = await open();
+    await expect(session.recover()).rejects.toThrow(/Nothing is offered/);
   });
 });
 

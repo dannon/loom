@@ -266,6 +266,33 @@ describe("the Orbit worker", { timeout: 30_000 }, () => {
     expect(seen("failed")[0].message).toContain("the record could not be made");
     // Shown again: the page's last snapshot is the first conversation's, its turn and all.
     expect(JSON.stringify(snapshots().at(-1)!.events)).toContain("first answer");
+    // The history continues the conversation shown again, not the one the failed reset made.
+    const { orbitSession } = await import("./worker");
+    const { runtime, conversation } = orbitSession();
+    expect((await runtime!.kept({ historyId: "h1" }))?.id).toBe(conversation!.id);
+    send({ type: "submit", text: "are you there?" });
+    await vi.waitFor(
+      () =>
+        expect(seen("events").some((m) => JSON.stringify(m.events).includes("still here"))).toBe(
+          true,
+        ),
+      { timeout: 10_000 },
+    );
+  });
+
+  it("takes the conversation back whole when leaving it fails partway through a reset", async () => {
+    const { send, seen } = await worker([() => text("still here")]);
+    const { orbitSession } = await import("./worker");
+    const host = orbitSession().host!;
+    // After its calls are quiesced: the conversation shown again has to admit them once more.
+    vi.spyOn(host, "settle").mockRejectedValueOnce(new Error("the calls would not settle"));
+    send({ type: "reset" });
+    await vi.waitFor(() => expect(seen("failed")).toHaveLength(1), { timeout: 10_000 });
+    expect(seen("failed")[0].message).toContain("the calls would not settle");
+    const notices = seen("notice").length;
+    send({ type: "submit", text: "/pending" });
+    await vi.waitFor(() => expect(seen("quiet")).toHaveLength(1), { timeout: 10_000 });
+    expect(seen("notice").length).toBeGreaterThan(notices);
     send({ type: "submit", text: "are you there?" });
     await vi.waitFor(
       () =>
@@ -321,6 +348,50 @@ describe("the Orbit worker", { timeout: 30_000 }, () => {
         ).toBe(true),
       { timeout: 10_000 },
     );
+  });
+
+  it("withdraws a waiting confirmation at Stop while a slower message is still in order", async () => {
+    const { send, seen } = await worker([
+      () => toolCall("update_history", { history_id: "h1", deleted: true }),
+      () => text("stopped"),
+    ]);
+    // A model switch whose server never answers holds every message after it in order.
+    const LOCAL = "http://local.test";
+    const fetched = globalThis.fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input instanceof Request ? input.url : input).startsWith(LOCAL)
+        ? new Promise<Response>(() => {})
+        : fetched(input, init),
+    );
+    send({ type: "submit", text: "delete my history" });
+    await vi.waitFor(() => expect(seen("confirm")).toHaveLength(1), { timeout: 10_000 });
+    const asked = seen("confirm")[0] as unknown as { id: number };
+    send({ type: "switch", id: 7, config: { ai_provider: "ollama", ai_base_url: LOCAL } });
+    send({ type: "stop" });
+    await vi.waitFor(
+      () =>
+        expect(
+          seen("events").some((m) =>
+            (m.events as Message[]).some((e) => e.type === "tool_execution_end"),
+          ),
+        ).toBe(true),
+      { timeout: 10_000 },
+    );
+    expect(seen("withdrawn")).toContainEqual({ type: "withdrawn", id: asked.id });
+    expect(seen("reply")).toHaveLength(0);
+  });
+
+  it("offers a read-only launch no Galaxy writer to call", async () => {
+    const { send, seen, prompts } = await worker(
+      [() => toolCall("update_history", { history_id: "h1", deleted: true }), () => text("ok")],
+      ["llm", "read"],
+    );
+    send({ type: "submit", text: "delete my history" });
+    await vi.waitFor(() => expect(prompts).toHaveLength(2), { timeout: 10_000 });
+    expect(prompts[0]).toContain('"get_histories"');
+    expect(prompts[0]).not.toContain('"update_history"');
+    // Not run, so nothing asked the user.
+    expect(seen("confirm")).toHaveLength(0);
   });
 
   it("answers a slash command with a notice and tells the page nothing is running", async () => {

@@ -247,6 +247,16 @@ export class Runtime {
     );
   }
 
+  /** Make `conversation` the one its history continues again, as it was before another took over. */
+  async continues(conversation: Conversation): Promise<void> {
+    const bound = await this.harness.snapshot(Binding, conversation.id, context);
+    if (!bound?.historyId) return;
+    const historyId = bound.historyId;
+    await this.harness.commit(async (tx) => {
+      (await tx.doc(Sessions)).byHistory[historyId] = conversation.id;
+    }, context);
+  }
+
   /** The conversation this browser keeps for the history, now on the dataset it was launched on. */
   async kept(placement: Placement): Promise<Conversation | undefined> {
     const index = await this.harness.snapshot(Sessions, context);
