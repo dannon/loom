@@ -76,7 +76,7 @@ async function preflight(browser, tier, url) {
             const build = spawnSync(
                 "npx",
                 ["vite", "build", "--config", CONFIG, "--configLoader", "runner", "--logLevel", "warn"],
-                { cwd: BROWSER, env: { ...process.env, VITE_ORBIT_BRAIN: "orbit", PREFLIGHT_OUT: out }, stdio: "inherit" },
+                { cwd: BROWSER, env: { ...process.env, PREFLIGHT_OUT: out }, stdio: "inherit" },
             );
             check("built: the preflight builds", build.status === 0);
             if (build.status === 0) {
@@ -89,7 +89,7 @@ async function preflight(browser, tier, url) {
             const dev = spawn(
                 "npx",
                 ["vite", "--config", CONFIG, "--configLoader", "runner", "--port", String(DEV_PORT), "--strictPort"],
-                { cwd: BROWSER, env: { ...process.env, VITE_ORBIT_BRAIN: "orbit" }, stdio: "ignore", detached: true },
+                { cwd: BROWSER, env: process.env, stdio: "ignore", detached: true },
             );
             cleanup.push(() => process.kill(-dev.pid));
             const url = `http://localhost:${DEV_PORT}/preflight.html`;

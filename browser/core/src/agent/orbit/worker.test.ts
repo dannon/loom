@@ -276,6 +276,53 @@ describe("the Orbit worker", { timeout: 30_000 }, () => {
     );
   });
 
+  it("puts a message sent during a reset into the new conversation", async () => {
+    const { send, seen } = await worker([() => text("hello again")]);
+    send({ type: "reset" });
+    send({ type: "submit", text: "the first words of the new conversation" });
+    const snapshots = () =>
+      seen("events").filter((m) => (m.events as Message[])[0]?.type === "snapshot");
+    await vi.waitFor(() => expect(snapshots()).toHaveLength(2), { timeout: 10_000 });
+    const second = seen("events").indexOf(snapshots()[1]);
+    await vi.waitFor(
+      () =>
+        expect(
+          seen("events")
+            .slice(second)
+            .some((m) =>
+              JSON.stringify(m.events).includes("the first words of the new conversation"),
+            ),
+        ).toBe(true),
+      { timeout: 10_000 },
+    );
+  });
+
+  it("withdraws a waiting confirmation at Stop and ends the call", async () => {
+    const { send, seen } = await worker([
+      () => toolCall("update_history", { history_id: "h1", deleted: true }),
+      () => text("stopped"),
+    ]);
+    send({ type: "submit", text: "delete my history" });
+    await vi.waitFor(() => expect(seen("confirm")).toHaveLength(1), { timeout: 10_000 });
+    const asked = seen("confirm")[0] as unknown as { id: number };
+    send({ type: "stop" });
+    await vi.waitFor(
+      () => expect(seen("withdrawn")).toContainEqual({ type: "withdrawn", id: asked.id }),
+      {
+        timeout: 10_000,
+      },
+    );
+    await vi.waitFor(
+      () =>
+        expect(
+          seen("events").some((m) =>
+            (m.events as Message[]).some((e) => e.type === "tool_execution_end"),
+          ),
+        ).toBe(true),
+      { timeout: 10_000 },
+    );
+  });
+
   it("answers a slash command with a notice and tells the page nothing is running", async () => {
     const { send, seen } = await worker([]);
     send({ type: "submit", text: "/pending" });

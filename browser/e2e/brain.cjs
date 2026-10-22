@@ -1,25 +1,19 @@
-// Which brain answered the drive that just ran, from the tools its requests declared: run-all.sh
-// runs this after every stub-backed drive, so a flag build that quietly boots the default brain
-// (or the reverse) fails the tier instead of passing on the old brain's behaviour.
+// That Orbit's brain answered the drive that just ran, from the tools its requests declared:
+// run-all.sh runs this after every stub-backed drive, so a build that quietly boots something else
+// fails the tier instead of passing on another brain's behaviour.
 //
-// EXPECT_BRAIN=browser (the default) or orbit. Each brain is known by a tool it declares under any
-// grant, read-only included: Orbit's galaxy_read_output and the browser brain's finish. Neither
-// declares the other's tools, record writers included.
-const MARKS = {
-    orbit: { always: "galaxy_read_output", never: ["finish", "notebook_resume"] },
-    browser: { always: "finish", never: ["galaxy_read_output", "galaxy_job_record"] },
-};
+// Orbit's brain is known by a tool it declares under any grant, read-only included
+// (galaxy_read_output), and by never declaring the browser brain's old ones.
+const MARKS = { always: "galaxy_read_output", never: ["finish", "notebook_resume"] };
 
-/** What is wrong with these prompts for `expected`, or [] when they fit; null when nothing says. */
-function grade(prompts, expected) {
-    const marks = MARKS[expected];
-    if (!marks) throw new Error(`EXPECT_BRAIN must be browser or orbit, not ${JSON.stringify(expected)}`);
+/** What is wrong with these prompts, or [] when they fit; null when nothing says. */
+function grade(prompts) {
     const declared = prompts.filter((p) => Array.isArray(p.tools) && p.tools.length > 0);
     // A drive that never reaches the model (credentials, a frame check) says nothing either way.
     if (declared.length === 0) return null;
     const failures = [];
-    if (!declared.some((p) => p.tools.includes(marks.always))) failures.push(`no request declared ${marks.always}`);
-    for (const name of marks.never) {
+    if (!declared.some((p) => p.tools.includes(MARKS.always))) failures.push(`no request declared ${MARKS.always}`);
+    for (const name of MARKS.never) {
         const at = declared.findIndex((p) => p.tools.includes(name));
         if (at >= 0) failures.push(`request ${at + 1} declared ${name}`);
     }
@@ -30,17 +24,16 @@ module.exports = { grade };
 
 if (require.main === module) {
     const STUB = process.env.STUB || "http://127.0.0.1:8099";
-    const expected = process.env.EXPECT_BRAIN || "browser";
     (async () => {
         const { prompts = [] } = await (await fetch(`${STUB}/__seen`)).json();
-        const failures = grade(prompts, expected);
+        const failures = grade(prompts);
         if (failures === null) {
-            console.log(`brain: no request declared tools; ${expected} not checked`);
+            console.log("brain: no request declared tools; not checked");
         } else if (failures.length) {
-            console.log(`brain: expected ${expected}, but ${failures.join("; ")}`);
+            console.log(`brain: expected Orbit's, but ${failures.join("; ")}`);
             process.exit(1);
         } else {
-            console.log(`brain: ${expected}`);
+            console.log("brain: orbit");
         }
     })().catch((error) => {
         console.error(`brain: ${error.message}`);

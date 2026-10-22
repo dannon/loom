@@ -3,7 +3,6 @@
 const playwright = require("playwright");
 const BROWSER = process.env.BROWSER || "chromium";
 const STUB = "http://127.0.0.1:8099";
-const ORBIT = process.env.EXPECT_BRAIN === "orbit";
 const LAUNCH = `${STUB}/plugins/visualizations/olit?dataset_id=dreset&frame=1`;
 
 const results = [];
@@ -13,7 +12,7 @@ function check(name, ok, detail) {
 }
 
 const get = async (path) => (await fetch(`${STUB}${path}`)).json();
-// Orbit's brain keeps its job blocks on the page as base64 carriers (galaxy-markdown-adapter.ts).
+// The brain keeps its job blocks on the page as base64 carriers (galaxy-markdown-adapter.ts).
 const decoded = (content) =>
     content.replace(/^\[[a-z]+-[a-z]+:v1\]: #[a-z]+ "([A-Za-z0-9+/=]+)"[ \t]*$/gm, (_, b64) =>
         Buffer.from(b64, "base64").toString("utf8"));
@@ -21,9 +20,9 @@ const record = async () => {
     const page = (await get("/__pages")).pages.find((p) => p.history_id === "h-dreset");
     return page && { ...page, content: decoded(page.content || "") };
 };
-// Each brain's line for a job it just submitted, and for one that finished.
-const SUBMITTED = ORBIT ? /job_id: jreset1\b[\s\S]*status: in_progress/ : /jreset1`? — submitted/;
-const FINISHED = ORBIT ? /job_id: jreset1\b[\s\S]*status: completed/ : /finished \(ok\)/;
+// The job's block, just submitted and once it finished.
+const SUBMITTED = /job_id: jreset1\b[\s\S]*status: in_progress/;
+const FINISHED = /job_id: jreset1\b[\s\S]*status: completed/;
 const shown = (frame, pattern, ms = 120000) =>
     frame.locator(`text=${pattern}`).first().waitFor({ timeout: ms }).then(() => true, () => false);
 
