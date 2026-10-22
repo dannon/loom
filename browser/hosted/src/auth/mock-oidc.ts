@@ -23,8 +23,11 @@ export interface MockOidc {
   close(): Promise<void>;
 }
 
-export async function startMockOidc(options: { clientId?: string; clientSecret?: string } = {}): Promise<MockOidc> {
+export async function startMockOidc(
+  options: { clientId?: string; clientSecret?: string; accessTtlS?: number } = {},
+): Promise<MockOidc> {
   const clientId = options.clientId ?? "orbit";
+  const accessTtl = options.accessTtlS ?? 300;
   const clientSecret = options.clientSecret;
   const { privateKey, publicKey } = await generateKeyPair("RS256");
   const jwk: JWK = { ...(await exportJWK(publicKey)), kid: "k1", alg: "RS256", use: "sig" };
@@ -45,11 +48,11 @@ export async function startMockOidc(options: { clientId?: string; clientSecret?:
     const refresh = randomBytes(24).toString("base64url");
     refreshTokens.set(refresh, { sub, used: false, revoked: false });
     return {
-      access_token: await sign({ sub, aud: "galaxy-api", azp: clientId }, 300),
-      id_token: await sign({ sub, aud: clientId }, 300),
+      access_token: await sign({ sub, aud: "galaxy-api", azp: clientId }, accessTtl),
+      id_token: await sign({ sub, aud: clientId }, accessTtl),
       refresh_token: refresh,
       token_type: "Bearer",
-      expires_in: 300,
+      expires_in: accessTtl,
       refresh_expires_in: 1800,
     };
   };
