@@ -273,7 +273,16 @@ function inOrder(work: () => Promise<unknown>) {
 export function startAgentWorker(agentFlavor: AgentFlavor): void {
   // A literal at build time: a default build drops this branch and never bundles Orbit's brain.
   if (process.env.orbit_brain === "orbit") {
-    void import("./orbit/worker").then(({ startOrbitWorker }) => startOrbitWorker(agentFlavor));
+    // The page posts "open" as soon as the worker exists, and a message with no handler is
+    // dropped; unbundled (the dev server), Orbit's worker takes hundreds of fetches to load.
+    const early: MessageEvent[] = [];
+    self.onmessage = (event) => early.push(event);
+    import("./orbit/worker")
+      .then(({ startOrbitWorker }) => {
+        startOrbitWorker(agentFlavor);
+        for (const event of early) self.onmessage?.call(self, event);
+      })
+      .catch(failed);
     return;
   }
   flavor = agentFlavor;
