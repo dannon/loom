@@ -238,10 +238,33 @@ async function leave(left: Conversation) {
   await orbit!.host.shutdown("new");
 }
 
-/** Show `next` on the page and start its session in Orbit's brain. */
+/**
+ * Show `next` on the page and start its session in Orbit's brain. A switch that fails partway
+ * goes back to the conversation that was shown, as switching back to it would, so the page is
+ * never left on a conversation with no session; the failure is still reported.
+ */
 async function show(next: Conversation, reason: SessionReason) {
-  if (conversation && conversation.id !== next.id) await leave(conversation);
+  const previous = conversation;
+  try {
+    if (previous && previous.id !== next.id) await leave(previous);
+    await enter(next, reason);
+  } catch (err) {
+    if (previous && previous.id !== next.id) {
+      try {
+        await enter(previous, "resume");
+      } catch (again) {
+        // Nothing is shown now: messages wait for the next open rather than reach a half-bound one.
+        conversation = undefined;
+        console.error("[orbit] could not go back to the conversation that was shown:", again);
+      }
+    }
+    throw err;
+  }
+}
+
+async function enter(next: Conversation, reason: SessionReason) {
   await detach?.();
+  detach = undefined;
   conversation = next;
   held = undefined;
   const harness = runtime!.harness;

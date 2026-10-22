@@ -28,6 +28,8 @@ function galaxy(
   const puts: string[] = [];
   let created = 0;
   let hold: { page: string; gate: Promise<void> } | undefined;
+  let jobHold: Promise<void> | undefined;
+  let jobAsked = 0;
   const job = { state: "running" };
   const handle = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
@@ -58,6 +60,8 @@ function galaxy(
       return json({ jobs: [{ id: JOB, tool_id: "cat1", history_id: "h1" }], outputs: [] });
     }
     if (path.startsWith("/api/jobs/")) {
+      jobAsked += 1;
+      if (jobHold) await jobHold;
       return json({ id: JOB, state: job.state, tool_id: "cat1", history_id: "h1", outputs: {} });
     }
     return json({});
@@ -67,6 +71,18 @@ function galaxy(
     puts,
     job,
     handle,
+    get jobAsked() {
+      return jobAsked;
+    },
+    /** Hold every job status request until the returned release. */
+    holdJobs() {
+      let release!: () => void;
+      jobHold = new Promise<void>((r) => (release = r));
+      return () => {
+        jobHold = undefined;
+        release();
+      };
+    },
     holdWrites(page: string) {
       let release!: () => void;
       hold = { page, gate: new Promise<void>((r) => (release = r)) };
@@ -84,6 +100,7 @@ async function worker(
   capabilities = ["llm", "read", "write"],
   config: Record<string, unknown> = {},
   seed: Parameters<typeof galaxy>[0] = [],
+  flavor: object = {},
 ) {
   vi.resetModules();
   const fake = galaxy(seed);
@@ -106,7 +123,7 @@ async function worker(
   };
   vi.stubGlobal("self", self);
   const { startOrbitWorker } = await import("./worker");
-  startOrbitWorker({});
+  startOrbitWorker(flavor);
   const send = (data: unknown) => self.onmessage!({ data });
   const seen = (type: string) => posted.filter((m) => m.type === type);
   send({
@@ -198,6 +215,67 @@ describe("the Orbit worker", { timeout: 30_000 }, () => {
     });
   });
 
+  it("keeps each conversation's approvals in its own registry, so /pending never shows another's", async () => {
+    const { send, seen } = await worker([]);
+    const { getSessionRegistry } = await import("../../../../../extensions/loom/registry-runtime");
+    const first = getSessionRegistry()!;
+    expect(first.store.mode).toBe("writer");
+    send({ type: "reset" });
+    const snapshots = () =>
+      seen("events").filter((m) => (m.events as Message[])[0]?.type === "snapshot");
+    await vi.waitFor(() => expect(snapshots()).toHaveLength(2), { timeout: 10_000 });
+    const second = getSessionRegistry()!;
+    expect(second.analysisDir).toMatch(/^\/orbit\/[^/]+$/);
+    expect(second.analysisDir).not.toBe(first.analysisDir);
+    expect(second.store.registryPath).not.toBe(first.store.registryPath);
+    expect(second.store.mode).toBe("writer");
+  });
+
+  it("goes back to the conversation that was shown when a switch fails partway, and says so", async () => {
+    // The brand is read when each record store is made: fail that once, for the new conversation.
+    let failNext = false;
+    const flavor = {
+      get brand() {
+        if (failNext) {
+          failNext = false;
+          throw new Error("the record could not be made");
+        }
+        return undefined;
+      },
+    };
+    const { send, seen } = await worker(
+      [() => text("first answer"), () => text("still here")],
+      undefined,
+      undefined,
+      undefined,
+      flavor,
+    );
+    const snapshots = () =>
+      seen("events").filter((m) => (m.events as Message[])[0]?.type === "snapshot");
+    send({ type: "submit", text: "hello" });
+    await vi.waitFor(
+      () =>
+        expect(seen("events").some((m) => JSON.stringify(m.events).includes("first answer"))).toBe(
+          true,
+        ),
+      { timeout: 10_000 },
+    );
+    failNext = true;
+    send({ type: "reset" });
+    await vi.waitFor(() => expect(seen("failed")).toHaveLength(1), { timeout: 10_000 });
+    expect(seen("failed")[0].message).toContain("the record could not be made");
+    // Shown again: the page's last snapshot is the first conversation's, its turn and all.
+    expect(JSON.stringify(snapshots().at(-1)!.events)).toContain("first answer");
+    send({ type: "submit", text: "are you there?" });
+    await vi.waitFor(
+      () =>
+        expect(seen("events").some((m) => JSON.stringify(m.events).includes("still here"))).toBe(
+          true,
+        ),
+      { timeout: 10_000 },
+    );
+  });
+
   it("answers a slash command with a notice and tells the page nothing is running", async () => {
     const { send, seen } = await worker([]);
     send({ type: "submit", text: "/pending" });
@@ -263,6 +341,43 @@ describe("the Orbit worker", { timeout: 30_000 }, () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(prompts).toHaveLength(3);
     expect(seen("settled")).toHaveLength(1);
+  });
+
+  it("lets a poll that was in flight when the user switched land on the conversation it was for", async () => {
+    const { fake, send, seen, posted, prompts } = await worker(
+      [
+        () => toolCall("run_tool", { history_id: "h1", tool_id: "cat1", inputs: {} }),
+        () => text("submitted"),
+      ],
+      ["llm", "read", "write"],
+      { poll_ms: 5 },
+    );
+    const { galaxyMarkdownToLoom } =
+      await import("../../../../../extensions/loom/galaxy-markdown-adapter");
+    send({ type: "submit", text: "run cat on it" });
+    await vi.waitFor(() => expect(fake.pages.size).toBe(1), { timeout: 10_000 });
+    const [left] = [...fake.pages.keys()];
+    const record = () => galaxyMarkdownToLoom(fake.pages.get(left)!.content);
+    await vi.waitFor(() => expect(prompts).toHaveLength(2), { timeout: 10_000 });
+    // The job finishes while the tick asking about it is held mid-poll.
+    const release = fake.holdJobs();
+    const asked = fake.jobAsked;
+    fake.job.state = "ok";
+    await vi.waitFor(() => expect(fake.jobAsked).toBeGreaterThan(asked), { timeout: 10_000 });
+    send({ type: "reset" });
+    await new Promise((r) => setTimeout(r, 50));
+    release();
+    const snapshots = () =>
+      seen("events").filter((m) => (m.events as Message[])[0]?.type === "snapshot");
+    await vi.waitFor(() => expect(snapshots()).toHaveLength(2), { timeout: 10_000 });
+    await vi.waitFor(() => expect(record()).toMatch(/status: completed/), { timeout: 10_000 });
+    await new Promise((r) => setTimeout(r, 100));
+    // The switch waits for Galaxy work in flight, so the tick lands while the first conversation
+    // is still shown: its Settled goes out before the new conversation's snapshot, never after.
+    const second = posted.indexOf(snapshots()[1]);
+    expect(seen("settled")).toHaveLength(1);
+    expect(posted.indexOf(seen("settled")[0])).toBeLessThan(second);
+    expect(fake.pages.size).toBe(1);
   });
 
   it("keeps a conversation's record current after Reset leaves it, with no follow-up nobody sees", async () => {
