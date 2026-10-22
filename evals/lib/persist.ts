@@ -10,6 +10,7 @@ import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import type { ScenarioRun } from "./types.js";
+import { runUsage } from "./usage.js";
 
 function gitShortSha(): string {
   try {
@@ -17,11 +18,6 @@ function gitShortSha(): string {
   } catch {
     return "nosha";
   }
-}
-
-function turnUsage(run: ScenarioRun): unknown {
-  const turnEnd = run.events.find((e) => e.type === "turn_end");
-  return (turnEnd as { usage?: unknown } | undefined)?.usage ?? null;
 }
 
 export function writeResultsJsonl(runs: ScenarioRun[], outDir: string): string | null {
@@ -39,7 +35,7 @@ export function writeResultsJsonl(runs: ScenarioRun[], outDir: string): string |
       passed: r.failures.length === 0,
       failedDimensions: [...new Set(r.failures.map((f) => f.dimension ?? "other"))],
       failures: r.failures.map((f) => ({ assertion: f.assertion, detail: f.detail })),
-      usage: turnUsage(r),
+      usage: runUsage(r),
       durationMs: r.durationMs,
     }),
   );

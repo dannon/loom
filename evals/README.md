@@ -120,6 +120,16 @@ than a coin-flip. The runner prints a `model x dimension` leaderboard grid
 and writes one JSON line per run to `evals/results/<date>-<sha>.jsonl`
 (gitignored) for diffing models over time and across Loom prompt changes.
 
+Each run's `usage` is summed over every model call it made (pi emits one
+`turn_end` per call, with the usage on `turn_end.message.usage`): `calls`,
+`errors` (calls that ended in an error or abort, such as a provider 429),
+`input`, `output`, `cacheRead`, `cacheWrite`, `totalTokens`, and `cost`. The
+report prints it under each run and as a per-model token table, so a prompt or
+tool change can be judged on cost as well as pass rate. `input` is pi's
+uncached input, so prompt size shows up across `input`, `cacheRead`, and
+`cacheWrite` together. Cost uses pi's per-model prices, which are 0 for the
+TACC matrix, so only the token counts mean anything there.
+
 ## Model matrix
 
 `evals/models.json` is the 7-model TACC matrix (all on the one SambaNova
