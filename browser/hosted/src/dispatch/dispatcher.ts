@@ -106,6 +106,8 @@ interface Live {
   renew?: NodeJS.Timeout;
   turn?: Turn;
   exited: boolean;
+  /** Set when the host ends the worker on purpose (the turn cap, a lost lease), so its exit isn't a crash. */
+  retired?: boolean;
 }
 
 type TurnJob = { conversationId: string; attempt?: number };
@@ -122,6 +124,8 @@ export class Dispatcher {
   readonly #handling = new Set<string>();
   /** Bookkeeping still writing (a turn's end, a worker's exit), which shutdown waits for. */
   readonly #settling = new Set<Promise<unknown>>();
+  /** Workers that crashed mid-turn since the conversation last settled, so a crash loop gives up. */
+  readonly #crashes = new Map<string, number>();
   #working = false;
   #stopping = false;
 
@@ -323,7 +327,9 @@ export class Dispatcher {
         if (gen === undefined) throw new Busy("the lease");
         // Marked for as long as the turn lasts, so a host killed outright (no exit handlers, no
         // shutdown) still leaves the conversation for the next host's sweeper.
-        await client.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [conversationId]);
+        await client.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [
+          conversationId,
+        ]);
         return gen;
       });
     } catch (error) {
@@ -399,7 +405,10 @@ export class Dispatcher {
     const arm = (ms: number) => {
       turn.cap = setTimeout(() => {
         if (live.asks.size > 0) arm(30_000);
-        else void live.worker.terminate();
+        else {
+          live.retired = true;
+          void live.worker.terminate();
+        }
       }, ms);
     };
     arm(this.#o.lease.maxTurnMs);
@@ -511,7 +520,9 @@ export class Dispatcher {
     live.renew = setInterval(() => {
       renewLease(pool, live.storeId, holder, this.#o.lease.ttlMs).then(
         (held) => {
-          if (!held) void worker.terminate();
+          if (held) return;
+          live.retired = true;
+          void worker.terminate();
         },
         (error: Error) =>
           this.#o.log?.(`lease renewal for ${conversation.id} failed: ${error.message}`),
@@ -582,6 +593,7 @@ export class Dispatcher {
         break;
       case "settled":
         if (live.turn?.running) this.#endTurn(live, "settled");
+        this.#crashes.delete(live.conversationId);
         break;
       case "report":
         this.#o.log?.(`conversation ${live.conversationId}: ${message.message}`);
@@ -628,6 +640,16 @@ export class Dispatcher {
         await this.#releaseLoop(live.sub, live.conversationId).catch(() => undefined);
       } else {
         this.#endTurn(live, "interrupted");
+        // A crash (a dropped database connection, an uncaught error) resumes the run on a fresh
+        // worker now, as the notice tells the user, rather than at their next message.
+        if (!this.#stopping && !live.retired) {
+          const attempt = (this.#crashes.get(live.conversationId) ?? 0) + 1;
+          this.#crashes.set(live.conversationId, attempt);
+          await this.#retry({ conversationId: live.conversationId, attempt }, "failed").catch(
+            (error: Error) =>
+              this.#o.log?.(`resuming ${live.conversationId} failed: ${error.message}`),
+          );
+        }
       }
     }
     this.#o.onEvent(live.conversationId, { type: "worker-exit", code });
