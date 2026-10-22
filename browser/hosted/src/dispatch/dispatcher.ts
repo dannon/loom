@@ -65,6 +65,11 @@ export interface DispatcherOptions {
   readonly turnsDisabled?: () => string | undefined;
   /** How long a turn that couldn't start waits before trying again, by attempt (0-based). */
   readonly retryDelayMs?: (attempt: number) => number;
+  /**
+   * How long a turn job's handler can go silent before pg-boss's monitor fails the job: a host killed
+   * outright leaves its job active, and the conversation's next job can't start until it isn't.
+   */
+  readonly jobHeartbeatSeconds?: number;
   readonly spawn?: (bundle: string, data: WorkerData) => Worker;
   readonly log?: (message: string) => void;
 }
@@ -127,14 +132,20 @@ export class Dispatcher {
   /** Create the queue if needed, start taking turns, and pick up conversations a restart cut off. */
   async start(): Promise<void> {
     const { boss } = this.#o;
-    if (!(await boss.getQueue(TURN_QUEUE))) {
+    const heartbeatSeconds = this.#o.jobHeartbeatSeconds ?? 30;
+    const queue = await boss.getQueue(TURN_QUEUE);
+    if (!queue) {
       await boss.createQueue(TURN_QUEUE, {
         policy: "stately",
         // A handler waits at most for a boot and the turn cap: it returns once the run asks the
         // user anything, and the cap stops a run that goes on.
         expireInSeconds: Math.ceil(this.#o.lease.maxTurnMs / 1000) + 600,
         retryLimit: 0,
+        heartbeatSeconds,
       });
+    } else if (queue.heartbeatSeconds !== heartbeatSeconds) {
+      // Queues made before the heartbeat existed.
+      await boss.updateQueue(TURN_QUEUE, { heartbeatSeconds });
     }
     await boss.work(
       TURN_QUEUE,
@@ -310,6 +321,9 @@ export class Dispatcher {
           this.#o.lease.ttlMs,
         );
         if (gen === undefined) throw new Busy("the lease");
+        // Marked for as long as the turn lasts, so a host killed outright (no exit handlers, no
+        // shutdown) still leaves the conversation for the next host's sweeper.
+        await client.query("UPDATE orbit_conversations SET interrupted = true WHERE id = $1", [conversationId]);
         return gen;
       });
     } catch (error) {
