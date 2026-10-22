@@ -5,7 +5,7 @@
  * would change agent behaviour without a commit saying so. Exits 0 even when behind, so
  * this can run in CI as information rather than as a gate.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -39,25 +39,6 @@ async function github(path) {
   const res = await fetch(`https://api.github.com/${path}`, { headers });
   if (!res.ok) throw new Error(`GitHub ${res.status} for ${path}`);
   return res.json();
-}
-
-async function skills() {
-  const lock = read("core/skills.lock.json");
-  const head = await github(`repos/${lock.repo}/commits/${lock.ref || "main"}`);
-  if (head.sha === lock.sha) {
-    return `skills     up to date at ${lock.sha.slice(0, 8)} (${lock.repo}@${lock.ref})`;
-  }
-  const cmp = await github(`repos/${lock.repo}/compare/${lock.sha}...${head.sha}`);
-  const touched = (cmp.files || []).filter((f) => f.filename.startsWith("skills/")).length;
-  // Inside the loom repo the lock follows Orbit's manifest; browser/ alone owns its lock.
-  const update = existsSync(join(HERE, "..", "scripts", "skills.manifest.json"))
-    ? "bump scripts/skills.manifest.json at the repo root, npm run sync:skills, node core/scripts/install_skills.js"
-    : "edit core/skills.lock.json, node core/scripts/install_skills.js";
-  return (
-    `skills     BEHIND by ${cmp.total_commits} commit(s): ${lock.sha.slice(0, 8)} -> ${head.sha.slice(0, 8)}\n` +
-    `           ${touched} file(s) changed under skills/, the subtree olit vendors\n` +
-    `           update: ${update}`
-  );
 }
 
 async function npmLatest(pkg) {
@@ -98,7 +79,7 @@ async function galaxyCharts() {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  const results = await Promise.allSettled([skills(), galaxyOps(), galaxyCharts()]);
+  const results = await Promise.allSettled([galaxyOps(), galaxyCharts()]);
   for (const r of results) {
     console.log(r.status === "fulfilled" ? r.value : `(could not check: ${r.reason.message})`);
   }

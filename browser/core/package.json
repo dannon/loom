@@ -20,7 +20,6 @@
   },
   "scripts": {
     "build:pyodide": "node scripts/install_pyodide.js",
-    "build:skills": "node scripts/install_skills.js",
     "test:unit": "vitest run",
     "test:watch": "vitest --watch",
     "typecheck": "tsc --noEmit"
