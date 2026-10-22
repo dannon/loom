@@ -264,4 +264,32 @@ describe("the Orbit worker", { timeout: 30_000 }, () => {
     expect(prompts).toHaveLength(3);
     expect(seen("settled")).toHaveLength(1);
   });
+
+  it("keeps a conversation's record current after Reset leaves it, with no follow-up nobody sees", async () => {
+    const { fake, send, seen, prompts } = await worker(
+      [
+        () => toolCall("run_tool", { history_id: "h1", tool_id: "cat1", inputs: {} }),
+        () => text("submitted"),
+      ],
+      ["llm", "read", "write"],
+      { poll_ms: 5 },
+    );
+    const { galaxyMarkdownToLoom } =
+      await import("../../../../../extensions/loom/galaxy-markdown-adapter");
+    send({ type: "submit", text: "run cat on it" });
+    await vi.waitFor(() => expect(fake.pages.size).toBe(1), { timeout: 10_000 });
+    const [left] = [...fake.pages.keys()];
+    const record = () => galaxyMarkdownToLoom(fake.pages.get(left)!.content);
+    await vi.waitFor(() => expect(record()).toContain(`job_id: ${JOB}`), { timeout: 10_000 });
+    await vi.waitFor(() => expect(prompts).toHaveLength(2), { timeout: 10_000 });
+    send({ type: "reset" });
+    const snapshots = () =>
+      seen("events").filter((m) => (m.events as Message[])[0]?.type === "snapshot");
+    await vi.waitFor(() => expect(snapshots()).toHaveLength(2), { timeout: 10_000 });
+    fake.job.state = "ok";
+    await vi.waitFor(() => expect(record()).toMatch(/status: completed/), { timeout: 10_000 });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(prompts).toHaveLength(2);
+    expect(seen("settled")).toEqual([]);
+  });
 });

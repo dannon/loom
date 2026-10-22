@@ -25,6 +25,11 @@ export function setRecordStore(store: RecordStore | null): void {
   else byKey.clear();
 }
 
+/** Keep `store` by key without binding it: an unshown conversation's record a shell polls. */
+export function addRecordStore(store: RecordStore): void {
+  byKey.set(store.key, store);
+}
+
 export function installedRecordStore(): RecordStore | null {
   return installed;
 }

@@ -85,6 +85,8 @@ let timer: ReturnType<typeof setInterval> | null = null;
  * rather than a boolean lets a caller wait for the one already in flight.
  */
 let inFlightTick: Promise<TickRun> | null = null;
+/** The record the running tick was pinned to, if a caller named one. */
+let inFlightPinned: string | undefined;
 /**
  * Bumped by every startGalaxyPoller. A tick that spans a session switch still
  * writes by the record key it pinned, but finds this moved and leaves the new
@@ -104,6 +106,12 @@ export interface PollOptions {
   reconcile?: boolean;
   /** Capture answered submissions that never got a block before polling. */
   recover?: boolean;
+  /**
+   * Poll this record rather than the bound one: a shell keeping an unshown conversation's record
+   * current. Its blocks move and its events are confirmed, but nothing is announced or delivered
+   * until the record is bound again.
+   */
+  recordKey?: string;
 }
 
 /** What one tick left behind, for a caller that drives the polling itself. */
@@ -709,9 +717,17 @@ function invocationHooks(nbPath: string): InvocationPersistHooks {
 
 /** Run a poll tick now, or hand back the one already running. */
 function tick(options: PollOptions = {}): Promise<TickRun> {
+  const key = options.recordKey ?? getNotebookPath();
+  // A tick pinned to another record answers for that record only: wait it out.
+  if (inFlightTick && inFlightPinned !== undefined && inFlightPinned !== key) {
+    const after = () => tick(options);
+    return inFlightTick.then(after, after);
+  }
   if (inFlightTick) return inFlightTick;
+  inFlightPinned = options.recordKey;
   inFlightTick = runTick(options).finally(() => {
     inFlightTick = null;
+    inFlightPinned = undefined;
   });
   return inFlightTick;
 }
@@ -723,7 +739,7 @@ function tick(options: PollOptions = {}): Promise<TickRun> {
  */
 export async function pollGalaxyNow(options: PollOptions = {}): Promise<TickResult> {
   // A tick already running was started without these asks: wait it out, then run one that has them.
-  if (options.awaitEnrichment || options.reconcile || options.recover) {
+  if (options.awaitEnrichment || options.reconcile || options.recover || options.recordKey) {
     while (inFlightTick) await inFlightTick;
   }
   return tickResult(await tick(options));
@@ -780,12 +796,16 @@ async function tickResult(run: TickRun): Promise<TickResult> {
 async function runTick(options: PollOptions): Promise<TickRun> {
   // Everything this tick writes goes by this key, so a tick that outlives a
   // session switch still lands in its own record.
-  const tickNotebook = getNotebookPath();
+  const tickNotebook = options.recordKey ?? getNotebookPath();
   const tickGeneration = generation;
   // Still this tick's to report if no session started since, or the one that did is on the same
-  // record: a replacement on the same notebook would never see these blocks in flight again.
+  // record: a replacement on the same notebook would never see these blocks in flight again. A
+  // pinned record is this tick's to report only while it's the bound one.
   const current = () =>
-    tickGeneration === generation || (tickNotebook !== null && getNotebookPath() === tickNotebook);
+    options.recordKey !== undefined
+      ? getNotebookPath() === tickNotebook
+      : tickGeneration === generation ||
+        (tickNotebook !== null && getNotebookPath() === tickNotebook);
   // Returned by reference, so the early returns below still carry what the finally delivers.
   const run: TickRun = { recordKey: tickNotebook, transitions: [] };
   try {
@@ -807,8 +827,9 @@ async function runTick(options: PollOptions): Promise<TickRun> {
     // -- advancing in-flight invocations and jobs -- must not wait behind one
     // that is talking to a Galaxy that has stopped answering. The hook is
     // responsible for its own re-entrancy; both failure paths are swallowed
-    // here so a rejection cannot surface as an unhandled one.
-    if (tickHook) {
+    // here so a rejection cannot surface as an unhandled one. A panel shows the bound record,
+    // so an unshown one's pinned tick doesn't feed it.
+    if (tickHook && (options.recordKey === undefined || current())) {
       try {
         void tickHook(content).catch((err) => {
           console.error("[galaxy-poller] tick hook failed:", err);

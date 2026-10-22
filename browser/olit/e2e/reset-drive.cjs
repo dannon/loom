@@ -1,6 +1,5 @@
 // Reset leaves the old conversation behind with Galaxy work still running. That work may finish
 // and update the old conversation's record, but it must not start a model request nobody sees.
-// Under Orbit's brain the old record catches up when its conversation is next shown, not before.
 const playwright = require("playwright");
 const BROWSER = process.env.BROWSER || "chromium";
 const STUB = "http://127.0.0.1:8099";
@@ -22,8 +21,9 @@ const record = async () => {
     const page = (await get("/__pages")).pages.find((p) => p.history_id === "h-dreset");
     return page && { ...page, content: decoded(page.content || "") };
 };
-// Each brain's line for a job it just submitted.
+// Each brain's line for a job it just submitted, and for one that finished.
 const SUBMITTED = ORBIT ? /job_id: jreset1\b[\s\S]*status: in_progress/ : /jreset1`? — submitted/;
+const FINISHED = ORBIT ? /job_id: jreset1\b[\s\S]*status: completed/ : /finished \(ok\)/;
 const shown = (frame, pattern, ms = 120000) =>
     frame.locator(`text=${pattern}`).first().waitFor({ timeout: ms }).then(() => true, () => false);
 
@@ -52,18 +52,12 @@ const shown = (frame, pattern, ms = 120000) =>
     const before = (await get("/__seen")).calls;
 
     await fetch(`${STUB}/__job?state=ok`);
-    if (ORBIT) {
-        // Orbit's watch polls only the conversation on the page; this record waits for its next show.
-        console.log("SKIP  the old conversation's record shows the job finished  — not until it is shown again");
-        await page.waitForTimeout(5000);
-    } else {
-        let finished = false;
-        for (let i = 0; i < 40 && !finished; i++) {
-            await page.waitForTimeout(1000);
-            finished = /finished \(ok\)/.test((await record())?.content || "");
-        }
-        check("the old conversation's record shows the job finished", finished);
+    let finished = false;
+    for (let i = 0; i < 40 && !finished; i++) {
+        await page.waitForTimeout(1000);
+        finished = FINISHED.test((await record())?.content || "");
     }
+    check("the old conversation's record shows the job finished", finished);
     // Past the watch's next poll, so a follow-up would have been sent by now.
     await page.waitForTimeout(3000);
     const after = (await get("/__seen")).calls;

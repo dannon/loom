@@ -274,4 +274,86 @@ describe("the poller on the desktop, across a switch to another record", () => {
   function statuses() {
     return findJobBlocks(readFileSync(nb, "utf8")).map((j) => j.status);
   }
+
+  describe("a tick pinned to an unshown conversation's record", () => {
+    let dir: string;
+    let nb: string;
+    let other: string;
+    const notify = vi.fn();
+    const resume = vi.fn();
+    const statuses = (file: string) =>
+      findJobBlocks(readFileSync(file, "utf8")).map((j) => j.status);
+    afterEach(async () => {
+      stopGalaxyPoller();
+      await pollerIdle();
+      setCapabilityProfile(null);
+      setSubmissionLedger(null);
+      resetState();
+      rmSync(dir, { recursive: true, force: true });
+    });
+    beforeEach(() => {
+      vi.resetAllMocks();
+      setCapabilityProfile({ ...profileFromEnv({}), ui: "worker" });
+      setSubmissionLedger(null);
+      dir = mkdtempSync(join(tmpdir(), "loom-poller-pinned-"));
+      nb = join(dir, "notebook.md");
+      setNotebookPath(nb);
+      other = join(dir, "other.md");
+      writeFileSync(other, renderJobYaml({ ...common, jobId: "job-9" }));
+      writeFileSync(nb, renderJobYaml({ ...common, jobId: "job-1" }));
+      mockJob.mockImplementation(async (id) => jobDetails(id, id === "job-9" ? "ok" : "running"));
+    });
+
+    it("moves that record's blocks but announces and delivers nothing until it's bound", async () => {
+      startGalaxyPoller(notify, resume);
+      const pinned = await pollGalaxyNow({ recordKey: other });
+      expect(statuses(other)).toEqual(["completed"]);
+      expect(statuses(nb)).toEqual(["in_progress"]);
+      expect(pinned).toMatchObject({ recordKey: other, transitions: [], inProgress: 0 });
+      expect(notify).not.toHaveBeenCalled();
+      expect(resume).not.toHaveBeenCalled();
+      // Bound again, its next tick hands over what the pinned one confirmed.
+      setNotebookPath(other);
+      const shown = await pollGalaxyNow();
+      expect(shown.transitions.map((t) => t.key)).toEqual([
+        terminalEventKey("job", "job-9", "completed"),
+      ]);
+    });
+
+    it("isn't answered by a tick already running on the bound record", async () => {
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      mockJob.mockImplementation(async (id) => {
+        if (id === "job-1") await gate;
+        return jobDetails(id, id === "job-9" ? "ok" : "running");
+      });
+      startGalaxyPoller(notify, resume);
+      const bound = pollGalaxyNow();
+      const pinned = pollGalaxyNow({ recordKey: other });
+      release();
+      expect((await bound).recordKey).toBe(nb);
+      expect((await pinned).recordKey).toBe(other);
+      expect(statuses(other)).toEqual(["completed"]);
+    });
+
+    it("leaves an unpinned caller to its own record rather than answering with the pinned one", async () => {
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      let started = false;
+      mockJob.mockImplementation(async (id) => {
+        if (id === "job-9") {
+          started = true;
+          await gate;
+        }
+        return jobDetails(id, id === "job-9" ? "ok" : "running");
+      });
+      startGalaxyPoller(notify, resume);
+      const pinned = pollGalaxyNow({ recordKey: other });
+      await vi.waitFor(() => expect(started).toBe(true));
+      const bound = pollGalaxyNow();
+      release();
+      expect((await pinned).recordKey).toBe(other);
+      expect((await bound).recordKey).toBe(nb);
+    });
+  });
 });
