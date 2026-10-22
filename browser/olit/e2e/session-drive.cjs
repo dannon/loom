@@ -27,7 +27,7 @@ function check(name, ok, detail) {
         }
         return false;
     };
-    const booted = () => wait(() => /olit ready|Restored this history/i.test(document.body.innerText), 60000);
+    const booted = () => wait(() => /Ready\.|Restored this history/.test(document.body.innerText), 60000);
     const idle = () => wait(() => !document.querySelector("#send-btn").classList.contains("hidden"), 60000);
 
     // The default scenario answers with a destructive call and opens the gate; this one just replies.

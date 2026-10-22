@@ -25,7 +25,7 @@ const credOpen = () => {
     const el = document.querySelector("#cred-overlay");
     return !!el && !el.classList.contains("hidden");
 };
-const isReady = () => /olit ready|restored this history/i.test(document.body.innerText);
+const isReady = () => /Ready\.|Restored this history/.test(document.body.innerText);
 const modalOpen = () => {
     const el = document.querySelector("#ext-overlay");
     return !!el && !el.classList.contains("hidden");

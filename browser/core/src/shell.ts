@@ -108,27 +108,20 @@ export interface OrbitBrowserHandle {
 }
 
 /** With no dataset to start from, the conversation is Galaxy's current history's. */
-export async function currentHistoryLaunch(
-  galaxy: Galaxy,
-  brand: Brand = DEFAULT_BRAND,
-): Promise<LaunchContext> {
+export async function currentHistoryLaunch(galaxy: Galaxy): Promise<LaunchContext> {
   try {
     const id = (await galaxy.get("history/current_history_json"))?.id;
     if (typeof id === "string" && id) return { historyId: id };
-    return { stop: cannotStart("the current history", undefined, brand) };
+    return { stop: cannotStart("the current history") };
   } catch (e) {
     const problem = String((e as Error)?.message ?? e);
-    return { stop: cannotStart("the current history", problem, brand) };
+    return { stop: cannotStart("the current history", problem) };
   }
 }
 
 /** The line a launch stops with when Galaxy names no history to work in. */
-export const cannotStart = (
-  what: string,
-  problem = "it named no history",
-  brand: Brand = DEFAULT_BRAND,
-) =>
-  `Could not read ${what} from Galaxy (${problem}). ${brand.name} works in a history, so it ` +
+export const cannotStart = (what: string, problem = "it named no history") =>
+  `Could not read ${what} from Galaxy (${problem}). This works in a history, so it ` +
   "cannot start; reload to try again.";
 
 /** Grow the composer with its content, up to a few lines. */
@@ -169,7 +162,7 @@ export async function mountOrbitBrowser(
   };
   applyOrbitTheme("light", document.documentElement);
 
-  const el = mountLayout(container, { save: !!sessions, name });
+  const el = mountLayout(container, { save: !!sessions });
   if (el.save && sessions?.label) el.save.title = sessions.label;
   const mounted = new AbortController();
   let started: AgentClient | undefined;
@@ -202,7 +195,7 @@ export async function mountOrbitBrowser(
   const credentials = (process.env.credentials as RequestCredentials) || "include";
   // The page's own Galaxy requests take the transport the agent's do.
   const galaxy = connectGalaxy({ root: config.galaxy_root, credentials });
-  const launch = await (options.launch ?? ((g) => currentHistoryLaunch(g, brand)))(galaxy);
+  const launch = await (options.launch ?? currentHistoryLaunch)(galaxy);
   if (launch.stop) {
     chat.addErrorMessage(launch.stop);
     el.input.disabled = true;
@@ -396,7 +389,7 @@ export async function mountOrbitBrowser(
         }
         if (message.galaxyProblem) {
           chat.addErrorMessage(
-            `Galaxy did not answer when ${name} opened (${message.galaxyProblem}), so no Galaxy tool ` +
+            `Galaxy did not answer when this session opened (${message.galaxyProblem}), so no Galaxy tool ` +
               "can run in this session. Reload once Galaxy is back.",
           );
         }
@@ -417,10 +410,10 @@ export async function mountOrbitBrowser(
         }
         info(
           launch.saved
-            ? `${name} ready.`
+            ? "Ready."
             : view.turns
-              ? `Restored this history's conversation from this browser. ${name} ready.`
-              : `${name} ready. Ask me to run something.`,
+              ? "Restored this history's conversation from this browser. Ready."
+              : "Ready. Ask me to run something.",
         );
         if (launch.greeting) {
           info(launch.greeting);
@@ -458,7 +451,7 @@ export async function mountOrbitBrowser(
         fresh.addEventListener("click", () => choose());
         choices.append(fresh);
       } else if (message.type === "waiting") {
-        const line = info(`${name} is open in another tab. `);
+        const line = info("This session is open in another tab. ");
         const take = document.createElement("button");
         take.className = "plan-btn";
         take.textContent = "Use it here";
@@ -470,7 +463,7 @@ export async function mountOrbitBrowser(
       } else if (message.type === "lost") {
         ready = false;
         refreshControls();
-        chat.addErrorMessage(`${name} was opened in another tab, which has it now.`);
+        chat.addErrorMessage("This session was opened in another tab, which has it now.");
       } else if (message.type === "failed") {
         console.error(`[${brand.id}] worker failed`, message.message);
         chat.hideThinking();
@@ -535,7 +528,7 @@ export async function mountOrbitBrowser(
       return;
     }
     if (!ready) {
-      info(`${name} is still starting; send again once it says it is ready.`);
+      info("Still starting; send again once it says it is ready.");
       return;
     }
     el.input.value = "";

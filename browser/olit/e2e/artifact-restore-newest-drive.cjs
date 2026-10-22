@@ -24,7 +24,7 @@ const durable = (p) => p.evaluate(() => !/can't keep conversations/i.test(docume
 
 const boot = (page) =>
     page
-        .waitForFunction(() => /olit ready/i.test(document.body.innerText), null, { timeout: 120000 })
+        .waitForFunction(() => /Ready\./.test(document.body.innerText), null, { timeout: 120000 })
         .then(() => true)
         .catch(() => false);
 

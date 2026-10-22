@@ -25,7 +25,7 @@ const shown = (frame, pattern, ms = 120000) =>
     await storedProvider(page, { provider: "openrouter", baseUrl: `${STUB}/v1`, apiKey: "sk-or-v1-stubkeystubkey", model: "stub-model" });
     await page.goto(LAUNCH, { waitUntil: "domcontentloaded" });
     const frame = page.frameLocator("#galaxy_visualization");
-    check("boots", await shown(frame, "/olit ready/i"));
+    check("boots", await shown(frame, "/Ready\\./"));
 
     await frame.locator("#input").fill("run cat on it");
     await frame.locator("#send-btn").click();

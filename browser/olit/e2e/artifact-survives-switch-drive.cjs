@@ -29,7 +29,7 @@ const durable = (p) => p.evaluate(() => !/can't keep conversations/i.test(docume
     await page.goto(APP, { waitUntil: "domcontentloaded" });
 
     const booted = await page.waitForFunction(
-        () => /olit ready/i.test(document.body.innerText), null, { timeout: 120000 })
+        () => /Ready\./.test(document.body.innerText), null, { timeout: 120000 })
         .then(() => true).catch(() => false);
     check("the agent boots", booted, booted ? "" : (await page.innerText("body")).slice(0, 200));
     if (!booted) {
@@ -58,7 +58,7 @@ const durable = (p) => p.evaluate(() => !/can't keep conversations/i.test(docume
     // in the shell are replaced. Anything that survives survived because it was persisted.
     await page.goto(APP, { waitUntil: "domcontentloaded" });
     const rebooted = await page.waitForFunction(
-        () => /olit ready/i.test(document.body.innerText), null, { timeout: 120000 })
+        () => /Ready\./.test(document.body.innerText), null, { timeout: 120000 })
         .then(() => true).catch(() => false);
     check("the agent comes back after the reload", rebooted);
     const survived = await page.waitForFunction(

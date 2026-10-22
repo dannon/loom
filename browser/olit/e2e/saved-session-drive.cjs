@@ -21,7 +21,7 @@ async function machine(browser, url, booting = true) {
     const frame = page.frameLocator("#galaxy_visualization");
     if (!booting) return { page, frame, ready: false };
     const ready = await frame
-        .locator("text=/olit ready/i")
+        .locator("text=/Ready\\./")
         .first()
         .waitFor({ timeout: 120000 })
         .then(() => true)

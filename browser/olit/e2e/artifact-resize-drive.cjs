@@ -34,7 +34,7 @@ const shown = (size) => `${size.width}x${size.height}`;
     await fetch(`${STUB}/__script?name=chart`);
     await page.goto(APP, { waitUntil: "domcontentloaded" });
     const frame = page.frameLocator("#galaxy_visualization");
-    const ready = await frame.locator("text=/olit ready/i").first().waitFor({ timeout: 120000 }).then(() => true, () => false);
+    const ready = await frame.locator("text=/Ready\\./").first().waitFor({ timeout: 120000 }).then(() => true, () => false);
     check("Olit boots", ready);
     check("the pane starts shut", await collapsed(frame));
 
@@ -48,7 +48,7 @@ const shown = (size) => `${size.width}x${size.height}`;
     await frame.locator("#artifact-btn").click();
     check("the button shuts the pane", await collapsed(frame));
     await page.reload({ waitUntil: "domcontentloaded" });
-    await frame.locator("text=/olit ready/i").first().waitFor({ timeout: 120000 });
+    await frame.locator("text=/Ready\\./").first().waitFor({ timeout: 120000 });
     await frame.locator("#artifact-content svg").first().waitFor({ state: "attached", timeout: 60000 });
     check("a reopened session draws its chart with the pane still shut", await collapsed(frame));
     await frame.locator("#artifact-btn").click();

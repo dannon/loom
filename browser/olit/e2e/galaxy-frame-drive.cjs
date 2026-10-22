@@ -28,7 +28,7 @@ function check(name, ok, detail) {
     check("it is launched as Galaxy launches a plugin on a dataset: the dataset and nothing else",
         JSON.stringify(handed.visualization_config) === JSON.stringify({ dataset_id: "d1" }),
         JSON.stringify(handed.visualization_config));
-    const ready = await frame.locator("text=/olit ready/i").first().waitFor({ timeout: 120000 })
+    const ready = await frame.locator("text=/Ready\\./").first().waitFor({ timeout: 120000 })
         .then(() => true).catch(() => false);
     check("the agent boots inside the frame", ready);
 
