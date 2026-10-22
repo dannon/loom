@@ -1,8 +1,15 @@
-import { describe, expect, it } from "vitest";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchFailureHint, fetchFailureHintForText } from "../extensions/orbit/fetch-failure-hint";
 import { applySkillTriggers, skillTriggers } from "../extensions/orbit/skill-triggers";
-import { galaxyToolFamily } from "../extensions/orbit/galaxy-tool-source";
+import {
+  galaxyToolFamily,
+  registerGalaxyTools,
+  setGalaxyToolSource,
+} from "../extensions/orbit/galaxy-tool-source";
+import { renderGalaxyResult } from "../extensions/orbit/galaxy-tool-wrap";
+import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 
 const ENA_FAILURE = {
   id: "d1",
@@ -74,13 +81,30 @@ describe("fetchFailureHint", () => {
 });
 
 describe("the fetch-failed trigger", () => {
+  beforeEach(() => {
+    setCapabilityProfile(profileFromEnv({}));
+    setGalaxyToolSource(null);
+    registerGalaxyTools({ registerTool: vi.fn() } as unknown as ExtensionAPI);
+  });
+  afterEach(() => {
+    setGalaxyToolSource(null);
+    setCapabilityProfile(null);
+  });
+
+  const triggers = () => skillTriggers(galaxyToolFamily());
+  const rendered = (data: unknown) =>
+    renderGalaxyResult("get_dataset_details", { success: true, data } as never, 0)
+      .content as Array<{
+      type: string;
+      text: string;
+    }>;
+
   it("appends the hint to a Galaxy result that shows a failed fetch, once", () => {
-    const triggers = skillTriggers(galaxyToolFamily());
-    const content = [{ type: "text", text: JSON.stringify({ data: ENA_FAILURE }) }];
+    const content = rendered(ENA_FAILURE);
     const applied = applySkillTriggers(
       { toolName: "get_dataset_details", isError: false, content },
       () => [],
-      triggers,
+      triggers(),
     )!;
     expect(applied.fired.map((f) => f.id)).toEqual(["fetch-failed"]);
     expect(applied.content[0].text).toContain("ena_runs");
@@ -88,8 +112,15 @@ describe("the fetch-failed trigger", () => {
       applySkillTriggers(
         { toolName: "get_dataset_details", isError: false, content: applied.content },
         () => [],
-        triggers,
+        triggers(),
       ),
+    ).toBeNull();
+  });
+
+  it("leaves a tool that isn't Galaxy's alone, however its text reads", () => {
+    const content = rendered(ENA_FAILURE);
+    expect(
+      applySkillTriggers({ toolName: "read", isError: false, content }, () => [], triggers()),
     ).toBeNull();
   });
 });

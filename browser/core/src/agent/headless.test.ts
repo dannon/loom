@@ -203,6 +203,18 @@ describe("a conversation without a page", { timeout: 30_000 }, () => {
     expect(set.requests[0].max_tokens).toBe(512);
   });
 
+  it("tells the model when Galaxy didn't answer as the session opened", async () => {
+    const down = () => json({ err_msg: "unavailable" }, 503);
+    const { requests } = await turn([{ text: "ok" }], {}, { "api/version": down });
+    const system = (requests[0].messages as Array<{ role: string; content: string }>)[0].content;
+    expect(system).toContain("## Galaxy connection: NOT CONNECTED");
+    expect(system).toContain("Galaxy did not answer");
+    // One session to a process: the next launch, with Galaxy up, opens after it.
+    await opened.pop()!.close();
+    const { requests: up } = await turn([{ text: "ok" }]);
+    expect(up[0].messages[0].content).not.toContain("NOT CONNECTED");
+  });
+
   it("puts the prompt first and the history binding just before the user's message", async () => {
     const { requests } = await turn([{ text: "ok" }], { history_id: "h1" });
     const sent = requests[0].messages as Array<{ role: string; content: string }>;

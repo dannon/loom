@@ -427,6 +427,17 @@ describe("the default source", () => {
     expect(named).toHaveLength(1);
   });
 
+  it("refuses an extra in place of an operation with a policy or a destructive gate", () => {
+    bare();
+    expect(() => createGalaxyOpsToolSource({ extras: [stub("update_page")] }).tools()).toThrow(
+      /can't stand in for update_page/,
+    );
+    const destructive = OPS.find((o) => o.destructive)!;
+    expect(() => createGalaxyOpsToolSource({ extras: [stub(destructive.name)] }).tools()).toThrow(
+      /can't stand in for/,
+    );
+  });
+
   it("still refuses two extras of one name", () => {
     bare();
     setGalaxyToolSource(

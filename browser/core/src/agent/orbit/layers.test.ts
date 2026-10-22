@@ -1,8 +1,8 @@
 // @vitest-environment node
 /**
  * The browser shell's tool_call layers over Orbit's brain (slice 3, commit 14): misroutes sent
- * back to the shell's tool with the browser brain's words (the cases in
- * olit/src/agent/__surface__/misroutes.json), {{artifact}} placement, and invented embeds.
+ * back to the shell's tool with the words the browser has always used, {{artifact}} placement, and
+ * invented embeds.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -17,8 +17,8 @@ import { registerBrowserLayers, registerFlavorLayers } from "./layers";
 
 type Handler = (event: { toolName: string; input: Record<string, unknown> }) => Promise<unknown>;
 
-// Olit's surface snapshot, olit/src/agent/__surface__/misroutes.json, as the browser brain words
-// the four cases; the core can't read a flavor's files, so they're written out here.
+// The four misroutes Olit's tools can draw, in the browser's words; written out here, since the
+// core can't read a flavor's files.
 const MISROUTES = [
   "'lineage_report' is an Olit tool, not a Galaxy tool. Call lineage_report directly.",
   "'vega_dataset' is an Olit tool, not a Galaxy tool. Call vega_dataset directly.",

@@ -344,6 +344,14 @@ export function createGalaxyOpsToolSource(
       // A snapshot: allOperations is one array both entries share, and grows when the other loads.
       const supplied = new Set((options.extras ?? []).map((tool) => tool.name));
       const ops = allOperations.filter((op) => !supplied.has(op.name));
+      // An extra in place of an operation would shed its policy and its destructive gate.
+      for (const op of allOperations) {
+        if (supplied.has(op.name) && (policies[op.name] || op.destructive)) {
+          throw new Error(
+            `[galaxy-tools] an extra can't stand in for ${op.name}: it carries a policy or a destructive gate`,
+          );
+        }
+      }
       const widened = new Map(WIDENED.map((bridge) => [bridge.op.name, bridge]));
       return [
         ...ops.map((op) => {

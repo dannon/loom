@@ -74,7 +74,7 @@ async function llmTargets(): Promise<Record<string, { root: string; path: string
 
 /** The commit this bundle was built from; a deployed copy cannot be identified without it. */
 function buildCommit(): string {
-  // Pinned when two builds are compared byte for byte (scripts/compare-default-bundle.mjs).
+  // Pinned when two builds are compared byte for byte.
   const pinned = readOrbitEnv("BUILD_COMMIT");
   if (pinned !== undefined) return pinned;
   try {
