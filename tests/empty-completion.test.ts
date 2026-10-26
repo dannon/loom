@@ -47,6 +47,7 @@ describe("endedEmpty", () => {
     expect(endedEmpty([assistant([], "error")])).toBe(false);
     expect(endedEmpty([assistant([], "aborted")])).toBe(false);
     expect(endedEmpty([])).toBe(false);
+    expect(endedEmpty([{ role: "assistant", content: "Done.", stopReason: "stop" }])).toBe(false);
   });
 
   it("judges only the last assistant message", () => {
@@ -60,7 +61,7 @@ describe("endedEmpty", () => {
  * treats that as a normal end of run, so without the check the user gets
  * silence. The follow-up wiring mirrors session-lifecycle's.
  */
-async function runEmptyAfterTools(replies: Array<"empty" | "answer">) {
+async function runEmptyAfterTools(script: Array<"tool" | "empty" | "answer">) {
   const dir = mkdtempSync(join(tmpdir(), "loom-empty-completion-"));
   let dispose: (() => void) | undefined;
   const notices: Array<{ text: string; level?: string }> = [];
@@ -127,10 +128,9 @@ async function runEmptyAfterTools(replies: Array<"empty" | "answer">) {
       streamSimple: (model) => {
         const stream = createAssistantMessageEventStream();
         const turn = turns++;
-        // Each run: one tool call, then whatever the script says.
-        const reply = turn % 2 === 1 ? replies[(turn - 1) / 2] : undefined;
+        const reply = script[turn] ?? "answer";
         const content: AssistantMessage["content"] =
-          reply === undefined
+          reply === "tool"
             ? [{ type: "toolCall", id: `look-${turn}`, name: "lookup", arguments: {} }]
             : reply === "answer"
               ? [{ type: "text", text: "Here is the answer." }]
@@ -149,7 +149,7 @@ async function runEmptyAfterTools(replies: Array<"empty" | "answer">) {
             totalTokens: 2,
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
           },
-          stopReason: reply === undefined ? "toolUse" : "stop",
+          stopReason: reply === "tool" ? "toolUse" : "stop",
           timestamp: Date.now(),
         };
         stream.push({ type: "done", reason: message.stopReason as "stop" | "toolUse", message });
@@ -187,7 +187,7 @@ async function runEmptyAfterTools(replies: Array<"empty" | "answer">) {
     await session.bindExtensions({ uiContext });
     await session.prompt("What did you find?");
     // The retry is a follow-up released after the run settles.
-    for (let i = 0; i < 50 && (session.isStreaming || turns < replies.length * 2); i++) {
+    for (let i = 0; i < 50 && (session.isStreaming || turns < script.length); i++) {
       await new Promise((r) => setTimeout(r, 20));
     }
     await session.agent.waitForIdle?.();
@@ -201,19 +201,19 @@ async function runEmptyAfterTools(replies: Array<"empty" | "answer">) {
 
 describe("empty completion through the Pi runtime (#605)", () => {
   it("says so and asks the model once more for its answer", async () => {
-    const { notices, prompts, turns } = await runEmptyAfterTools(["empty", "answer"]);
+    const { notices, prompts, turns } = await runEmptyAfterTools(["tool", "empty", "answer"]);
     expect(notices).toEqual([{ text: EMPTY_COMPLETION_RETRYING, level: "warning" }]);
     expect(prompts).toEqual(["What did you find?", EMPTY_COMPLETION_NUDGE]);
-    expect(turns).toBe(4);
+    expect(turns).toBe(3);
   }, 20_000);
 
   it("gives up visibly when the retry is empty too", async () => {
-    const { notices, prompts, turns } = await runEmptyAfterTools(["empty", "empty"]);
+    const { notices, prompts, turns } = await runEmptyAfterTools(["tool", "empty", "empty"]);
     expect(notices).toEqual([
       { text: EMPTY_COMPLETION_RETRYING, level: "warning" },
       { text: EMPTY_COMPLETION_GAVE_UP, level: "error" },
     ]);
     expect(prompts).toEqual(["What did you find?", EMPTY_COMPLETION_NUDGE]);
-    expect(turns).toBe(4);
+    expect(turns).toBe(3);
   }, 20_000);
 });

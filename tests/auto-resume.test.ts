@@ -309,6 +309,46 @@ describe("createFollowUpDelivery", () => {
     expect(send).toHaveBeenCalledExactlyOnceWith("galaxy result");
   });
 
+  it("drops a retry nudge once the user moves on, and keeps Galaxy results", () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const onDropped = vi.fn();
+    const d = createFollowUpDelivery(send, { graceMs: 100 });
+    d.agentStarted();
+    d.deliver("galaxy result");
+    d.deliver("retry nudge", { dropOnInput: true, onDropped });
+    d.agentSettled();
+    d.userInput(); // the message they queued mid-turn
+    d.agentStarted();
+    d.agentSettled();
+    vi.advanceTimersByTime(100);
+    expect(send).toHaveBeenCalledExactlyOnceWith("galaxy result");
+    expect(onDropped).toHaveBeenCalledExactlyOnceWith("input");
+  });
+
+  it("drops a retry nudge at the cap instead of holding it, and says so", () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const onDropped = vi.fn();
+    const onPaused = vi.fn();
+    const d = createFollowUpDelivery(send, { graceMs: 100, maxConsecutive: 1, onPaused });
+    d.deliver("1");
+    d.userMessageRecorded("1");
+    d.agentStarted();
+    d.deliver("retry nudge", { dropOnInput: true, onDropped });
+    d.agentSettled();
+    vi.advanceTimersByTime(100);
+    expect(send).toHaveBeenCalledExactlyOnceWith("1");
+    expect(onDropped).toHaveBeenCalledExactlyOnceWith("cap");
+    // Nothing else was waiting, so no "Galaxy results are waiting" pause.
+    expect(onPaused).not.toHaveBeenCalled();
+    d.userInput();
+    d.agentStarted();
+    d.agentSettled();
+    vi.advanceTimersByTime(100);
+    expect(send).toHaveBeenCalledOnce();
+  });
+
   it("doesn't take someone else's turn as delivery", () => {
     vi.useFakeTimers();
     const send = vi.fn();

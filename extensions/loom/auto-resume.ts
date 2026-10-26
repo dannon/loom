@@ -92,6 +92,14 @@ export interface FollowUpOptions {
    * nudge about the turn that was just stopped is stale by then.
    */
   dropOnStop?: boolean;
+  /**
+   * Drop it once the user says anything, and at the turn cap rather than
+   * holding it: a retry of the turn they've since moved past is noise, and
+   * one held across a pause would fire long after it meant anything.
+   */
+  dropOnInput?: boolean;
+  /** Told when a dropOnInput follow-up is discarded instead of sent. */
+  onDropped?: (reason: "input" | "cap") => void;
 }
 
 export interface FollowUpDelivery {
@@ -128,6 +136,8 @@ export interface FollowUpDeliveryOptions {
 interface Held {
   text: string;
   dropOnStop: boolean;
+  dropOnInput: boolean;
+  onDropped?: (reason: "input" | "cap") => void;
 }
 
 /**
@@ -217,11 +227,19 @@ export function createFollowUpDelivery(
         : `Galaxy results are waiting -- automatic follow-up paused after ${consecutive} automatic turn(s). Say continue to resume.`,
     );
   };
+  const dropTransient = (reason: "input" | "cap") => {
+    const dropped = held.filter((h) => h.dropOnInput);
+    if (dropped.length === 0) return;
+    held = held.filter((h) => !h.dropOnInput);
+    for (const h of dropped) h.onDropped?.(reason);
+  };
   const flush = () => {
     timer = null;
     if (busy || inFlight || held.length === 0) return;
     if (!isIdle()) return armFlush();
     const max = opts.maxConsecutive ?? maxAutoFollowUps();
+    if (!stopped && consecutive >= max) dropTransient("cap");
+    if (held.length === 0) return;
     if (stopped || consecutive >= max) return announcePause();
     const items = held;
     held = [];
@@ -239,7 +257,12 @@ export function createFollowUpDelivery(
 
   return {
     deliver(text, deliverOpts) {
-      held.push({ text, dropOnStop: deliverOpts?.dropOnStop ?? false });
+      held.push({
+        text,
+        dropOnStop: deliverOpts?.dropOnStop ?? false,
+        dropOnInput: deliverOpts?.dropOnInput ?? false,
+        onDropped: deliverOpts?.onDropped,
+      });
       if (!busy && !inFlight && !timer) flush();
     },
     userMessageRecorded(text) {
@@ -268,6 +291,7 @@ export function createFollowUpDelivery(
       armFlush();
     },
     userInput() {
+      dropTransient("input");
       consecutive = 0;
       stopped = false;
       pauseAnnounced = false;

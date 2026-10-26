@@ -37,6 +37,7 @@ type Message = { role: string; content?: unknown; stopReason?: string };
 export function endedEmpty(messages: readonly Message[]): boolean {
   const last = [...messages].reverse().find((m) => m.role === "assistant");
   if (!last || last.stopReason !== "stop") return false;
+  if (typeof last.content === "string") return last.content.trim().length === 0;
   if (!Array.isArray(last.content)) return true;
   return !last.content.some(
     (c: { type?: string; text?: unknown }) =>
@@ -53,6 +54,11 @@ export function registerEmptyCompletionCheck(pi: ExtensionAPI): void {
   pi.on("session_start", async () => {
     retried = false;
   });
+  // A new request from the user gets its own retry.
+  pi.on("input", async (event) => {
+    if (event.source !== "extension") retried = false;
+    return { action: "continue" };
+  });
 
   pi.on("agent_end", async (event, ctx) => {
     if (!endedEmpty(event.messages as Message[])) {
@@ -61,17 +67,29 @@ export function registerEmptyCompletionCheck(pi: ExtensionAPI): void {
     }
     const notify = (text: string, level: "warning" | "error") => {
       try {
-        if (ctx.hasUI) ctx.ui.notify(text, level);
+        if (ctx.hasUI) return ctx.ui.notify(text, level);
       } catch {
-        /* stale/headless context */
+        /* stale context -- fall through to stderr */
       }
+      // Headless runs (--print) would otherwise end exactly as silently as #605.
+      console.error(`loom: ${text}`);
     };
     if (retried) {
       retried = false;
       notify(EMPTY_COMPLETION_GAVE_UP, "error");
       return;
     }
-    if (!deliverAutoFollowUp(EMPTY_COMPLETION_NUDGE, { dropOnStop: true })) {
+    const delivered = deliverAutoFollowUp(EMPTY_COMPLETION_NUDGE, {
+      dropOnStop: true,
+      dropOnInput: true,
+      onDropped: (reason) => {
+        retried = false;
+        // At the auto-turn cap the retry never runs; say so rather than
+        // leaving "asking once more" hanging.
+        if (reason === "cap") notify(EMPTY_COMPLETION_ENDED, "error");
+      },
+    });
+    if (!delivered) {
       notify(EMPTY_COMPLETION_ENDED, "error");
       return;
     }
