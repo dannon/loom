@@ -3,13 +3,24 @@ import * as path from "path";
 import { createGalaxyContext } from "@galaxyproject/galaxy-ops";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  datatypeAccepts,
+  fetchInputFormatsWith,
   fetchTemplateWith,
   primeTemplateReplay,
   replayTemplateFetcher,
+  resetDatatypeCache,
   TemplateUnavailableError,
 } from "../extensions/loom/registry-templates";
 import { tmpAnalysisDir } from "./registry-fixtures";
-import { TOOL_BODY, TOOL_ID, UDT_SNAPSHOT, UDT_UUID } from "./registry-proposal-fixtures";
+import {
+  CONVERTERS,
+  DATATYPES,
+  MANIFEST_ID,
+  TOOL_BODY,
+  TOOL_ID,
+  UDT_SNAPSHOT,
+  UDT_UUID,
+} from "./registry-proposal-fixtures";
 
 type Route = (url: URL) => unknown;
 
@@ -169,5 +180,79 @@ describe("review follow-ups", () => {
       else process.env.LOOM_TEMPLATE_REPLAY = saved;
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("reading datatypes for the format check (#618)", () => {
+  const NANOPLOT_FASTQ = ["fastq", "fastq.gz", "fastq.bz2", "vcf_bgzip"];
+  const accepts = datatypeAccepts(DATATYPES, CONVERTERS);
+
+  it("follows Galaxy's subclassing: fastqsanger and its gzip both fit a fastq slot", () => {
+    expect(accepts("fastqsanger", NANOPLOT_FASTQ)).toBe(true);
+    expect(accepts("fastqsanger.gz", NANOPLOT_FASTQ)).toBe(true);
+    expect(accepts("fastq", ["data"])).toBe(true);
+    expect(accepts("tsv", ["txt", "zip"])).toBe(true);
+  });
+
+  it("refuses a TSV manifest in NanoPlot's FASTQ slot", () => {
+    expect(accepts("tsv", NANOPLOT_FASTQ)).toBe(false);
+    expect(accepts("fastqsanger", ["tabular"])).toBe(false);
+  });
+
+  it("takes what an installed converter turns into an accepted format", () => {
+    expect(accepts("tabular", ["csv"])).toBe(true);
+    expect(datatypeAccepts(DATATYPES, [])("tabular", ["csv"])).toBe(false);
+  });
+
+  it("can't tell, rather than refusing, for datatypes it doesn't know or converters it couldn't read", () => {
+    expect(accepts("nanopore_fast5", NANOPLOT_FASTQ)).toBeUndefined();
+    expect(accepts("tsv", ["fastq", "some_custom_type"])).toBeUndefined();
+    expect(datatypeAccepts(DATATYPES, null)("tsv", NANOPLOT_FASTQ)).toBeUndefined();
+  });
+
+  it("reads each input's extension and the hierarchy once per server", async () => {
+    resetDatatypeCache();
+    const seen: string[] = [];
+    const galaxy = ctx(
+      {
+        "/api/datatypes/types_and_mapping": () => ({ datatypes_mapping: DATATYPES }),
+        "/api/datatypes/converters": () => CONVERTERS,
+        [`/api/datasets/${MANIFEST_ID}`]: () => ({ id: MANIFEST_ID, extension: "tsv" }),
+        "/api/dataset_collections/c62": () => ({
+          id: "c62",
+          elements: [],
+          elements_datatypes: ["fastqsanger.gz"],
+        }),
+      },
+      seen,
+    );
+    const inputs = [
+      { slot: "a", src: "hda" as const, id: MANIFEST_ID },
+      { slot: "b", src: "hdca" as const, id: "c62" },
+      { slot: "c", src: "hda" as const, id: "gone" },
+      { slot: "d", src: "ldda" as const, id: "lib1" },
+    ];
+    const f = await fetchInputFormatsWith(galaxy, "https://galaxy.test", inputs);
+    expect(Object.fromEntries(f.extensions)).toEqual({
+      [`hda:${MANIFEST_ID}`]: ["tsv"],
+      "hdca:c62": ["fastqsanger.gz"],
+      "hda:gone": null,
+      "ldda:lib1": null,
+    });
+    expect(f.accepts?.("tsv", ["fastq"])).toBe(false);
+    expect(seen.some((u) => u.includes("get_content_as_text"))).toBe(false);
+
+    await fetchInputFormatsWith(galaxy, "https://galaxy.test", inputs.slice(0, 1));
+    expect(seen.filter((u) => u.startsWith("/api/datatypes/types_and_mapping"))).toHaveLength(1);
+  });
+
+  it("says the hierarchy is unknown when Galaxy won't give it, and asks again next time", async () => {
+    resetDatatypeCache();
+    const seen: string[] = [];
+    const galaxy = ctx({}, seen);
+    const f = await fetchInputFormatsWith(galaxy, "https://galaxy.test", []);
+    expect(f.accepts).toBeNull();
+    await fetchInputFormatsWith(galaxy, "https://galaxy.test", []);
+    expect(seen.filter((u) => u.startsWith("/api/datatypes/types_and_mapping"))).toHaveLength(2);
   });
 });

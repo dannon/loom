@@ -22,9 +22,12 @@ import {
 } from "../extensions/loom/registry-runtime";
 import { RegistryStore } from "../extensions/loom/registry";
 import type { TemplateSnapshot } from "../extensions/loom/registry-submitter";
-import { TemplateUnavailableError } from "../extensions/loom/registry-templates";
 import { SERVER, tmpAnalysisDir } from "./registry-fixtures";
+import { datatypeAccepts, TemplateUnavailableError } from "../extensions/loom/registry-templates";
 import {
+  CONVERTERS,
+  DATATYPES,
+  MANIFEST_ID,
   NANOPLOT_ID,
   NANOPLOT_SNAPSHOT,
   TOOL_ID,
@@ -444,6 +447,61 @@ describe("map-over through loom_propose and /approve (#615)", () => {
     const r = await approveCommand(deps(), `${id} --yes`);
     expect(r.message).toMatch(/^Approved /);
     expect(r.message).toMatch(/runs once per element/);
+  });
+});
+
+describe("format check through loom_propose and /approve (#618)", () => {
+  const formats =
+    (exts: Record<string, string[]>): ProposalDeps["formats"] =>
+    () =>
+    async () => ({
+      extensions: new Map(Object.entries(exts)),
+      accepts: datatypeAccepts(DATATYPES, CONVERTERS),
+    });
+  const nanoplot = (id: string, src: "hda" | "hdca" = "hda") =>
+    params({
+      target: { kind: "tool", id: NANOPLOT_ID },
+      inputs: [{ slot: "mode|reads|files", src, id }],
+      overrides: [],
+    });
+
+  beforeEach(() => {
+    snapshot = NANOPLOT_SNAPSHOT;
+  });
+
+  it("refuses Scott's manifest at proposal time and writes nothing", async () => {
+    const r = await propose(
+      deps({ formats: formats({ [`hda:${MANIFEST_ID}`]: ["tsv"] }) }),
+      nanoplot(MANIFEST_ID),
+    );
+    expect(r).toEqual({
+      ok: false,
+      problems: [expect.stringMatching(/takes fastq, .* but dataset \S+ is tsv\./)],
+    });
+    expect(findProposalBlocks(notebook())).toEqual([]);
+  });
+
+  it("re-checks at /approve, so a dataset relabeled since then is refused", async () => {
+    const r = await propose(
+      deps({ formats: formats({ "hda:d1": ["fastqsanger"] }) }),
+      nanoplot("d1"),
+    );
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.formatsUnchecked).toEqual([]);
+    const reply = await approveCommand(
+      deps({ formats: formats({ "hda:d1": ["tabular"] }) }),
+      `${r.proposal.proposalId} --yes`,
+    );
+    expect(reply.message).toMatch(/^Not approved -- .*\n- input slot "mode\|reads\|files" takes/);
+    expect(liveApproval(session!.store.snapshot(), r.proposal.proposalId)).toBeUndefined();
+  });
+
+  it("lists what it couldn't check in the tool's reply", async () => {
+    const r = await propose(deps({ formats: formats({}) }), nanoplot("d2"));
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.formatsUnchecked).toEqual([
+      expect.stringMatching(/didn't say what format dataset d2/),
+    ]);
   });
 });
 

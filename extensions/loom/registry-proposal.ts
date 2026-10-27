@@ -367,6 +367,8 @@ export interface TemplateSlot {
 export interface SlotVariant {
   when: BranchChoice[];
   multiple: boolean;
+  /** Datatype extensions this branch takes; empty when the template doesn't say. */
+  accepts: string[];
 }
 
 /** A conditional's selector, the value that picks this branch, and its default. */
@@ -417,6 +419,16 @@ function children(group: Record<string, unknown>): unknown {
 }
 
 /** A selector or case value as text; Galaxy gives booleans for a boolean selector. */
+/** A template's accepted formats: a list, or a comma-separated string (a user-defined tool's `format`). */
+function formatList(...vs: unknown[]): string[] {
+  const out = new Set<string>();
+  for (const v of vs) {
+    const items = typeof v === "string" ? v.split(",") : Array.isArray(v) ? v : [];
+    for (const x of items) if (typeof x === "string" && x.trim() !== "") out.add(x.trim());
+  }
+  return [...out];
+}
+
 function choiceText(v: unknown): string | undefined {
   if (typeof v === "string") return v;
   if (typeof v === "boolean" || typeof v === "number") return String(v);
@@ -436,7 +448,11 @@ function walkToolInputs(
     const name = `${prefix}${raw.name}`;
     const type = raw.type;
     if (type === "data" || type === "data_collection") {
-      const variant: SlotVariant = { when: branch, multiple: raw.multiple === true };
+      const variant: SlotVariant = {
+        when: branch,
+        multiple: raw.multiple === true,
+        accepts: formatList(raw.extensions, raw.format),
+      };
       const seen = shape.slots.get(name);
       if (seen) {
         seen.variants.push(variant);
@@ -503,7 +519,13 @@ function workflowShape(body: Record<string, unknown>, version: string): Template
         collection: s.input_type === "data_collection",
         required: s.optional !== true,
         multiple: false,
-        variants: [{ when: [], multiple: false }],
+        variants: [
+          {
+            when: [],
+            multiple: false,
+            accepts: formatList(s.accepted_formats, s.acceptable_extensions),
+          },
+        ],
       });
     } else if (s.input_type === "parameter") {
       shape.params.add(name);
@@ -621,6 +643,76 @@ export function variantsFor(proposal: Proposal, shape: TemplateShape, slot: Temp
     }),
   );
   return picked.length > 0 ? picked : slot.variants;
+}
+
+/** What Galaxy says about the datasets a proposal names, for the format check. */
+export interface InputFormats {
+  /**
+   * Each input's datatype extensions by `src:id`: one for a dataset, the
+   * element datatypes for a collection. Null when Galaxy couldn't say.
+   */
+  extensions: Map<string, string[] | null>;
+  /**
+   * Whether Galaxy takes a dataset of `ext` where `accepted` are asked for, as
+   * a subtype of one or by converting it. Undefined when that can't be told
+   * (a datatype the server didn't describe); null when the datatype hierarchy
+   * couldn't be read at all.
+   */
+  accepts: ((ext: string, accepted: string[]) => boolean | undefined) | null;
+}
+
+export const inputKey = (i: { src: string; id: string }) => `${i.src}:${i.id}`;
+
+function orList(xs: string[]): string {
+  return xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} or ${xs.at(-1)}`;
+}
+
+/**
+ * Each input whose datatype its slot can't take (#618). Only a provable
+ * mismatch is refused: a slot that names no formats, a dataset Galaxy didn't
+ * describe, or a datatype pairing the hierarchy can't settle is let through
+ * and listed in `unchecked` instead.
+ */
+export function checkInputFormats(
+  proposal: Proposal,
+  shape: TemplateShape,
+  formats: InputFormats,
+): { problems: string[]; unchecked: string[] } {
+  const problems: string[] = [];
+  const unchecked: string[] = [];
+  for (const input of proposal.inputs) {
+    const slot = slotFor(shape, input.slot);
+    if (!slot) continue;
+    const variants = variantsFor(proposal, shape, slot);
+    if (variants.some((v) => v.accepts.length === 0)) continue;
+    const accepted = [...new Set(variants.flatMap((v) => v.accepts))];
+    if (accepted.includes("data")) continue;
+    const exts = formats.extensions.get(inputKey(input));
+    const what = input.src === "hdca" ? `collection ${input.id}` : `dataset ${input.id}`;
+    if (!exts || exts.length === 0) {
+      unchecked.push(`${input.slot}: Galaxy didn't say what format ${what} is`);
+      continue;
+    }
+    if (!formats.accepts) {
+      unchecked.push(`${input.slot}: Galaxy's datatype hierarchy couldn't be read`);
+      continue;
+    }
+    const verdicts = exts.map((ext) => ({ ext, ok: formats.accepts!(ext, accepted) }));
+    const wrong = verdicts.filter((v) => v.ok === false).map((v) => v.ext);
+    if (wrong.length > 0) {
+      problems.push(
+        `input slot "${input.slot}" takes ${orList(accepted)} (or a subtype), but ${what} ` +
+          `${input.src === "hdca" ? "holds" : "is"} ${orList(wrong)}. Give it one in a format ` +
+          `the slot takes; if the data is right but mislabeled, change its datatype in Galaxy first`,
+      );
+    } else if (verdicts.some((v) => v.ok === undefined)) {
+      const unsure = verdicts.filter((v) => v.ok === undefined).map((v) => v.ext);
+      unchecked.push(
+        `${input.slot}: can't tell whether ${orList(unsure)} fits ${orList(accepted)}`,
+      );
+    }
+  }
+  return { problems, unchecked };
 }
 
 /**

@@ -44,6 +44,7 @@ import { canonicalJson, normalizeServerUrl, sha256Hex } from "./registry";
 import {
   approveProposal,
   canonicalizeProposal,
+  checkInputFormats,
   describePredicate,
   findDrift,
   liveApproval,
@@ -60,6 +61,7 @@ import {
   validateProposal,
   type Drift,
   type Proposal,
+  type TemplateShape,
 } from "./registry-proposal";
 import {
   flushHeldRevocations,
@@ -71,9 +73,11 @@ import {
 
 export { sessionView };
 import {
+  inputFormatFetcherFor,
   primeTemplateReplay,
   TemplateUnavailableError,
   templateFetcherFor,
+  type InputFormatFetcher,
   type TemplateFetcher,
 } from "./registry-templates";
 import { getCurrentHistoryId, getNotebookPath, onNotebookChange } from "./state";
@@ -85,6 +89,8 @@ export interface ProposalDeps {
   galaxyUrl: () => string | null;
   historyId: () => string | null;
   fetcher: (sessionDir: string) => TemplateFetcher;
+  /** Reads the inputs' datatypes for the format check; absent or null skips it. */
+  formats?: (sessionDir: string) => InputFormatFetcher | null;
   /** ISO timestamp. */
   now: () => string;
   random: (n: number) => Uint8Array;
@@ -96,6 +102,7 @@ export const defaultDeps: ProposalDeps = {
   galaxyUrl: () => getGalaxyConfig()?.url ?? null,
   historyId: getCurrentHistoryId,
   fetcher: templateFetcherFor,
+  formats: inputFormatFetcherFor,
   now: () => new Date().toISOString(),
   random: (n) => randomBytes(n),
 };
@@ -222,8 +229,26 @@ export type ProposeResult =
       table: string;
       /** Slots given a collection that the run maps over, one job per element. */
       mappedOver: string[];
+      /** Inputs whose format couldn't be checked, and why. */
+      formatsUnchecked: string[];
     }
   | { ok: false; problems: string[] };
+
+/**
+ * The format check (#618), when this session can ask Galaxy. A dataset the
+ * slot can't take is a problem; one it couldn't judge is only noted.
+ */
+async function checkFormats(
+  deps: ProposalDeps,
+  nb: string,
+  proposal: Proposal,
+  shape: TemplateShape,
+  signal?: AbortSignal,
+): Promise<{ problems: string[]; unchecked: string[] }> {
+  const fetch = deps.formats?.(path.dirname(nb));
+  if (!fetch) return { problems: [], unchecked: [] };
+  return checkInputFormats(proposal, shape, await fetch(proposal.inputs, signal));
+}
 
 /**
  * Validate a proposal against the fetched template and, only if nothing is
@@ -314,6 +339,8 @@ export async function propose(
   );
   const problems = validateProposal(proposal, shape);
   if (problems.length > 0) return { ok: false, problems };
+  const formats = await checkFormats(deps, nb, proposal, shape, signal);
+  if (formats.problems.length > 0) return { ok: false, problems: formats.problems };
 
   // Freeze the template it was validated against, when this session can.
   if (!cannotWrite(session)) {
@@ -350,6 +377,7 @@ export async function propose(
     proposal,
     table: renderProposalTable(proposal, { resolvedVersion: snapshot.version, shape }),
     mappedOver: mappedOverSlots(proposal, shape),
+    formatsUnchecked: formats.unchecked,
   };
 }
 
@@ -432,6 +460,9 @@ export async function approveCommand(
   }
   const shape = templateShape(proposal.target.kind, snapshot);
   const problems = validateProposal(proposal, shape);
+  if (problems.length === 0) {
+    problems.push(...(await checkFormats(deps, nb, proposal, shape, opts.signal)).problems);
+  }
   if (problems.length > 0) {
     return {
       level: "warning",
@@ -692,7 +723,7 @@ export function registerProposalCommands(pi: ExtensionAPI, deps: ProposalDeps = 
     label: "Propose Galaxy Run",
     description: `Propose one concrete Galaxy run -- a tool, workflow or user-defined tool with its
 exact inputs and parameters -- for the user to approve. The harness fetches the target's template from
-Galaxy and checks your proposal against it (dataset slots, required inputs, parameter names) before
+Galaxy and checks your proposal against it (dataset slots and their formats, required inputs, parameter names) before
 anything is written; if something is wrong you get the list of problems and nothing is written. On
 success it writes a loom-proposal block to the notebook and returns a proposal id and a table.
 Show the user that table and ask them to type /approve <proposal-id>. You cannot approve it yourself.
@@ -758,10 +789,15 @@ element, on a multiple input it takes them all in one job.`,
           ? ` It maps over the collection given to ${result.mappedOver.join(", ")}: ` +
             `Galaxy runs it once per element, and each job it makes carries out this proposal.`
           : "";
+      const unchecked =
+        result.formatsUnchecked.length > 0
+          ? `\n\nFormats not checked (Galaxy will say at submission if they're wrong):\n- ` +
+            result.formatsUnchecked.join("\n- ")
+          : "";
       return toolText(
         `Proposed ${id}. Show the user this table and ask them to type /approve ${id} ` +
           `(or say what to change). Do not submit this run until they have approved it.` +
-          `${mapped}\n\n${result.table}`,
+          `${mapped}\n\n${result.table}${unchecked}`,
         {
           proposalId: id,
           predicate: describePredicate(result.proposal.predicate),

@@ -5,6 +5,7 @@ import { RegistryStore, specRevision, canonicalJson, sha256Hex } from "../extens
 import {
   approveProposal,
   canonicalizeProposal,
+  checkInputFormats,
   findDrift,
   mappedOverSlots,
   newProposalId,
@@ -20,7 +21,11 @@ import {
   type ProposalSighting,
 } from "../extensions/loom/registry-proposal";
 import { SERVER, T0, tmpAnalysisDir } from "./registry-fixtures";
+import { datatypeAccepts } from "../extensions/loom/registry-templates";
 import {
+  CONVERTERS,
+  DATATYPES,
+  MANIFEST_ID,
   NANOPLOT_SNAPSHOT,
   TOOL_SNAPSHOT,
   UDT_SNAPSHOT,
@@ -234,6 +239,95 @@ describe("proposal validated against the template (v3 §13)", () => {
     const udt = templateShape("udt", UDT_SNAPSHOT);
     expect([...udt.slots.keys()]).toEqual(["table"]);
     expect(udt.params.has("skip")).toBe(true);
+  });
+});
+
+describe("dataset formats checked against the slot (#618)", () => {
+  const nanoplot = templateShape("tool", NANOPLOT_SNAPSHOT);
+  const accepts = datatypeAccepts(DATATYPES, CONVERTERS);
+  const formats = (exts: Record<string, string[] | null>) => ({
+    extensions: new Map(Object.entries(exts)),
+    accepts,
+  });
+  const manifest = nanoplotProposal({
+    inputs: [{ slot: "mode|reads|files", src: "hda", id: MANIFEST_ID }],
+  });
+
+  it("reads each branch's formats from the template", () => {
+    const files = nanoplot.slots.get("mode|reads|files")!;
+    expect(files.variants).toHaveLength(6);
+    expect(files.variants[0]).toEqual({
+      when: [
+        { param: "mode|choice", value: "batch", default: "batch" },
+        { param: "mode|reads|type", value: "fastq", default: "fastq" },
+      ],
+      multiple: false,
+      accepts: ["fastq", "fastq.gz", "fastq.bz2", "vcf_bgzip"],
+    });
+    expect(templateShape("udt", UDT_SNAPSHOT).slots.get("table")?.variants[0].accepts).toEqual([
+      "tabular",
+    ]);
+  });
+
+  it("refuses Scott's TSV manifest in NanoPlot's FASTQ slot, naming both formats", () => {
+    const { problems } = checkInputFormats(
+      manifest,
+      nanoplot,
+      formats({ [`hda:${MANIFEST_ID}`]: ["tsv"] }),
+    );
+    expect(problems).toEqual([
+      `input slot "mode|reads|files" takes fastq, fastq.gz, fastq.bz2 or vcf_bgzip (or a subtype), ` +
+        `but dataset ${MANIFEST_ID} is tsv. Give it one in a format the slot takes; if the data ` +
+        `is right but mislabeled, change its datatype in Galaxy first`,
+    ]);
+  });
+
+  it("takes the 62 runs as fastqsanger.gz, and a collection with one bad element is named", () => {
+    const ok = checkInputFormats(
+      nanoplotProposal(),
+      nanoplot,
+      formats({ "hdca:a1c62e0f5b3d7790": ["fastqsanger.gz"] }),
+    );
+    expect(ok).toEqual({ problems: [], unchecked: [] });
+    const mixed = checkInputFormats(
+      nanoplotProposal(),
+      nanoplot,
+      formats({ "hdca:a1c62e0f5b3d7790": ["fastqsanger.gz", "tsv"] }),
+    );
+    expect(mixed.problems).toEqual([
+      expect.stringMatching(/but collection a1c62e0f5b3d7790 holds tsv\./),
+    ]);
+  });
+
+  it("checks against the branch the proposal picks", () => {
+    const summary = {
+      ...manifest,
+      overrides: [{ param: "mode|reads|type", value: "summary", rationale: "a summary file" }],
+    };
+    const r = checkInputFormats(summary, nanoplot, formats({ [`hda:${MANIFEST_ID}`]: ["tsv"] }));
+    expect(r.problems).toEqual([]);
+  });
+
+  it("lets through, and lists, what it can't judge", () => {
+    expect(
+      checkInputFormats(manifest, nanoplot, formats({ [`hda:${MANIFEST_ID}`]: null })),
+    ).toEqual({ problems: [], unchecked: [expect.stringMatching(/didn't say what format/)] });
+    expect(
+      checkInputFormats(manifest, nanoplot, {
+        extensions: new Map([[`hda:${MANIFEST_ID}`, ["tsv"]]]),
+        accepts: null,
+      }),
+    ).toEqual({ problems: [], unchecked: [expect.stringMatching(/hierarchy couldn't be read/)] });
+    expect(
+      checkInputFormats(manifest, nanoplot, formats({ [`hda:${MANIFEST_ID}`]: ["fast5_tar"] })),
+    ).toEqual({ problems: [], unchecked: [expect.stringMatching(/can't tell whether fast5_tar/)] });
+  });
+
+  it("skips a slot that names no formats", () => {
+    const shape = templateShape("tool", TOOL_SNAPSHOT);
+    expect(
+      checkInputFormats(toolProposal(), shape, formats({ "hda:4b6e2f1a9c3d5e70": ["tsv"] })),
+    ).toEqual({ problems: [], unchecked: [] });
   });
 });
 

@@ -22,16 +22,28 @@
 import * as fs from "fs";
 import * as path from "path";
 import {
+  getCollectionDetails,
+  getDatasetDetails,
+  getDatatypesMapping,
   getToolDetails,
   getWorkflowDetails,
   listUserTools,
   resolveWorkflowSlots,
+  subtypeSatisfies,
+  type DatatypesMapping,
   type GalaxyContext,
 } from "@galaxyproject/galaxy-ops";
 import { readEnv } from "../../shared/orbit-env.js";
 import { appendActivityEvent } from "./activity";
 import { galaxyOpsContext } from "./galaxy-api";
-import { UNPINNED, targetId, type ProposalTarget } from "./registry-proposal";
+import {
+  UNPINNED,
+  inputKey,
+  targetId,
+  type InputFormats,
+  type Proposal,
+  type ProposalTarget,
+} from "./registry-proposal";
 import type { TemplateSnapshot } from "./registry-submitter";
 import { resolveReplayPath } from "./submission-replay";
 
@@ -130,6 +142,122 @@ export const galaxyTemplateFetcher: TemplateFetcher = async (target, historyId, 
   }
   return fetchTemplateWith(ctx, target, historyId);
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dataset formats, for the format check
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Reads what Galaxy says about a proposal's inputs; null where the check can't run. */
+export type InputFormatFetcher = (
+  inputs: Proposal["inputs"],
+  signal?: AbortSignal,
+) => Promise<InputFormats>;
+
+interface Converter {
+  source: string;
+  target: string;
+}
+
+/**
+ * Whether Galaxy would take `ext` where `accepted` are asked for: the same
+ * datatype or a subclass of one (`fastqsanger` for `fastq`), or something an
+ * installed converter turns into one (`fastqsanger.gz` for `fastqsanger`,
+ * which Galaxy converts implicitly). Galaxy's own hierarchy, not a table of
+ * ours, so a server's custom datatypes are read the way it reads them.
+ */
+export function datatypeAccepts(
+  mapping: DatatypesMapping,
+  converters: Converter[] | null,
+): (ext: string, accepted: string[]) => boolean | undefined {
+  const known = (e: string) => mapping.ext_to_class_name[e] !== undefined;
+  const isA = (sub: string, sup: string) =>
+    known(sub) && known(sup) && subtypeSatisfies(sub, [sup], mapping);
+  return (ext, accepted) => {
+    if (!known(ext)) return undefined;
+    if (accepted.some((a) => isA(ext, a))) return true;
+    if (converters?.some((c) => isA(ext, c.source) && accepted.some((a) => isA(c.target, a)))) {
+      return true;
+    }
+    // A converter list we couldn't read, or an accepted format the server
+    // doesn't describe, might have been the way in.
+    if (!converters || !accepted.every(known)) return undefined;
+    return false;
+  };
+}
+
+/** The hierarchy and converters change only with the server's config; read them once. */
+const datatypeCache = new Map<string, Promise<InputFormats["accepts"]>>();
+
+async function readDatatypes(ctx: GalaxyContext): Promise<InputFormats["accepts"]> {
+  const mapping = await getDatatypesMapping(ctx);
+  // galaxy-ops answers a failed read with an empty mapping.
+  if (Object.keys(mapping.ext_to_class_name ?? {}).length === 0) return null;
+  let converters: Converter[] | null = null;
+  try {
+    const { data } = await ctx.client.GET("/api/datatypes/converters");
+    if (Array.isArray(data)) converters = data;
+  } catch {
+    // Unknown converters only make more pairings unknown.
+  }
+  return datatypeAccepts(mapping, converters);
+}
+
+export async function fetchInputFormatsWith(
+  ctx: GalaxyContext,
+  serverKey: string,
+  inputs: Proposal["inputs"],
+): Promise<InputFormats> {
+  let pending = datatypeCache.get(serverKey);
+  if (!pending) {
+    pending = readDatatypes(ctx).catch(() => null);
+    datatypeCache.set(serverKey, pending);
+  }
+  const accepts = await pending;
+  if (!accepts) datatypeCache.delete(serverKey);
+
+  const extensions = new Map<string, string[] | null>();
+  await Promise.all(
+    inputs.map(async (input) => {
+      const key = inputKey(input);
+      if (extensions.has(key)) return;
+      extensions.set(key, null);
+      try {
+        if (input.src === "hda") {
+          const { dataset } = await getDatasetDetails(
+            { datasetId: input.id, includePreview: false },
+            ctx,
+          );
+          const ext = dataset.extension ?? dataset.file_ext;
+          if (typeof ext === "string" && ext !== "") extensions.set(key, [ext]);
+        } else if (input.src === "hdca") {
+          const c = await getCollectionDetails({ collectionId: input.id, maxElements: 1 }, ctx);
+          const exts = c.elements_datatypes?.filter((e) => typeof e === "string" && e !== "");
+          if (exts && exts.length > 0) extensions.set(key, exts);
+        }
+        // A library dataset (ldda) isn't read here; it goes unchecked.
+      } catch {
+        // Left null: the check lists it as unchecked rather than guessing.
+      }
+    }),
+  );
+  return { extensions, accepts };
+}
+
+/** For the configured Galaxy server; null when there isn't one to ask. */
+export function inputFormatFetcherFor(_sessionDir: string): InputFormatFetcher | null {
+  // Replayed templates stand in for a Galaxy that isn't there.
+  if (readEnv("TEMPLATE_REPLAY")?.trim()) return null;
+  return async (inputs, signal) => {
+    const ctx = galaxyOpsContext(signal);
+    if (!ctx) return { extensions: new Map(), accepts: null };
+    return fetchInputFormatsWith(ctx, ctx.baseUrl ?? "", inputs);
+  };
+}
+
+/** Test seam: forget what was read about each server's datatypes. */
+export function resetDatatypeCache(): void {
+  datatypeCache.clear();
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Eval-only replay

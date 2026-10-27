@@ -5,6 +5,7 @@
  * for a workflow (details at the version plus the run form's slots).
  */
 
+import type { DatatypesMapping } from "@galaxyproject/galaxy-ops";
 import type { Proposal } from "../extensions/loom/registry-proposal";
 import type { TemplateSnapshot } from "../extensions/loom/registry-submitter";
 import { SERVER } from "./registry-fixtures";
@@ -156,3 +157,145 @@ export function toolProposal(over: Partial<Proposal> = {}): Proposal {
     ...over,
   };
 }
+
+/**
+ * Galaxy's datatype hierarchy as usegalaxy.org's
+ * `/api/datatypes/types_and_mapping` reports it, trimmed to the datatypes the
+ * format tests use, and three of its converters.
+ */
+export const DATATYPES: DatatypesMapping = {
+  ext_to_class_name: {
+    data: "galaxy.datatypes.data.Data",
+    txt: "galaxy.datatypes.data.Text",
+    tabular: "galaxy.datatypes.tabular.Tabular",
+    tsv: "galaxy.datatypes.tabular.TSV",
+    csv: "galaxy.datatypes.tabular.CSV",
+    fastq: "galaxy.datatypes.sequence.Fastq",
+    "fastq.gz": "galaxy.datatypes.registry.FastqGz",
+    "fastq.bz2": "galaxy.datatypes.registry.FastqBz2",
+    fastqsanger: "galaxy.datatypes.sequence.FastqSanger",
+    "fastqsanger.gz": "galaxy.datatypes.registry.FastqSangerGz",
+    fasta: "galaxy.datatypes.sequence.Fasta",
+    vcf_bgzip: "galaxy.datatypes.tabular.VcfGz",
+    zip: "galaxy.datatypes.binary.CompressedZipArchive",
+    bam: "galaxy.datatypes.binary.Bam",
+  },
+  class_to_classes: {
+    "galaxy.datatypes.data.Data": {
+      "galaxy.datatypes.data.Data": true,
+    },
+    "galaxy.datatypes.data.Text": {
+      "galaxy.datatypes.data.Data": true,
+      "galaxy.datatypes.data.Text": true,
+    },
+    "galaxy.datatypes.tabular.Tabular": {
+      "galaxy.datatypes.data.Data": true,
+      "galaxy.datatypes.data.Text": true,
+      "galaxy.datatypes.tabular.Tabular": true,
+      "galaxy.datatypes.tabular.TabularData": true,
+    },
+    "galaxy.datatypes.tabular.TSV": {
+      "galaxy.datatypes.data.Data": true,
+      "galaxy.datatypes.data.Text": true,
+      "galaxy.datatypes.tabular.BaseCSV": true,
+      "galaxy.datatypes.tabular.TSV": true,
+      "galaxy.datatypes.tabular.TabularData": true,
+    },
+    "galaxy.datatypes.tabular.CSV": {
+      "galaxy.datatypes.data.Data": true,
+      "galaxy.datatypes.data.Text": true,
+      "galaxy.datatypes.tabular.BaseCSV": true,
+      "galaxy.datatypes.tabular.CSV": true,
+      "galaxy.datatypes.tabular.TabularData": true,
+    },
+    "galaxy.datatypes.sequence.Fastq": {
+      "galaxy.datatypes.data.Data": true,
+      "galaxy.datatypes.data.Text": true,
+      "galaxy.datatypes.sequence.BaseFastq": true,
+      "galaxy.datatypes.sequence.Fastq": true,
+      "galaxy.datatypes.sequence.Sequence": true,
+    },
+    "galaxy.datatypes.registry.FastqGz": {
+      "galaxy.datatypes.binary.Binary": true,
+      "galaxy.datatypes.binary.CompressedArchive": true,
+      "galaxy.datatypes.binary.DynamicCompressedArchive": true,
+      "galaxy.datatypes.binary.GzDynamicCompressedArchive": true,
+      "galaxy.datatypes.data.Data": true,
+      "galaxy.datatypes.data.Text": true,
+      "galaxy.datatypes.registry.FastqGz": true,
+      "galaxy.datatypes.sequence.BaseFastq": true,
+      "galaxy.datatypes.sequence.Fastq": true,
+      "galaxy.datatypes.sequence.Sequence": true,
+    },
+    "galaxy.datatypes.registry.FastqBz2": {
+      "galaxy.datatypes.binary.Binary": true,
+      "galaxy.datatypes.binary.Bz2DynamicCompressedArchive": true,
+      "galaxy.datatypes.binary.CompressedArchive": true,
+      "galaxy.datatypes.binary.DynamicCompressedArchive": true,
+      "galaxy.datatypes.data.Data": true,
+      "galaxy.datatypes.data.Text": true,
+      "galaxy.datatypes.registry.FastqBz2": true,
+      "galaxy.datatypes.sequence.BaseFastq": true,
+      "galaxy.datatypes.sequence.Fastq": true,
+      "galaxy.datatypes.sequence.Sequence": true,
+    },
+    "galaxy.datatypes.sequence.FastqSanger": {
+      "galaxy.datatypes.data.Data": true,
+      "galaxy.datatypes.data.Text": true,
+      "galaxy.datatypes.sequence.BaseFastq": true,
+      "galaxy.datatypes.sequence.Fastq": true,
+      "galaxy.datatypes.sequence.FastqSanger": true,
+      "galaxy.datatypes.sequence.Sequence": true,
+    },
+    "galaxy.datatypes.registry.FastqSangerGz": {
+      "galaxy.datatypes.binary.Binary": true,
+      "galaxy.datatypes.binary.CompressedArchive": true,
+      "galaxy.datatypes.binary.DynamicCompressedArchive": true,
+      "galaxy.datatypes.binary.GzDynamicCompressedArchive": true,
+      "galaxy.datatypes.data.Data": true,
+      "galaxy.datatypes.data.Text": true,
+      "galaxy.datatypes.registry.FastqSangerGz": true,
+      "galaxy.datatypes.sequence.BaseFastq": true,
+      "galaxy.datatypes.sequence.Fastq": true,
+      "galaxy.datatypes.sequence.FastqSanger": true,
+      "galaxy.datatypes.sequence.Sequence": true,
+    },
+    "galaxy.datatypes.sequence.Fasta": {
+      "galaxy.datatypes.data.Data": true,
+      "galaxy.datatypes.data.Text": true,
+      "galaxy.datatypes.sequence.Fasta": true,
+      "galaxy.datatypes.sequence.Sequence": true,
+    },
+    "galaxy.datatypes.tabular.VcfGz": {
+      "galaxy.datatypes.binary.Binary": true,
+      "galaxy.datatypes.data.Data": true,
+      "galaxy.datatypes.data.Text": true,
+      "galaxy.datatypes.tabular.BaseVcf": true,
+      "galaxy.datatypes.tabular.Tabular": true,
+      "galaxy.datatypes.tabular.TabularData": true,
+      "galaxy.datatypes.tabular.VcfGz": true,
+    },
+    "galaxy.datatypes.binary.CompressedZipArchive": {
+      "galaxy.datatypes.binary.Binary": true,
+      "galaxy.datatypes.binary.CompressedArchive": true,
+      "galaxy.datatypes.binary.CompressedZipArchive": true,
+      "galaxy.datatypes.data.Data": true,
+    },
+    "galaxy.datatypes.binary.Bam": {
+      "galaxy.datatypes.binary.Bam": true,
+      "galaxy.datatypes.binary.BamNative": true,
+      "galaxy.datatypes.binary.Binary": true,
+      "galaxy.datatypes.binary.CompressedArchive": true,
+      "galaxy.datatypes.data.Data": true,
+    },
+  },
+};
+
+export const CONVERTERS = [
+  { source: "fastqsanger.gz", target: "fastqsanger", tool_id: "CONVERTER_gz_to_uncompressed" },
+  { source: "fastq.gz", target: "fastq", tool_id: "CONVERTER_gz_to_uncompressed" },
+  { source: "tabular", target: "csv", tool_id: "tabular_to_csv" },
+];
+
+/** Scott's run manifest (#618): a TSV, not reads. */
+export const MANIFEST_ID = "f9cad7b01a472135e3710fbaac96b25c";
