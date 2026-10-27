@@ -24,7 +24,13 @@ import { RegistryStore } from "../extensions/loom/registry";
 import type { TemplateSnapshot } from "../extensions/loom/registry-submitter";
 import { TemplateUnavailableError } from "../extensions/loom/registry-templates";
 import { SERVER, tmpAnalysisDir } from "./registry-fixtures";
-import { TOOL_ID, TOOL_SNAPSHOT, toolProposal } from "./registry-proposal-fixtures";
+import {
+  NANOPLOT_ID,
+  NANOPLOT_SNAPSHOT,
+  TOOL_ID,
+  TOOL_SNAPSHOT,
+  toolProposal,
+} from "./registry-proposal-fixtures";
 
 const NOTEBOOK =
   "# Analysis\n\n## Plan A: QC [remote]\n\n- [ ] 1. **Trim** {#plan-a-step-1} -- fastp\n- [ ] 2. **Align** {#plan-a-step-2}\n";
@@ -402,6 +408,42 @@ describe("edit after approve revokes, on the next read", () => {
     } finally {
       state.setNotebookPath(null);
     }
+  });
+});
+
+describe("map-over through loom_propose and /approve (#615)", () => {
+  it("proposes NanoPlot over a collection, says it runs per element, and approves it", async () => {
+    snapshot = NANOPLOT_SNAPSHOT;
+    let text = "";
+    const pi = {
+      registerTool: (t: { name: string; execute: (...a: unknown[]) => Promise<unknown> }) => {
+        if (t.name === "loom_propose") {
+          void t
+            .execute("call-1", {
+              ...params({
+                target: { kind: "tool", id: NANOPLOT_ID },
+                inputs: [{ slot: "mode|reads|files", src: "hdca", id: "a1c62e0f5b3d7790" }],
+                overrides: [],
+              }),
+            })
+            .then((r) => {
+              text = (r as { content: Array<{ text: string }> }).content[0].text;
+            });
+        }
+      },
+      registerCommand: () => {},
+      on: () => {},
+    } as never;
+    registerProposalCommands(pi, deps());
+    await vi.waitFor(() => expect(text).not.toBe(""));
+    expect(text).toMatch(/^Proposed prop-/);
+    expect(text).toMatch(/maps over the collection given to mode\|reads\|files/);
+    expect(text).toMatch(/runs once per element, one job each/);
+
+    const id = text.match(/^Proposed (\S+)\./)![1];
+    const r = await approveCommand(deps(), `${id} --yes`);
+    expect(r.message).toMatch(/^Approved /);
+    expect(r.message).toMatch(/runs once per element/);
   });
 });
 

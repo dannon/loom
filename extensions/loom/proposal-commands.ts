@@ -47,6 +47,7 @@ import {
   describePredicate,
   findDrift,
   liveApproval,
+  mappedOverSlots,
   newProposalId,
   parseInputs,
   parseOverrides,
@@ -215,7 +216,14 @@ export interface ProposeParams {
 }
 
 export type ProposeResult =
-  { ok: true; proposal: Proposal; table: string } | { ok: false; problems: string[] };
+  | {
+      ok: true;
+      proposal: Proposal;
+      table: string;
+      /** Slots given a collection that the run maps over, one job per element. */
+      mappedOver: string[];
+    }
+  | { ok: false; problems: string[] };
 
 /**
  * Validate a proposal against the fetched template and, only if nothing is
@@ -340,7 +348,8 @@ export async function propose(
   return {
     ok: true,
     proposal,
-    table: renderProposalTable(proposal, { resolvedVersion: snapshot.version }),
+    table: renderProposalTable(proposal, { resolvedVersion: snapshot.version, shape }),
+    mappedOver: mappedOverSlots(proposal, shape),
   };
 }
 
@@ -421,7 +430,8 @@ export async function approveCommand(
   } catch (err) {
     return { level: "warning", message: `Can't approve ${id}: ${(err as Error).message}.` };
   }
-  const problems = validateProposal(proposal, templateShape(proposal.target.kind, snapshot));
+  const shape = templateShape(proposal.target.kind, snapshot);
+  const problems = validateProposal(proposal, shape);
   if (problems.length > 0) {
     return {
       level: "warning",
@@ -429,7 +439,11 @@ export async function approveCommand(
     };
   }
 
-  const table = renderProposalTable(proposal, { resolvedVersion: snapshot.version, plain: true });
+  const table = renderProposalTable(proposal, {
+    resolvedVersion: snapshot.version,
+    plain: true,
+    shape,
+  });
   // Approval re-fetches and freezes what Galaxy says now, by design; say so
   // when that's not what the proposal was checked against.
   const templateNote =
@@ -498,6 +512,7 @@ export async function approveCommand(
       resolvedVersion: result.spec.target.version,
       specRevision: result.specRevision,
       plain: true,
+      shape,
     }),
     ...(result.superseded.length > 0 ? { superseded: result.superseded } : {}),
   });
@@ -519,6 +534,7 @@ export async function approveCommand(
         resolvedVersion: result.spec.target.version,
         specRevision: result.specRevision,
         plain: true,
+        shape,
       }) +
       `\n\nEditing the proposal from here revokes this approval.`,
   };
@@ -680,7 +696,9 @@ Galaxy and checks your proposal against it (dataset slots, required inputs, para
 anything is written; if something is wrong you get the list of problems and nothing is written. On
 success it writes a loom-proposal block to the notebook and returns a proposal id and a table.
 Show the user that table and ask them to type /approve <proposal-id>. You cannot approve it yourself.
-Give every parameter you set a rationale. Leave version unset to take what Galaxy resolves.`,
+Give every parameter you set a rationale. Leave version unset to take what Galaxy resolves.
+A tool's dataset input also takes a collection (src hdca): on a one-dataset input it runs once per
+element, on a multiple input it takes them all in one job.`,
     parameters: Type.Object({
       step_anchor: Type.String({
         description: "The plan step this run is for, e.g. 'plan-a-step-2'.",
@@ -735,10 +753,20 @@ Give every parameter you set a rationale. Leave version unset to take what Galax
         );
       }
       const id = result.proposal.proposalId;
+      const mapped =
+        result.mappedOver.length > 0
+          ? ` It maps over the collection given to ${result.mappedOver.join(", ")}: ` +
+            `Galaxy runs it once per element, and each job it makes carries out this proposal.`
+          : "";
       return toolText(
         `Proposed ${id}. Show the user this table and ask them to type /approve ${id} ` +
-          `(or say what to change). Do not submit this run until they have approved it.\n\n${result.table}`,
-        { proposalId: id, predicate: describePredicate(result.proposal.predicate) },
+          `(or say what to change). Do not submit this run until they have approved it.` +
+          `${mapped}\n\n${result.table}`,
+        {
+          proposalId: id,
+          predicate: describePredicate(result.proposal.predicate),
+          ...(result.mappedOver.length > 0 ? { mappedOver: result.mappedOver } : {}),
+        },
       );
     },
   });

@@ -54,6 +54,49 @@ export const TOOL_BODY = {
 
 export const TOOL_SNAPSHOT: TemplateSnapshot = { body: TOOL_BODY, version: "0.23.4+galaxy0" };
 
+export const NANOPLOT_ID = "toolshed.g2.bx.psu.edu/repos/iuc/nanoplot/nanoplot/1.46.1+galaxy0";
+
+/**
+ * NanoPlot's reads input as usegalaxy.org describes it, trimmed to three of
+ * its seven read types: the same `mode|reads|files` slot in every branch,
+ * taking one dataset under `batch` and several under `combined`, with the
+ * formats depending on `reads|type`.
+ */
+function nanoplotReads(multiple: boolean) {
+  const files = (extensions: string[]) => [{ name: "files", type: "data", multiple, extensions }];
+  return {
+    name: "reads",
+    type: "conditional",
+    test_param: { name: "type", type: "select", value: "fastq" },
+    cases: [
+      { value: "fastq", inputs: files(["fastq", "fastq.gz", "fastq.bz2", "vcf_bgzip"]) },
+      { value: "summary", inputs: files(["txt", "zip"]) },
+      { value: "bam", inputs: files(["bam"]) },
+    ],
+  };
+}
+
+export const NANOPLOT_SNAPSHOT: TemplateSnapshot = {
+  version: "1.46.1+galaxy0",
+  body: {
+    id: NANOPLOT_ID,
+    name: "NanoPlot",
+    version: "1.46.1+galaxy0",
+    inputs: [
+      {
+        name: "mode",
+        type: "conditional",
+        test_param: { name: "choice", type: "select", value: "batch" },
+        cases: [
+          { value: "batch", inputs: [nanoplotReads(false)] },
+          { value: "combined", inputs: [nanoplotReads(true)] },
+        ],
+      },
+      { name: "format", type: "select" },
+    ],
+  },
+};
+
 export const WORKFLOW_SNAPSHOT: TemplateSnapshot = {
   version: "3",
   body: {
@@ -85,6 +128,18 @@ export const UDT_SNAPSHOT: TemplateSnapshot = {
     },
   },
 };
+
+/** Scott's proposal (#615): NanoPlot over a 62-element list of runs. */
+export function nanoplotProposal(over: Partial<Proposal> = {}): Proposal {
+  return toolProposal({
+    label: "Per-sample NanoPlot QC",
+    target: { kind: "tool", tool_id: NANOPLOT_ID, version: "unpinned" },
+    inputs: [{ slot: "mode|reads|files", src: "hdca", id: "a1c62e0f5b3d7790" }],
+    overrides: [],
+    predicate: { kind: "manual" },
+    ...over,
+  });
+}
 
 export function toolProposal(over: Partial<Proposal> = {}): Proposal {
   return {

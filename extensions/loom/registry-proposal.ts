@@ -352,7 +352,28 @@ export interface TemplateSlot {
   label?: string;
   collection: boolean;
   required: boolean;
+  /** True when any variant takes several datasets. */
   multiple: boolean;
+  /**
+   * The slot as each conditional branch declares it. A tool can name the same
+   * input in several branches with different settings -- NanoPlot's
+   * `mode|reads|files` takes one dataset under `mode|choice=batch` and several
+   * under `combined` -- so which one applies depends on what the proposal picks.
+   */
+  variants: SlotVariant[];
+}
+
+/** One branch's declaration of a slot, and the selector values that pick it. */
+export interface SlotVariant {
+  when: BranchChoice[];
+  multiple: boolean;
+}
+
+/** A conditional's selector, the value that picks this branch, and its default. */
+export interface BranchChoice {
+  param: string;
+  value: string;
+  default?: string;
 }
 
 /** What a frozen template body says a proposal may name. */
@@ -395,11 +416,19 @@ function children(group: Record<string, unknown>): unknown {
   return group.inputs ?? group.parameters;
 }
 
+/** A selector or case value as text; Galaxy gives booleans for a boolean selector. */
+function choiceText(v: unknown): string | undefined {
+  if (typeof v === "string") return v;
+  if (typeof v === "boolean" || typeof v === "number") return String(v);
+  return undefined;
+}
+
 function walkToolInputs(
   inputs: unknown,
   shape: TemplateShape,
   prefix: string,
   conditional: boolean,
+  branch: BranchChoice[] = [],
 ): void {
   if (!Array.isArray(inputs)) return;
   for (const raw of inputs) {
@@ -407,27 +436,49 @@ function walkToolInputs(
     const name = `${prefix}${raw.name}`;
     const type = raw.type;
     if (type === "data" || type === "data_collection") {
+      const variant: SlotVariant = { when: branch, multiple: raw.multiple === true };
+      const seen = shape.slots.get(name);
+      if (seen) {
+        seen.variants.push(variant);
+        seen.multiple ||= variant.multiple;
+        continue;
+      }
       shape.slots.set(name, {
         name,
         ...(typeof raw.label === "string" && raw.label !== "" ? { label: raw.label } : {}),
         collection: type === "data_collection",
         required: !conditional && raw.optional !== true,
-        multiple: raw.multiple === true,
+        multiple: variant.multiple,
+        variants: [variant],
       });
     } else if (type === "conditional") {
       const testRaw = raw.test_param ?? raw.test_parameter;
       const test = isRecord(testRaw) ? testRaw : null;
-      if (test && typeof test.name === "string") shape.params.add(`${name}|${test.name}`);
+      const selector = test && typeof test.name === "string" ? `${name}|${test.name}` : null;
+      if (selector) shape.params.add(selector);
+      const byDefault = choiceText(test?.value ?? test?.default);
       const casesRaw = raw.cases ?? raw.whens;
       const cases = Array.isArray(casesRaw) ? casesRaw : [];
       for (const c of cases) {
-        if (isRecord(c)) walkToolInputs(children(c), shape, `${name}|`, true);
+        if (!isRecord(c)) continue;
+        const value = choiceText(c.value ?? c.discriminator);
+        const choice: BranchChoice[] =
+          selector && value !== undefined
+            ? [
+                {
+                  param: selector,
+                  value,
+                  ...(byDefault !== undefined ? { default: byDefault } : {}),
+                },
+              ]
+            : [];
+        walkToolInputs(children(c), shape, `${name}|`, true, [...branch, ...choice]);
       }
     } else if (type === "repeat") {
       shape.repeats.add(name);
-      walkToolInputs(children(raw), shape, `${name}_#|`, true);
+      walkToolInputs(children(raw), shape, `${name}_#|`, true, branch);
     } else if (type === "section") {
-      walkToolInputs(children(raw), shape, `${name}|`, conditional);
+      walkToolInputs(children(raw), shape, `${name}|`, conditional, branch);
     } else if (type === "upload_dataset") {
       continue;
     } else {
@@ -452,6 +503,7 @@ function workflowShape(body: Record<string, unknown>, version: string): Template
         collection: s.input_type === "data_collection",
         required: s.optional !== true,
         multiple: false,
+        variants: [{ when: [], multiple: false }],
       });
     } else if (s.input_type === "parameter") {
       shape.params.add(name);
@@ -542,12 +594,48 @@ function collectionOnDatasetSlot(slotName: string, shape: TemplateShape): string
     .filter((s) => s.collection || s.multiple)
     .map((s) => s.name);
   return (
-    `input slot "${slotName}" takes one dataset, not a collection. ` +
+    `input slot "${slotName}" takes one dataset, not a collection, and a workflow ` +
+    `input doesn't map over one here. ` +
     `Give it the id of one dataset (src hda)` +
     (takers.length > 0
       ? `, or give the collection (src hdca) to a slot that takes one: ${takers.join(", ")}`
       : "; nothing in this template takes a collection")
   );
+}
+
+/**
+ * The variants of a slot this proposal's selector choices pick: a branch
+ * applies when each selector on its path is overridden to its value or, left
+ * alone, defaults to it. When the choices pick none (a selector set to
+ * something no branch names), every variant is kept rather than guessing.
+ */
+export function variantsFor(proposal: Proposal, shape: TemplateShape, slot: TemplateSlot) {
+  const chosen = new Map<string, string | undefined>();
+  for (const o of proposal.overrides) {
+    chosen.set(foldRepeats(o.param, shape.repeats), choiceText(o.value));
+  }
+  const picked = slot.variants.filter((v) =>
+    v.when.every((c) => {
+      const value = chosen.has(c.param) ? chosen.get(c.param) : c.default;
+      return value === undefined || value === c.value;
+    }),
+  );
+  return picked.length > 0 ? picked : slot.variants;
+}
+
+/**
+ * The slots a proposal maps over: a collection on a tool's one-dataset slot,
+ * which Galaxy runs once per element.
+ */
+export function mappedOverSlots(proposal: Proposal, shape: TemplateShape): string[] {
+  if (proposal.target.kind === "workflow") return [];
+  return proposal.inputs
+    .filter((i) => {
+      const slot = slotFor(shape, i.slot);
+      if (i.src !== "hdca" || !slot || slot.collection) return false;
+      return !variantsFor(proposal, shape, slot).some((v) => v.multiple);
+    })
+    .map((i) => i.slot);
 }
 
 /**
@@ -583,8 +671,15 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
         `input slot "${input.slot}" takes a collection (src hdca), not ${input.src}; ` +
           `give a collection id with src hdca`,
       );
-    } else if (!slot.collection && !slot.multiple && input.src === "hdca") {
-      // A `multiple` data slot takes a list's datasets all at once, as one job.
+    } else if (
+      !slot.collection &&
+      !slot.multiple &&
+      input.src === "hdca" &&
+      proposal.target.kind === "workflow"
+    ) {
+      // A tool maps over a collection on a one-dataset slot (one job per
+      // element) and a `multiple` slot takes it whole; a workflow input does
+      // neither without a batch request the proposal can't express.
       problems.push(collectionOnDatasetSlot(input.slot, shape));
     }
     filled.set(input.slot, (filled.get(input.slot) ?? 0) + 1);
@@ -1004,6 +1099,8 @@ export function renderProposalTable(
     specRevision?: string;
     compact?: boolean;
     plain?: boolean;
+    /** The template, so a map-over can say it runs once per element. */
+    shape?: TemplateShape;
   } = {},
 ): string {
   const t = proposal.target;
@@ -1018,7 +1115,11 @@ export function renderProposalTable(
     ["History", proposal.historyId],
   ];
   if (proposal.label) rows.splice(1, 0, ["Label", proposal.label]);
-  for (const i of proposal.inputs) rows.push([`input ${i.slot}`, `${i.src} ${i.id}`]);
+  const mapped = new Set(opts.shape ? mappedOverSlots(proposal, opts.shape) : []);
+  for (const i of proposal.inputs) {
+    const each = mapped.has(i.slot) ? " -- runs once per element, one job each" : "";
+    rows.push([`input ${i.slot}`, `${i.src} ${i.id}${each}`]);
+  }
   for (const o of proposal.overrides) {
     rows.push([
       `param ${o.param}`,

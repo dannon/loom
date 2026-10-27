@@ -6,6 +6,7 @@ import {
   approveProposal,
   canonicalizeProposal,
   findDrift,
+  mappedOverSlots,
   newProposalId,
   parseProposalFields,
   pendingProposals,
@@ -20,10 +21,12 @@ import {
 } from "../extensions/loom/registry-proposal";
 import { SERVER, T0, tmpAnalysisDir } from "./registry-fixtures";
 import {
+  NANOPLOT_SNAPSHOT,
   TOOL_SNAPSHOT,
   UDT_SNAPSHOT,
   UDT_UUID,
   WORKFLOW_SNAPSHOT,
+  nanoplotProposal,
   toolProposal,
 } from "./registry-proposal-fixtures";
 
@@ -109,20 +112,43 @@ describe("proposal validated against the template (v3 §13)", () => {
     expect(s.slots.get("reads")?.required).toBe(true);
   });
 
-  it("refuses a collection given to a dataset slot, and the reverse", () => {
+  it("refuses a dataset given to a collection slot", () => {
     const problems = validateProposal(
-      toolProposal({
-        inputs: [
-          { slot: "reads", src: "hdca", id: "c1" },
-          { slot: "pool", src: "hda", id: "d1" },
-        ],
-      }),
+      toolProposal({ inputs: [...toolProposal().inputs, { slot: "pool", src: "hda", id: "d1" }] }),
       shape,
     );
-    expect(problems).toEqual([
-      expect.stringMatching(/"reads" takes one dataset/),
-      expect.stringMatching(/"pool" takes a collection/),
-    ]);
+    expect(problems).toEqual([expect.stringMatching(/"pool" takes a collection/)]);
+  });
+
+  describe("a collection on a tool's one-dataset slot maps over it (#615)", () => {
+    const nanoplot = templateShape("tool", NANOPLOT_SNAPSHOT);
+
+    it("accepts Scott's NanoPlot proposal over a 62-element list", () => {
+      expect(validateProposal(nanoplotProposal(), nanoplot)).toEqual([]);
+      expect(mappedOverSlots(nanoplotProposal(), nanoplot)).toEqual(["mode|reads|files"]);
+    });
+
+    it("says in the table it runs once per element", () => {
+      const table = renderProposalTable(nanoplotProposal(), { shape: nanoplot, plain: true });
+      expect(table).toMatch(
+        /input mode\|reads\|files +hdca a1c62e0f5b3d7790 -- runs once per element, one job each/,
+      );
+    });
+
+    it("reads the branch the proposal picks: combined mode takes the list in one job", () => {
+      const combined = nanoplotProposal({
+        overrides: [{ param: "mode|choice", value: "combined", rationale: "one report" }],
+      });
+      expect(validateProposal(combined, nanoplot)).toEqual([]);
+      expect(mappedOverSlots(combined, nanoplot)).toEqual([]);
+      expect(renderProposalTable(combined, { shape: nanoplot })).not.toMatch(/once per element/);
+    });
+
+    it("maps over a tool's plain one-dataset slot too", () => {
+      const p = toolProposal({ inputs: [{ slot: "reads", src: "hdca", id: "c1" }] });
+      expect(validateProposal(p, shape)).toEqual([]);
+      expect(mappedOverSlots(p, shape)).toEqual(["reads"]);
+    });
   });
 
   it("says what would work when a collection lands on a one-dataset slot (#615)", () => {
