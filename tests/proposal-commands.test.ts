@@ -526,11 +526,29 @@ describe("format check through loom_propose and /approve (#618)", () => {
   });
 
   it("lists what it couldn't check in the tool's reply", async () => {
-    const r = await propose(deps({ formats: formats({}) }), nanoplot("d2"));
+    let tool: { execute: (...a: unknown[]) => Promise<unknown> } | undefined;
+    const pi = {
+      registerTool: (t: { name: string; execute: (...a: unknown[]) => Promise<unknown> }) => {
+        if (t.name === "loom_propose") tool = t;
+      },
+      registerCommand: () => {},
+      on: () => {},
+    } as never;
+    registerProposalCommands(pi, deps({ formats: formats({}) }));
+    const r = (await tool!.execute("call-1", nanoplot("d2"))) as {
+      content: Array<{ text: string }>;
+    };
+    expect(r.content[0].text).toMatch(
+      /Formats not checked \(Galaxy will say at submission if they're wrong\):\n- mode\|reads\|files: Galaxy didn't say what format dataset d2/,
+    );
+  });
+
+  it("lists what it couldn't check when there's no dialog to approve in", async () => {
+    const r = await propose(deps({ formats: formats({}) }), nanoplot("d5"));
     if (!r.ok) throw new Error(r.problems.join("; "));
-    expect(r.formatsUnchecked).toEqual([
-      expect.stringMatching(/didn't say what format dataset d2/),
-    ]);
+    const reply = await approveCommand(deps({ formats: formats({}) }), r.proposal.proposalId);
+    expect(reply.message).toMatch(/^Not approved: there's no dialog/);
+    expect(reply.message).toMatch(/Formats not checked:\n- mode\|reads\|files: Galaxy didn't say/);
   });
 });
 
