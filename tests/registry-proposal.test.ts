@@ -120,9 +120,30 @@ describe("proposal validated against the template (v3 §13)", () => {
       shape,
     );
     expect(problems).toEqual([
-      expect.stringMatching(/"reads" takes a dataset/),
+      expect.stringMatching(/"reads" takes one dataset/),
       expect.stringMatching(/"pool" takes a collection/),
     ]);
+  });
+
+  it("says what would work when a collection lands on a one-dataset slot (#615)", () => {
+    const [problem] = validateProposal(
+      canonicalizeProposal(
+        {
+          ...toolProposal(),
+          target: { kind: "workflow", workflow_id: "f2db41e1fa331b3e", version: "unpinned" },
+          inputs: [
+            { slot: "forward", src: "hdca", id: "c62" },
+            { slot: "samples", src: "hdca", id: "c1" },
+          ],
+          overrides: [],
+        },
+        templateShape("workflow", WORKFLOW_SNAPSHOT),
+      ),
+      templateShape("workflow", WORKFLOW_SNAPSHOT),
+    );
+    expect(problem).toMatch(/"0" takes one dataset/);
+    expect(problem).toMatch(/id of one dataset \(src hda\)/);
+    expect(problem).toMatch(/to a slot that takes one: 1$/);
   });
 
   it("takes a collection on a multiple-dataset slot, flattened into one job (#615)", () => {

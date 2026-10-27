@@ -534,6 +534,23 @@ function describeSlots(shape: TemplateShape): string {
 }
 
 /**
+ * A collection on a slot that takes one dataset. Says what would be accepted,
+ * so a model can change its call instead of resending the same one.
+ */
+function collectionOnDatasetSlot(slotName: string, shape: TemplateShape): string {
+  const takers = [...shape.slots.values()]
+    .filter((s) => s.collection || s.multiple)
+    .map((s) => s.name);
+  return (
+    `input slot "${slotName}" takes one dataset, not a collection. ` +
+    `Give it the id of one dataset (src hda)` +
+    (takers.length > 0
+      ? `, or give the collection (src hdca) to a slot that takes one: ${takers.join(", ")}`
+      : "; nothing in this template takes a collection")
+  );
+}
+
+/**
  * Every way the proposal disagrees with the template, or an empty list.
  * Checked: each input names a dataset slot the template has, with a src that
  * slot takes, at most once unless it takes several; every required slot is
@@ -562,12 +579,13 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
       continue;
     }
     if (slot.collection && input.src !== "hdca") {
-      problems.push(`input slot "${input.slot}" takes a collection (src hdca), not ${input.src}`);
+      problems.push(
+        `input slot "${input.slot}" takes a collection (src hdca), not ${input.src}; ` +
+          `give a collection id with src hdca`,
+      );
     } else if (!slot.collection && !slot.multiple && input.src === "hdca") {
       // A `multiple` data slot takes a list's datasets all at once, as one job.
-      problems.push(
-        `input slot "${input.slot}" takes a dataset (src hda or ldda), not a collection`,
-      );
+      problems.push(collectionOnDatasetSlot(input.slot, shape));
     }
     filled.set(input.slot, (filled.get(input.slot) ?? 0) + 1);
     covered.add(slot.name);
