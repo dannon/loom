@@ -442,11 +442,17 @@ function choiceText(v: unknown): string | undefined {
   return undefined;
 }
 
-/** A selector's value as its branches name it: a boolean's true/false become its truevalue/falsevalue. */
+/** Galaxy's `string_as_bool`: these spellings are true and anything else is false. */
+const galaxyTrue = (v: unknown) => ["true", "yes", "on", "1"].includes(String(v).toLowerCase());
+
+/**
+ * A selector's value as its branches name it. A boolean's value becomes its
+ * truevalue or falsevalue the way Galaxy reads it, so `"True"` is true and
+ * any string it doesn't know, its own truevalue included, is false.
+ */
 function selectorText(shape: TemplateShape, selector: string, v: unknown): string | undefined {
   const b = shape.booleans.get(selector);
-  if (b && (v === true || v === "true")) return b.t;
-  if (b && (v === false || v === "false")) return b.f;
+  if (b && v !== undefined) return galaxyTrue(v) ? b.t : b.f;
   return choiceText(v);
 }
 
@@ -899,6 +905,13 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
     // A selector set to something no branch names would leave which inputs
     // and formats apply unknown, so it is refused rather than guessed at.
     const selector = foldRepeats(o.param, shape.repeats);
+    const b = shape.booleans.get(selector);
+    if (b && typeof o.value === "string" && o.value === b.t && !galaxyTrue(o.value)) {
+      problems.push(
+        `"${o.param}" is a boolean; give true or false (Galaxy reads "${o.value}" as false)`,
+      );
+      continue;
+    }
     const values = shape.choices.get(selector);
     const value = selectorText(shape, selector, o.value);
     if (values && (value === undefined || !values.has(value))) {

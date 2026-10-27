@@ -456,6 +456,34 @@ describe("branch resolution follows Galaxy's conditionals (review follow-ups)", 
     expect(checkInputFormats(byDefault, shape, formats).problems).toHaveLength(1);
   });
 
+  it("reads a boolean selector's value the way Galaxy's boolean parameter does", () => {
+    const shape = tool([
+      branchy(
+        "paired",
+        { name: "on", type: "boolean", truevalue: "enabled", falsevalue: "disabled" },
+        [
+          { value: "enabled", inputs: [{ name: "r2", type: "data", extensions: ["tabular"] }] },
+          { value: "disabled", inputs: [{ name: "r2", type: "data", extensions: ["fastq"] }] },
+        ],
+      ),
+    ]);
+    const formats = { extensions: new Map([["hda:d", ["tabular"]]]), accepts };
+    const with_ = (v: unknown) =>
+      proposal([{ slot: "paired|r2", src: "hda", id: "d" }], { "paired|on": v });
+    for (const v of [true, "true", "True", "yes", "on", 1, "1"]) {
+      expect(validateProposal(with_(v), shape)).toEqual([]);
+      expect(checkInputFormats(with_(v), shape, formats).problems).toEqual([]);
+    }
+    for (const v of [false, "false", "no", 0, "disabled"]) {
+      expect(validateProposal(with_(v), shape)).toEqual([]);
+      expect(checkInputFormats(with_(v), shape, formats).problems).toHaveLength(1);
+    }
+    // Galaxy reads any other string as false, so its truevalue would pick the false branch.
+    expect(validateProposal(with_("enabled"), shape)).toEqual([
+      expect.stringMatching(/"paired\|on" is a boolean; give true or false/),
+    ]);
+  });
+
   it("keeps every value a selector path takes under any parent branch", () => {
     const inner = (v: string) =>
       branchy("inner", { name: "choice", type: "select" }, [{ value: v, inputs: [] }]);
