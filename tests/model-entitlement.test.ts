@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   UnavailableModels,
+  availabilityUpdate,
   chatGptPlanRejection,
   unavailableModelLabel,
 } from "../app/src/renderer/model-entitlement.js";
@@ -104,5 +105,84 @@ describe("UnavailableModels", () => {
     expect(unavailableModelLabel("GPT-5.3 Codex Spark")).toBe(
       "GPT-5.3 Codex Spark — not available on your ChatGPT account",
     );
+  });
+});
+
+describe("availabilityUpdate", () => {
+  const none = { provider: null, model: null };
+
+  it("marks the requested model on a ChatGPT refusal", () => {
+    expect(
+      availabilityUpdate(
+        {
+          stopReason: "error",
+          errorMessage: STREAM_REJECTION,
+          provider: "openai-codex",
+          model: "gpt-5.3-codex-spark",
+        },
+        none,
+      ),
+    ).toEqual({ action: "mark", provider: "openai-codex", model: "gpt-5.3-codex-spark" });
+  });
+
+  // First-run setup never sets the renderer's tracked provider, so the
+  // message's own provider has to be enough.
+  it("uses the message's provider when the tracked one is unset or stale", () => {
+    const msg = {
+      stopReason: "error",
+      errorMessage: STREAM_REJECTION,
+      provider: "openai-codex",
+      model: "gpt-5.3-codex-spark",
+    };
+    expect(availabilityUpdate(msg, none)?.action).toBe("mark");
+    expect(availabilityUpdate(msg, { provider: "anthropic", model: "x" })?.provider).toBe(
+      "openai-codex",
+    );
+  });
+
+  it("falls back to the tracked provider and model", () => {
+    expect(
+      availabilityUpdate(
+        { stopReason: "error", errorMessage: STREAM_REJECTION },
+        { provider: "openai-codex", model: "gpt-5.3-codex-spark" },
+      ),
+    ).toEqual({ action: "mark", provider: "openai-codex", model: "gpt-5.3-codex-spark" });
+  });
+
+  it("ignores the same text from any other provider", () => {
+    expect(
+      availabilityUpdate(
+        {
+          stopReason: "error",
+          errorMessage: STREAM_REJECTION,
+          provider: "openai-compatible",
+          model: "gpt-5.3-codex-spark",
+        },
+        none,
+      ),
+    ).toBeNull();
+  });
+
+  it("won't mark a model the turn didn't ask for", () => {
+    expect(
+      availabilityUpdate(
+        {
+          stopReason: "error",
+          errorMessage: STREAM_REJECTION,
+          provider: "openai-codex",
+          model: "gpt-5.6-sol",
+        },
+        none,
+      ),
+    ).toBeNull();
+  });
+
+  it("clears on an answer, but not on an abort or an unrelated error", () => {
+    const base = { provider: "openai-codex", model: "gpt-5.6-terra" };
+    expect(availabilityUpdate({ ...base, stopReason: "stop" }, none)?.action).toBe("clear");
+    expect(availabilityUpdate({ ...base, stopReason: "aborted" }, none)).toBeNull();
+    expect(
+      availabilityUpdate({ ...base, stopReason: "error", errorMessage: "429 rate limit" }, none),
+    ).toBeNull();
   });
 });

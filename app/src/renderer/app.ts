@@ -39,7 +39,7 @@ import { planModelDiscovery } from "./model-discovery-gate.js";
 import { FALLBACK_MODELS_BY_PROVIDER, type ModelChoice } from "./model-fallback.js";
 import {
   UnavailableModels,
-  chatGptPlanRejection,
+  availabilityUpdate,
   unavailableModelLabel,
 } from "./model-entitlement.js";
 import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
@@ -1235,17 +1235,18 @@ welcomeOauthSignIn.addEventListener("click", async () => {
   welcomeError.textContent = "";
   welcomeOauthSignIn.disabled = true;
   welcomeOauthStatus.textContent = "Opening browser…";
+  // Captured before the await: the picker can change while the browser is open.
+  const provider = welcomeProvider.value;
   try {
-    const res = await window.orbit.oauthSignIn(welcomeProvider.value);
+    const res = await window.orbit.oauthSignIn(provider);
     if (res.ok) {
       welcomeOauthStatus.textContent = formatOAuthStatus(res.status);
       welcomeOauthStatus.classList.toggle("signed-in", res.status.signedIn);
       welcomeOauthSignIn.textContent = "Sign in again";
-      unavailableModels.clear(welcomeProvider.value);
-      populateWelcomeModels(
-        welcomeProvider.value,
-        readWelcomeModel(welcomeProvider.value) || undefined,
-      );
+      unavailableModels.clear(provider);
+      if (welcomeProvider.value === provider) {
+        populateWelcomeModels(provider, readWelcomeModel(provider) || undefined);
+      }
     } else {
       welcomeError.textContent = `Sign-in failed: ${res.error}`;
       welcomeOauthStatus.textContent = "Not signed in";
@@ -2906,28 +2907,23 @@ window.orbit.onAgentEvent((event) => {
       // Each assistant message = one LLM call billed separately
       const msg = (
         event as {
-          message?: { role?: string; stopReason?: string; errorMessage?: string; model?: string };
+          message?: {
+            role?: string;
+            stopReason?: string;
+            errorMessage?: string;
+            provider?: string;
+            model?: string;
+          };
         }
       ).message;
       if (msg?.role === "assistant") {
         commitTurnUsage();
-        const turnModel = msg.model || currentModel;
-        // Only openai-codex is a ChatGPT sign-in; any other endpoint echoing
-        // that text says nothing about this account.
-        if (currentProvider === "openai-codex" && turnModel) {
-          const rejected = msg.stopReason === "error" && chatGptPlanRejection(msg.errorMessage);
-          // Mark the model we asked for, not whatever id the error text names.
-          if (rejected) {
-            if (!rejected.model || rejected.model === turnModel) {
-              unavailableModels.mark(currentProvider, turnModel);
-            }
-          }
-          // A model that answers is available after all (plan change, or an
-          // account switch Orbit didn't see), so drop any stale mark.
-          else if (msg.stopReason !== "error" && msg.stopReason !== "aborted") {
-            unavailableModels.clear(currentProvider, turnModel);
-          }
-        }
+        const update = availabilityUpdate(msg, {
+          provider: currentProvider,
+          model: currentModel,
+        });
+        if (update?.action === "mark") unavailableModels.mark(update.provider, update.model);
+        else if (update) unavailableModels.clear(update.provider, update.model);
         // Surface assistant-side errors (e.g. 401 invalid API key) so the user
         // isn't staring at a silent UI after a failed call.
         if (msg.stopReason === "error") {
@@ -3670,20 +3666,27 @@ async function updatePrefsAuthUi(): Promise<void> {
   }
 }
 
+function forgetPrefsUnavailableModels(provider: string): void {
+  unavailableModels.clear(provider);
+  if (prefsProvider.value !== provider) return;
+  populateModels(
+    provider,
+    readPrefsModel(provider) || undefined,
+    prefsProviderStates[provider]?.discoveredModels,
+  );
+}
+
 prefsOauthSignIn.addEventListener("click", async () => {
   prefsOauthSignIn.disabled = true;
   prefsOauthStatus.textContent = "Opening browser…";
   prefsOauthStatus.classList.remove("signed-in");
+  // Captured before the await: the picker can change while the browser is open.
+  const provider = prefsProvider.value;
   try {
-    const res = await window.orbit.oauthSignIn(prefsProvider.value);
+    const res = await window.orbit.oauthSignIn(provider);
     if (res.ok) {
-      // A different account may well have a different plan.
-      unavailableModels.clear(prefsProvider.value);
-      populateModels(
-        prefsProvider.value,
-        readPrefsModel(prefsProvider.value) || undefined,
-        prefsProviderStates[prefsProvider.value]?.discoveredModels,
-      );
+      // A different account may be offered different models.
+      forgetPrefsUnavailableModels(provider);
       prefsOauthStatus.textContent = formatOAuthStatus(res.status);
       prefsOauthStatus.classList.toggle("signed-in", res.status.signedIn);
       prefsOauthSignIn.textContent = "Sign in again";
@@ -3705,13 +3708,9 @@ prefsOauthSignOut.addEventListener("click", async () => {
   if (!confirm(`Sign out of ${oauthAccountLabel(prefsProvider.value)}? ${consequence}`)) return;
   prefsOauthSignOut.disabled = true;
   try {
-    await window.orbit.oauthSignOut(prefsProvider.value);
-    unavailableModels.clear(prefsProvider.value);
-    populateModels(
-      prefsProvider.value,
-      readPrefsModel(prefsProvider.value) || undefined,
-      prefsProviderStates[prefsProvider.value]?.discoveredModels,
-    );
+    const provider = prefsProvider.value;
+    await window.orbit.oauthSignOut(provider);
+    forgetPrefsUnavailableModels(provider);
     prefsOauthStatus.textContent = "Not signed in";
     prefsOauthStatus.classList.remove("signed-in");
     prefsOauthSignIn.textContent = oauthSignInLabel(prefsProvider.value, false);

@@ -20,6 +20,40 @@ export function chatGptPlanRejection(raw: string | null | undefined): { model?: 
   return model ? { model } : {};
 }
 
+interface TurnMessage {
+  stopReason?: string;
+  errorMessage?: string;
+  provider?: string;
+  model?: string;
+}
+
+/**
+ * What one finished assistant message says about a model's availability. The
+ * message's own provider/model win over the renderer's tracked ones, which
+ * aren't set on every path (first-run setup, for one).
+ */
+export function availabilityUpdate(
+  msg: TurnMessage,
+  fallback: { provider: string | null; model: string | null },
+): { action: "mark" | "clear"; provider: string; model: string } | null {
+  const provider = msg.provider || fallback.provider;
+  const model = msg.model || fallback.model;
+  // Only openai-codex is a ChatGPT sign-in; any other endpoint echoing that
+  // text says nothing about this account.
+  if (provider !== "openai-codex" || !model) return null;
+  if (msg.stopReason === "error") {
+    const rejected = chatGptPlanRejection(msg.errorMessage);
+    // Mark the model we asked for, not whatever id the error text names.
+    if (!rejected || (rejected.model && rejected.model !== model)) return null;
+    return { action: "mark", provider, model };
+  }
+  // An aborted turn proves nothing either way.
+  if (msg.stopReason === "aborted") return null;
+  // A model that answers is available after all (plan change, or an account
+  // switch Orbit didn't see), so drop any stale mark.
+  return { action: "clear", provider, model };
+}
+
 export function unavailableModelLabel(label: string): string {
   return `${label} — not available on your ChatGPT account`;
 }
