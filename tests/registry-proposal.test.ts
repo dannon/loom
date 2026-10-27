@@ -501,6 +501,28 @@ describe("branch resolution follows Galaxy's conditionals (review follow-ups)", 
     ]);
   });
 
+  it("takes a select option no case names, which Galaxy runs with no extra inputs", () => {
+    const shape = tool([
+      branchy(
+        "trim",
+        {
+          name: "how",
+          type: "select",
+          value: "none",
+          options: [
+            ["None", "none", true],
+            ["Adapters", "adapters", false],
+          ],
+        },
+        [{ value: "adapters", inputs: [{ name: "adapters", type: "data", optional: true }] }],
+      ),
+    ]);
+    expect(validateProposal(proposal([], { "trim|how": "none" }), shape)).toEqual([]);
+    expect(validateProposal(proposal([], { "trim|how": "other" }), shape)).toEqual([
+      '"trim|how" chooses a branch; it takes adapters or none',
+    ]);
+  });
+
   it("keeps every value a selector path takes under any parent branch", () => {
     const inner = (v: string) =>
       branchy("inner", { name: "choice", type: "select" }, [{ value: v, inputs: [] }]);
