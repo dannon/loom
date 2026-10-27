@@ -184,6 +184,19 @@ describe("proposal validated against the template (v3 §13)", () => {
       expect(validateProposal(two("combined"), nanoplot)).toEqual([]);
     });
 
+    it("refuses datasets and collections mixed on one slot, as Galaxy does", () => {
+      const given = (srcs: Array<"hda" | "hdca">) =>
+        nanoplotProposal({
+          inputs: srcs.map((src, n) => ({ slot: "mode|reads|files", src, id: `x${n}` })),
+          overrides: [{ param: "mode|choice", value: "combined", rationale: "x" }],
+        });
+      expect(validateProposal(given(["hda", "hdca"]), nanoplot)).toEqual([
+        expect.stringMatching(/"mode\|reads\|files" is given both datasets and collections/),
+      ]);
+      expect(validateProposal(given(["hdca", "hdca"]), nanoplot)).toEqual([]);
+      expect(validateProposal(given(["hda", "hda"]), nanoplot)).toEqual([]);
+    });
+
     it("maps over a tool's plain one-dataset slot too", () => {
       const p = toolProposal({ inputs: [{ slot: "reads", src: "hdca", id: "c1" }] });
       expect(validateProposal(p, shape)).toEqual([]);

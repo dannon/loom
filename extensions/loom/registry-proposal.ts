@@ -822,6 +822,7 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
   // Inputs Galaxy would drop, reported last: a selector value no branch names
   // already explains why nothing applies.
   const unused = new Map<string, string>();
+  const srcs = new Map<string, Set<string>>();
   for (const input of proposal.inputs) {
     const slot = slotFor(shape, input.slot);
     if (!slot) {
@@ -856,7 +857,17 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
       problems.push(collectionOnDatasetSlot(input.slot, shape));
     }
     filled.set(input.slot, (filled.get(input.slot) ?? 0) + 1);
+    srcs.set(input.slot, (srcs.get(input.slot) ?? new Set()).add(input.src));
     covered.add(slot.name);
+  }
+  for (const [name, given] of srcs) {
+    // Galaxy refuses a collection beside anything else on one input.
+    if (given.size > 1 && given.has("hdca")) {
+      problems.push(
+        `input slot "${name}" is given both datasets and collections; Galaxy takes only ` +
+          `collections once one is given, so give all collections or all datasets`,
+      );
+    }
   }
   for (const [name, n] of filled) {
     const slot = slotFor(shape, name);
