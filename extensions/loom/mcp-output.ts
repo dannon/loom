@@ -197,11 +197,17 @@ function galaxyPage(pagination: unknown, returned: number): Recordish | null {
   let total = count(source.total_items);
   if (total !== undefined && total < (offset ?? 0) + returned) total = undefined;
   let hasNext = typeof source.has_next === "boolean" ? source.has_next : undefined;
-  if (hasNext === undefined && total !== undefined && offset !== undefined)
-    hasNext = offset + returned < total;
+  if (total !== undefined && offset !== undefined) {
+    const more = offset + returned < total;
+    // A has_next that contradicts the total proves nothing either way.
+    hasNext = hasNext === undefined || hasNext === more ? more : undefined;
+  }
   let nextOffset = hasNext ? count(source.next_offset) : undefined;
-  // A next_offset that doesn't move forward would loop the model on one page.
-  if (nextOffset !== undefined && offset !== undefined && nextOffset <= offset)
+  // Backwards would loop the model on one page; past the total would skip records.
+  if (
+    nextOffset !== undefined &&
+    ((offset !== undefined && nextOffset <= offset) || (total !== undefined && nextOffset >= total))
+  )
     nextOffset = undefined;
   return {
     totalItems: total ?? null,

@@ -280,6 +280,18 @@ describe("bounded MCP output recovery", () => {
     });
   });
 
+  it("trusts neither side of contradictory pagination", async () => {
+    const payload = userTools(5);
+    payload.pagination = { total_items: 234, offset: 0, has_next: false, next_offset: 5 };
+    let headline = await catalogHeadline(payload);
+    expect(headline).not.toMatch(/last page/i);
+    expect(headline).toMatch(/did not say whether more pages exist/i);
+    payload.pagination = { total_items: 234, offset: 0, has_next: true, next_offset: 250 };
+    headline = await catalogHeadline(payload);
+    expect(headline).toMatch(/more pages exist/i);
+    expect(headline).not.toContain("offset=250");
+  });
+
   it("does not imply a catalog is complete when Galaxy sent no pagination block", async () => {
     const headline = await catalogHeadline(userTools(5));
     expect(headline).toMatch(/^User-defined tools: showing 5 of 5 tools in this response/);
