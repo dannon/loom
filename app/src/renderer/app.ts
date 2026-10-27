@@ -33,6 +33,8 @@ import {
   buildDiscoveredModelOptions,
   pickOfferedProvider,
   unavailableProviders,
+  discoveredModelsStatus,
+  reconcileTypedModel,
   type ModelOption,
 } from "./model-options.js";
 import { planLiveValidation, planModelDiscovery } from "./model-discovery-gate.js";
@@ -1044,16 +1046,17 @@ function wireApiKeyValidation(
       // provider's models into another's picker.
       if (mySeq !== seq || providerEl.value !== provider) return;
       if (res.valid) {
-        setStatus("valid", key ? "\u2713 Valid" : "\u2713 Endpoint answered without a key");
+        const ok = key ? "\u2713 Valid" : "\u2713 Endpoint answered without a key";
+        setStatus("valid", ok);
         if (res.models && res.models.length > 0) {
           if (provider === CUSTOM_ENDPOINT_PROVIDER) {
             // The dropdown is hidden for a custom endpoint, so a probe's
-            // answer becomes suggestions rather than the set of choices. Fill
-            // an empty field with the first id: the probe just proved the
-            // endpoint serves it, so it is a better default than blank.
+            // answer becomes suggestions rather than the set of choices.
             if (suggestionsEl) renderModelSuggestions(suggestionsEl, res.models);
-            if (typedModelEl && !typedModelEl.value.trim()) {
-              typedModelEl.value = res.models[0] ?? "";
+            if (typedModelEl) {
+              typedModelEl.value = reconcileTypedModel(typedModelEl.value, res.models);
+              const listed = discoveredModelsStatus(typedModelEl.value, res.models);
+              setStatus("valid", `${ok} \u00b7 ${listed.replace(/^\u2713 /, "")}`);
             }
           } else if (modelEl) {
             renderModelOptions(modelEl, buildDiscoveredModelOptions(res.models, modelEl.value));
@@ -3972,9 +3975,12 @@ async function refreshDiscoveredModels(provider: string, manual: boolean): Promi
     }
     if (target) target.discoveredModels = res.models;
     if (owns()) {
-      populateModels(provider, readPrefsModel(provider) || target?.model || undefined, res.models);
-      const n = res.models.length;
-      setModelStatus("valid", `\u2713 ${n} model${n === 1 ? "" : "s"} available`);
+      const onScreen = readPrefsModel(provider) || target?.model || "";
+      const typed = provider === CUSTOM_ENDPOINT_PROVIDER;
+      const model = typed ? reconcileTypedModel(onScreen, res.models) : onScreen;
+      populateModels(provider, model || undefined, res.models);
+      // Only a typed field can hide the list; a dropdown shows all of it.
+      setModelStatus("valid", discoveredModelsStatus(typed ? model : "", res.models));
     }
   } catch (err) {
     if (owns()) {
