@@ -125,6 +125,19 @@ describe("proposal validated against the template (v3 §13)", () => {
     ]);
   });
 
+  it("takes a collection on a multiple-dataset slot, flattened into one job (#615)", () => {
+    const problems = validateProposal(
+      toolProposal({
+        inputs: [
+          { slot: "reads", src: "hda", id: "4b6e2f1a9c3d5e70" },
+          { slot: "bundle", src: "hdca", id: "c62" },
+        ],
+      }),
+      shape,
+    );
+    expect(problems).toEqual([]);
+  });
+
   it("refuses a dataset input passed as an override, and a duplicate override", () => {
     const problems = validateProposal(
       toolProposal({

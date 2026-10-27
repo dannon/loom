@@ -34,6 +34,7 @@ export const TOOL_BODY = {
     { name: "reads", type: "data", label: "Reads", optional: false },
     { name: "adapters", type: "data", optional: true },
     { name: "pool", type: "data_collection", optional: true },
+    { name: "bundle", type: "data", multiple: true, optional: true },
     {
       name: "filter_options",
       type: "section",

@@ -563,7 +563,8 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
     }
     if (slot.collection && input.src !== "hdca") {
       problems.push(`input slot "${input.slot}" takes a collection (src hdca), not ${input.src}`);
-    } else if (!slot.collection && input.src === "hdca") {
+    } else if (!slot.collection && !slot.multiple && input.src === "hdca") {
+      // A `multiple` data slot takes a list's datasets all at once, as one job.
       problems.push(
         `input slot "${input.slot}" takes a dataset (src hda or ldda), not a collection`,
       );
