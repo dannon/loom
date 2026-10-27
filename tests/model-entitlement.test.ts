@@ -45,6 +45,7 @@ describe("humanizeAgentError on a ChatGPT-plan rejection", () => {
       expect(h.text).toContain("gpt-5.3-codex-spark");
       expect(h.text).toMatch(/ChatGPT/);
       expect(h.text).toMatch(/Preferences/);
+      expect(h.text).not.toMatch(/plan/i);
       expect(h.text).not.toContain("Codex error:");
     });
   }

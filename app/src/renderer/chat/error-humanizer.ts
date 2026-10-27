@@ -158,9 +158,9 @@ export function humanizeAgentError(
     const which = planRejection.model ? `the ${planRejection.model} model` : "this model";
     return {
       text:
-        `OpenAI doesn't offer ${which} to ChatGPT-account sign-ins on your plan, so the ` +
-        "request was refused before the model did anything. Pick another model in " +
-        "Preferences and resend.",
+        `OpenAI doesn't support ${which} when Codex is signed in with a ChatGPT account, ` +
+        "so the request was refused before the model did anything. Pick another model " +
+        "in Preferences and resend.",
       retriable: false,
     };
   }

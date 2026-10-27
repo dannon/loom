@@ -1241,6 +1241,11 @@ welcomeOauthSignIn.addEventListener("click", async () => {
       welcomeOauthStatus.textContent = formatOAuthStatus(res.status);
       welcomeOauthStatus.classList.toggle("signed-in", res.status.signedIn);
       welcomeOauthSignIn.textContent = "Sign in again";
+      unavailableModels.clear(welcomeProvider.value);
+      populateWelcomeModels(
+        welcomeProvider.value,
+        readWelcomeModel(welcomeProvider.value) || undefined,
+      );
     } else {
       welcomeError.textContent = `Sign-in failed: ${res.error}`;
       welcomeOauthStatus.textContent = "Not signed in";
@@ -2907,11 +2912,18 @@ window.orbit.onAgentEvent((event) => {
       if (msg?.role === "assistant") {
         commitTurnUsage();
         const turnModel = msg.model || currentModel;
-        if (currentProvider && turnModel) {
+        // Only openai-codex is a ChatGPT sign-in; any other endpoint echoing
+        // that text says nothing about this account.
+        if (currentProvider === "openai-codex" && turnModel) {
           const rejected = msg.stopReason === "error" && chatGptPlanRejection(msg.errorMessage);
-          // A model that answers was entitled after all (plan upgrade, or an
+          // Mark the model we asked for, not whatever id the error text names.
+          if (rejected) {
+            if (!rejected.model || rejected.model === turnModel) {
+              unavailableModels.mark(currentProvider, turnModel);
+            }
+          }
+          // A model that answers is available after all (plan change, or an
           // account switch Orbit didn't see), so drop any stale mark.
-          if (rejected) unavailableModels.mark(currentProvider, rejected.model || turnModel);
           else if (msg.stopReason !== "error" && msg.stopReason !== "aborted") {
             unavailableModels.clear(currentProvider, turnModel);
           }
@@ -3695,6 +3707,11 @@ prefsOauthSignOut.addEventListener("click", async () => {
   try {
     await window.orbit.oauthSignOut(prefsProvider.value);
     unavailableModels.clear(prefsProvider.value);
+    populateModels(
+      prefsProvider.value,
+      readPrefsModel(prefsProvider.value) || undefined,
+      prefsProviderStates[prefsProvider.value]?.discoveredModels,
+    );
     prefsOauthStatus.textContent = "Not signed in";
     prefsOauthStatus.classList.remove("signed-in");
     prefsOauthSignIn.textContent = oauthSignInLabel(prefsProvider.value, false);

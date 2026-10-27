@@ -1,9 +1,9 @@
 // Model catalog by provider -- labels include cost guidance (in/out price per
-// 1M tokens). Fallback only: populateDynamicModelData() at startup overwrites
-// this from pi-ai's bundled registry via main IPC, so new models don't require
-// hand-edits here. It does have to name models pi still ships, though, or the
-// picker offers ids that fail on first use when that IPC is down (#609) --
-// tests/model-fallback.test.ts checks it against the registry.
+// 1M tokens). In Orbit desktop, populateDynamicModelData() overwrites this at
+// startup from pi-ai's bundled registry via main IPC. The web shell has no
+// registry IPC, so there this table is the whole catalog. Either way it has to
+// name models pi still ships, or the picker offers ids that fail on first use
+// (#609) -- tests/model-fallback.test.ts checks it against the registry.
 export interface ModelChoice {
   id: string;
   label: string;

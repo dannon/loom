@@ -1,9 +1,10 @@
-// Some openai-codex models are only open to certain ChatGPT plans (or to API
-// access), and the only signal is the rejection itself: pi's registry carries
-// no entitlement data, and probing every model would spend the user's plan
-// quota on requests they never asked for. So Orbit learns from the rejection --
-// it explains it in chat, and marks the model in the pickers so the user isn't
-// offered it again as if it worked (#609).
+// Some openai-codex models in pi's registry aren't served to ChatGPT-account
+// sign-ins (which accounts, and why, OpenAI doesn't say). The only signal is
+// the refusal itself: pi's registry carries no entitlement data, and probing
+// every model would spend the user's plan quota on requests they never asked
+// for. So Orbit learns from the refusal -- it explains it in chat, and marks
+// the model in the pickers so the user isn't offered it again as if it worked
+// (#609).
 
 const CHATGPT_PLAN_REJECTION = /not supported when using codex with a chatgpt account/i;
 const REJECTED_MODEL_ID = /'([^'\s]+)'\s+model\b/i;
@@ -66,7 +67,7 @@ export class UnavailableModels {
     try {
       const parsed: unknown = JSON.parse(this.store?.getItem(STORAGE_KEY) ?? "{}");
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-      const out: Record<string, string[]> = {};
+      const out: Record<string, string[]> = Object.create(null);
       for (const [provider, ids] of Object.entries(parsed)) {
         if (Array.isArray(ids)) out[provider] = ids.filter((m) => typeof m === "string");
       }
