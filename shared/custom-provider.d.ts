@@ -26,6 +26,8 @@ export function normalizeEndpointApi(value: string | undefined | null): Endpoint
 
 export const ACTIVE_LLM_API_KEY_ENV: "LOOM_ACTIVE_LLM_API_KEY";
 export function isCustomProvider(entry: LlmProviderConfig | undefined): boolean;
+export const NO_AUTH_API_KEY: "no-key";
+export function isKeylessCustomProvider(entry: LlmProviderConfig | undefined | null): boolean;
 export function synthesizeModelDef(entry: LlmProviderConfig): CustomModelDef;
 export function mergeCustomProviderIntoModelsConfig(
   modelsConfig: ModelsConfig,
