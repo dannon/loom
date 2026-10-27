@@ -251,9 +251,33 @@ describe("bounded MCP output recovery", () => {
     const payload = userTools(25);
     payload.pagination = { total_items: 234, offset: 0, has_next: true, next_offset: 25 };
     const headline = await catalogHeadline(payload);
-    expect(headline).toMatch(/^User-defined tools: showing 20 of 234 \(offset 0\)\./);
-    expect(headline).toContain("This response holds 25; page it with mcp_read_output nextOffset.");
-    expect(headline).toContain("offset=25");
+    expect(headline).toMatch(/^User-defined tools: showing 20 of 234 \(Galaxy offset 0\)\./);
+    // Re-calling Galaxy before reading tools 20-24 of this response would skip them.
+    expect(headline).toContain("read the rest first with mcp_read_output offset=20.");
+    expect(headline).toContain("after that, re-call the Galaxy tool with offset=25.");
+  });
+
+  it("keeps Galaxy's next offset when it reports no total", async () => {
+    const payload = userTools(5);
+    payload.pagination = { offset: 0, has_next: true, next_offset: 5 };
+    const headline = await catalogHeadline(payload);
+    expect(headline).toContain("offset=5");
+    expect(headline).toMatch(/more pages exist/i);
+  });
+
+  it("infers more pages from the total and ignores a next offset that doesn't advance", async () => {
+    const payload = userTools(5);
+    payload.pagination = { total_items: 234, offset: 10, next_offset: 10 };
+    const headline = await catalogHeadline(payload);
+    expect(headline).toMatch(/more pages exist/i);
+    expect(headline).toContain("a later offset");
+    expect(headline).not.toContain("offset=10");
+    expect(inspectOutput(JSON.stringify(payload), { outputId: "x" }).galaxyPage).toEqual({
+      totalItems: 234,
+      offset: 10,
+      hasNext: true,
+      nextOffset: null,
+    });
   });
 
   it("does not imply a catalog is complete when Galaxy sent no pagination block", async () => {

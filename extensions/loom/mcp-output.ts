@@ -173,6 +173,7 @@ function userToolCatalog(root: unknown, args: OutputQuery): Recordish | undefine
     responseItems: tools.length,
     sourceCount: preview(response.count),
     sourcePagination: preview(response.pagination),
+    galaxyPage: galaxyPage(response.pagination, tools.length),
     items,
     nextOffset: more ? offset + items.length : null,
     definitionsOmitted: true,
@@ -185,30 +186,58 @@ function count(value: unknown): number | undefined {
 }
 
 /**
- * The first line the model reads, so it must not call a page complete. Galaxy
- * MCP's next_offset is used as given: its output budget can cut a page short of
- * `limit`, so offset + limit would skip records.
+ * Galaxy MCP's pagination block, keeping only fields consistent with this
+ * response. next_offset is used as given, never offset + limit: Galaxy MCP's
+ * output budget can cut a page short of `limit`, so that would skip records.
  */
+function galaxyPage(pagination: unknown, returned: number): Recordish | null {
+  const source = record(pagination);
+  if (!source) return null;
+  const offset = count(source.offset);
+  let total = count(source.total_items);
+  if (total !== undefined && total < (offset ?? 0) + returned) total = undefined;
+  let hasNext = typeof source.has_next === "boolean" ? source.has_next : undefined;
+  if (hasNext === undefined && total !== undefined && offset !== undefined)
+    hasNext = offset + returned < total;
+  let nextOffset = hasNext ? count(source.next_offset) : undefined;
+  // A next_offset that doesn't move forward would loop the model on one page.
+  if (nextOffset !== undefined && offset !== undefined && nextOffset <= offset)
+    nextOffset = undefined;
+  return {
+    totalItems: total ?? null,
+    offset: offset ?? null,
+    hasNext: hasNext ?? null,
+    nextOffset: nextOffset ?? null,
+  };
+}
+
+/** The first line the model reads, so it must never call a partial page complete. */
 function catalogHeadline(page: Recordish): string {
   const shown = (page.items as unknown[]).length;
-  // preview() keeps a pagination block's scalar fields verbatim.
-  const source = record(record(page.sourcePagination)?.fields);
-  const total = count(source?.total_items);
-  if (total === undefined)
-    return `User-defined tools: showing ${shown} of ${page.responseItems} tools in this response. Galaxy did not report a total, so other pages may exist. Full definitions are available on demand.`;
-  const offset = count(source?.offset);
-  let headline = `User-defined tools: showing ${shown} of ${total}${offset === undefined ? "" : ` (offset ${offset})`}.`;
-  if (shown < (page.responseItems as number))
-    headline += ` This response holds ${page.responseItems}; page it with mcp_read_output nextOffset.`;
-  if (source?.has_next === true) {
-    const next = count(source.next_offset);
-    headline +=
-      next === undefined
-        ? " More pages exist in Galaxy; re-call the Galaxy tool with a later offset."
-        : ` More pages exist in Galaxy -- re-call the Galaxy tool with offset=${next} to continue.`;
-  } else if (source?.has_next === false) headline += " This is Galaxy's last page.";
-  else headline += " Galaxy did not say whether more pages exist.";
-  return `${headline} Full definitions are available on demand.`;
+  const galaxy = record(page.galaxyPage);
+  const total = count(galaxy?.totalItems);
+  const offset = count(galaxy?.offset);
+  const unread = count(page.nextOffset);
+  const parts = [
+    total === undefined
+      ? `User-defined tools: showing ${shown} of ${page.responseItems} tools in this response.`
+      : `User-defined tools: showing ${shown} of ${total}${offset === undefined ? "" : ` (Galaxy offset ${offset})`}.`,
+  ];
+  if (unread !== undefined)
+    parts.push(
+      `This response holds ${page.responseItems}; read the rest first with mcp_read_output offset=${unread}.`,
+    );
+  if (galaxy?.hasNext === true) {
+    const next = count(galaxy.nextOffset);
+    parts.push(
+      `More pages exist in Galaxy -- ${unread === undefined ? "" : "after that, "}re-call the Galaxy tool with ${next === undefined ? "a later offset" : `offset=${next}`}.`,
+    );
+  } else if (galaxy?.hasNext === false) parts.push("This is Galaxy's last page.");
+  else if (total === undefined)
+    parts.push("Galaxy did not report a total, so other pages may exist.");
+  else parts.push("Galaxy did not say whether more pages exist.");
+  parts.push("Full definitions are available on demand.");
+  return parts.join(" ");
 }
 
 export function inspectOutput(text: string, args: OutputQuery): Recordish {
@@ -411,7 +440,7 @@ export function registerMcpOutputRecovery(pi: ExtensionAPI): void {
       if (page.type === "user_tool_catalog") {
         if (!event.isError) headline = catalogHeadline(page);
         next =
-          'Search tool names/IDs/descriptions with query, or page this catalog with pointer "/data" and nextOffset. Use a tool\'s definitionPointer to inspect its inputs, outputs or command only when needed. These are summaries of this response, not proof that Galaxy has no other pages.';
+          "Search tool names/IDs/descriptions with query, or page this catalog by passing its nextOffset as offset. Use a tool's definitionPointer to inspect its inputs, outputs or command only when needed. These are summaries of this response, not proof that Galaxy has no other pages.";
       }
     } catch {
       headline = event.isError
