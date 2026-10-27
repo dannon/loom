@@ -388,6 +388,8 @@ export interface TemplateShape {
   repeats: Set<string>;
   /** Labels that name exactly one slot or parameter, for canonicalizing. */
   aliases: Map<string, string>;
+  /** Each conditional selector's values, where the template lists them. */
+  choices: Map<string, Set<string>>;
 }
 
 function emptyShape(version: string): TemplateShape {
@@ -397,6 +399,7 @@ function emptyShape(version: string): TemplateShape {
     params: new Set(),
     repeats: new Set(),
     aliases: new Map(),
+    choices: new Map(),
   };
 }
 
@@ -475,6 +478,18 @@ function walkToolInputs(
       const byDefault = choiceText(test?.value ?? test?.default);
       const casesRaw = raw.cases ?? raw.whens;
       const cases = Array.isArray(casesRaw) ? casesRaw : [];
+      // A select can offer values no case names (Galaxy runs those with no
+      // extra inputs), so the options count too.
+      const values = new Set<string>();
+      for (const c of cases) {
+        const v = isRecord(c) ? choiceText(c.value ?? c.discriminator) : undefined;
+        if (v !== undefined) values.add(v);
+      }
+      for (const o of Array.isArray(test?.options) ? test.options : []) {
+        const v = choiceText(Array.isArray(o) ? o[1] : isRecord(o) ? o.value : undefined);
+        if (v !== undefined) values.add(v);
+      }
+      if (selector && values.size > 0) shape.choices.set(selector, values);
       for (const c of cases) {
         if (!isRecord(c)) continue;
         const value = choiceText(c.value ?? c.discriminator);
@@ -725,7 +740,8 @@ export function mappedOverSlots(proposal: Proposal, shape: TemplateShape): strin
     .filter((i) => {
       const slot = slotFor(shape, i.slot);
       if (i.src !== "hdca" || !slot || slot.collection) return false;
-      return !variantsFor(proposal, shape, slot).some((v) => v.multiple);
+      // When the branch can't be pinned down, say it may run per element.
+      return variantsFor(proposal, shape, slot).some((v) => !v.multiple);
     })
     .map((i) => i.slot);
 }
@@ -778,7 +794,8 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
     covered.add(slot.name);
   }
   for (const [name, n] of filled) {
-    if (n > 1 && !slotFor(shape, name)?.multiple) {
+    const slot = slotFor(shape, name);
+    if (n > 1 && slot && !variantsFor(proposal, shape, slot).some((v) => v.multiple)) {
       problems.push(`input slot "${name}" takes one dataset but is given ${n}`);
     }
   }
@@ -800,6 +817,14 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
     }
     if (o.param.includes("_#") || !shape.params.has(foldRepeats(o.param, shape.repeats))) {
       problems.push(`"${o.param}" is not a parameter of this ${proposalNoun(proposal)}`);
+      continue;
+    }
+    // A selector set to something no branch names would leave which inputs
+    // and formats apply unknown, so it is refused rather than guessed at.
+    const values = shape.choices.get(foldRepeats(o.param, shape.repeats));
+    const value = choiceText(o.value);
+    if (values && (value === undefined || !values.has(value))) {
+      problems.push(`"${o.param}" chooses a branch; it takes ${orList([...values])}`);
     }
   }
   return problems;

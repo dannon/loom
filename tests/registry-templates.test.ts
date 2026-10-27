@@ -246,6 +246,19 @@ describe("reading datatypes for the format check (#618)", () => {
     expect(seen.filter((u) => u.startsWith("/api/datatypes/types_and_mapping"))).toHaveLength(1);
   });
 
+  it("doesn't keep a read whose converter list failed", async () => {
+    resetDatatypeCache();
+    const seen: string[] = [];
+    const galaxy = ctx(
+      { "/api/datatypes/types_and_mapping": () => ({ datatypes_mapping: DATATYPES }) },
+      seen,
+    );
+    const f = await fetchInputFormatsWith(galaxy, "https://galaxy.test", []);
+    expect(f.accepts?.("tsv", ["fastq"])).toBeUndefined();
+    await fetchInputFormatsWith(galaxy, "https://galaxy.test", []);
+    expect(seen.filter((u) => u.startsWith("/api/datatypes/converters"))).toHaveLength(2);
+  });
+
   it("says the hierarchy is unknown when Galaxy won't give it, and asks again next time", async () => {
     resetDatatypeCache();
     const seen: string[] = [];

@@ -460,8 +460,11 @@ export async function approveCommand(
   }
   const shape = templateShape(proposal.target.kind, snapshot);
   const problems = validateProposal(proposal, shape);
+  let formatsUnchecked: string[] = [];
   if (problems.length === 0) {
-    problems.push(...(await checkFormats(deps, nb, proposal, shape, opts.signal)).problems);
+    const formats = await checkFormats(deps, nb, proposal, shape, opts.signal);
+    problems.push(...formats.problems);
+    formatsUnchecked = formats.unchecked;
   }
   if (problems.length > 0) {
     return {
@@ -481,10 +484,14 @@ export async function approveCommand(
     proposal.templateDigest && proposal.templateDigest !== sha256Hex(canonicalJson(snapshot.body))
       ? "\n\nGalaxy's template for this target changed since it was proposed; the above was checked against the current one."
       : "";
+  const formatNote =
+    formatsUnchecked.length > 0
+      ? `\n\nFormats not checked:\n- ${formatsUnchecked.join("\n- ")}`
+      : "";
   if (opts.confirm) {
     const confirmed = await opts.confirm(
       `Approve ${id}?`,
-      `${table}${templateNote}\n\nThis freezes exactly the above.`,
+      `${table}${templateNote}${formatNote}\n\nThis freezes exactly the above.`,
     );
     if (!confirmed) return { level: "info", message: `Not approved; ${id} is still pending.` };
   } else if (!yes) {
@@ -492,7 +499,7 @@ export async function approveCommand(
     // a spec the user never saw, so they have to see it here and say so.
     const message =
       `Not approved: there's no dialog here to confirm in. This is what /approve would freeze:\n\n` +
-      `${table}${templateNote}\n\nIf that's what you want, run /approve ${id} --yes.`;
+      `${table}${templateNote}${formatNote}\n\nIf that's what you want, run /approve ${id} --yes.`;
     activity(deps, "proposal.approval_unconfirmed", "user", { proposal_id: id, table });
     return { level: "warning", message };
   }

@@ -496,6 +496,19 @@ describe("format check through loom_propose and /approve (#618)", () => {
     expect(liveApproval(session!.store.snapshot(), r.proposal.proposalId)).toBeUndefined();
   });
 
+  it("shows the person approving what it couldn't check", async () => {
+    const r = await propose(deps({ formats: formats({}) }), nanoplot("d3"));
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    let shown = "";
+    await approveCommand(deps({ formats: formats({}) }), r.proposal.proposalId, {
+      confirm: async (_t, message) => {
+        shown = message;
+        return false;
+      },
+    });
+    expect(shown).toMatch(/Formats not checked:\n- mode\|reads\|files: Galaxy didn't say/);
+  });
+
   it("lists what it couldn't check in the tool's reply", async () => {
     const r = await propose(deps({ formats: formats({}) }), nanoplot("d2"));
     if (!r.ok) throw new Error(r.problems.join("; "));

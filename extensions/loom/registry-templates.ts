@@ -186,12 +186,19 @@ export function datatypeAccepts(
 }
 
 /** The hierarchy and converters change only with the server's config; read them once. */
-const datatypeCache = new Map<string, Promise<InputFormats["accepts"]>>();
+const datatypeCache = new Map<
+  string,
+  Promise<{ accepts: InputFormats["accepts"]; complete: boolean }>
+>();
 
-async function readDatatypes(ctx: GalaxyContext): Promise<InputFormats["accepts"]> {
+async function readDatatypes(
+  ctx: GalaxyContext,
+): Promise<{ accepts: InputFormats["accepts"]; complete: boolean }> {
   const mapping = await getDatatypesMapping(ctx);
   // galaxy-ops answers a failed read with an empty mapping.
-  if (Object.keys(mapping.ext_to_class_name ?? {}).length === 0) return null;
+  if (Object.keys(mapping.ext_to_class_name ?? {}).length === 0) {
+    return { accepts: null, complete: false };
+  }
   let converters: Converter[] | null = null;
   try {
     const { data } = await ctx.client.GET("/api/datatypes/converters");
@@ -199,7 +206,7 @@ async function readDatatypes(ctx: GalaxyContext): Promise<InputFormats["accepts"
   } catch {
     // Unknown converters only make more pairings unknown.
   }
-  return datatypeAccepts(mapping, converters);
+  return { accepts: datatypeAccepts(mapping, converters), complete: converters !== null };
 }
 
 export async function fetchInputFormatsWith(
@@ -209,11 +216,13 @@ export async function fetchInputFormatsWith(
 ): Promise<InputFormats> {
   let pending = datatypeCache.get(serverKey);
   if (!pending) {
-    pending = readDatatypes(ctx).catch(() => null);
+    pending = readDatatypes(ctx).catch(() => ({ accepts: null, complete: false }));
     datatypeCache.set(serverKey, pending);
   }
-  const accepts = await pending;
-  if (!accepts) datatypeCache.delete(serverKey);
+  const { accepts, complete } = await pending;
+  // A partial read serves this proposal but isn't kept, so a blip doesn't
+  // leave every later check unable to refuse anything.
+  if (!complete) datatypeCache.delete(serverKey);
 
   const extensions = new Map<string, string[] | null>();
   await Promise.all(

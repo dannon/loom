@@ -149,6 +149,41 @@ describe("proposal validated against the template (v3 §13)", () => {
       expect(renderProposalTable(combined, { shape: nanoplot })).not.toMatch(/once per element/);
     });
 
+    it("refuses a selector value no branch names, so it can't hide a map-over", () => {
+      for (const value of ["bogus", null]) {
+        const p = nanoplotProposal({
+          overrides: [{ param: "mode|choice", value, rationale: "x" }],
+        });
+        expect(validateProposal(p, nanoplot)).toEqual([
+          '"mode|choice" chooses a branch; it takes batch or combined',
+        ]);
+      }
+    });
+
+    it("says it may run per element when the branch can't be pinned down", () => {
+      const body = structuredClone(NANOPLOT_SNAPSHOT.body) as {
+        inputs: Array<{ test_param: { value?: string } }>;
+      };
+      delete body.inputs[0].test_param.value;
+      const undecided = templateShape("tool", { ...NANOPLOT_SNAPSHOT, body });
+      expect(mappedOverSlots(nanoplotProposal(), undecided)).toEqual(["mode|reads|files"]);
+    });
+
+    it("counts datasets against the branch picked, not any branch", () => {
+      const two = (choice: string) =>
+        nanoplotProposal({
+          inputs: [
+            { slot: "mode|reads|files", src: "hda", id: "d1" },
+            { slot: "mode|reads|files", src: "hda", id: "d2" },
+          ],
+          overrides: [{ param: "mode|choice", value: choice, rationale: "x" }],
+        });
+      expect(validateProposal(two("batch"), nanoplot)).toEqual([
+        'input slot "mode|reads|files" takes one dataset but is given 2',
+      ]);
+      expect(validateProposal(two("combined"), nanoplot)).toEqual([]);
+    });
+
     it("maps over a tool's plain one-dataset slot too", () => {
       const p = toolProposal({ inputs: [{ slot: "reads", src: "hdca", id: "c1" }] });
       expect(validateProposal(p, shape)).toEqual([]);
