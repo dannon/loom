@@ -296,6 +296,7 @@ describe("dataset formats checked against the slot (#618)", () => {
         { param: "mode|choice", value: "batch", default: "batch" },
         { param: "mode|reads|type", value: "fastq", default: "fastq" },
       ],
+      collection: false,
       multiple: false,
       accepts: ["fastq", "fastq.gz", "fastq.bz2", "vcf_bgzip"],
     });
@@ -363,6 +364,115 @@ describe("dataset formats checked against the slot (#618)", () => {
     expect(
       checkInputFormats(toolProposal(), shape, formats({ "hda:4b6e2f1a9c3d5e70": ["tsv"] })),
     ).toEqual({ problems: [], unchecked: [] });
+  });
+});
+
+describe("branch resolution follows Galaxy's conditionals (review follow-ups)", () => {
+  const accepts = datatypeAccepts(DATATYPES, CONVERTERS);
+  const tool = (inputs: unknown[]) =>
+    templateShape("tool", { version: "1", body: { id: "t", version: "1", inputs } });
+  const proposal = (inputs: Proposal["inputs"], choices: Record<string, unknown>) =>
+    toolProposal({
+      target: { kind: "tool", tool_id: "t", version: "unpinned" },
+      inputs,
+      overrides: Object.entries(choices).map(([param, value]) => ({
+        param,
+        value,
+        rationale: "x",
+      })),
+    });
+  const branchy = (name: string, test: Record<string, unknown>, cases: unknown[]) => ({
+    name,
+    type: "conditional",
+    test_param: test,
+    cases,
+  });
+
+  it("reads each repeat instance's selector from that instance", () => {
+    const shape = tool([
+      {
+        name: "rows",
+        type: "repeat",
+        inputs: [
+          branchy("mode", { name: "choice", type: "select", value: "one" }, [
+            { value: "one", inputs: [{ name: "reads", type: "data", extensions: ["fastq"] }] },
+            {
+              value: "many",
+              inputs: [{ name: "reads", type: "data", multiple: true, extensions: ["tabular"] }],
+            },
+          ]),
+        ],
+      },
+    ]);
+    const p = proposal(
+      [
+        { slot: "rows_0|mode|reads", src: "hda", id: "fq" },
+        { slot: "rows_1|mode|reads", src: "hdca", id: "tabs" },
+      ],
+      { "rows_0|mode|choice": "one", "rows_1|mode|choice": "many" },
+    );
+    expect(validateProposal(p, shape)).toEqual([]);
+    expect(mappedOverSlots(p, shape)).toEqual([]);
+    expect(
+      checkInputFormats(p, shape, {
+        extensions: new Map([
+          ["hda:fq", ["fastqsanger"]],
+          ["hdca:tabs", ["tabular"]],
+        ]),
+        accepts,
+      }),
+    ).toEqual({ problems: [], unchecked: [] });
+  });
+
+  it("names a boolean selector's branches by its truevalue and falsevalue", () => {
+    const shape = tool([
+      branchy(
+        "paired",
+        { name: "on", type: "boolean", truevalue: "yes", falsevalue: "no", value: false },
+        [
+          { value: "yes", inputs: [{ name: "r2", type: "data", extensions: ["tabular"] }] },
+          { value: "no", inputs: [{ name: "r2", type: "data", extensions: ["fastq"] }] },
+        ],
+      ),
+    ]);
+    const formats = { extensions: new Map([["hda:d", ["tabular"]]]), accepts };
+    const on = proposal([{ slot: "paired|r2", src: "hda", id: "d" }], { "paired|on": true });
+    expect(validateProposal(on, shape)).toEqual([]);
+    expect(checkInputFormats(on, shape, formats).problems).toEqual([]);
+    const byDefault = proposal([{ slot: "paired|r2", src: "hda", id: "d" }], {});
+    expect(checkInputFormats(byDefault, shape, formats).problems).toHaveLength(1);
+  });
+
+  it("keeps every value a selector path takes under any parent branch", () => {
+    const inner = (v: string) =>
+      branchy("inner", { name: "choice", type: "select" }, [{ value: v, inputs: [] }]);
+    const shape = tool([
+      branchy("outer", { name: "sel", type: "select" }, [
+        { value: "A", inputs: [inner("a")] },
+        { value: "B", inputs: [inner("b")] },
+      ]),
+    ]);
+    expect(
+      validateProposal(proposal([], { "outer|sel": "A", "outer|inner|choice": "a" }), shape),
+    ).toEqual([]);
+  });
+
+  it("reads dataset-or-collection per branch, in either declaration order", () => {
+    for (const order of [
+      ["c", "d"],
+      ["d", "c"],
+    ]) {
+      const cases = order.map((v) => ({
+        value: v,
+        inputs: [{ name: "x", type: v === "c" ? "data_collection" : "data" }],
+      }));
+      const shape = tool([branchy("k", { name: "sel", type: "select", value: "c" }, cases)]);
+      const hda = [{ slot: "k|x", src: "hda" as const, id: "d1" }];
+      expect(validateProposal(proposal(hda, { "k|sel": "d" }), shape)).toEqual([]);
+      expect(validateProposal(proposal(hda, { "k|sel": "c" }), shape)).toEqual([
+        expect.stringMatching(/"k\|x" takes a collection/),
+      ]);
+    }
   });
 });
 

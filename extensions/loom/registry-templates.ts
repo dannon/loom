@@ -170,6 +170,10 @@ export function datatypeAccepts(
   converters: Converter[] | null,
 ): (ext: string, accepted: string[]) => boolean | undefined {
   const known = (e: string) => mapping.ext_to_class_name[e] !== undefined;
+  const compressed = (e: string) =>
+    mapping.class_to_classes[mapping.ext_to_class_name[e]]?.[
+      "galaxy.datatypes.binary.DynamicCompressedArchive"
+    ] === true;
   const isA = (sub: string, sup: string) =>
     known(sub) && known(sup) && subtypeSatisfies(sub, [sup], mapping);
   return (ext, accepted) => {
@@ -181,6 +185,9 @@ export function datatypeAccepts(
     // A converter list we couldn't read, or an accepted format the server
     // doesn't describe, might have been the way in.
     if (!converters || !accepted.every(known)) return undefined;
+    // Galaxy matches compressed datatypes by their uncompressed type
+    // (fastqsanger.bz2 fits fastq.bz2), which the class tree doesn't show.
+    if (compressed(ext) && accepted.some(compressed)) return undefined;
     return false;
   };
 }

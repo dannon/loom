@@ -199,6 +199,12 @@ describe("reading datatypes for the format check (#618)", () => {
     expect(accepts("fastqsanger", ["tabular"])).toBe(false);
   });
 
+  it("can't tell, rather than refusing, a compressed type against a compressed sibling", () => {
+    // Galaxy matches these by their uncompressed types; the class tree has them as siblings.
+    expect(accepts("fastqsanger.bz2", ["fastq.bz2"])).toBeUndefined();
+    expect(accepts("tsv", ["fastq.gz", "fastq.bz2"])).toBe(false);
+  });
+
   it("takes what an installed converter turns into an accepted format", () => {
     expect(accepts("tabular", ["csv"])).toBe(true);
     expect(datatypeAccepts(DATATYPES, [])("tabular", ["csv"])).toBe(false);

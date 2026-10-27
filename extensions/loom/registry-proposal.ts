@@ -366,6 +366,7 @@ export interface TemplateSlot {
 /** One branch's declaration of a slot, and the selector values that pick it. */
 export interface SlotVariant {
   when: BranchChoice[];
+  collection: boolean;
   multiple: boolean;
   /** Datatype extensions this branch takes; empty when the template doesn't say. */
   accepts: string[];
@@ -390,6 +391,8 @@ export interface TemplateShape {
   aliases: Map<string, string>;
   /** Each conditional selector's values, where the template lists them. */
   choices: Map<string, Set<string>>;
+  /** Boolean selectors' true and false values, which branches are named by. */
+  booleans: Map<string, { t: string; f: string }>;
 }
 
 function emptyShape(version: string): TemplateShape {
@@ -400,6 +403,7 @@ function emptyShape(version: string): TemplateShape {
     repeats: new Set(),
     aliases: new Map(),
     choices: new Map(),
+    booleans: new Map(),
   };
 }
 
@@ -438,6 +442,14 @@ function choiceText(v: unknown): string | undefined {
   return undefined;
 }
 
+/** A selector's value as its branches name it: a boolean's true/false become its truevalue/falsevalue. */
+function selectorText(shape: TemplateShape, selector: string, v: unknown): string | undefined {
+  const b = shape.booleans.get(selector);
+  if (b && (v === true || v === "true")) return b.t;
+  if (b && (v === false || v === "false")) return b.f;
+  return choiceText(v);
+}
+
 function walkToolInputs(
   inputs: unknown,
   shape: TemplateShape,
@@ -453,6 +465,7 @@ function walkToolInputs(
     if (type === "data" || type === "data_collection") {
       const variant: SlotVariant = {
         when: branch,
+        collection: type === "data_collection",
         multiple: raw.multiple === true,
         accepts: formatList(raw.extensions, raw.format),
       };
@@ -475,7 +488,15 @@ function walkToolInputs(
       const test = isRecord(testRaw) ? testRaw : null;
       const selector = test && typeof test.name === "string" ? `${name}|${test.name}` : null;
       if (selector) shape.params.add(selector);
-      const byDefault = choiceText(test?.value ?? test?.default);
+      if (selector && test?.type === "boolean") {
+        shape.booleans.set(selector, {
+          t: choiceText(test.truevalue) ?? "true",
+          f: choiceText(test.falsevalue) ?? "false",
+        });
+      }
+      const byDefault = selector
+        ? selectorText(shape, selector, test?.value ?? test?.default)
+        : undefined;
       const casesRaw = raw.cases ?? raw.whens;
       const cases = Array.isArray(casesRaw) ? casesRaw : [];
       // A select can offer values no case names (Galaxy runs those with no
@@ -489,7 +510,12 @@ function walkToolInputs(
         const v = choiceText(Array.isArray(o) ? o[1] : isRecord(o) ? o.value : undefined);
         if (v !== undefined) values.add(v);
       }
-      if (selector && values.size > 0) shape.choices.set(selector, values);
+      // The same selector path can sit under several parent branches.
+      if (selector && values.size > 0) {
+        const all = shape.choices.get(selector) ?? new Set<string>();
+        for (const v of values) all.add(v);
+        shape.choices.set(selector, all);
+      }
       for (const c of cases) {
         if (!isRecord(c)) continue;
         const value = choiceText(c.value ?? c.discriminator);
@@ -537,6 +563,7 @@ function workflowShape(body: Record<string, unknown>, version: string): Template
         variants: [
           {
             when: [],
+            collection: s.input_type === "data_collection",
             multiple: false,
             accepts: formatList(s.accepted_formats, s.acceptable_extensions),
           },
@@ -646,14 +673,28 @@ function collectionOnDatasetSlot(slotName: string, shape: TemplateShape): string
  * alone, defaults to it. When the choices pick none (a selector set to
  * something no branch names), every variant is kept rather than guessing.
  */
-export function variantsFor(proposal: Proposal, shape: TemplateShape, slot: TemplateSlot) {
-  const chosen = new Map<string, string | undefined>();
-  for (const o of proposal.overrides) {
-    chosen.set(foldRepeats(o.param, shape.repeats), choiceText(o.value));
-  }
+export function variantsFor(
+  proposal: Proposal,
+  shape: TemplateShape,
+  slot: TemplateSlot,
+  /** The input's name as given, so a selector is read from its own repeat instance. */
+  inputName: string = slot.name,
+): SlotVariant[] {
+  const given = new Map<string, unknown>(proposal.overrides.map((o) => [o.param, o.value]));
+  const inputParts = inputName.split("|");
+  // `rows_#|mode|choice` for the input `rows_1|mode|reads` is `rows_1|mode|choice`.
+  const instance = (param: string) =>
+    param
+      .split("|")
+      .map((part, i) => {
+        const m = inputParts[i]?.match(/^(.+)_(\d+)$/);
+        return part.endsWith("_#") && m && `${m[1]}_#` === part ? inputParts[i] : part;
+      })
+      .join("|");
   const picked = slot.variants.filter((v) =>
     v.when.every((c) => {
-      const value = chosen.has(c.param) ? chosen.get(c.param) : c.default;
+      const param = instance(c.param);
+      const value = given.has(param) ? selectorText(shape, c.param, given.get(param)) : c.default;
       return value === undefined || value === c.value;
     }),
   );
@@ -698,7 +739,7 @@ export function checkInputFormats(
   for (const input of proposal.inputs) {
     const slot = slotFor(shape, input.slot);
     if (!slot) continue;
-    const variants = variantsFor(proposal, shape, slot);
+    const variants = variantsFor(proposal, shape, slot, input.slot);
     if (variants.some((v) => v.accepts.length === 0)) continue;
     const accepted = [...new Set(variants.flatMap((v) => v.accepts))];
     if (accepted.includes("data")) continue;
@@ -739,9 +780,9 @@ export function mappedOverSlots(proposal: Proposal, shape: TemplateShape): strin
   return proposal.inputs
     .filter((i) => {
       const slot = slotFor(shape, i.slot);
-      if (i.src !== "hdca" || !slot || slot.collection) return false;
+      if (i.src !== "hdca" || !slot) return false;
       // When the branch can't be pinned down, say it may run per element.
-      return variantsFor(proposal, shape, slot).some((v) => !v.multiple);
+      return variantsFor(proposal, shape, slot, i.slot).some((v) => !v.multiple && !v.collection);
     })
     .map((i) => i.slot);
 }
@@ -774,14 +815,15 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
       );
       continue;
     }
-    if (slot.collection && input.src !== "hdca") {
+    // Branches can disagree; only what every applicable one refuses is refused.
+    const variants = variantsFor(proposal, shape, slot, input.slot);
+    if (variants.every((v) => v.collection) && input.src !== "hdca") {
       problems.push(
         `input slot "${input.slot}" takes a collection (src hdca), not ${input.src}; ` +
           `give a collection id with src hdca`,
       );
     } else if (
-      !slot.collection &&
-      !slot.multiple &&
+      !variants.some((v) => v.collection || v.multiple) &&
       input.src === "hdca" &&
       proposal.target.kind === "workflow"
     ) {
@@ -795,7 +837,7 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
   }
   for (const [name, n] of filled) {
     const slot = slotFor(shape, name);
-    if (n > 1 && slot && !variantsFor(proposal, shape, slot).some((v) => v.multiple)) {
+    if (n > 1 && slot && !variantsFor(proposal, shape, slot, name).some((v) => v.multiple)) {
       problems.push(`input slot "${name}" takes one dataset but is given ${n}`);
     }
   }
@@ -821,8 +863,9 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
     }
     // A selector set to something no branch names would leave which inputs
     // and formats apply unknown, so it is refused rather than guessed at.
-    const values = shape.choices.get(foldRepeats(o.param, shape.repeats));
-    const value = choiceText(o.value);
+    const selector = foldRepeats(o.param, shape.repeats);
+    const values = shape.choices.get(selector);
+    const value = selectorText(shape, selector, o.value);
     if (values && (value === undefined || !values.has(value))) {
       problems.push(`"${o.param}" chooses a branch; it takes ${orList([...values])}`);
     }
