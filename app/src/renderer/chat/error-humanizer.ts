@@ -4,6 +4,8 @@
 // the Anthropic SDK does for HTTP errors), so we end up showing the wire
 // payload verbatim in chat unless we unwrap it here.
 
+import { chatGptPlanRejection } from "../model-entitlement.js";
+
 export interface HumanizedError {
   text: string;
   retriable: boolean;
@@ -145,6 +147,20 @@ export function humanizeAgentError(
       text:
         "This conversation is too long for the model's context window. " +
         "Run /compact to compact it (or start a new session), then resend.",
+      retriable: false,
+    };
+  }
+
+  // Plan-gated openai-codex model (#609). Matched on the whole string because
+  // it arrives both bare (pi's "Codex error: ...") and inside an HTTP body.
+  const planRejection = chatGptPlanRejection(trimmed);
+  if (planRejection) {
+    const which = planRejection.model ? `the ${planRejection.model} model` : "this model";
+    return {
+      text:
+        `OpenAI doesn't offer ${which} to ChatGPT-account sign-ins on your plan, so the ` +
+        "request was refused before the model did anything. Pick another model in " +
+        "Preferences and resend.",
       retriable: false,
     };
   }

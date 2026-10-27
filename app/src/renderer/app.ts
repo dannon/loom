@@ -37,6 +37,11 @@ import {
 } from "./model-options.js";
 import { planModelDiscovery } from "./model-discovery-gate.js";
 import { FALLBACK_MODELS_BY_PROVIDER, type ModelChoice } from "./model-fallback.js";
+import {
+  UnavailableModels,
+  chatGptPlanRejection,
+  unavailableModelLabel,
+} from "./model-entitlement.js";
 import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
 import {
   ALLOWED_SKILLS_PREFIX,
@@ -248,6 +253,19 @@ let currentModel: string | null = null;
 // and usage events carry only the model — so we set this at the explicit
 // model/provider change sites (startup, /model switch, prefs save).
 let currentProvider: string | null = null;
+
+function rendererStorage(): Storage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+const unavailableModels = new UnavailableModels(rendererStorage());
+
+function modelOptionLabel(provider: string, id: string, label: string): string {
+  return unavailableModels.has(provider, id) ? unavailableModelLabel(label) : label;
+}
 
 // Current context occupancy: input + cacheRead of the LATEST assistant turn's
 // usage (the size of the last request sent to the model). This is NOT the
@@ -1083,7 +1101,7 @@ function populateWelcomeModels(
   for (const m of models) {
     const opt = document.createElement("option");
     opt.value = m.id;
-    opt.textContent = m.label;
+    opt.textContent = modelOptionLabel(provider, m.id, m.label);
     if (selected && m.id === selected) opt.selected = true;
     welcomeModel.appendChild(opt);
   }
@@ -1092,7 +1110,7 @@ function populateWelcomeModels(
   if (selected && !models.some((m) => m.id === selected)) {
     const opt = document.createElement("option");
     opt.value = selected;
-    opt.textContent = `${selected} (custom)`;
+    opt.textContent = modelOptionLabel(provider, selected, `${selected} (custom)`);
     opt.selected = true;
     welcomeModel.appendChild(opt);
   }
@@ -2882,10 +2900,22 @@ window.orbit.onAgentEvent((event) => {
       // Commit per-assistant-message usage to the session total
       // Each assistant message = one LLM call billed separately
       const msg = (
-        event as { message?: { role?: string; stopReason?: string; errorMessage?: string } }
+        event as {
+          message?: { role?: string; stopReason?: string; errorMessage?: string; model?: string };
+        }
       ).message;
       if (msg?.role === "assistant") {
         commitTurnUsage();
+        const turnModel = msg.model || currentModel;
+        if (currentProvider && turnModel) {
+          const rejected = msg.stopReason === "error" && chatGptPlanRejection(msg.errorMessage);
+          // A model that answers was entitled after all (plan upgrade, or an
+          // account switch Orbit didn't see), so drop any stale mark.
+          if (rejected) unavailableModels.mark(currentProvider, rejected.model || turnModel);
+          else if (msg.stopReason !== "error" && msg.stopReason !== "aborted") {
+            unavailableModels.clear(currentProvider, turnModel);
+          }
+        }
         // Surface assistant-side errors (e.g. 401 invalid API key) so the user
         // isn't staring at a silent UI after a failed call.
         if (msg.stopReason === "error") {
@@ -3499,7 +3529,7 @@ function populateModels(provider: string, selected?: string, discovered?: readon
   for (const m of models) {
     const opt = document.createElement("option");
     opt.value = m.id;
-    opt.textContent = m.label;
+    opt.textContent = modelOptionLabel(provider, m.id, m.label);
     if (selected && m.id === selected) opt.selected = true;
     prefsModel.appendChild(opt);
   }
@@ -3507,7 +3537,7 @@ function populateModels(provider: string, selected?: string, discovered?: readon
   if (selected && !models.find((m) => m.id === selected)) {
     const opt = document.createElement("option");
     opt.value = selected;
-    opt.textContent = `${selected} (custom)`;
+    opt.textContent = modelOptionLabel(provider, selected, `${selected} (custom)`);
     opt.selected = true;
     prefsModel.appendChild(opt);
   }
@@ -3635,6 +3665,13 @@ prefsOauthSignIn.addEventListener("click", async () => {
   try {
     const res = await window.orbit.oauthSignIn(prefsProvider.value);
     if (res.ok) {
+      // A different account may well have a different plan.
+      unavailableModels.clear(prefsProvider.value);
+      populateModels(
+        prefsProvider.value,
+        readPrefsModel(prefsProvider.value) || undefined,
+        prefsProviderStates[prefsProvider.value]?.discoveredModels,
+      );
       prefsOauthStatus.textContent = formatOAuthStatus(res.status);
       prefsOauthStatus.classList.toggle("signed-in", res.status.signedIn);
       prefsOauthSignIn.textContent = "Sign in again";
@@ -3657,6 +3694,7 @@ prefsOauthSignOut.addEventListener("click", async () => {
   prefsOauthSignOut.disabled = true;
   try {
     await window.orbit.oauthSignOut(prefsProvider.value);
+    unavailableModels.clear(prefsProvider.value);
     prefsOauthStatus.textContent = "Not signed in";
     prefsOauthStatus.classList.remove("signed-in");
     prefsOauthSignIn.textContent = oauthSignInLabel(prefsProvider.value, false);
