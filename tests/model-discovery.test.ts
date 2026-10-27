@@ -76,16 +76,17 @@ describe("discoverProviderModels", () => {
     expect(probe).not.toHaveBeenCalled();
   });
 
-  it("fails without probing when no key is stored", async () => {
+  // A local llama-server needs no key, so "none stored" is a valid setup to
+  // probe, not a reason to refuse (#600).
+  it("probes without a key when none is stored", async () => {
     const probe = okProbe(["a/one"]);
     const res = await discoverProviderModels("openai-compatible", {
       config: { llm: { active: "openai-compatible", providers: { "openai-compatible": NO_KEY } } },
       resolveKey: () => null,
       probe,
     });
-    expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error).toMatch(/no stored api key/i);
-    expect(probe).not.toHaveBeenCalled();
+    expect(res).toEqual({ ok: true, models: ["a/one"] });
+    expect(probe).toHaveBeenCalledWith("https://openrouter.ai/api/v1/", "", undefined);
   });
 
   // hadKey (and so the auto-probe on opening Preferences) is true for any

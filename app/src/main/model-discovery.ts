@@ -48,24 +48,20 @@ export async function discoverProviderModels(
     return { ok: false, error: "This provider has no base URL to query." };
   }
   const key = deps.resolveKey(entry);
-  if (!key) {
-    // "No key stored" and "a key is stored but unreadable" look identical from
-    // here, and they are not the same to the user. The renderer's hadKey comes
-    // from maskConfig, which counts any apiKeyEncrypted as a key -- but
-    // safeStorage is off in dev and under LOOM_DISABLE_SAFE_STORAGE, and
-    // decryption fails outright once the Keychain ACL stops matching the
-    // running binary. Telling someone with a saved key that they have none
-    // sends them to re-enter a key they already have.
+  // Nothing stored at all is a keyless endpoint (#600), so probe it bare. A
+  // key that is stored but unreadable is not that: safeStorage is off in dev
+  // and under LOOM_DISABLE_SAFE_STORAGE, and decryption fails outright once the
+  // Keychain ACL stops matching the running binary. Probing bare there would
+  // report "needs an API key" to someone who already saved one.
+  const keyless = !key && !entry.apiKey && !entry.apiKeyEncrypted;
+  if (!key && !keyless) {
     return {
       ok: false,
-      error:
-        entry.apiKey || entry.apiKeyEncrypted
-          ? "Stored API key could not be read — re-enter it to fetch models."
-          : "No stored API key — enter one to fetch models.",
+      error: "Stored API key could not be read — re-enter it to fetch models.",
     };
   }
   try {
-    const res = await deps.probe(baseUrl, key, entry.api);
+    const res = await deps.probe(baseUrl, key ?? "", entry.api);
     if (!res.valid) return { ok: false, error: res.error || "Endpoint rejected the stored key" };
     const seen = new Set<string>();
     for (const raw of res.models ?? []) {

@@ -18,8 +18,6 @@ export interface DiscoveryContext {
   typedBaseUrl: string;
   /** Key currently in the field, if the user is typing a new one. */
   typedKey: string;
-  /** Config has a key for this provider. */
-  hadKey: boolean;
   /** A list was already fetched for this provider in this Preferences session. */
   alreadyDiscovered: boolean;
 }
@@ -37,7 +35,7 @@ export function planModelDiscovery(ctx: DiscoveryContext): DiscoveryPlan {
   const saved = ctx.savedBaseUrl.trim();
   if (!saved) {
     return ctx.manual
-      ? { action: "message", message: "Save the base URL and key first, then fetch." }
+      ? { action: "message", message: "Save the base URL first, then fetch." }
       : { action: "skip" };
   }
   // Unsaved edits make a stored-config probe answer a question the user is no
@@ -55,8 +53,28 @@ export function planModelDiscovery(ctx: DiscoveryContext): DiscoveryPlan {
     return ctx.manual ? { action: "validate-typed-key" } : { action: "skip" };
   }
   if (ctx.manual) return { action: "probe" };
-  // Opening the pane: only worth a network call when main has something to
-  // probe with, and only once per provider per session.
-  if (!ctx.hadKey || ctx.alreadyDiscovered) return { action: "skip" };
+  // Opening the pane: once per provider per session. No stored key still gets
+  // a probe -- main sends it bare, which is how a keyless endpoint lists its
+  // models (#600), and one that wants a key says so.
+  if (ctx.alreadyDiscovered) return { action: "skip" };
   return { action: "probe" };
+}
+
+/**
+ * What the live validator should do with what's on screen.
+ *
+ * An empty key field used to mean "nothing to check". For a custom endpoint it
+ * can now mean "this server needs no key" (#600), so probe it bare -- unless a
+ * key is already stored, in which case blank means "keep it" and a bare probe
+ * would report that stored key as missing.
+ */
+export function planLiveValidation(ctx: {
+  key: string;
+  baseUrl: string | undefined;
+  custom: boolean;
+  storedKey: boolean;
+}): "probe" | "probe-keyless" | "clear" {
+  if (ctx.key.trim()) return "probe";
+  if (ctx.custom && ctx.baseUrl?.trim() && !ctx.storedKey) return "probe-keyless";
+  return "clear";
 }

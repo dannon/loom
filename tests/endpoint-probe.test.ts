@@ -197,6 +197,26 @@ describe("modelsProbeRequest", () => {
     });
   });
 
+  it("sends no credential at all for a keyless endpoint (#600)", () => {
+    expect(modelsProbeRequest("openai-completions", "http://127.0.0.1:8080/v1", "")).toEqual({
+      url: "http://127.0.0.1:8080/v1/models",
+      headers: {},
+    });
+    expect(modelsProbeRequest("anthropic-messages", "http://127.0.0.1:8080", "")).toEqual({
+      url: "http://127.0.0.1:8080/v1/models",
+      headers: { "anthropic-version": ANTHROPIC_VERSION },
+    });
+  });
+
+  it("tells a keyless probe that the endpoint wants a key, not that the key is bad", () => {
+    for (const status of [401, 403]) {
+      const res = interpretModelsResponse(status, "", { keyless: true });
+      expect(res.valid).toBe(false);
+      expect(res.error).toMatch(/needs an API key/);
+    }
+    expect(interpretModelsResponse(401, "").error).toBe("Invalid API key (401)");
+  });
+
   it("reads both shapes' model lists with one extractor", () => {
     // Anthropic's /v1/models answers { data: [{ id, type: "model" }] }, the
     // same envelope OpenAI uses, which is why the shape only changes the

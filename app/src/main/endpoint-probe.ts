@@ -36,13 +36,15 @@ export function modelsProbeRequest(
   baseUrl: string,
   key: string,
 ): ModelsProbeRequest {
+  // An empty key means a keyless endpoint (#600): send no credential rather
+  // than an empty one, which some servers reject as malformed.
   if (api === "anthropic-messages") {
     return {
       url: `${baseUrl}/v1/models`,
-      headers: { "x-api-key": key, "anthropic-version": ANTHROPIC_VERSION },
+      headers: { ...(key ? { "x-api-key": key } : {}), "anthropic-version": ANTHROPIC_VERSION },
     };
   }
-  return { url: `${baseUrl}/models`, headers: { authorization: `Bearer ${key}` } };
+  return { url: `${baseUrl}/models`, headers: key ? { authorization: `Bearer ${key}` } : {} };
 }
 
 /**
@@ -201,7 +203,14 @@ function extractModelIds(parsed: unknown): string[] {
  * we verified nothing, and the server's own sentence is usually the most
  * useful thing we can put on screen.
  */
-export function interpretModelsResponse(status: number, body: string): ProbeOutcome {
+export function interpretModelsResponse(
+  status: number,
+  body: string,
+  { keyless = false }: { keyless?: boolean } = {},
+): ProbeOutcome {
+  if (keyless && (status === 401 || status === 403)) {
+    return { valid: false, error: `This endpoint needs an API key (${status})` };
+  }
   if (status === 401) return { valid: false, error: "Invalid API key (401)" };
   if (status === 403) return { valid: false, error: "Endpoint rejected the key (403)" };
   if (status < 200 || status >= 300) {

@@ -915,7 +915,8 @@ async function validateApiKey(
   api?: string,
 ): Promise<{ valid: boolean; error?: string; models?: string[] }> {
   const trimmed = key.trim();
-  if (!trimmed) return { valid: false, error: "Key is empty" };
+  // A custom endpoint may need no key at all (#600); anything else does.
+  if (!trimmed && !baseUrl) return { valid: false, error: "Key is empty" };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000);
   try {
@@ -926,7 +927,7 @@ async function validateApiKey(
       const res = await fetch(req.url, { headers: req.headers, signal: controller.signal });
       // Read as text, not res.json(): a body that isn't JSON is a result we
       // have to report, not an exception to swallow. See endpoint-probe.ts.
-      return interpretModelsResponse(res.status, await res.text());
+      return interpretModelsResponse(res.status, await res.text(), { keyless: !trimmed });
     }
     if (provider === "anthropic") {
       if (!trimmed.startsWith("sk-ant-")) {
