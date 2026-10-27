@@ -457,6 +457,43 @@ describe("branch resolution follows Galaxy's conditionals (review follow-ups)", 
     ).toEqual([]);
   });
 
+  it("refuses an input the chosen branch doesn't declare, chosen or by default", () => {
+    const shape = tool([
+      branchy("sel", { name: "choice", type: "select", value: "b" }, [
+        { value: "a", inputs: [{ name: "x", type: "data", extensions: ["fastqsanger"] }] },
+        { value: "b", inputs: [{ name: "n", type: "integer" }] },
+      ]),
+    ]);
+    const given = [{ slot: "sel|x", src: "hda" as const, id: "d1" }];
+    const unused = [expect.stringMatching(/"sel\|x" isn't used.*sel\|choice is a/)];
+    expect(validateProposal(proposal(given, { "sel|choice": "b" }), shape)).toEqual(unused);
+    expect(validateProposal(proposal(given, {}), shape)).toEqual(unused);
+    expect(validateProposal(proposal(given, { "sel|choice": "a" }), shape)).toEqual([]);
+  });
+
+  it("refuses an inner choice that only another outer branch offers, when it hides the input", () => {
+    const inner = (v: string, reads: Record<string, unknown>) =>
+      branchy("inner", { name: "choice", type: "select" }, [
+        { value: v, inputs: [{ name: "reads", type: "data", ...reads }] },
+      ]);
+    const shape = tool([
+      branchy("outer", { name: "sel", type: "select" }, [
+        { value: "A", inputs: [inner("a", { extensions: ["fastqsanger"] })] },
+        { value: "B", inputs: [inner("b", { multiple: true, extensions: ["tabular"] })] },
+      ]),
+    ]);
+    const p = proposal(
+      [
+        { slot: "outer|inner|reads", src: "hda", id: "t1" },
+        { slot: "outer|inner|reads", src: "hda", id: "t2" },
+      ],
+      { "outer|sel": "A", "outer|inner|choice": "b" },
+    );
+    expect(validateProposal(p, shape)).toEqual([
+      expect.stringMatching(/"outer\|inner\|reads" isn't used/),
+    ]);
+  });
+
   it("reads dataset-or-collection per branch, in either declaration order", () => {
     for (const order of [
       ["c", "d"],

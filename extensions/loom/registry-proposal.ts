@@ -670,8 +670,8 @@ function collectionOnDatasetSlot(slotName: string, shape: TemplateShape): string
 /**
  * The variants of a slot this proposal's selector choices pick: a branch
  * applies when each selector on its path is overridden to its value or, left
- * alone, defaults to it. When the choices pick none (a selector set to
- * something no branch names), every variant is kept rather than guessing.
+ * alone, defaults to it. Empty when the choices pick a branch that doesn't
+ * declare the slot, which Galaxy would drop.
  */
 export function variantsFor(
   proposal: Proposal,
@@ -698,7 +698,19 @@ export function variantsFor(
       return value === undefined || value === c.value;
     }),
   );
-  return picked.length > 0 ? picked : slot.variants;
+  return picked;
+}
+
+/** The selector choices under which a slot is used, for a refusal. */
+function slotBranches(slot: TemplateSlot): string {
+  const each = [
+    ...new Set(
+      slot.variants.map((v) => v.when.map((c) => `${c.param} is ${c.value}`).join(" and ")),
+    ),
+  ];
+  if (each.length <= 3) return `it's used when ${each.join("; or when ")}`;
+  const selectors = [...new Set(slot.variants.flatMap((v) => v.when.map((c) => c.param)))];
+  return `it's used only under other values of ${orList(selectors)}`;
 }
 
 /** What Galaxy says about the datasets a proposal names, for the format check. */
@@ -740,7 +752,7 @@ export function checkInputFormats(
     const slot = slotFor(shape, input.slot);
     if (!slot) continue;
     const variants = variantsFor(proposal, shape, slot, input.slot);
-    if (variants.some((v) => v.accepts.length === 0)) continue;
+    if (variants.length === 0 || variants.some((v) => v.accepts.length === 0)) continue;
     const accepted = [...new Set(variants.flatMap((v) => v.accepts))];
     if (accepted.includes("data")) continue;
     const exts = formats.extensions.get(inputKey(input));
@@ -807,6 +819,9 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
   // separately, by the template slot they fill, for the required check.
   const filled = new Map<string, number>();
   const covered = new Set<string>();
+  // Inputs Galaxy would drop, reported last: a selector value no branch names
+  // already explains why nothing applies.
+  const unused = new Map<string, string>();
   for (const input of proposal.inputs) {
     const slot = slotFor(shape, input.slot);
     if (!slot) {
@@ -817,6 +832,14 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
     }
     // Branches can disagree; only what every applicable one refuses is refused.
     const variants = variantsFor(proposal, shape, slot, input.slot);
+    if (variants.length === 0) {
+      unused.set(
+        input.slot,
+        `input slot "${input.slot}" isn't used with the branch these choices pick ` +
+          `(overrides, or the selectors' defaults); ${slotBranches(slot)}`,
+      );
+      continue;
+    }
     if (variants.every((v) => v.collection) && input.src !== "hdca") {
       problems.push(
         `input slot "${input.slot}" takes a collection (src hdca), not ${input.src}; ` +
@@ -837,7 +860,8 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
   }
   for (const [name, n] of filled) {
     const slot = slotFor(shape, name);
-    if (n > 1 && slot && !variantsFor(proposal, shape, slot, name).some((v) => v.multiple)) {
+    const variants = slot ? variantsFor(proposal, shape, slot, name) : [];
+    if (n > 1 && variants.length > 0 && !variants.some((v) => v.multiple)) {
       problems.push(`input slot "${name}" takes one dataset but is given ${n}`);
     }
   }
@@ -868,8 +892,10 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
     const value = selectorText(shape, selector, o.value);
     if (values && (value === undefined || !values.has(value))) {
       problems.push(`"${o.param}" chooses a branch; it takes ${orList([...values])}`);
+      unused.clear();
     }
   }
+  problems.push(...unused.values());
   return problems;
 }
 
