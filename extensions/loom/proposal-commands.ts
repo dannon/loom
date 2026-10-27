@@ -500,7 +500,11 @@ export async function approveCommand(
     const message =
       `Not approved: there's no dialog here to confirm in. This is what /approve would freeze:\n\n` +
       `${table}${templateNote}${formatNote}\n\nIf that's what you want, run /approve ${id} --yes.`;
-    activity(deps, "proposal.approval_unconfirmed", "user", { proposal_id: id, table });
+    activity(deps, "proposal.approval_unconfirmed", "user", {
+      proposal_id: id,
+      table,
+      ...(formatsUnchecked.length > 0 ? { formats_unchecked: formatsUnchecked } : {}),
+    });
     return { level: "warning", message };
   }
 
@@ -552,6 +556,8 @@ export async function approveCommand(
       plain: true,
       shape,
     }),
+    // So the record tells a format that fit from one nobody could check.
+    ...(formatsUnchecked.length > 0 ? { formats_unchecked: formatsUnchecked } : {}),
     ...(result.superseded.length > 0 ? { superseded: result.superseded } : {}),
   });
   try {

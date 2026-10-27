@@ -509,6 +509,22 @@ describe("format check through loom_propose and /approve (#618)", () => {
     expect(shown).toMatch(/Formats not checked:\n- mode\|reads\|files: Galaxy didn't say/);
   });
 
+  it("puts what it couldn't check on the approval's record", async () => {
+    const r = await propose(deps({ formats: formats({}) }), nanoplot("d4"));
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    const unchecked = [expect.stringMatching(/didn't say what format dataset d4/)];
+    await approveCommand(deps({ formats: formats({}) }), r.proposal.proposalId);
+    expect(activity().at(-1)).toMatchObject({
+      kind: "proposal.approval_unconfirmed",
+      payload: { formats_unchecked: unchecked },
+    });
+    await approveCommand(deps({ formats: formats({}) }), `${r.proposal.proposalId} --yes`);
+    expect(activity().at(-1)).toMatchObject({
+      kind: "proposal.approved",
+      payload: { formats_unchecked: unchecked },
+    });
+  });
+
   it("lists what it couldn't check in the tool's reply", async () => {
     const r = await propose(deps({ formats: formats({}) }), nanoplot("d2"));
     if (!r.ok) throw new Error(r.problems.join("; "));
