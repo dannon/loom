@@ -73,20 +73,36 @@ export function pickOfferedProvider(
  * nothing else it could mean. With several, an unlisted id stays: plenty of
  * gateways list only part of what they serve.
  */
-export function reconcileTypedModel(current: string, discovered: readonly string[]): string {
+export function reconcileTypedModel(
+  current: string,
+  discovered: readonly string[],
+  { replaceStale = true }: { replaceStale?: boolean } = {},
+): string {
   const first = discovered[0];
   if (first === undefined) return current;
   const typed = current.trim();
   if (discovered.includes(typed)) return typed;
-  if (!typed || discovered.length === 1) return first;
+  if (!typed || (replaceStale && discovered.length === 1)) return first;
   return current;
 }
 
-/** The status line after a fetch, which also says when the field hides the list. */
-export function discoveredModelsStatus(current: string, discovered: readonly string[]): string {
+/**
+ * The status line after a fetch. It says when the field hides the list, and
+ * when `previous` -- what the field held before -- was swapped out, so a
+ * replaced id never changes silently.
+ */
+export function discoveredModelsStatus(
+  current: string,
+  discovered: readonly string[],
+  previous = "",
+): string {
+  const typed = current.trim();
+  const was = previous.trim();
+  if (was && was !== typed && discovered.length === 1 && discovered[0] === typed) {
+    return `✓ Using "${typed}", the only model the endpoint lists (was "${was}")`;
+  }
   const n = discovered.length;
   const count = `✓ ${n} model${n === 1 ? "" : "s"} available`;
-  const typed = current.trim();
   if (!typed || discovered.includes(typed)) return count;
-  return `${count} -- "${typed}" isn't one of them; clear the field to see the list`;
+  return `${count} -- "${typed}" isn't one of them; clear the Model field to see the list`;
 }

@@ -87,6 +87,14 @@ describe("reconcileTypedModel", () => {
     expect(reconcileTypedModel("old-endpoint-model", ["qwen3-30b"])).toBe("qwen3-30b");
   });
 
+  // Opening Preferences re-probes on its own; that mustn't quietly rewrite a
+  // model the user chose. Only setting up an endpoint swaps a stale id.
+  it("only fills a blank field when told not to replace", () => {
+    const keep = { replaceStale: false };
+    expect(reconcileTypedModel("my-lora-alias", ["qwen3-30b"], keep)).toBe("my-lora-alias");
+    expect(reconcileTypedModel("", ["qwen3-30b"], keep)).toBe("qwen3-30b");
+  });
+
   it("fills an empty field with the first model", () => {
     expect(reconcileTypedModel("", ["a", "b"])).toBe("a");
     expect(reconcileTypedModel("  ", ["a", "b"])).toBe("a");
@@ -117,7 +125,14 @@ describe("discoveredModelsStatus", () => {
 
   it("says when the field holds an id that isn't on the list", () => {
     expect(discoveredModelsStatus("typed-by-hand", ["a", "b"])).toBe(
-      '✓ 2 models available -- "typed-by-hand" isn\'t one of them; clear the field to see the list',
+      '✓ 2 models available -- "typed-by-hand" isn\'t one of them; clear the Model field to see the list',
     );
+  });
+
+  it("says when it swapped the field's model for the only one listed", () => {
+    expect(discoveredModelsStatus("qwen3-30b", ["qwen3-30b"], "old-model")).toBe(
+      '✓ Using "qwen3-30b", the only model the endpoint lists (was "old-model")',
+    );
+    expect(discoveredModelsStatus("qwen3-30b", ["qwen3-30b"], "")).toBe("✓ 1 model available");
   });
 });

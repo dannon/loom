@@ -48,10 +48,10 @@ export async function discoverProviderModels(
     return { ok: false, error: "This provider has no base URL to query." };
   }
   const key = deps.resolveKey(entry);
-  // Nothing stored at all is a keyless endpoint (#600), so probe it bare. A
+  // Nothing stored at all is a keyless endpoint (#600), so probe it keyless. A
   // key that is stored but unreadable is not that: safeStorage is off in dev
   // and under LOOM_DISABLE_SAFE_STORAGE, and decryption fails outright once the
-  // Keychain ACL stops matching the running binary. Probing bare there would
+  // Keychain ACL stops matching the running binary. Probing keyless there would
   // report "needs an API key" to someone who already saved one.
   const keyless = !key && !entry.apiKey && !entry.apiKeyEncrypted;
   if (!key && !keyless) {

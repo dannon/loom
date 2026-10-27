@@ -7,6 +7,8 @@
  * The I/O stays in the caller.
  */
 
+import { NO_AUTH_API_KEY } from "../../../shared/custom-provider.js";
+
 export type ProbeOutcome = { valid: boolean; error?: string; models?: string[] };
 
 /** The dated version header every Anthropic Messages endpoint requires. */
@@ -36,15 +38,16 @@ export function modelsProbeRequest(
   baseUrl: string,
   key: string,
 ): ModelsProbeRequest {
-  // An empty key means a keyless endpoint (#600): send no credential rather
-  // than an empty one, which some servers reject as malformed.
+  // An empty key means a keyless endpoint (#600). Send the same placeholder
+  // the brain will, so the probe answers for what the first chat sends.
+  const sent = key || NO_AUTH_API_KEY;
   if (api === "anthropic-messages") {
     return {
       url: `${baseUrl}/v1/models`,
-      headers: { ...(key ? { "x-api-key": key } : {}), "anthropic-version": ANTHROPIC_VERSION },
+      headers: { "x-api-key": sent, "anthropic-version": ANTHROPIC_VERSION },
     };
   }
-  return { url: `${baseUrl}/models`, headers: key ? { authorization: `Bearer ${key}` } : {} };
+  return { url: `${baseUrl}/models`, headers: { authorization: `Bearer ${sent}` } };
 }
 
 /**

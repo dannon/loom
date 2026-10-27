@@ -1054,8 +1054,9 @@ function wireApiKeyValidation(
             // answer becomes suggestions rather than the set of choices.
             if (suggestionsEl) renderModelSuggestions(suggestionsEl, res.models);
             if (typedModelEl) {
-              typedModelEl.value = reconcileTypedModel(typedModelEl.value, res.models);
-              const listed = discoveredModelsStatus(typedModelEl.value, res.models);
+              const before = typedModelEl.value;
+              typedModelEl.value = reconcileTypedModel(before, res.models);
+              const listed = discoveredModelsStatus(typedModelEl.value, res.models, before);
               setStatus("valid", `${ok} \u00b7 ${listed.replace(/^\u2713 /, "")}`);
             }
           } else if (modelEl) {
@@ -3977,10 +3978,19 @@ async function refreshDiscoveredModels(provider: string, manual: boolean): Promi
     if (owns()) {
       const onScreen = readPrefsModel(provider) || target?.model || "";
       const typed = provider === CUSTOM_ENDPOINT_PROVIDER;
-      const model = typed ? reconcileTypedModel(onScreen, res.models) : onScreen;
+      // The probe Preferences runs on open must not rewrite a chosen model;
+      // only the Fetch button, i.e. someone setting the endpoint up, swaps it.
+      const model = typed
+        ? reconcileTypedModel(onScreen, res.models, { replaceStale: manual })
+        : onScreen;
       populateModels(provider, model || undefined, res.models);
       // Only a typed field can hide the list; a dropdown shows all of it.
-      setModelStatus("valid", discoveredModelsStatus(typed ? model : "", res.models));
+      setModelStatus(
+        "valid",
+        typed
+          ? discoveredModelsStatus(model, res.models, onScreen)
+          : discoveredModelsStatus("", res.models),
+      );
     }
   } catch (err) {
     if (owns()) {

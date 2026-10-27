@@ -54,7 +54,7 @@ export function planModelDiscovery(ctx: DiscoveryContext): DiscoveryPlan {
   }
   if (ctx.manual) return { action: "probe" };
   // Opening the pane: once per provider per session. No stored key still gets
-  // a probe -- main sends it bare, which is how a keyless endpoint lists its
+  // a probe -- main sends it keyless, which is how a keyless endpoint lists its
   // models (#600), and one that wants a key says so.
   if (ctx.alreadyDiscovered) return { action: "skip" };
   return { action: "probe" };
@@ -64,8 +64,8 @@ export function planModelDiscovery(ctx: DiscoveryContext): DiscoveryPlan {
  * What the live validator should do with what's on screen.
  *
  * An empty key field used to mean "nothing to check". For a custom endpoint it
- * can now mean "this server needs no key" (#600), so probe it bare -- unless a
- * key is already stored, in which case blank means "keep it" and a bare probe
+ * can now mean "this server needs no key" (#600), so probe it keyless -- unless a
+ * key is already stored, in which case blank means "keep it" and a keyless probe
  * would report that stored key as missing.
  */
 export function planLiveValidation(ctx: {

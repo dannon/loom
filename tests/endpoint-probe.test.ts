@@ -6,6 +6,7 @@ import {
   interpretModelsResponse,
   modelsProbeRequest,
 } from "../app/src/main/endpoint-probe.js";
+import { NO_AUTH_API_KEY } from "../shared/custom-provider.js";
 
 /** The shape undici actually throws: a bare TypeError with the reason on cause. */
 function fetchFailed(code: string, message = "some transport failure"): TypeError {
@@ -197,14 +198,16 @@ describe("modelsProbeRequest", () => {
     });
   });
 
-  it("sends no credential at all for a keyless endpoint (#600)", () => {
+  // The brain has to send pi's placeholder at chat time, so the probe sends
+  // it too -- a green check should mean what the first chat will see.
+  it("sends the brain's placeholder key for a keyless endpoint (#600)", () => {
     expect(modelsProbeRequest("openai-completions", "http://127.0.0.1:8080/v1", "")).toEqual({
       url: "http://127.0.0.1:8080/v1/models",
-      headers: {},
+      headers: { authorization: `Bearer ${NO_AUTH_API_KEY}` },
     });
     expect(modelsProbeRequest("anthropic-messages", "http://127.0.0.1:8080", "")).toEqual({
       url: "http://127.0.0.1:8080/v1/models",
-      headers: { "anthropic-version": ANTHROPIC_VERSION },
+      headers: { "x-api-key": NO_AUTH_API_KEY, "anthropic-version": ANTHROPIC_VERSION },
     });
   });
 
