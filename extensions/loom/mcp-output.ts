@@ -180,6 +180,37 @@ function userToolCatalog(root: unknown, args: OutputQuery): Recordish | undefine
   };
 }
 
+function count(value: unknown): number | undefined {
+  return Number.isInteger(value) && (value as number) >= 0 ? (value as number) : undefined;
+}
+
+/**
+ * The first line the model reads, so it must not call a page complete. Galaxy
+ * MCP's next_offset is used as given: its output budget can cut a page short of
+ * `limit`, so offset + limit would skip records.
+ */
+function catalogHeadline(page: Recordish): string {
+  const shown = (page.items as unknown[]).length;
+  // preview() keeps a pagination block's scalar fields verbatim.
+  const source = record(record(page.sourcePagination)?.fields);
+  const total = count(source?.total_items);
+  if (total === undefined)
+    return `User-defined tools: showing ${shown} of ${page.responseItems} tools in this response. Galaxy did not report a total, so other pages may exist. Full definitions are available on demand.`;
+  const offset = count(source?.offset);
+  let headline = `User-defined tools: showing ${shown} of ${total}${offset === undefined ? "" : ` (offset ${offset})`}.`;
+  if (shown < (page.responseItems as number))
+    headline += ` This response holds ${page.responseItems}; page it with mcp_read_output nextOffset.`;
+  if (source?.has_next === true) {
+    const next = count(source.next_offset);
+    headline +=
+      next === undefined
+        ? " More pages exist in Galaxy; re-call the Galaxy tool with a later offset."
+        : ` More pages exist in Galaxy -- re-call the Galaxy tool with offset=${next} to continue.`;
+  } else if (source?.has_next === false) headline += " This is Galaxy's last page.";
+  else headline += " Galaxy did not say whether more pages exist.";
+  return `${headline} Full definitions are available on demand.`;
+}
+
 export function inspectOutput(text: string, args: OutputQuery): Recordish {
   const offset = Math.max(0, Math.floor(args.offset ?? 0));
   const limit = Math.max(1, Math.min(20, Math.floor(args.limit ?? 10)));
@@ -378,8 +409,7 @@ export function registerMcpOutputRecovery(pi: ExtensionAPI): void {
       });
       overview = JSON.stringify(page);
       if (page.type === "user_tool_catalog") {
-        if (!event.isError)
-          headline = `User-defined tools: showing ${(page.items as unknown[]).length} of ${page.responseItems} tools returned by Galaxy. Full definitions are available on demand.`;
+        if (!event.isError) headline = catalogHeadline(page);
         next =
           'Search tool names/IDs/descriptions with query, or page this catalog with pointer "/data" and nextOffset. Use a tool\'s definitionPointer to inspect its inputs, outputs or command only when needed. These are summaries of this response, not proof that Galaxy has no other pages.';
       }
