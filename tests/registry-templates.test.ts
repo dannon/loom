@@ -223,7 +223,11 @@ describe("reading datatypes for the format check (#618)", () => {
       {
         "/api/datatypes/types_and_mapping": () => ({ datatypes_mapping: DATATYPES }),
         "/api/datatypes/converters": () => CONVERTERS,
-        [`/api/datasets/${MANIFEST_ID}`]: () => ({ id: MANIFEST_ID, extension: "tsv" }),
+        [`/api/datasets/${MANIFEST_ID}`]: () => ({
+          id: MANIFEST_ID,
+          extension: "tsv",
+          state: "ok",
+        }),
         "/api/dataset_collections/c62": () => ({
           id: "c62",
           elements: [],
