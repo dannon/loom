@@ -378,6 +378,23 @@ describe("dataset formats checked against the slot (#618)", () => {
       checkInputFormats(toolProposal(), shape, formats({ "hda:4b6e2f1a9c3d5e70": ["tsv"] })),
     ).toEqual({ problems: [], unchecked: [] });
   });
+
+  it("checks a workflow input against its accepted formats", () => {
+    const body = structuredClone(WORKFLOW_SNAPSHOT.body) as { slots: Record<string, unknown>[] };
+    body.slots[0].accepted_formats = ["fastqsanger"];
+    const wf = templateShape("workflow", { ...WORKFLOW_SNAPSHOT, body });
+    const p = {
+      ...toolProposal(),
+      target: { kind: "workflow" as const, workflow_id: "f2db41e1fa331b3e", version: "unpinned" },
+      inputs: [
+        { slot: "0", src: "hda" as const, id: "d1" },
+        { slot: "1", src: "hdca" as const, id: "c1" },
+      ],
+      overrides: [],
+    };
+    const r = checkInputFormats(p, wf, formats({ "hda:d1": ["tabular"], "hdca:c1": ["tabular"] }));
+    expect(r.problems).toEqual([expect.stringMatching(/"0" takes fastqsanger .* is tabular/)]);
+  });
 });
 
 describe("branch resolution follows Galaxy's conditionals (review follow-ups)", () => {
