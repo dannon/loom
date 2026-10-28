@@ -1,13 +1,13 @@
 /**
  * Files sidebar — main-process IPC and file watcher.
  *
- * Exposes three IPC handles (`files:list`, `files:read`, `files:write`) plus
+ * Exposes file listing, reading, writing and system-viewer IPC handles plus
  * a per-cwd fs watcher that pushes `files:changed` to the renderer. Every
  * path is clamped to the active cwd so a compromised renderer cannot read
  * or write anywhere else on disk.
  */
 
-import { ipcMain, BrowserWindow } from "electron";
+import { ipcMain, BrowserWindow, shell } from "electron";
 import { createIdempotentIpc } from "./ipc-registry.js";
 import { isTextLikeForPreview } from "./file-preview-classification.js";
 import * as fs from "node:fs";
@@ -235,6 +235,24 @@ export function registerFilesIpc(getCwd: () => string): void {
   // Idempotent registration so a macOS reopen-after-close (which re-runs this
   // for the new window) can't double-register and crash (#311).
   const ipc = createIdempotentIpc(ipcMain);
+
+  ipc.handle("files:open-system-viewer", async (_e, relPath: unknown) => {
+    try {
+      if (typeof relPath !== "string" || !relPath) throw new Error("Invalid file path");
+      const cwd = getCwd();
+      const abs = resolveWithin(cwd, relPath);
+      // Resolve links as well as '..' before handing the path to another app.
+      const cwdReal = await fsp.realpath(cwd);
+      const fileReal = resolveWithin(cwdReal, await fsp.realpath(abs));
+      if (!(await fsp.stat(fileReal)).isFile()) throw new Error("Not a regular file");
+      // Pass the path directly: no renderer read, byte limit or shell command.
+      // HTML also belongs in the system app for this explicit menu action.
+      const error = await shell.openPath(fileReal);
+      return error ? { opened: false, error } : { opened: true };
+    } catch (err) {
+      return { opened: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 
   ipc.handle("files:list", async (_e, opts?: { includeHidden?: boolean }) => {
     const cwd = getCwd();

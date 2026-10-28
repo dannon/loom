@@ -142,6 +142,7 @@ const shell = new ShellPanel(document.getElementById("agent-shell-body")!);
 const filesPanel = new FilesPanel(
   document.getElementById("files-tree")!,
   (relPath: string) => void openFileFromTree(relPath),
+  window.orbit.openFileInSystemViewer ? openFileInSystemViewer : undefined,
 );
 const fileViewer = new FileViewer(artifacts.getFileViewContainer());
 
@@ -163,6 +164,16 @@ async function openFileFromTree(relPath: string): Promise<void> {
     artifacts.showFileTab();
     setArtifactCollapsed(false);
     filesPanel.setSelected(relPath);
+  }
+}
+
+async function openFileInSystemViewer(relPath: string): Promise<void> {
+  try {
+    const result = await window.orbit.openFileInSystemViewer!(relPath);
+    if (!result.opened) throw new Error(result.error || "No system viewer could open this file.");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    chat.addErrorMessage(`Failed to open ${relPath} in system viewer: ${message}`);
   }
 }
 
