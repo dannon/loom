@@ -39,6 +39,10 @@ jobs:
               - "shared/**"
               # The conformance test (core/src/agent/pi-host.orbit.test.ts) boots Orbit's brain.
               - "extensions/**"
+              # The browser resolves pi-coding-agent and pi-tui from the root install, so a pi bump
+              # there changes what the browser runs.
+              - "package.json"
+              - "package-lock.json"
               - ".github/workflows/browser.yml"
 
   test:
