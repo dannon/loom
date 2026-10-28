@@ -92,10 +92,10 @@ export const ACTIVE_LLM_API_KEY_ENV = "LOOM_ACTIVE_LLM_API_KEY";
  * secret itself. pi's ModelRegistry rejects any custom (non-built-in) provider
  * that defines models without an apiKey and drops the whole provider, so
  * omitting it makes `--provider/--model` fail to resolve and the brain won't
- * launch. pi resolves a bare apiKey string as an env-var lookup at request
- * time, so the real key is read from LOOM_ACTIVE_LLM_API_KEY in memory and
- * still never lands on disk. (The runtime --api-key flag, when passed, takes
- * precedence over this.)
+ * launch. The real key never lands on disk: bin/loom.js hands it to pi with
+ * --api-key, which takes precedence. (pi 1.x reads a bare apiKey string as a
+ * literal, not an env-var name, so without --api-key this name itself is what
+ * gets sent.)
  */
 export function mergeCustomProviderIntoModelsConfig(modelsConfig, providerName, entry) {
   const providers = { ...((modelsConfig && modelsConfig.providers) || {}) };
@@ -138,10 +138,32 @@ export function syncCustomProviderModelsFile(modelsJsonPath, providerName, entry
 }
 
 /**
+ * What a keyless endpoint gets sent as its key. pi refuses to run a request
+ * with no key at all, and a server that doesn't check (llama-server, a local
+ * vLLM) ignores whatever arrives.
+ */
+export const NO_AUTH_API_KEY = "no-key";
+
+/**
+ * A custom endpoint with no key stored in any form -- the user left the field
+ * blank because the server needs none (#600). An encrypted key counts as
+ * stored even where it can't be decrypted: that's a key we failed to read, and
+ * sending a placeholder in its place would hide the failure.
+ */
+export function isKeylessCustomProvider(entry) {
+  return isCustomProvider(entry) && !entry.apiKey && !entry.apiKeyEncrypted;
+}
+
+/**
  * Resolve the API key for a custom provider at runtime. Orbit injects the
  * decrypted key via LOOM_ACTIVE_LLM_API_KEY (or ORBIT_ACTIVE_LLM_API_KEY); the standalone CLI uses the
- * plaintext apiKey on the entry. Returns undefined when neither is present.
+ * plaintext apiKey on the entry; a keyless endpoint gets NO_AUTH_API_KEY.
+ * Returns undefined when none of those applies.
  */
 export function resolveActiveLlmApiKey(entry, env) {
-  return (env && readEnv("ACTIVE_LLM_API_KEY", env)) || (entry && entry.apiKey);
+  return (
+    (env && readEnv("ACTIVE_LLM_API_KEY", env)) ||
+    (entry && entry.apiKey) ||
+    (isKeylessCustomProvider(entry) ? NO_AUTH_API_KEY : undefined)
+  );
 }

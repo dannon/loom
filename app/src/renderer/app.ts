@@ -33,9 +33,11 @@ import {
   buildDiscoveredModelOptions,
   pickOfferedProvider,
   unavailableProviders,
+  discoveredModelsStatus,
+  reconcileTypedModel,
   type ModelOption,
 } from "./model-options.js";
-import { planModelDiscovery } from "./model-discovery-gate.js";
+import { planLiveValidation, planModelDiscovery } from "./model-discovery-gate.js";
 import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
 import {
   ALLOWED_SKILLS_PREFIX,
@@ -959,6 +961,9 @@ function renderModelOptions(el: HTMLSelectElement, options: ModelOption[]): void
  */
 const CUSTOM_ENDPOINT_PROVIDER = "openai-compatible";
 
+/** A local server (llama-server, vLLM) often checks no key at all (#600). */
+const KEYLESS_KEY_PLACEHOLDER = "optional -- leave blank if the endpoint needs no key";
+
 /** Fill a datalist with whatever `/models` last reported, as suggestions only. */
 function renderModelSuggestions(list: HTMLDataListElement, ids: readonly string[]): void {
   list.innerHTML = "";
@@ -993,6 +998,7 @@ function wireApiKeyValidation(
     apiShapeEl,
     suggestionsEl,
     typedModelEl,
+    hasStoredKey,
   }: {
     baseUrlEl?: HTMLInputElement;
     /** Catalog dropdown, for providers that have a catalog. */
@@ -1003,6 +1009,8 @@ function wireApiKeyValidation(
     suggestionsEl?: HTMLDataListElement;
     /** The typed model input itself, for a custom endpoint. */
     typedModelEl?: HTMLInputElement;
+    /** Config already holds a key for this provider, so a blank field means "keep it". */
+    hasStoredKey?: (provider: string) => boolean;
   } = {},
 ): void {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -1019,7 +1027,13 @@ function wireApiKeyValidation(
     // Anthropic gateway answers /v1/models behind x-api-key, not /models
     // behind a bearer, so sending the wrong one reports a good key as bad.
     const api = baseUrl ? apiShapeEl?.value || undefined : undefined;
-    if (!key) {
+    const plan = planLiveValidation({
+      key,
+      baseUrl,
+      custom: provider === CUSTOM_ENDPOINT_PROVIDER,
+      storedKey: hasStoredKey?.(provider) ?? false,
+    });
+    if (plan === "clear") {
       setStatus("", "");
       return;
     }
@@ -1032,16 +1046,18 @@ function wireApiKeyValidation(
       // provider's models into another's picker.
       if (mySeq !== seq || providerEl.value !== provider) return;
       if (res.valid) {
-        setStatus("valid", "\u2713 Valid");
+        const ok = key ? "\u2713 Valid" : "\u2713 Endpoint answered without a key";
+        setStatus("valid", ok);
         if (res.models && res.models.length > 0) {
           if (provider === CUSTOM_ENDPOINT_PROVIDER) {
             // The dropdown is hidden for a custom endpoint, so a probe's
-            // answer becomes suggestions rather than the set of choices. Fill
-            // an empty field with the first id: the probe just proved the
-            // endpoint serves it, so it is a better default than blank.
+            // answer becomes suggestions rather than the set of choices.
             if (suggestionsEl) renderModelSuggestions(suggestionsEl, res.models);
-            if (typedModelEl && !typedModelEl.value.trim()) {
-              typedModelEl.value = res.models[0] ?? "";
+            if (typedModelEl) {
+              const before = typedModelEl.value;
+              typedModelEl.value = reconcileTypedModel(before, res.models);
+              const listed = discoveredModelsStatus(typedModelEl.value, res.models, before);
+              setStatus("valid", `${ok} \u00b7 ${listed.replace(/^\u2713 /, "")}`);
             }
           } else if (modelEl) {
             renderModelOptions(modelEl, buildDiscoveredModelOptions(res.models, modelEl.value));
@@ -1201,6 +1217,7 @@ async function updateWelcomeAuthUi(): Promise<void> {
   welcomeBaseUrlRow.classList.toggle("hidden", !custom);
   welcomeApiKeyRow.classList.toggle("hidden", oauthOnly);
   welcomeApiKeyHintRow.classList.toggle("hidden", oauthOnly);
+  welcomeApiKey.placeholder = custom ? KEYLESS_KEY_PLACEHOLDER : "sk-...";
   welcomeOauthRow.classList.toggle("hidden", !signIn);
   welcomeOauthHintRow.classList.toggle("hidden", !signIn);
   if (signIn) {
@@ -1269,15 +1286,16 @@ welcomeSave.addEventListener("click", async () => {
   const signedIn = signIn
     ? (await window.orbit.oauthStatus(welcomeProvider.value)).signedIn
     : false;
+  const custom = welcomeProvider.value === CUSTOM_ENDPOINT_PROVIDER;
   // Dual-auth providers are satisfied by either credential, so only insist on a
-  // key when there is no sign-in to fall back on.
-  if (!oauthOnly && !apiKey && !signedIn) {
+  // key when there is no sign-in to fall back on. A custom endpoint may need
+  // none at all (#600).
+  if (!oauthOnly && !custom && !apiKey && !signedIn) {
     welcomeError.textContent = signIn
       ? "Enter an API key, or sign in above."
       : "API key is required";
     return;
   }
-  const custom = welcomeProvider.value === "openai-compatible";
   if (custom && !welcomeBaseUrl.value.trim()) {
     welcomeError.textContent = "Enter a base URL (or use the Jetstream preset).";
     return;
@@ -1363,7 +1381,10 @@ document.addEventListener("keydown", (e) => {
 async function checkFirstRun(): Promise<void> {
   const cfg = (await window.orbit.getConfig()) as {
     _mode?: string;
-    llm?: { active?: string; providers?: Record<string, { hasApiKey?: boolean }> };
+    llm?: {
+      active?: string;
+      providers?: Record<string, { hasApiKey?: boolean; baseUrl?: string }>;
+    };
   };
   // Remote shells inject Galaxy creds server-side, but the LLM key may be
   // missing (no admin-baked key). When it is, reuse the welcome overlay to
@@ -1398,8 +1419,10 @@ async function checkFirstRun(): Promise<void> {
     const status = await window.orbit.oauthStatus(active);
     if (status.signedIn) return;
   }
-  const hasKey = active ? Boolean(cfg.llm?.providers?.[active]?.hasApiKey) : false;
-  if (!hasKey) {
+  const entry = active ? cfg.llm?.providers?.[active] : undefined;
+  // A saved custom endpoint is set up even with no key -- it may need none (#600).
+  const configured = Boolean(entry?.hasApiKey || entry?.baseUrl);
+  if (!configured) {
     selectWelcomeProvider(welcomeProvider.value);
     void updateWelcomeAuthUi();
     welcomeOverlay.classList.remove("hidden");
@@ -3573,6 +3596,7 @@ wireApiKeyValidation(prefsProvider, prefsApiKey, prefsApiKeyStatus, {
   apiShapeEl: prefsApiShape,
   suggestionsEl: prefsModelOptions,
   typedModelEl: prefsModelCustom,
+  hasStoredKey: (provider) => Boolean(prefsProviderStates[provider]?.hadKey),
   // Remember what typing a key discovered, so flipping providers and back
   // inside one Preferences session doesn't lose the list.
   onModels: (provider, models) => {
@@ -3911,7 +3935,6 @@ async function refreshDiscoveredModels(provider: string, manual: boolean): Promi
     savedBaseUrl: state?.savedBaseUrl ?? "",
     typedBaseUrl: prefsBaseUrl.value,
     typedKey: prefsApiKey.value,
-    hadKey: state?.hadKey ?? false,
     alreadyDiscovered: Boolean(state?.discoveredModels?.length),
   });
   if (plan.action === "skip") return;
@@ -3953,9 +3976,21 @@ async function refreshDiscoveredModels(provider: string, manual: boolean): Promi
     }
     if (target) target.discoveredModels = res.models;
     if (owns()) {
-      populateModels(provider, readPrefsModel(provider) || target?.model || undefined, res.models);
-      const n = res.models.length;
-      setModelStatus("valid", `\u2713 ${n} model${n === 1 ? "" : "s"} available`);
+      const onScreen = readPrefsModel(provider) || target?.model || "";
+      const typed = provider === CUSTOM_ENDPOINT_PROVIDER;
+      // The probe Preferences runs on open must not rewrite a chosen model;
+      // only the Fetch button, i.e. someone setting the endpoint up, swaps it.
+      const model = typed
+        ? reconcileTypedModel(onScreen, res.models, { replaceStale: manual })
+        : onScreen;
+      populateModels(provider, model || undefined, res.models);
+      // Only a typed field can hide the list; a dropdown shows all of it.
+      setModelStatus(
+        "valid",
+        typed
+          ? discoveredModelsStatus(model, res.models, onScreen)
+          : discoveredModelsStatus("", res.models),
+      );
     }
   } catch (err) {
     if (owns()) {
@@ -3981,7 +4016,11 @@ function loadProviderFields(provider: string): void {
   prefsApiShape.value = state.api || DEFAULT_API_SHAPE;
   applyApiShapeHint(prefsApiShape, prefsBaseUrl);
   prefsBaseUrlDiverged = state.baseUrl.trim() !== state.savedBaseUrl.trim();
-  prefsApiKey.placeholder = state.hadKey ? "leave blank to keep existing key" : "";
+  prefsApiKey.placeholder = state.hadKey
+    ? "leave blank to keep existing key"
+    : provider === CUSTOM_ENDPOINT_PROVIDER
+      ? KEYLESS_KEY_PLACEHOLDER
+      : "";
   if (state.hadKey && !state.typedKey) {
     prefsApiKeyStatus.className = "api-key-status stored";
     prefsApiKeyStatus.textContent =

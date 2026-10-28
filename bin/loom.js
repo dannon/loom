@@ -516,7 +516,8 @@ ${credentialFixHint(activeLlmProvider, { canUseApiKey: false })}
   }
 
   // Custom OpenAI-compatible provider: usable when a key is resolvable from the
-  // injected env var (Orbit) or a plaintext config key (standalone CLI).
+  // injected env var (Orbit) or a plaintext config key (standalone CLI), or
+  // when none is stored because the endpoint needs none (#600).
   if (isCustomProvider(activeLlmConfig) && resolveActiveLlmApiKey(activeLlmConfig, process.env)) {
     return;
   }
