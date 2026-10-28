@@ -38,6 +38,7 @@ import { registerSessionIndexTools } from "./session-index/tools";
 import { isSessionIndexEnabled } from "./session-index/is-enabled";
 import { registerSkillTriggers } from "./skill-triggers";
 import { registerIwcPlanCheck } from "./iwc-plan-check";
+import { registerEmptyCompletionCheck } from "./empty-completion";
 import { registerSraImportGate } from "./sra-import-gate";
 import { registerGalaxyRepeatGuard } from "./galaxy-repeat-guard";
 import { registerGalaxyHistoryGuard } from "./galaxy-history-guard";
@@ -240,6 +241,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerInstructionsCommand(pi);
   registerSkillTriggers(pi, family);
   registerIwcPlanCheck(pi, family);
+  registerEmptyCompletionCheck(pi);
   registerEvidenceGate(pi, family);
   registerSraImportGate(pi, family);
   registerGalaxyRepeatGuard(pi, family);
