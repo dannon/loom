@@ -44,9 +44,11 @@ import { canonicalJson, normalizeServerUrl, sha256Hex } from "./registry";
 import {
   approveProposal,
   canonicalizeProposal,
+  checkInputFormats,
   describePredicate,
   findDrift,
   liveApproval,
+  mappedOverSlots,
   newProposalId,
   parseInputs,
   parseOverrides,
@@ -59,6 +61,7 @@ import {
   validateProposal,
   type Drift,
   type Proposal,
+  type TemplateShape,
 } from "./registry-proposal";
 import {
   flushHeldRevocations,
@@ -70,9 +73,11 @@ import {
 
 export { sessionView };
 import {
+  inputFormatFetcherFor,
   primeTemplateReplay,
   TemplateUnavailableError,
   templateFetcherFor,
+  type InputFormatFetcher,
   type TemplateFetcher,
 } from "./registry-templates";
 import { getCurrentHistoryId, getNotebookPath, onNotebookChange } from "./state";
@@ -84,6 +89,8 @@ export interface ProposalDeps {
   galaxyUrl: () => string | null;
   historyId: () => string | null;
   fetcher: (sessionDir: string) => TemplateFetcher;
+  /** Reads the inputs' datatypes for the format check; absent or null skips it. */
+  formats?: (sessionDir: string) => InputFormatFetcher | null;
   /** ISO timestamp. */
   now: () => string;
   random: (n: number) => Uint8Array;
@@ -95,6 +102,7 @@ export const defaultDeps: ProposalDeps = {
   galaxyUrl: () => getGalaxyConfig()?.url ?? null,
   historyId: getCurrentHistoryId,
   fetcher: templateFetcherFor,
+  formats: inputFormatFetcherFor,
   now: () => new Date().toISOString(),
   random: (n) => randomBytes(n),
 };
@@ -222,7 +230,32 @@ export interface ProposeParams {
 }
 
 export type ProposeResult =
-  { ok: true; proposal: Proposal; table: string } | { ok: false; problems: string[] };
+  | {
+      ok: true;
+      proposal: Proposal;
+      table: string;
+      /** Slots given a collection that the run maps over, one job per element. */
+      mappedOver: string[];
+      /** Inputs whose format couldn't be checked, and why. */
+      formatsUnchecked: string[];
+    }
+  | { ok: false; problems: string[] };
+
+/**
+ * The format check (#618), when this session can ask Galaxy. A dataset the
+ * slot can't take is a problem; one it couldn't judge is only noted.
+ */
+async function checkFormats(
+  deps: ProposalDeps,
+  nb: string,
+  proposal: Proposal,
+  shape: TemplateShape,
+  signal?: AbortSignal,
+): Promise<{ problems: string[]; unchecked: string[] }> {
+  const fetch = deps.formats?.(path.dirname(nb));
+  if (!fetch) return { problems: [], unchecked: [] };
+  return checkInputFormats(proposal, shape, await fetch(proposal.inputs, signal));
+}
 
 /**
  * Validate a proposal against the fetched template and, only if nothing is
@@ -313,6 +346,8 @@ export async function propose(
   );
   const problems = validateProposal(proposal, shape);
   if (problems.length > 0) return { ok: false, problems };
+  const formats = await checkFormats(deps, nb, proposal, shape, signal);
+  if (formats.problems.length > 0) return { ok: false, problems: formats.problems };
 
   // Freeze the template it was validated against, when this session can.
   if (!cannotWrite(session)) {
@@ -347,7 +382,9 @@ export async function propose(
   return {
     ok: true,
     proposal,
-    table: renderProposalTable(proposal, { resolvedVersion: snapshot.version }),
+    table: renderProposalTable(proposal, { resolvedVersion: snapshot.version, shape }),
+    mappedOver: mappedOverSlots(proposal, shape),
+    formatsUnchecked: formats.unchecked,
   };
 }
 
@@ -430,7 +467,14 @@ export async function approveCommand(
   } catch (err) {
     return { level: "warning", message: `Can't approve ${id}: ${(err as Error).message}.` };
   }
-  const problems = validateProposal(proposal, templateShape(proposal.target.kind, snapshot));
+  const shape = templateShape(proposal.target.kind, snapshot);
+  const problems = validateProposal(proposal, shape);
+  let formatsUnchecked: string[] = [];
+  if (problems.length === 0) {
+    const formats = await checkFormats(deps, nb, proposal, shape, opts.signal);
+    problems.push(...formats.problems);
+    formatsUnchecked = formats.unchecked;
+  }
   if (problems.length > 0) {
     return {
       level: "warning",
@@ -438,17 +482,25 @@ export async function approveCommand(
     };
   }
 
-  const table = renderProposalTable(proposal, { resolvedVersion: snapshot.version, plain: true });
+  const table = renderProposalTable(proposal, {
+    resolvedVersion: snapshot.version,
+    plain: true,
+    shape,
+  });
   // Approval re-fetches and freezes what Galaxy says now, by design; say so
   // when that's not what the proposal was checked against.
   const templateNote =
     proposal.templateDigest && proposal.templateDigest !== sha256Hex(canonicalJson(snapshot.body))
       ? "\n\nGalaxy's template for this target changed since it was proposed; the above was checked against the current one."
       : "";
+  const formatNote =
+    formatsUnchecked.length > 0
+      ? `\n\nFormats not checked:\n- ${formatsUnchecked.join("\n- ")}`
+      : "";
   if (opts.confirm) {
     const confirmed = await opts.confirm(
       `Approve ${id}?`,
-      `${table}${templateNote}\n\nThis freezes exactly the above.`,
+      `${table}${templateNote}${formatNote}\n\nThis freezes exactly the above.`,
     );
     if (!confirmed) return { level: "info", message: `Not approved; ${id} is still pending.` };
   } else if (!yes) {
@@ -456,8 +508,12 @@ export async function approveCommand(
     // a spec the user never saw, so they have to see it here and say so.
     const message =
       `Not approved: there's no dialog here to confirm in. This is what /approve would freeze:\n\n` +
-      `${table}${templateNote}\n\nIf that's what you want, run /approve ${id} --yes.`;
-    activity(deps, "proposal.approval_unconfirmed", "user", { proposal_id: id, table });
+      `${table}${templateNote}${formatNote}\n\nIf that's what you want, run /approve ${id} --yes.`;
+    activity(deps, "proposal.approval_unconfirmed", "user", {
+      proposal_id: id,
+      table,
+      ...(formatsUnchecked.length > 0 ? { formats_unchecked: formatsUnchecked } : {}),
+    });
     return { level: "warning", message };
   }
 
@@ -507,7 +563,10 @@ export async function approveCommand(
       resolvedVersion: result.spec.target.version,
       specRevision: result.specRevision,
       plain: true,
+      shape,
     }),
+    // So the record tells a format that fit from one nobody could check.
+    ...(formatsUnchecked.length > 0 ? { formats_unchecked: formatsUnchecked } : {}),
     ...(result.superseded.length > 0 ? { superseded: result.superseded } : {}),
   });
   try {
@@ -529,6 +588,7 @@ export async function approveCommand(
         resolvedVersion: result.spec.target.version,
         specRevision: result.specRevision,
         plain: true,
+        shape,
       }) +
       `\n\nEditing the proposal from here revokes this approval.`,
   };
@@ -695,11 +755,13 @@ export function registerProposalCommands(pi: ExtensionAPI, deps: ProposalDeps = 
     label: "Propose Galaxy Run",
     description: `Propose one concrete Galaxy run -- a tool, workflow or user-defined tool with its
 exact inputs and parameters -- for the user to approve. The harness fetches the target's template from
-Galaxy and checks your proposal against it (dataset slots, required inputs, parameter names) before
+Galaxy and checks your proposal against it (dataset slots and their formats, required inputs, parameter names) before
 anything is written; if something is wrong you get the list of problems and nothing is written. On
 success it writes a loom-proposal block to the notebook and returns a proposal id and a table.
 Show the user that table and ask them to type /approve <proposal-id>. You cannot approve it yourself.
-Give every parameter you set a rationale. Leave version unset to take what Galaxy resolves.`,
+Give every parameter you set a rationale. Leave version unset to take what Galaxy resolves.
+A tool's dataset input also takes a collection (src hdca): on a one-dataset input it runs once per
+element, on a multiple input it takes them all in one job.`,
     parameters: Type.Object({
       step_anchor: Type.String({
         description: "The plan step this run is for, e.g. 'plan-a-step-2'.",
@@ -754,10 +816,25 @@ Give every parameter you set a rationale. Leave version unset to take what Galax
         );
       }
       const id = result.proposal.proposalId;
+      const mapped =
+        result.mappedOver.length > 0
+          ? ` It maps over the collection given to ${result.mappedOver.join(", ")}: ` +
+            `Galaxy runs it once per element, and each job it makes carries out this proposal.`
+          : "";
+      const unchecked =
+        result.formatsUnchecked.length > 0
+          ? `\n\nFormats not checked (Galaxy will say at submission if they're wrong):\n- ` +
+            result.formatsUnchecked.join("\n- ")
+          : "";
       return toolText(
         `Proposed ${id}. Show the user this table and ask them to type /approve ${id} ` +
-          `(or say what to change). Do not submit this run until they have approved it.\n\n${result.table}`,
-        { proposalId: id, predicate: describePredicate(result.proposal.predicate) },
+          `(or say what to change). Do not submit this run until they have approved it.` +
+          `${mapped}\n\n${result.table}${unchecked}`,
+        {
+          proposalId: id,
+          predicate: describePredicate(result.proposal.predicate),
+          ...(result.mappedOver.length > 0 ? { mappedOver: result.mappedOver } : {}),
+        },
       );
     },
   });
