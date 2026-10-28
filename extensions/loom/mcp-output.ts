@@ -8,7 +8,7 @@ import { constants } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { inspectOutput, record } from "./galaxy-output";
+import { CATALOG_NEXT_STEPS, catalogHeadline, inspectOutput, record } from "./galaxy-output";
 import type { GalaxyToolFamily } from "../../shared/galaxy-tool-family.js";
 
 const MAX_FILE_BYTES = 32 * 1024 * 1024;
@@ -154,10 +154,8 @@ export function registerMcpOutputRecovery(pi: ExtensionAPI, inProcess?: GalaxyTo
       });
       overview = JSON.stringify(page);
       if (page.type === "user_tool_catalog") {
-        if (!event.isError)
-          headline = `User-defined tools: showing ${(page.items as unknown[]).length} of ${page.responseItems} tools returned by Galaxy. Full definitions are available on demand.`;
-        next =
-          'Search tool names/IDs/descriptions with query, or page this catalog with pointer "/data" and nextOffset. Use a tool\'s definitionPointer to inspect its inputs, outputs or command only when needed. These are summaries of this response, not proof that Galaxy has no other pages.';
+        if (!event.isError) headline = catalogHeadline(page, "mcp_read_output");
+        next = CATALOG_NEXT_STEPS;
       }
     } catch {
       headline = event.isError

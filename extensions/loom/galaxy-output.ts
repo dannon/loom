@@ -174,12 +174,85 @@ function userToolCatalog(root: unknown, args: OutputQuery): Recordish | undefine
     responseItems: tools.length,
     sourceCount: preview(response.count),
     sourcePagination: preview(response.pagination),
+    galaxyPage: galaxyPage(response.pagination, tools.length),
     items,
     nextOffset: more ? offset + items.length : null,
     definitionsOmitted: true,
     searchScope: "tool identity, name, version, description, container, not command bodies",
   };
 }
+
+function count(value: unknown): number | undefined {
+  return Number.isInteger(value) && (value as number) >= 0 ? (value as number) : undefined;
+}
+
+/**
+ * Galaxy's pagination block, keeping only fields consistent with this response. next_offset is
+ * used as given, never offset + limit: Galaxy's output budget can cut a page short of `limit`,
+ * so that would skip records.
+ */
+function galaxyPage(pagination: unknown, returned: number): Recordish | null {
+  const source = record(pagination);
+  if (!source) return null;
+  const offset = count(source.offset);
+  let total = count(source.total_items);
+  if (total !== undefined && total < (offset ?? 0) + returned) total = undefined;
+  let hasNext = typeof source.has_next === "boolean" ? source.has_next : undefined;
+  if (total !== undefined && offset !== undefined) {
+    const more = offset + returned < total;
+    // A has_next that contradicts the total proves nothing either way.
+    hasNext = hasNext === undefined || hasNext === more ? more : undefined;
+  }
+  let nextOffset = hasNext ? count(source.next_offset) : undefined;
+  // Backwards would loop the model on one page; past the total would skip records.
+  if (
+    nextOffset !== undefined &&
+    ((offset !== undefined && nextOffset <= offset) || (total !== undefined && nextOffset >= total))
+  )
+    nextOffset = undefined;
+  return {
+    totalItems: total ?? null,
+    offset: offset ?? null,
+    hasNext: hasNext ?? null,
+    nextOffset: nextOffset ?? null,
+  };
+}
+
+/** The tool that reads a spilled response back: galaxy-ops' ring or pi's MCP file store. */
+export type OutputReadTool = "galaxy_read_output" | "mcp_read_output";
+
+/** The first line the model reads, so it must never call a partial page complete. */
+export function catalogHeadline(page: Recordish, readTool: OutputReadTool): string {
+  const shown = (page.items as unknown[]).length;
+  const galaxy = record(page.galaxyPage);
+  const total = count(galaxy?.totalItems);
+  const offset = count(galaxy?.offset);
+  const unread = count(page.nextOffset);
+  const parts = [
+    total === undefined
+      ? `User-defined tools: showing ${shown} of ${page.responseItems} tools in this response.`
+      : `User-defined tools: showing ${shown} of ${total}${offset === undefined ? "" : ` (Galaxy offset ${offset})`}.`,
+  ];
+  if (unread !== undefined)
+    parts.push(
+      `This response holds ${page.responseItems}; read the rest first with ${readTool} offset=${unread}.`,
+    );
+  if (galaxy?.hasNext === true) {
+    const next = count(galaxy.nextOffset);
+    parts.push(
+      `More pages exist in Galaxy -- ${unread === undefined ? "" : "after that, "}re-call the Galaxy tool with ${next === undefined ? "a later offset" : `offset=${next}`}.`,
+    );
+  } else if (galaxy?.hasNext === false) parts.push("This is Galaxy's last page.");
+  else if (total === undefined)
+    parts.push("Galaxy did not report a total, so other pages may exist.");
+  else parts.push("Galaxy did not say whether more pages exist.");
+  parts.push("Full definitions are available on demand.");
+  return parts.join(" ");
+}
+
+/** Guidance for the model once a response turned out to be a user-defined tool catalog. */
+export const CATALOG_NEXT_STEPS =
+  "Search tool names/IDs/descriptions with query, or page this catalog by passing its nextOffset as offset. Use a tool's definitionPointer to inspect its inputs, outputs or command only when needed. These are summaries of this response, not proof that Galaxy has no other pages.";
 
 export function inspectOutput(text: string, args: OutputQuery): Recordish {
   const offset = Math.max(0, Math.floor(args.offset ?? 0));
@@ -262,10 +335,8 @@ export function spillPreview(text: string, outputId: string, isError: boolean): 
     const page = inspectOutput(text, { outputId, limit: 20 });
     overview = JSON.stringify(page);
     if (page.type === "user_tool_catalog") {
-      if (!isError)
-        headline = `User-defined tools: showing ${(page.items as unknown[]).length} of ${page.responseItems} tools returned by Galaxy. Full definitions are available on demand.`;
-      next =
-        'Search tool names/IDs/descriptions with query, or page this catalog with pointer "/data" and nextOffset. Use a tool\'s definitionPointer to inspect its inputs, outputs or command only when needed. These are summaries of this response, not proof that Galaxy has no other pages.';
+      if (!isError) headline = catalogHeadline(page, "galaxy_read_output");
+      next = CATALOG_NEXT_STEPS;
     }
   } catch {
     // One entry is larger than a preview page; a raw head and tail still shows its shape.

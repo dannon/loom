@@ -75,11 +75,102 @@ describe("spillPreview", () => {
     const text = spillPreview(envelope, ID, false);
     const [headline, overview] = text.split("\n");
     expect(headline).toBe(
-      "User-defined tools: showing 20 of 57 tools returned by Galaxy. Full definitions are available on demand.",
+      "User-defined tools: showing 20 of 57 tools in this response. This response holds 57; read the rest first with galaxy_read_output offset=20. Galaxy did not report a total, so other pages may exist. Full definitions are available on demand.",
     );
     expect(JSON.parse(overview)).toEqual(inspectOutput(envelope, { outputId: ID, limit: 20 }));
-    expect(text).toContain('page this catalog with pointer "/data" and nextOffset');
+    expect(text).toContain("page this catalog by passing its nextOffset as offset");
     expect(text).not.toContain("private command body");
+  });
+
+  function catalogHeadline(payload: ReturnType<typeof userTools>) {
+    return spillPreview(JSON.stringify(payload), ID, false).split("\n")[0];
+  }
+
+  it("headlines Galaxy's real total and next offset when a catalog page was cut short", () => {
+    // Galaxy's output budget trimmed a limit=25 page to 5, so next_offset is 5, not 25.
+    const payload = userTools(5);
+    payload.count = 5;
+    payload.pagination = {
+      total_items: 234,
+      returned_items: 5,
+      limit: 25,
+      offset: 0,
+      has_next: true,
+      has_previous: false,
+      next_offset: 5,
+      previous_offset: null,
+      helper_text: "Page truncated to fit the output budget; use offset=5 for the next page.",
+    };
+    const headline = catalogHeadline(payload);
+    expect(headline).toContain("234");
+    expect(headline).toContain("offset 0");
+    expect(headline).toContain("offset=5");
+    expect(headline).toMatch(/more pages exist/i);
+    expect(headline).not.toContain("offset=25");
+    expect(headline).not.toMatch(/\b5 of 5\b/);
+    expect(headline).not.toMatch(/\bMCP\b|mcp_read_output/);
+  });
+
+  it("says a catalog page is the last one only when Galaxy says so", () => {
+    const payload = userTools(4);
+    payload.pagination = {
+      total_items: 234,
+      offset: 230,
+      has_next: false,
+      next_offset: null,
+      previous_offset: 205,
+    };
+    const headline = catalogHeadline(payload);
+    expect(headline).toContain("234");
+    expect(headline).toContain("offset 230");
+    expect(headline).toMatch(/last page/i);
+    expect(headline).not.toMatch(/more pages exist/i);
+  });
+
+  it("names galaxy_read_output when this response holds more than one preview page", () => {
+    const payload = userTools(25);
+    payload.pagination = { total_items: 234, offset: 0, has_next: true, next_offset: 25 };
+    const headline = catalogHeadline(payload);
+    expect(headline).toMatch(/^User-defined tools: showing 20 of 234 \(Galaxy offset 0\)\./);
+    // Re-calling Galaxy before reading tools 20-24 of this response would skip them.
+    expect(headline).toContain("read the rest first with galaxy_read_output offset=20.");
+    expect(headline).toContain("after that, re-call the Galaxy tool with offset=25.");
+    expect(headline).not.toContain("mcp_read_output");
+  });
+
+  it("exposes the normalized Galaxy page in the overview the model pages with", () => {
+    const payload = userTools(5);
+    payload.pagination = { total_items: 234, offset: 10, next_offset: 10 };
+    const page = inspectOutput(JSON.stringify(payload), { outputId: ID });
+    expect(page.galaxyPage).toEqual({
+      totalItems: 234,
+      offset: 10,
+      hasNext: true,
+      nextOffset: null,
+    });
+    const headline = catalogHeadline(payload);
+    expect(headline).toMatch(/more pages exist/i);
+    expect(headline).toContain("a later offset");
+    expect(headline).not.toContain("offset=10");
+  });
+
+  it("trusts neither side of contradictory pagination", () => {
+    const payload = userTools(5);
+    payload.pagination = { total_items: 234, offset: 0, has_next: false, next_offset: 5 };
+    expect(catalogHeadline(payload)).toMatch(/did not say whether more pages exist/i);
+    expect(catalogHeadline(payload)).not.toMatch(/last page/i);
+    payload.pagination = { total_items: 234, offset: 0, has_next: true, next_offset: 250 };
+    const headline = catalogHeadline(payload);
+    expect(headline).toMatch(/more pages exist/i);
+    expect(headline).not.toContain("offset=250");
+  });
+
+  it("does not imply a catalog is complete when Galaxy sent no pagination block", () => {
+    const headline = catalogHeadline(userTools(5));
+    expect(headline).toMatch(/^User-defined tools: showing 5 of 5 tools in this response/);
+    expect(headline).toMatch(/did not report a total/i);
+    expect(headline).not.toMatch(/last page/i);
+    expect(inspectOutput(JSON.stringify(userTools(5)), { outputId: ID }).galaxyPage).toBeNull();
   });
 
   it("keeps the error headline for a failed catalog response", () => {

@@ -194,6 +194,113 @@ describe("bounded MCP output recovery", () => {
     });
   });
 
+  async function catalogHeadline(payload: ReturnType<typeof userTools>) {
+    const { path, content, details } = await piMcpResult(
+      "list_user_tools",
+      JSON.stringify(payload),
+    );
+    const recovered = await harness().result(
+      event(path, { toolName: "mcp__galaxy__list_user_tools", content, details }),
+    );
+    const text = recovered.content![0].type === "text" ? recovered.content![0].text : "";
+    return text.split("\n")[0];
+  }
+
+  it("headlines Galaxy's real total and next offset when a catalog page was cut short", async () => {
+    // Galaxy MCP's output budget trimmed a limit=25 page to 5, so next_offset is 5, not 25.
+    const payload = userTools(5);
+    payload.count = 5;
+    payload.pagination = {
+      total_items: 234,
+      returned_items: 5,
+      limit: 25,
+      offset: 0,
+      has_next: true,
+      has_previous: false,
+      next_offset: 5,
+      previous_offset: null,
+      helper_text: "Page truncated to fit the output budget; use offset=5 for the next page.",
+    };
+    const headline = await catalogHeadline(payload);
+    expect(headline).toContain("234");
+    expect(headline).toContain("offset 0");
+    expect(headline).toContain("offset=5");
+    expect(headline).toMatch(/more pages exist/i);
+    expect(headline).not.toContain("offset=25");
+    expect(headline).not.toMatch(/\b5 of 5\b/);
+  });
+
+  it("says a catalog page is the last one only when Galaxy says so", async () => {
+    const payload = userTools(4);
+    payload.pagination = {
+      total_items: 234,
+      returned_items: 4,
+      limit: 25,
+      offset: 230,
+      has_next: false,
+      has_previous: true,
+      next_offset: null,
+      previous_offset: 205,
+    };
+    const headline = await catalogHeadline(payload);
+    expect(headline).toContain("234");
+    expect(headline).toContain("offset 230");
+    expect(headline).toMatch(/last page/i);
+    expect(headline).not.toMatch(/more pages exist/i);
+  });
+
+  it("keeps loom's preview paging separate from Galaxy's in the headline", async () => {
+    const payload = userTools(25);
+    payload.pagination = { total_items: 234, offset: 0, has_next: true, next_offset: 25 };
+    const headline = await catalogHeadline(payload);
+    expect(headline).toMatch(/^User-defined tools: showing 20 of 234 \(Galaxy offset 0\)\./);
+    // Re-calling Galaxy before reading tools 20-24 of this response would skip them.
+    expect(headline).toContain("read the rest first with mcp_read_output offset=20.");
+    expect(headline).toContain("after that, re-call the Galaxy tool with offset=25.");
+  });
+
+  it("keeps Galaxy's next offset when it reports no total", async () => {
+    const payload = userTools(5);
+    payload.pagination = { offset: 0, has_next: true, next_offset: 5 };
+    const headline = await catalogHeadline(payload);
+    expect(headline).toContain("offset=5");
+    expect(headline).toMatch(/more pages exist/i);
+  });
+
+  it("infers more pages from the total and ignores a next offset that doesn't advance", async () => {
+    const payload = userTools(5);
+    payload.pagination = { total_items: 234, offset: 10, next_offset: 10 };
+    const headline = await catalogHeadline(payload);
+    expect(headline).toMatch(/more pages exist/i);
+    expect(headline).toContain("a later offset");
+    expect(headline).not.toContain("offset=10");
+    expect(inspectOutput(JSON.stringify(payload), { outputId: "x" }).galaxyPage).toEqual({
+      totalItems: 234,
+      offset: 10,
+      hasNext: true,
+      nextOffset: null,
+    });
+  });
+
+  it("trusts neither side of contradictory pagination", async () => {
+    const payload = userTools(5);
+    payload.pagination = { total_items: 234, offset: 0, has_next: false, next_offset: 5 };
+    let headline = await catalogHeadline(payload);
+    expect(headline).not.toMatch(/last page/i);
+    expect(headline).toMatch(/did not say whether more pages exist/i);
+    payload.pagination = { total_items: 234, offset: 0, has_next: true, next_offset: 250 };
+    headline = await catalogHeadline(payload);
+    expect(headline).toMatch(/more pages exist/i);
+    expect(headline).not.toContain("offset=250");
+  });
+
+  it("does not imply a catalog is complete when Galaxy sent no pagination block", async () => {
+    const headline = await catalogHeadline(userTools(5));
+    expect(headline).toMatch(/^User-defined tools: showing 5 of 5 tools in this response/);
+    expect(headline).toMatch(/did not report a total/i);
+    expect(headline).not.toMatch(/last page/i);
+  });
+
   it("bounds Unicode catalog pages without skipping records at a byte boundary", () => {
     const payload = userTools(31);
     for (const item of payload.data) {
