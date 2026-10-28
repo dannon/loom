@@ -518,7 +518,7 @@ export function galaxyOpsContext(signal?: AbortSignal): GalaxyContext | null {
  * reply (a refused redirect, an abort, a dead network) rethrows what fetch
  * threw, which galaxy-ops had wrapped.
  */
-function asLoomFailure(err: unknown): unknown {
+function asOrbitFailure(err: unknown): unknown {
   if (!(err instanceof GalaxyError)) return err;
   const http = err.http;
   if (http && http.status !== null) {
@@ -543,7 +543,7 @@ export async function galaxyGetInvocation(
   try {
     result = await getInvocations({ invocationId, stepDetails: true }, ctx);
   } catch (err) {
-    throw asLoomFailure(err);
+    throw asOrbitFailure(err);
   }
   if (Array.isArray(result)) {
     throw new Error(`Galaxy answered a listing for invocation ${invocationId}`);
@@ -566,7 +566,7 @@ export async function galaxyGetDataset(
     const result = await getDatasetDetails({ datasetId, includePreview: false }, ctx);
     return result.dataset;
   } catch (err) {
-    throw asLoomFailure(err);
+    throw asOrbitFailure(err);
   }
 }
 
@@ -588,7 +588,7 @@ export async function galaxyListHistoryInvocations(
   try {
     result = await getInvocations({ historyId, limit, stepDetails: false }, ctx);
   } catch (err) {
-    throw asLoomFailure(err);
+    throw asOrbitFailure(err);
   }
   if (!Array.isArray(result)) throw new Error("Galaxy answered one invocation for a listing");
   return result

@@ -28,7 +28,7 @@ import { isLessonsEnabled, LESSONS_OFF_POINTER } from "./enabled";
 import * as path from "path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { appendActivityEvent } from "../activity.js";
-import { readLoomVersion } from "../feedback.js";
+import { readOrbitVersion } from "../feedback.js";
 import { getNotebookPath } from "../state.js";
 import {
   PROPOSABLE_NAMESPACES,
@@ -259,7 +259,7 @@ function chosenOption(answer: unknown, options: string[]): string | undefined {
 }
 
 function generatedBy(): string {
-  const version = readLoomVersion();
+  const version = readOrbitVersion();
   return version && /^[A-Za-z0-9.-]{1,40}$/.test(version) ? `agent:loom/${version}` : "agent:loom";
 }
 

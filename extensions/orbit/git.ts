@@ -87,7 +87,7 @@ function gitOutput(args: string[], cwd: string): string {
   }).trim();
 }
 
-export function isLoomManagedRepo(cwd: string): boolean {
+export function isOrbitManagedRepo(cwd: string): boolean {
   try {
     return gitOutput(["config", "--bool", "loom.managed"], cwd) === "true";
   } catch {
@@ -103,7 +103,7 @@ export function isLoomManagedRepo(cwd: string): boolean {
 export function ensureGitRepo(cwd: string): boolean {
   try {
     execFileSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd, stdio: "ignore" });
-    return isLoomManagedRepo(cwd);
+    return isOrbitManagedRepo(cwd);
   } catch {
     // not a repo — fall through to init
   }

@@ -57,7 +57,7 @@ import { isLessonReplayEnabled, registerLessonReplay } from "./lessons/replay";
 import { registerObservationTriggers } from "./observation-triggers";
 import { registerObservationsCommand } from "./observations-command";
 import { registerMcpOutputRecovery } from "./mcp-output";
-import { registerLoomMcpServers } from "./mcp-servers";
+import { registerOrbitMcpServers } from "./mcp-servers";
 import { registerGalaxyVersionCapture } from "./galaxy-version-capture";
 import type { GalaxyToolFamily } from "../../shared/galaxy-tool-family.js";
 import { registerGalaxyTools } from "./galaxy-tool-source";
@@ -81,7 +81,7 @@ import {
   profileNameFromUrl,
   normalizeGalaxyUrl,
 } from "./profiles";
-import { LoomWidgetKey, encodeMarkdownWidget } from "../../shared/orbit-shell-contract.js";
+import { OrbitWidgetKey, encodeMarkdownWidget } from "../../shared/orbit-shell-contract.js";
 
 /** Status-bar label for a Galaxy tool -- galaxy-ops' or Loom's own -- else undefined. */
 function galaxyToolLabel(
@@ -162,7 +162,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
 
   // brc-analytics is the one MCP server Loom brings; a shell with no MCP layer
   // at all (the browser worker) says so with mcpServers.
-  if (profile.mcpServers) registerLoomMcpServers(pi);
+  if (profile.mcpServers) registerOrbitMcpServers(pi);
 
   setupUIBridge(pi);
   registerSessionLifecycle(pi);
@@ -424,7 +424,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
       // Open → close. Marks "hidden" so the panel doesn't auto-reopen on the
       // next notebook write (see ui-bridge); a second /notebook reopens it.
       if (getNotebookWidgetMode() === "open") {
-        ctx.ui.setWidget(LoomWidgetKey.Notebook, undefined);
+        ctx.ui.setWidget(OrbitWidgetKey.Notebook, undefined);
         setNotebookWidgetMode("hidden");
         return;
       }
@@ -434,7 +434,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
         try {
           const { content } = await store.read();
           const header = `> \`${store.label}\`\n\n`;
-          ctx.ui.setWidget(LoomWidgetKey.Notebook, encodeMarkdownWidget(header + content));
+          ctx.ui.setWidget(OrbitWidgetKey.Notebook, encodeMarkdownWidget(header + content));
           setNotebookWidgetMode("open");
         } catch (err) {
           ctx.ui.notify(`Failed to read notebook: ${err}`, "error");

@@ -13,7 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 // bin/ and shared/ are siblings of extensions/.
-import { getLoomVersion } from "../../bin/update-check.js";
+import { getOrbitVersion } from "../../bin/update-check.js";
 import {
   parseChangelog,
   decideWhatsNew,
@@ -62,7 +62,7 @@ export default function whatsNewExtension(pi: ExtensionAPI): void {
     // Orbit owns its own what's-new banner for the embedded brain.
     if (isDesktopShell()) return;
     try {
-      const running = getLoomVersion();
+      const running = getOrbitVersion();
       const decision = decideWhatsNew(loadEntries(), readSeen(), running, "latest");
       if (decision.entries.length) {
         const body = formatHighlightsText(decision.entries);
@@ -80,7 +80,7 @@ export default function whatsNewExtension(pi: ExtensionAPI): void {
     description: "Show what's new in this version of loom",
     handler: async (_args: string | undefined, ctx: ExtensionContext) => {
       try {
-        const running = getLoomVersion();
+        const running = getOrbitVersion();
         const entries = selectEntries(loadEntries(), undefined, running, "latest");
         if (entries.length) {
           ctx.ui.notify(

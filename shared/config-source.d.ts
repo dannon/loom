@@ -1,10 +1,10 @@
-import type { LoomConfig } from "./orbit-config.js";
+import type { OrbitConfig } from "./orbit-config.js";
 
 export interface ConfigSource {
   /** The raw config object; loadConfig() clones it and applies the same migrations and defaults as the file. */
-  load(): Partial<LoomConfig>;
+  load(): Partial<OrbitConfig>;
   /** Absent means the shell owns the config and nothing here may write it. */
-  save?(config: LoomConfig): void;
+  save?(config: OrbitConfig): void;
   /** Secret values the shell holds that are in neither the config nor process.env. */
   secrets?(): string[];
 }

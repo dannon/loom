@@ -208,7 +208,7 @@ export interface Scenario {
    * different tool surfaces. Comes after `--mode json` and any
    * `--provider`/`--model` injected by the runner.
    */
-  loomArgs?: string[];
+  coreArgs?: string[];
   /** Hard wall-clock cap for the loom invocation. Defaults to 15s. */
   timeoutMs?: number;
   assertions: Assertions;

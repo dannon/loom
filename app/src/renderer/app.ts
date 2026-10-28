@@ -45,7 +45,7 @@ import {
   availabilityUpdate,
   unavailableModelLabel,
 } from "./model-entitlement.js";
-import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/orbit-shell-contract.js";
+import { OrbitWidgetKey, decodeMarkdownWidget } from "../../../shared/orbit-shell-contract.js";
 import {
   ALLOWED_SKILLS_PREFIX,
   isAllowedSkillUrl,
@@ -3312,7 +3312,7 @@ window.orbit.onUiRequest((request) => {
     // tab now mirrors the live shell + proc-monitor streams (see below);
     // the brain-side activity.jsonl is still written for debug but no
     // longer pushed as a widget.
-    if (key === LoomWidgetKey.Notebook && lines) {
+    if (key === OrbitWidgetKey.Notebook && lines) {
       notebookLoadSeq++;
       const markdown = decodeMarkdownWidget(lines);
       artifacts.setNotebookMarkdown(markdown);

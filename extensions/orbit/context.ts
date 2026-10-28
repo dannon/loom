@@ -60,15 +60,15 @@ import {
 import { galaxyToolFamily } from "./galaxy-tool-source";
 import {
   buildReproductionLessonsContext,
-  LOOM_LESSONS_CONTEXT_TYPE,
+  ORBIT_LESSONS_CONTEXT_TYPE,
 } from "./lessons/reproduction-index";
 
 /** customType for the per-turn live notebook context message (E1/E2 cache fix). */
-const LOOM_NOTEBOOK_CONTEXT_TYPE = "loom-notebook-context";
+const ORBIT_NOTEBOOK_CONTEXT_TYPE = "loom-notebook-context";
 
 /** customType for workspace LOOM.md content. Kept out of the system prompt on
  *  purpose -- see buildWorkspaceInstructionsContext. */
-const LOOM_WORKSPACE_INSTRUCTIONS_TYPE = "loom-workspace-instructions";
+const ORBIT_WORKSPACE_INSTRUCTIONS_TYPE = "loom-workspace-instructions";
 
 /**
  * Read the user-curated notebook from the record and return a head + tail
@@ -865,9 +865,9 @@ export function setupContextInjection(pi: ExtensionAPI): void {
       (m) =>
         !(
           m.role === "custom" &&
-          (m.customType === LOOM_NOTEBOOK_CONTEXT_TYPE ||
-            m.customType === LOOM_WORKSPACE_INSTRUCTIONS_TYPE ||
-            m.customType === LOOM_LESSONS_CONTEXT_TYPE)
+          (m.customType === ORBIT_NOTEBOOK_CONTEXT_TYPE ||
+            m.customType === ORBIT_WORKSPACE_INSTRUCTIONS_TYPE ||
+            m.customType === ORBIT_LESSONS_CONTEXT_TYPE)
         ),
     );
 
@@ -899,15 +899,15 @@ export function setupContextInjection(pi: ExtensionAPI): void {
     // Lessons first, furthest from the user's turn: an index of titles written
     // by other people is the weakest claim on attention of the three.
     const lessons = await buildReproductionLessonsContext(lastUserText(messages));
-    if (lessons) insert(LOOM_LESSONS_CONTEXT_TYPE, lessons);
+    if (lessons) insert(ORBIT_LESSONS_CONTEXT_TYPE, lessons);
 
     // Workspace LOOM.md next, so the notebook -- and then the user's own turn
     // -- sit closer to the end than anything a cloned folder shipped.
     const workspace = buildWorkspaceInstructionsContext();
-    if (workspace) insert(LOOM_WORKSPACE_INSTRUCTIONS_TYPE, workspace);
+    if (workspace) insert(ORBIT_WORKSPACE_INSTRUCTIONS_TYPE, workspace);
 
     const live = await buildLiveNotebookContext();
-    if (live) insert(LOOM_NOTEBOOK_CONTEXT_TYPE, live);
+    if (live) insert(ORBIT_NOTEBOOK_CONTEXT_TYPE, live);
 
     return { messages };
   });

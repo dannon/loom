@@ -88,7 +88,7 @@ function section(text: string, heading: string, without: string[] = []): string 
   return lines.slice(start, end).join("\n");
 }
 
-async function loomPrompt(): Promise<string> {
+async function orbitPrompt(): Promise<string> {
   vi.stubEnv("GALAXY_URL", "https://galaxy.example.org");
   vi.stubEnv("GALAXY_API_KEY", "fixture-key");
   const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<unknown>>();
@@ -215,7 +215,7 @@ function wordSimilarity(a: string[], b: string[]): number {
 
 describe("browser prompt blocks against the loom blocks they were copied from", () => {
   it("pairs every marked copy", async () => {
-    const table = pairs(await loomPrompt());
+    const table = pairs(await orbitPrompt());
     expect(
       markedCopies()
         .map((c) => c.name)
@@ -224,7 +224,7 @@ describe("browser prompt blocks against the loom blocks they were copied from", 
   });
 
   it("reports each pair's drift", async () => {
-    const table = pairs(await loomPrompt());
+    const table = pairs(await orbitPrompt());
     const report = {
       about:
         "browser = prompt.ts, loom = the block its loom: comment names. Both sides normalized " +

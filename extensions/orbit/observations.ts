@@ -63,7 +63,7 @@ import type { ObservationsMode } from "./observations-config.js";
 import { join } from "node:path";
 import { release } from "node:os";
 import { getConfigDir } from "./config.js";
-import { readLoomVersion } from "./feedback.js";
+import { readOrbitVersion } from "./feedback.js";
 import { loadProfiles } from "./profiles.js";
 import { galaxyCredentials } from "./galaxy-api.js";
 import { isWsl } from "../../shared/wsl.js";
@@ -564,7 +564,7 @@ export function collectObservationEnvelope(installToken: string): ObservationEnv
     id: crypto.randomUUID(),
     clientTs: new Date().toISOString(),
     app: isDesktopShell() ? "orbit" : "loom-cli",
-    version: readLoomVersion() ?? "0.0.0",
+    version: readOrbitVersion() ?? "0.0.0",
     platform: PLATFORMS.has(platform) ? platform : "linux",
     ...(isWsl({ platform: process.platform, env: process.env, release: release() })
       ? { wsl: true }

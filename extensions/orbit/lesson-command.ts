@@ -12,7 +12,7 @@
 import fs from "node:fs";
 import { isLessonsEnabled, LESSONS_OFF_POINTER } from "./lessons/enabled";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { getConfigPath, loadConfig, saveConfig, type LoomConfig } from "./config.js";
+import { getConfigPath, loadConfig, saveConfig, type OrbitConfig } from "./config.js";
 import { parseLesson, validateLessonMarkdown } from "../../shared/lesson-rules.js";
 import {
   armLessonProposal,
@@ -87,7 +87,7 @@ export const PROPOSE_INSTRUCTION = [
 
 // The `lessons` config key is declared alongside the lesson store; this file
 // only needs its shape.
-type LessonsConfig = LoomConfig & { lessons?: { suppress?: unknown } };
+type LessonsConfig = OrbitConfig & { lessons?: { suppress?: unknown } };
 
 export function currentSuppressions(): string[] {
   const list = (loadConfig() as LessonsConfig).lessons?.suppress;

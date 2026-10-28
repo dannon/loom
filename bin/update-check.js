@@ -27,7 +27,7 @@ const FETCH_TIMEOUT_MS = 5000;
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /** @returns {string} the installed Loom version, from this package's package.json. */
-export function getLoomVersion() {
+export function getOrbitVersion() {
   const pkg = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, "package.json"), "utf-8"));
   return pkg.version;
 }
@@ -79,7 +79,7 @@ export function readCache() {
 /** The in-session notice for the current install, or null. @returns {string | null} */
 export function readNotice() {
   try {
-    return noticeFor(getLoomVersion(), readCache());
+    return noticeFor(getOrbitVersion(), readCache());
   } catch {
     return null;
   }
@@ -114,7 +114,7 @@ export async function fetchOrbitLatest(fetchFn = fetch) {
  * cache it. Best-effort: a failure writes a short-TTL failure marker. */
 export async function refreshCache() {
   if (readCache()) return; // still fresh; nothing to do
-  const channel = pickChannel(getLoomVersion());
+  const channel = pickChannel(getOrbitVersion());
   try {
     const res = await fetch(REGISTRY, {
       headers: { Accept: "application/vnd.npm.install-v1+json" },

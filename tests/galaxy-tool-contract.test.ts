@@ -98,7 +98,7 @@ describe("the Galaxy tool contract between the browser and Orbit", () => {
       browserOnly: browserNames.filter((n) => !opNames.includes(n)).sort(),
       olitFlavorOnly: [...olitOnly].sort(),
       orbitOnly: opNames.filter((n) => !browserNames.includes(n)).sort(),
-      loomBridging: LOOM_BRIDGING,
+      orbitBridging: LOOM_BRIDGING,
       upstreamPending: UPSTREAM_PENDING,
       knownDifferences: { parameters: paramDifferences(), forkOnly: FORK_ONLY },
     };

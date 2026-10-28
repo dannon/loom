@@ -43,7 +43,7 @@ import type {
   GalaxyLivePayload,
   GalaxyLiveState,
 } from "../../shared/galaxy-live-contract.js";
-import { LoomWidgetKey, encodeJsonWidget } from "../../shared/orbit-shell-contract.js";
+import { OrbitWidgetKey, encodeJsonWidget } from "../../shared/orbit-shell-contract.js";
 import {
   GalaxyApiError,
   galaxyGet,
@@ -886,7 +886,7 @@ export function armGalaxyLivePanel(ctx: ExtensionContext): void {
   const push = (payload: GalaxyLivePayload): void => {
     if (generation !== armGeneration) return;
     try {
-      ctx.ui.setWidget(LoomWidgetKey.GalaxyLive, encodeJsonWidget(payload));
+      ctx.ui.setWidget(OrbitWidgetKey.GalaxyLive, encodeJsonWidget(payload));
     } catch (err) {
       // Same guard as the notebook widget: a tick that lands after session
       // teardown fires against a ctx pi has invalidated, and touching ctx.ui

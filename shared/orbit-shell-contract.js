@@ -1,4 +1,4 @@
-export const LoomWidgetKey = {
+export const OrbitWidgetKey = {
   Plan: "plan",
   Steps: "steps",
   Results: "results",

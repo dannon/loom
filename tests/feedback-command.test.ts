@@ -6,7 +6,7 @@ vi.mock("../extensions/orbit/feedback.js", () => ({
   submitFeedback: (...a: unknown[]) => submitFeedback(...a),
   buildBrainSysinfo: () => ({ platform: "darwin" }),
   appendToOutbox: (...a: unknown[]) => appendToOutbox(...a),
-  readLoomVersion: () => "0.0.0-test",
+  readOrbitVersion: () => "0.0.0-test",
 }));
 vi.mock("../extensions/orbit/activity.js", () => ({ getRecentActivityEvents: () => [] }));
 vi.mock("../extensions/orbit/config.js", () => ({ loadConfig: () => ({ testerId: "orbit-007" }) }));

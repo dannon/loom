@@ -4,7 +4,7 @@
  * Files under `vendor/skills/` are vendored from `galaxyproject/agentic-plugins`
  * at a pinned commit by `scripts/sync-skills.mjs` and ship inside the package --
  * both the npm CLI (`files: ["extensions/", ...]`) and the Orbit installers
- * (forge's `LOOM_BUNDLE_FILES` includes `extensions`) pick them up with no
+ * (forge's `ORBIT_BUNDLE_FILES` includes `extensions`) pick them up with no
  * packaging change. That is deliberate: the guidance has to be available
  * offline, at a version we reviewed, with no runtime dependency on GitHub.
  *

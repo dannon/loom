@@ -3,7 +3,7 @@ import {
   isSensitivePath,
   isCredentialStore,
   isProtectedWritePath,
-  isLoomStatePath,
+  isOrbitStatePath,
 } from "../extensions/orbit/exec-guard/sensitive-read";
 import { WORKSPACE_STATE_DIR_NAMES } from "../extensions/orbit/workspace-state-dir";
 
@@ -168,11 +168,11 @@ describe("isProtectedWritePath", () => {
 
 // Every state-dir case above, for each spelling. A workspace uses one of them,
 // but the other is state too -- in any workspace.
-describe.each(WORKSPACE_STATE_DIR_NAMES)("isProtectedWritePath / isLoomStatePath -- %s", (D) => {
+describe.each(WORKSPACE_STATE_DIR_NAMES)("isProtectedWritePath / isOrbitStatePath -- %s", (D) => {
   const OTHER = WORKSPACE_STATE_DIR_NAMES.find((n) => n !== D)!;
   it("flags writes under the state dir", () => {
     expect(isProtectedWritePath(`/test-home/alice/project/${D}/config.json`)).toBe(true);
-    expect(isLoomStatePath(`/test-home/alice/project/${D}/config.json`)).toBe(true);
+    expect(isOrbitStatePath(`/test-home/alice/project/${D}/config.json`)).toBe(true);
   });
   it("allows analysis work product under ~/<state>/analyses", () => {
     expect(isProtectedWritePath(`/test-home/alice/${D}/analyses/proj/notebook.md`, HOME)).toBe(
@@ -227,10 +227,10 @@ describe.each(WORKSPACE_STATE_DIR_NAMES)("isProtectedWritePath / isLoomStatePath
   });
 });
 
-describe("isLoomStatePath -- a home that is itself under a state dir", () => {
+describe("isOrbitStatePath -- a home that is itself under a state dir", () => {
   it.each(WORKSPACE_STATE_DIR_NAMES)("gets no %s/analyses carve-out", (D) => {
     for (const odd of ["/srv/.loom/alice", "/srv/.orbit/alice"]) {
-      expect(isLoomStatePath(`${odd}/${D}/analyses/p/out.txt`, odd), odd).toBe(true);
+      expect(isOrbitStatePath(`${odd}/${D}/analyses/p/out.txt`, odd), odd).toBe(true);
     }
   });
 });

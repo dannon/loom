@@ -1,4 +1,4 @@
-export const LoomWidgetKey: {
+export const OrbitWidgetKey: {
   readonly Plan: "plan";
   readonly Steps: "steps";
   readonly Results: "results";

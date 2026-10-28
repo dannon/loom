@@ -9,11 +9,11 @@ import { prepareSpeech, SPEECH_STAGE_DIR } from "./scripts/prepare-speech.mjs";
 
 const APP_DIR = __dirname;
 const REPO_ROOT = path.resolve(APP_DIR, "..");
-const LOOM_STAGE_PARENT = path.resolve(APP_DIR, ".loom-stage");
-const LOOM_STAGE_DIR = path.join(LOOM_STAGE_PARENT, "loom");
-const NODE_STAGE_DIR = path.join(LOOM_STAGE_PARENT, "node");
-const UV_STAGE_DIR = path.join(LOOM_STAGE_PARENT, "uv");
-const TARBALL_CACHE_DIR = path.join(LOOM_STAGE_PARENT, "cache");
+const ORBIT_STAGE_PARENT = path.resolve(APP_DIR, ".orbit-stage");
+const ORBIT_STAGE_DIR = path.join(ORBIT_STAGE_PARENT, "orbit");
+const NODE_STAGE_DIR = path.join(ORBIT_STAGE_PARENT, "node");
+const UV_STAGE_DIR = path.join(ORBIT_STAGE_PARENT, "uv");
+const TARBALL_CACHE_DIR = path.join(ORBIT_STAGE_PARENT, "cache");
 
 // uv release target triple per (platform, arch). Mirrors astral-sh/uv's
 // asset names on its GitHub releases.
@@ -27,7 +27,7 @@ const UV_TARGETS: Record<string, string> = {
 
 // Files copied verbatim from the Loom repo root into the staged bundle.
 // Mirrors the npm `files` allowlist plus package-lock.json (used by npm ci).
-const LOOM_BUNDLE_FILES = [
+const ORBIT_BUNDLE_FILES = [
   "bin",
   "extensions",
   "lessons",
@@ -39,14 +39,14 @@ const LOOM_BUNDLE_FILES = [
   "LICENSE",
 ];
 
-function stageLoomBundle(platform: string, arch: string): void {
-  fs.rmSync(LOOM_STAGE_DIR, { recursive: true, force: true });
-  fs.mkdirSync(LOOM_STAGE_DIR, { recursive: true });
+function stageOrbitBundle(platform: string, arch: string): void {
+  fs.rmSync(ORBIT_STAGE_DIR, { recursive: true, force: true });
+  fs.mkdirSync(ORBIT_STAGE_DIR, { recursive: true });
 
-  for (const item of LOOM_BUNDLE_FILES) {
+  for (const item of ORBIT_BUNDLE_FILES) {
     const src = path.join(REPO_ROOT, item);
     if (!fs.existsSync(src)) continue;
-    fs.cpSync(src, path.join(LOOM_STAGE_DIR, item), { recursive: true });
+    fs.cpSync(src, path.join(ORBIT_STAGE_DIR, item), { recursive: true });
   }
 
   // Loom's root prepare script runs `husky`, which is a devDependency.
@@ -54,21 +54,21 @@ function stageLoomBundle(platform: string, arch: string): void {
   // lifecycle → `sh -c husky` → exit 127. Strip prepare from the staged
   // copy before installing. Other install/postinstall hooks (native module
   // prebuild downloads) stay intact.
-  execSync("npm pkg delete scripts.prepare", { cwd: LOOM_STAGE_DIR, stdio: "inherit" });
+  execSync("npm pkg delete scripts.prepare", { cwd: ORBIT_STAGE_DIR, stdio: "inherit" });
 
   // Install runtime deps only (no devDependencies) into the staged bundle.
   // npm ci is faster + deterministic when the lockfile is present.
-  const installCmd = fs.existsSync(path.join(LOOM_STAGE_DIR, "package-lock.json"))
+  const installCmd = fs.existsSync(path.join(ORBIT_STAGE_DIR, "package-lock.json"))
     ? "npm ci --omit=dev --no-audit --no-fund"
     : "npm install --omit=dev --omit=optional --no-audit --no-fund";
-  execSync(installCmd, { cwd: LOOM_STAGE_DIR, stdio: "inherit" });
+  execSync(installCmd, { cwd: ORBIT_STAGE_DIR, stdio: "inherit" });
 
-  pruneLoomNodeModules(platform, arch);
+  pruneOrbitNodeModules(platform, arch);
 }
 
 // Trim runtime-irrelevant chunks from the staged Loom node_modules. Targets
 // only known-safe heavy directories; keeps everything that might be loaded.
-function pruneLoomNodeModules(platform: string, arch: string): void {
+function pruneOrbitNodeModules(platform: string, arch: string): void {
   // koffi ships prebuilt .node binaries for ~18 platforms (darwin/linux/
   // win32/freebsd/openbsd/musl x ia32/x64/arm64/...). We only need the
   // target platform's. Keeping just `<platform>_<arch>` saves ~30MB, and
@@ -77,7 +77,7 @@ function pruneLoomNodeModules(platform: string, arch: string): void {
   // npm hoists most copies to the top-level node_modules but pi-coding-agent
   // pins its own koffi, so the package can appear nested too. Walk for any.
   const keepDir = `${platform}_${arch}`;
-  for (const koffiBuild of findKoffiBuildDirs(path.join(LOOM_STAGE_DIR, "node_modules"))) {
+  for (const koffiBuild of findKoffiBuildDirs(path.join(ORBIT_STAGE_DIR, "node_modules"))) {
     for (const entry of fs.readdirSync(koffiBuild)) {
       if (entry !== keepDir) {
         fs.rmSync(path.join(koffiBuild, entry), { recursive: true, force: true });
@@ -91,7 +91,7 @@ function pruneLoomNodeModules(platform: string, arch: string): void {
   // an individual --timestamp round-trip. Drop it. (force: true no-ops if the
   // path is ever absent.)
   fs.rmSync(
-    path.join(LOOM_STAGE_DIR, "node_modules", "@earendil-works", "pi-coding-agent", "examples"),
+    path.join(ORBIT_STAGE_DIR, "node_modules", "@earendil-works", "pi-coding-agent", "examples"),
     { recursive: true, force: true },
   );
 }
@@ -182,14 +182,14 @@ async function stageNodeBundle(platform: string, arch: string): Promise<void> {
   console.log(`[loom-stage] extracting ${filename}`);
   if (platform === "win32") {
     execSync(
-      `powershell -Command "Expand-Archive -Path '${tarballPath}' -DestinationPath '${LOOM_STAGE_PARENT}'"`,
+      `powershell -Command "Expand-Archive -Path '${tarballPath}' -DestinationPath '${ORBIT_STAGE_PARENT}'"`,
       { stdio: "inherit" },
     );
   } else {
-    execSync(`tar -xf "${tarballPath}" -C "${LOOM_STAGE_PARENT}"`, { stdio: "inherit" });
+    execSync(`tar -xf "${tarballPath}" -C "${ORBIT_STAGE_PARENT}"`, { stdio: "inherit" });
   }
 
-  const extractedPath = path.join(LOOM_STAGE_PARENT, distName);
+  const extractedPath = path.join(ORBIT_STAGE_PARENT, distName);
   fs.renameSync(extractedPath, NODE_STAGE_DIR);
 
   pruneNodeBundle();
@@ -211,7 +211,7 @@ function pruneNodeBundle(): void {
 // Bundle uv/uvx so Galaxy MCP (`uvx galaxy-mcp>=1.9.0`) doesn't need a
 // system-installed uv. Pulls the latest release tarball from astral-sh/uv.
 // "latest" resolves to a specific tag at fetch time -- the cached tarball
-// won't auto-refresh; remove `.loom-stage/cache/` to pick up newer uv.
+// won't auto-refresh; remove `.orbit-stage/cache/` to pick up newer uv.
 async function stageUvBundle(platform: string, arch: string): Promise<void> {
   const key = `${platform}-${arch}`;
   const target = UV_TARGETS[key];
@@ -378,7 +378,7 @@ const config: ForgeConfig = {
     // Copies the staged Loom bundle, Node runtime, and uv binary to
     // Contents/Resources/ in the packaged app. agent.ts resolves
     // process.resourcesPath/{loom,node,uv}/... at brain spawn time.
-    extraResource: [LOOM_STAGE_DIR, NODE_STAGE_DIR, UV_STAGE_DIR, SPEECH_STAGE_DIR],
+    extraResource: [ORBIT_STAGE_DIR, NODE_STAGE_DIR, UV_STAGE_DIR, SPEECH_STAGE_DIR],
     ...macCodesign,
   },
   hooks: {
@@ -387,7 +387,7 @@ const config: ForgeConfig = {
     // matching Node + uv binaries.
     prePackage: async (_forgeConfig, platform, arch) => {
       await prepareSpeech(platform, arch);
-      stageLoomBundle(platform, arch);
+      stageOrbitBundle(platform, arch);
       await stageNodeBundle(platform, arch);
       await stageUvBundle(platform, arch);
     },

@@ -58,7 +58,7 @@ const isObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 const stringList = (v) => (Array.isArray(v) ? v.filter((s) => typeof s === "string") : []);
 
 /** @param {string} name @param {Record<string, any>} entry */
-function pointsAtLoomServer(name, entry) {
+function pointsAtOrbitServer(name, entry) {
   if (name === "galaxy") {
     return (
       entry.command === "uvx" && stringList(entry.args).some((a) => a.startsWith("galaxy-mcp"))
@@ -75,14 +75,14 @@ function pointsAtLoomServer(name, entry) {
  * undo if the entry went away, so it stays.
  * @param {string} name @param {unknown} entry
  */
-function isLoomWritten(name, entry) {
+function isOrbitWritten(name, entry) {
   if (!isObject(entry)) return false;
   if (entry.enabled === false || entry.exposure === "hidden") return false;
   const adapterShaped = ADAPTER_ONLY_FIELDS.some((f) => f in entry);
   if (!PI_NATIVE_FIELDS.some((f) => f in entry)) {
-    return adapterShaped || pointsAtLoomServer(name, entry);
+    return adapterShaped || pointsAtOrbitServer(name, entry);
   }
-  return adapterShaped && pointsAtLoomServer(name, entry);
+  return adapterShaped && pointsAtOrbitServer(name, entry);
 }
 
 // pi only expands a name that starts with a letter or underscore; the adapter
@@ -240,7 +240,7 @@ export function stripLegacyMcpEntries(config) {
   if (servers) {
     for (const [name, entry] of Object.entries(servers)) {
       if (LEGACY_SERVER_NAMES.includes(name)) {
-        if (!isLoomWritten(name, entry)) {
+        if (!isOrbitWritten(name, entry)) {
           if (isObject(entry) && entry.enabled !== false) shadowing.push(name);
           continue;
         }

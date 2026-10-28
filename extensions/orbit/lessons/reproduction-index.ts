@@ -29,7 +29,7 @@ import type { Lesson } from "./types";
 import { wrapLessons } from "./wrapper";
 
 /** customType for the per-turn lesson index, beside the two in context.ts. */
-export const LOOM_LESSONS_CONTEXT_TYPE = "loom-lessons-context";
+export const ORBIT_LESSONS_CONTEXT_TYPE = "loom-lessons-context";
 
 const REPRODUCTION_PREFIX = "reproduction/";
 const REPRODUCING = /reproduc/i;

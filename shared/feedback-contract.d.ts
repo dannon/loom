@@ -28,7 +28,7 @@ export interface FeedbackPayload {
   schemaVersion: 1;
   source: "orbit" | "loom-cli" | "orbit-cli";
   /**
-   * Opaque beta-tester code (e.g. "orbit-007"), copied from LoomConfig.testerId.
+   * Opaque beta-tester code (e.g. "orbit-007"), copied from OrbitConfig.testerId.
    * MUST stay top-level: the orbit-feedback worker maps `payload.testerId` to a
    * first-class `tester_id` column. Optional + additive, so schemaVersion stays 1.
    */

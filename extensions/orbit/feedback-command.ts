@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { submitFeedback, buildBrainSysinfo, appendToOutbox, readLoomVersion } from "./feedback.js";
+import { submitFeedback, buildBrainSysinfo, appendToOutbox, readOrbitVersion } from "./feedback.js";
 import { getRecentActivityEvents } from "./activity.js";
 import { loadConfig } from "./config.js";
 import {
@@ -59,7 +59,7 @@ export function registerFeedbackCommand(pi: ExtensionAPI): void {
               sysinfo: buildBrainSysinfo(),
               activityTail: formatActivityTail(getRecentActivityEvents(60)),
             }
-          : { sysinfo: { appVersion: readLoomVersion() } }),
+          : { sysinfo: { appVersion: readOrbitVersion() } }),
       };
 
       const capped = capFeedbackPayload(payload);

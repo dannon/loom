@@ -3,7 +3,7 @@
 export type Cache =
   | { fetchedAt: number; failed: true }
   | { fetchedAt: number; failed?: false; latest: string; channel: string; orbitLatest?: string };
-export function getLoomVersion(): string;
+export function getOrbitVersion(): string;
 export function parseCache(raw: string, now: number): Cache | null;
 export function noticeFor(current: string, cache: Cache | null): string | null;
 export function readCache(): Cache | null;

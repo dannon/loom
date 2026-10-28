@@ -56,7 +56,7 @@ test("offline microphone dictation fills the editable draft without sending", as
       GALAXY_URL: "",
       GALAXY_API_KEY: "",
       LOOM_DISABLE_SAFE_STORAGE: "1",
-      LOOM_FRESH_SESSION: "1",
+      ORBIT_FRESH_SESSION: "1",
       ORBIT_FRESH_SESSION: "1",
     },
     cwd,

@@ -86,9 +86,9 @@ function buildSecretEnv(): Record<string, string> {
 // runs out of an installed bundle, not a path that walks up out of the .app.
 // `app` is undefined when this module is imported outside an Electron runtime
 // (e.g. vitest), so optional-chain through `app.isPackaged` to fall back to dev.
-function resolveLoomBin(): string {
+function resolveCoreBin(): string {
   if (app?.isPackaged) {
-    return path.join(process.resourcesPath, "loom", "bin", "orbit.js");
+    return path.join(process.resourcesPath, "orbit", "bin", "orbit.js");
   }
   return path.resolve(__dirname, "../../../bin/orbit.js");
 }
@@ -105,7 +105,7 @@ function resolveNodeBin(): string {
   return "node";
 }
 
-const LOOM_BIN = resolveLoomBin();
+const CORE_BIN = resolveCoreBin();
 const NODE_BIN = resolveNodeBin();
 
 export type AgentStatus = "running" | "stopped" | "error";
@@ -349,7 +349,7 @@ export class AgentManager {
       !this.nextStartSkipContinue &&
       !this.nextStartIsFresh &&
       (this.hasStartedBefore || this.hasExistingSession());
-    const args = [LOOM_BIN, "--mode", "rpc"];
+    const args = [CORE_BIN, "--mode", "rpc"];
     if (wantsContinue) {
       args.push("--continue");
     }
@@ -377,7 +377,7 @@ export class AgentManager {
     this.nextStartIsFresh = false;
     log("starting agent", {
       node: NODE_BIN,
-      bin: LOOM_BIN,
+      bin: CORE_BIN,
       cwd: this.cwd,
       continue: args.includes("--continue"),
       fresh,

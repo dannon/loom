@@ -28,7 +28,7 @@ export interface LlmProviderConfig {
   api?: string;
 }
 
-export interface LoomConfig {
+export interface OrbitConfig {
   /**
    * Opaque beta-tester code (e.g. "orbit-007"). When set, it rides along on
    * feedback submissions so the team can attribute reports to a tester. Not a
@@ -217,8 +217,8 @@ export interface SkillRepo {
 
 export function getConfigDir(): string;
 export function getConfigPath(): string;
-export function loadConfig(): LoomConfig;
-export function saveConfig(config: LoomConfig): void;
+export function loadConfig(): OrbitConfig;
+export function saveConfig(config: OrbitConfig): void;
 /** The skills repos a fresh config is seeded with, and the definition of a bundled repo. */
 export const DEFAULT_SKILLS: ReadonlyArray<Required<SkillRepo>>;
 export function isBundledSkillRepo(repo: { name?: string; url?: string; branch?: string }): boolean;

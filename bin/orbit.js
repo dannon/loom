@@ -5,10 +5,10 @@ import { resolve, dirname, join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { homedir } from "os";
-import { loadConfig as loadLoomConfig } from "../shared/orbit-config.js";
+import { loadConfig as loadOrbitConfig } from "../shared/orbit-config.js";
 import { migrateStateDir } from "../shared/state-dir.js";
 import { spawn } from "child_process";
-import { getLoomVersion, detectInstall } from "./update-check.js";
+import { getOrbitVersion, detectInstall } from "./update-check.js";
 import { resolveHideThinking, isInteractiveTerminal } from "./thinking-pref.js";
 import { hasStoredCredential, isProviderUsable, pickSignedInFallback } from "./provider-auth.js";
 import { SEED_OAUTH_ONLY_PROVIDERS } from "../shared/provider-auth-caps.js";
@@ -110,7 +110,7 @@ migrateStateDir();
 
 // Config opt-out feeds the same single signal the extension + refresh read.
 try {
-  if (loadLoomConfig().updateCheck === false) writeEnv(process.env, "NO_UPDATE_CHECK", "1");
+  if (loadOrbitConfig().updateCheck === false) writeEnv(process.env, "NO_UPDATE_CHECK", "1");
 } catch {}
 
 if (
@@ -142,7 +142,7 @@ async function handleInformationalCommand() {
 
   if (hasArg("--version")) {
     const { VERSION } = await import(pathToFileURL(piConfigModulePath).href);
-    console.log(`loom ${getLoomVersion()} (pi-coding-agent ${VERSION})`);
+    console.log(`loom ${getOrbitVersion()} (pi-coding-agent ${VERSION})`);
     return true;
   }
 
@@ -175,7 +175,7 @@ const agentDir = process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agen
 // Apply consolidated config
 // ─────────────────────────────────────────────────────────────────────────────
 
-const loomConfig = loadLoomConfig();
+const orbitConfig = loadOrbitConfig();
 
 // Provider name → env var mapping
 const PROVIDER_ENV_MAP = {
@@ -236,7 +236,7 @@ function reconcileActiveProviderWithAuth() {
   // credentials by env -- a child process must not overrule that. And an
   // informational command must never touch provider state at all.
   if (isRpcMode || isInformationalCommand) return;
-  const llm = loomConfig.llm;
+  const llm = orbitConfig.llm;
   if (!llm?.active) return;
   const auth = readAuthJson();
   if (activeProviderUsable(llm.active, llm.providers?.[llm.active], auth)) return;
@@ -258,8 +258,8 @@ reconcileActiveProviderWithAuth();
 // skip env injection entirely: a stale apiKey on the entry shouldn't leak
 // under a misrouted env variable when the brain will authenticate via
 // ~/.pi/agent/auth.json anyway.
-const activeLlmProvider = loomConfig.llm?.active;
-const activeLlmConfig = activeLlmProvider ? loomConfig.llm?.providers?.[activeLlmProvider] : null;
+const activeLlmProvider = orbitConfig.llm?.active;
+const activeLlmConfig = activeLlmProvider ? orbitConfig.llm?.providers?.[activeLlmProvider] : null;
 if (
   activeLlmConfig?.apiKey &&
   !OAUTH_ONLY_PROVIDERS.has(activeLlmProvider) &&
@@ -324,8 +324,8 @@ if (activeLlmProvider && OAUTH_ONLY_PROVIDERS.has(activeLlmProvider)) {
 let galaxyUrl = null;
 let galaxyApiKey = null;
 
-if (loomConfig.galaxy?.active && loomConfig.galaxy.profiles) {
-  const active = loomConfig.galaxy.profiles[loomConfig.galaxy.active];
+if (orbitConfig.galaxy?.active && orbitConfig.galaxy.profiles) {
+  const active = orbitConfig.galaxy.profiles[orbitConfig.galaxy.active];
   if (active) {
     galaxyUrl = active.url;
     galaxyApiKey = active.apiKey;
@@ -681,7 +681,7 @@ if (userArgs[0] === "update") {
     console.error("Orbit manages its own updates -- update from the Orbit app, not the CLI.");
     process.exit(0);
   }
-  const channel = pickChannel(getLoomVersion());
+  const channel = pickChannel(getOrbitVersion());
   const { kind, cmd } = detectInstall(channel);
   if (!cmd) {
     console.error(
@@ -759,7 +759,7 @@ if (userArgs[0] === "update") {
 
       if (isInteractiveTerminal(userArgs)) {
         const hideThinking = resolveHideThinking({
-          configShowThinking: loomConfig.ui?.showThinking,
+          configShowThinking: orbitConfig.ui?.showThinking,
         });
         if (piSettings.hideThinkingBlock !== hideThinking) {
           piSettings.hideThinkingBlock = hideThinking;

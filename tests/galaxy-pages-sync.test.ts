@@ -12,8 +12,8 @@ import {
   UNTRUSTED_END,
 } from "../extensions/orbit/galaxy-pages-sync";
 import {
-  loomToGalaxyMarkdown,
-  galaxyMarkdownToLoom,
+  orbitToGalaxyMarkdown,
+  galaxyMarkdownToOrbit,
 } from "../extensions/orbit/galaxy-markdown-adapter";
 
 vi.mock("../extensions/orbit/galaxy-pages-api");
@@ -171,7 +171,7 @@ describe("pushNotebookToGalaxy", () => {
     expect(sent).toContain("job_parameters(job_id=0a1b2c3d4e5f6789)");
     expect(galaxyApi.galaxyGet).toHaveBeenCalledWith("/jobs/0a1b2c3d4e5f6789");
     // Pulling the pushed page back yields the canonical notebook unchanged.
-    expect(galaxyMarkdownToLoom(sent)).toBe(notebook);
+    expect(galaxyMarkdownToOrbit(sent)).toBe(notebook);
   });
 
   it("omits the job directive (but keeps the carrier) when Galaxy doesn't know the job", async () => {
@@ -349,10 +349,10 @@ describe("pullNotebookFromGalaxy", () => {
     // A page body as it would look after a Loom push: the loom-invocation fence
     // is encoded to a render-invisible carrier. Pull must decode it back AND
     // still apply the untrusted-content wrap -- the two transforms compose.
-    const loomBlock = ["```loom-invocation", "invocation_id: abc123", "label: QC", "```"].join(
+    const orbitBlock = ["```loom-invocation", "invocation_id: abc123", "label: QC", "```"].join(
       "\n",
     );
-    const remoteWithCarrier = loomToGalaxyMarkdown(`# Remote report\n\n${loomBlock}\n`);
+    const remoteWithCarrier = orbitToGalaxyMarkdown(`# Remote report\n\n${orbitBlock}\n`);
     vi.mocked(pagesApi.getPage).mockResolvedValue({
       id: "p1",
       slug: "a",
@@ -398,7 +398,7 @@ describe("pullNotebookFromGalaxy", () => {
     const sessionBlock = ["```loom-session", "id: s-1", "orphaned_active_steps: 0", "```"].join(
       "\n",
     );
-    const remote = loomToGalaxyMarkdown(`# Remote\n\n${jobBlock}\n\n${sessionBlock}\n`);
+    const remote = orbitToGalaxyMarkdown(`# Remote\n\n${jobBlock}\n\n${sessionBlock}\n`);
     vi.mocked(pagesApi.getPage).mockResolvedValue({
       id: "p1",
       slug: "a",

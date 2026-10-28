@@ -75,7 +75,7 @@ async function launchIsolatedOrbit(opts: { notebook?: string } = {}) {
     GALAXY_API_KEY: "",
     // Force a fresh session so the brain doesn't try to --continue from
     // an unrelated prior session if one happened to exist on disk.
-    LOOM_FRESH_SESSION: "1",
+    ORBIT_FRESH_SESSION: "1",
     // Skip the safeStorage keychain probe -- on macOS it pops a system
     // "keychain cannot be found" dialog under a redirected HOME and
     // blocks the test indefinitely.

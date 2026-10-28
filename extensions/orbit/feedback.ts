@@ -31,7 +31,7 @@ export interface FeedbackResult {
  * triage. Resolves the repo-root package.json the same way the brain resolves
  * ../../shared at runtime. Returns undefined if it can't be read (safe fallback).
  */
-export function readLoomVersion(): string | undefined {
+export function readOrbitVersion(): string | undefined {
   try {
     const here = dirname(fileURLToPath(import.meta.url));
     const pkg = JSON.parse(readFileSync(join(here, "../../package.json"), "utf-8")) as {
@@ -50,7 +50,7 @@ export function buildBrainSysinfo(): FeedbackSysinfo {
   };
   const active = cfg.llm?.active;
   return {
-    appVersion: readLoomVersion(),
+    appVersion: readOrbitVersion(),
     platform: process.platform,
     arch: process.arch,
     wsl: isWsl({ platform: process.platform, env: process.env, release: release() }),

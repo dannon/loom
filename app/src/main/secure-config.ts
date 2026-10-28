@@ -1,5 +1,5 @@
 import { app, safeStorage } from "electron";
-import type { LlmProviderConfig, LoomConfig } from "../../../shared/orbit-config.js";
+import type { LlmProviderConfig, OrbitConfig } from "../../../shared/orbit-config.js";
 import { loadConfig, saveConfig } from "../../../shared/orbit-config.js";
 import { readEnv } from "../../../shared/orbit-env.js";
 
@@ -62,7 +62,7 @@ export function resolveProviderApiKey(entry: LlmProviderConfig | undefined): str
  * if available, preferring the encrypted field. `null` means no key is
  * available via config (env vars may still supply one).
  */
-export function resolveLlmApiKey(config: LoomConfig): string | null {
+export function resolveLlmApiKey(config: OrbitConfig): string | null {
   const llm = config.llm;
   if (!llm?.active || !llm.providers) return null;
   return resolveProviderApiKey(llm.providers[llm.active]);
@@ -72,7 +72,7 @@ export function resolveLlmApiKey(config: LoomConfig): string | null {
  * Resolve the active Galaxy profile's API key. Returns `null` if no active
  * profile, no key, or decryption unavailable.
  */
-export function resolveGalaxyApiKey(config: LoomConfig): string | null {
+export function resolveGalaxyApiKey(config: OrbitConfig): string | null {
   const active = config.galaxy?.active;
   if (!active) return null;
   const profile = config.galaxy?.profiles?.[active];

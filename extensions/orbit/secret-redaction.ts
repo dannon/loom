@@ -15,7 +15,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "../../shared/orbit-config.js";
-import type { LoomConfig } from "../../shared/orbit-config.js";
+import type { OrbitConfig } from "../../shared/orbit-config.js";
 import { installedConfigSource } from "../../shared/config-source.js";
 import { piAgentDir } from "./agent-dir";
 import { galaxyCredentials } from "./galaxy-api";
@@ -101,7 +101,7 @@ interface ContentItem {
  * already holds that live in none of those places.
  */
 export function collectSecretValues(
-  config: LoomConfig,
+  config: OrbitConfig,
   env: Record<string, string | undefined>,
   auth: unknown = null,
   extra: readonly unknown[] = [],

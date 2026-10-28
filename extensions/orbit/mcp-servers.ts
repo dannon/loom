@@ -7,7 +7,7 @@
 
 import type { ExtensionAPI, McpServerConfig } from "@earendil-works/pi-coding-agent";
 
-export function loomMcpServers(): Record<string, McpServerConfig> {
+export function orbitMcpServers(): Record<string, McpServerConfig> {
   return {
     // Public, anonymous BRC genome/assembly/lineage lookups -- no credentials, so
     // always on.
@@ -18,8 +18,8 @@ export function loomMcpServers(): Record<string, McpServerConfig> {
   };
 }
 
-export function registerLoomMcpServers(pi: ExtensionAPI): void {
-  for (const [name, config] of Object.entries(loomMcpServers())) {
+export function registerOrbitMcpServers(pi: ExtensionAPI): void {
+  for (const [name, config] of Object.entries(orbitMcpServers())) {
     pi.registerMcpServer(name, config);
   }
 }

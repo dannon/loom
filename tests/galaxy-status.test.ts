@@ -4,14 +4,14 @@ import {
   resolveGalaxyServerUrl,
   resolveGalaxyHistoryOpenUrl,
 } from "../app/src/main/galaxy-status.js";
-import type { LoomConfig } from "../shared/orbit-config.js";
+import type { OrbitConfig } from "../shared/orbit-config.js";
 
 const noConfigKey = () => null;
 
-function profileConfig(url: string): LoomConfig {
+function profileConfig(url: string): OrbitConfig {
   return {
     galaxy: { active: "main", profiles: { main: { url } } },
-  } as unknown as LoomConfig;
+  } as unknown as OrbitConfig;
 }
 
 describe("resolveGalaxyStatus", () => {
@@ -19,7 +19,7 @@ describe("resolveGalaxyStatus", () => {
     // The env-driven / auto-connect path: tool calls work but the footer used
     // to read the (empty) config profile and show "not configured".
     const status = resolveGalaxyStatus(
-      {} as LoomConfig,
+      {} as OrbitConfig,
       { GALAXY_URL: "https://usegalaxy.org", GALAXY_API_KEY: "k" } as NodeJS.ProcessEnv,
       noConfigKey,
     );
@@ -45,7 +45,7 @@ describe("resolveGalaxyStatus", () => {
   });
 
   it("is disconnected with no profile and no env", () => {
-    const status = resolveGalaxyStatus({} as LoomConfig, {} as NodeJS.ProcessEnv, noConfigKey);
+    const status = resolveGalaxyStatus({} as OrbitConfig, {} as NodeJS.ProcessEnv, noConfigKey);
     expect(status).toEqual({ connected: false, url: null });
   });
 
@@ -72,7 +72,7 @@ describe("resolveGalaxyServerUrl", () => {
   it("falls back to the exported GALAXY_URL when no profile is saved (#290)", () => {
     expect(
       resolveGalaxyServerUrl(
-        {} as LoomConfig,
+        {} as OrbitConfig,
         { GALAXY_URL: "https://env.example" } as NodeJS.ProcessEnv,
       ),
     ).toBe("https://env.example");
@@ -93,7 +93,7 @@ describe("resolveGalaxyServerUrl", () => {
   });
 
   it("is null with no profile and no env", () => {
-    expect(resolveGalaxyServerUrl({} as LoomConfig, {} as NodeJS.ProcessEnv)).toBeNull();
+    expect(resolveGalaxyServerUrl({} as OrbitConfig, {} as NodeJS.ProcessEnv)).toBeNull();
   });
 });
 
@@ -103,7 +103,7 @@ describe("resolveGalaxyHistoryOpenUrl", () => {
   it("accepts a same-origin history URL pinned to the effective env server (#290)", () => {
     // The env-driven case: no saved profile, server URL comes from GALAXY_URL.
     const serverUrl = resolveGalaxyServerUrl(
-      {} as LoomConfig,
+      {} as OrbitConfig,
       { GALAXY_URL: "https://env.example" } as NodeJS.ProcessEnv,
     );
     expect(resolveGalaxyHistoryOpenUrl(HISTORY, serverUrl)).toBe(HISTORY);

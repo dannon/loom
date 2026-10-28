@@ -100,7 +100,7 @@ test("Refresh skills clears the catalog cache and restarts the agent", async () 
     USERPROFILE: fakeHome,
     GALAXY_URL: "",
     GALAXY_API_KEY: "",
-    LOOM_FRESH_SESSION: "1",
+    ORBIT_FRESH_SESSION: "1",
     LOOM_DISABLE_SAFE_STORAGE: "1",
   };
 

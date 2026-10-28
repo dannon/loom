@@ -223,7 +223,7 @@ function isOneLine(value: string): boolean {
  * an unterminated `loom-job` opener swallows an appended `loom-invocation`
  * just as well as another job block would.
  */
-const LOOM_FENCE_KINDS: readonly NotebookFenceKind[] = [
+const ORBIT_FENCE_KINDS: readonly NotebookFenceKind[] = [
   "invocation",
   "job",
   "udt",
@@ -346,11 +346,11 @@ export function isFoldableDuplicate(
  */
 export function appendIndexOutsideOpenFence(lines: readonly string[]): number {
   const closed = new Set<number>();
-  for (const kind of LOOM_FENCE_KINDS) {
+  for (const kind of ORBIT_FENCE_KINDS) {
     for (const range of scanFencedBlocks(lines, kind)) closed.add(range.start);
   }
   for (let i = 0; i < lines.length; i++) {
-    const opensBlock = LOOM_FENCE_KINDS.some((kind) => isNotebookFenceOpen(lines[i], kind));
+    const opensBlock = ORBIT_FENCE_KINDS.some((kind) => isNotebookFenceOpen(lines[i], kind));
     if (opensBlock && !closed.has(i)) return i;
   }
   return lines.length;

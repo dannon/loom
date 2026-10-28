@@ -472,7 +472,7 @@ function hasSegment(p: string, name: string): boolean {
 // absolute check (callers without a home / the unit tests).
 export function isProtectedWritePath(absPath: string, home = ""): boolean {
   if (hasSegment(path.normalize(absPath), ".git")) return true;
-  return isLoomStatePath(absPath, home);
+  return isOrbitStatePath(absPath, home);
 }
 
 // The harness-owned record: the signed registry and frozen templates under
@@ -508,7 +508,7 @@ function hasStateSegment(p: string): boolean {
 // unrecognized command, not a catastrophic one. (home is compared
 // un-realpath'd, matching isSensitivePath; pass home="" for the plain absolute
 // check.)
-export function isLoomStatePath(absPath: string, home = ""): boolean {
+export function isOrbitStatePath(absPath: string, home = ""): boolean {
   const norm = path.normalize(absPath);
   if (!hasStateSegment(norm)) return false;
   // A home that itself sits under a state dir gets no carve-out: the segment

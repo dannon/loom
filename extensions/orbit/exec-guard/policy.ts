@@ -5,7 +5,7 @@ import {
   isSensitivePath,
   isCredentialStore,
   isProtectedWritePath,
-  isLoomStatePath,
+  isOrbitStatePath,
   isRecordStorePath,
 } from "./sensitive-read";
 import type { PolicyDeps, PolicyRequest, PolicyResult } from "./types";
@@ -133,8 +133,8 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     // The classifier judges the command string; only this layer has a resolver.
     // A write target that looks like ordinary work product in the analysis
     // workspace but realpaths into Loom's own state is still Loom's own state.
-    for (const p of c.loomWriteTargets) {
-      if (isLoomStatePath(deps.resolver.contains(p).resolved, deps.home)) {
+    for (const p of c.stateDirWriteTargets) {
+      if (isOrbitStatePath(deps.resolver.contains(p).resolved, deps.home)) {
         return {
           decision: "deny",
           category: "bash:catastrophic",

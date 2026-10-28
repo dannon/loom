@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { discoverProviderModels } from "../app/src/main/model-discovery.js";
-import type { LoomConfig } from "../shared/orbit-config.js";
+import type { OrbitConfig } from "../shared/orbit-config.js";
 
-const CONFIG: LoomConfig = {
+const CONFIG: OrbitConfig = {
   llm: {
     active: "anthropic",
     providers: {

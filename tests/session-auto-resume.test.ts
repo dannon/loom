@@ -59,7 +59,7 @@ async function start(hasUI = true) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("LOOM_AUTO_RESUME", undefined);
-  vi.stubEnv("LOOM_FRESH_SESSION", "1");
+  vi.stubEnv("ORBIT_FRESH_SESSION", "1");
 });
 afterEach(() => {
   vi.unstubAllEnvs();

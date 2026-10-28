@@ -14,7 +14,7 @@ import {
   getNotebookWidgetMode,
   setNotebookWidgetMode,
 } from "./state.js";
-import { LoomWidgetKey, encodeMarkdownWidget } from "../../shared/orbit-shell-contract.js";
+import { OrbitWidgetKey, encodeMarkdownWidget } from "../../shared/orbit-shell-contract.js";
 
 export function setupUIBridge(pi: ExtensionAPI): void {
   let latestCtx: ExtensionContext | null = null;
@@ -34,7 +34,7 @@ export function setupUIBridge(pi: ExtensionAPI): void {
     const nbPath = getNotebookPath();
     const header = nbPath ? `> \`${nbPath}\`\n\n` : "";
     try {
-      latestCtx.ui.setWidget(LoomWidgetKey.Notebook, encodeMarkdownWidget(header + content));
+      latestCtx.ui.setWidget(OrbitWidgetKey.Notebook, encodeMarkdownWidget(header + content));
     } catch (err) {
       // A notebook write that lands after session teardown fires this callback
       // with a ctx pi has since invalidated; touching ctx.ui throws "ctx is

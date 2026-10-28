@@ -1,6 +1,6 @@
 import * as path from "path";
 import { WORKSPACE_STATE_DIR_NAMES } from "../workspace-state-dir";
-import { isCredentialStore, isLoomStatePath } from "./sensitive-read";
+import { isCredentialStore, isOrbitStatePath } from "./sensitive-read";
 
 export interface BashClass {
   kind: "safe" | "catastrophic" | "unknown";
@@ -16,10 +16,10 @@ export interface BashClass {
   sensitiveReadPaths: string[];
   /** `.loom/`/`.orbit/` write targets this classifier judged to be ordinary work
    *  product in an Orbit analysis workspace. It only sees the command string, so the policy
-   *  layer realpaths each one and re-applies isLoomStatePath -- a symlink under
+   *  layer realpaths each one and re-applies isOrbitStatePath -- a symlink under
    *  the analyses tree pointing at Loom's own state is still Loom's own state.
    *  Empty unless a write verb aimed at a state dir was carved out. */
-  loomWriteTargets: string[];
+  stateDirWriteTargets: string[];
   /** A command runs after a `cd`/`pushd` into Loom's own state or a credential
    *  store. The classifier cannot tell what an unrecognized command does there,
    *  so the policy layer must not auto-allow it. */
@@ -63,7 +63,7 @@ const STATE_DIR_ALT = WORKSPACE_STATE_DIR_NAMES.map((n) => n.slice(1)).join("|")
 // A write verb aimed at something under a `.loom/` or `.orbit/` directory. Only
 // the trigger: whether it is really Loom state is decided per target below,
 // because Orbit's own workspaces live under $HOME/.loom/analyses/<name>/.
-const LOOM_WRITE = new RegExp(
+const STATE_DIR_WRITE = new RegExp(
   String.raw`(?:>>?|\btee\b|\bsed\b[^\n]*-i|\bcp\b|\bmv\b|\bdd\b)[^\n]*\.(?:${STATE_DIR_ALT})\/`,
   "i",
 );
@@ -401,9 +401,9 @@ function wordText(fragments: WordFragment[]): string {
 // too (macOS resolves ~/.LOOM and ~/.loom to the same directory), and against a
 // backslash-stripped copy so a quoted `.\loom/` -- where the backslash survives
 // as a literal -- is still examined rather than skipped.
-const LOOM_SEGMENT = new RegExp(String.raw`\.(?:${STATE_DIR_ALT})\/`, "i");
-function mentionsLoom(word: WordFragment[]): boolean {
-  return LOOM_SEGMENT.test(wordText(word).replace(/\\/g, ""));
+const STATE_DIR_SEGMENT = new RegExp(String.raw`\.(?:${STATE_DIR_ALT})\/`, "i");
+function mentionsStateDir(word: WordFragment[]): boolean {
+  return STATE_DIR_SEGMENT.test(wordText(word).replace(/\\/g, ""));
 }
 
 // Resolve a `.loom/` word to the absolute path the shell would act on, or null
@@ -417,7 +417,7 @@ function mentionsLoom(word: WordFragment[]): boolean {
 // before it realpaths, so a `..` after a symlink would never be inspected) --
 // comes back null. What survives is an absolute path the caller can compare
 // against the analyses tree the write tool already allows (isProtectedWritePath).
-function resolveLoomWord(word: WordFragment[], home: string): string | null {
+function resolveStateDirWord(word: WordFragment[], home: string): string | null {
   if (!home) return null;
   const fragments = word.filter((f) => f.text.length > 0);
   if (fragments.length === 0) return null;
@@ -452,21 +452,21 @@ function resolveLoomWord(word: WordFragment[], home: string): string | null {
 // outright while the same write through the file tool was allowed. Now a matched
 // line is catastrophic only if some `.loom/` target on it is really Loom state;
 // the rest are handed to the policy layer, which can realpath them.
-function scanLoomWrite(
+function scanStateDirWrite(
   command: string,
   home: string,
 ): { catastrophic: boolean; targets: string[] } {
   // Backslashes are stripped for the trigger too: bash drops them, so
   // `.lo\om/` names the same directory and must not skip the per-word check.
-  if (!LOOM_WRITE.test(command) && !LOOM_WRITE.test(command.replace(/\\/g, ""))) {
+  if (!STATE_DIR_WRITE.test(command) && !STATE_DIR_WRITE.test(command.replace(/\\/g, ""))) {
     return { catastrophic: false, targets: [] };
   }
-  const words = shellWords(command).filter(mentionsLoom);
+  const words = shellWords(command).filter(mentionsStateDir);
   if (words.length === 0) return { catastrophic: true, targets: [] };
   const targets: string[] = [];
   for (const w of words) {
-    const resolved = resolveLoomWord(w, home);
-    if (resolved === null || isLoomStatePath(resolved, home)) {
+    const resolved = resolveStateDirWord(w, home);
+    if (resolved === null || isOrbitStatePath(resolved, home)) {
       return { catastrophic: true, targets: [] };
     }
     targets.push(resolved);
@@ -719,7 +719,7 @@ const UNKNOWN: CwdState = { dir: null, state: false, nearState: false, guarded: 
 const LOST: CwdState = { dir: null, state: true, nearState: true, guarded: true };
 
 // Resolve a word to the absolute path the shell would use, or null. Same
-// expansion rules as resolveLoomWord, plus a relative path against `base` and
+// expansion rules as resolveStateDirWord, plus a relative path against `base` and
 // `..`, collapsed lexically -- which is what bash's default logical cd does. A
 // write through a symlinked `..` is caught by the caller handing the prefix to
 // the policy layer to realpath.
@@ -811,7 +811,7 @@ interface Segment {
 function scanCdContext(command: string, hostHome: string, hostCwd: string): CdScan {
   const home = toShellPath(hostHome);
   const cwd = toShellPath(hostCwd);
-  const isState = (p: string) => isLoomStatePath(toHostPath(p), hostHome);
+  const isState = (p: string) => isOrbitStatePath(toHostPath(p), hostHome);
   const out: CdScan = { catastrophic: false, readPaths: [], writeTargets: [], guarded: false };
   // isCredentialStore realpaths a handful of files; a script that cds back
   // and forth asks about the same few directories over and over.
@@ -1317,10 +1317,10 @@ export function classifyBash(commandRaw: string, home = "", cwd = ""): BashClass
   // Computed for every kind (incl. compound/unknown) so the policy layer's
   // sensitive-read floor fires through a pipe; see BashClass.sensitiveReadPaths.
   const sensitiveReadPaths = extractReadTargets(command);
-  const loom = scanLoomWrite(command, home);
+  const loom = scanStateDirWrite(command, home);
   const base = {
     sensitiveReadPaths,
-    loomWriteTargets: [...loom.targets, ...cd.writeTargets],
+    stateDirWriteTargets: [...loom.targets, ...cd.writeTargets],
     guardedCwd: cd.guarded,
     cdReadPaths: cd.readPaths,
     namesRecord: NAMES_RECORD.test(command.replace(/\\/g, "")),

@@ -68,11 +68,11 @@ function carriedKindOf(line: string): CarriedKind | null {
 
 /**
  * Push (pure, no network): typed notebook fences -> hidden base64 carriers,
- * narrative untouched. The sync helper pushes via loomToGalaxyMarkdownRich
+ * narrative untouched. The sync helper pushes via orbitToGalaxyMarkdownRich
  * (which also emits validated directives); this plain form is kept for
  * non-network callers and the round-trip tests.
  */
-export function loomToGalaxyMarkdown(body: string): string {
+export function orbitToGalaxyMarkdown(body: string): string {
   const lines = body.split("\n");
   const out: string[] = [];
   let i = 0;
@@ -95,9 +95,9 @@ export function loomToGalaxyMarkdown(body: string): string {
 /** Pull: strip the ```galaxy directives Loom emitted, then carriers -> original
  *  typed fences. Stripping runs first, while carriers are still single lines,
  *  so the "directive sits directly above a carrier" check is exact. */
-export function galaxyMarkdownToLoom(body: string): string {
-  const withoutLoomDirectives = stripLoomGalaxyDirectiveBlocks(body);
-  return withoutLoomDirectives.replace(CARRIER_RE, (_m, b64: string) =>
+export function galaxyMarkdownToOrbit(body: string): string {
+  const withoutOrbitDirectives = stripOrbitGalaxyDirectiveBlocks(body);
+  return withoutOrbitDirectives.replace(CARRIER_RE, (_m, b64: string) =>
     Buffer.from(b64, "base64").toString("utf8"),
   );
 }
@@ -110,13 +110,13 @@ const CARRIER_LINE_RE = new RegExp(`^${CARRIER_BODY}$`);
 
 /**
  * Remove only the ```galaxy directive blocks Loom itself emitted.
- * loomToGalaxyMarkdownRich always writes the directive immediately above the
+ * orbitToGalaxyMarkdownRich always writes the directive immediately above the
  * block's carrier with no blank line between, so a ```galaxy block is Loom's
  * iff the line right after its closing fence is a carrier. Every other
  * ```galaxy block was authored by a human and is preserved verbatim -- stripping
  * those unconditionally was silent data loss on pull.
  */
-function stripLoomGalaxyDirectiveBlocks(body: string): string {
+function stripOrbitGalaxyDirectiveBlocks(body: string): string {
   const lines = body.split("\n");
   const out: string[] = [];
   let i = 0;
@@ -209,7 +209,7 @@ const DIRECTIVES: Record<
  * invocation and job blocks whose id validates, a visible directive. The
  * directive is gated because Galaxy 400s the whole page on an undecodable id.
  */
-export async function loomToGalaxyMarkdownRich(
+export async function orbitToGalaxyMarkdownRich(
   body: string,
   validators: DirectiveValidators,
 ): Promise<string> {
