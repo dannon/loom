@@ -105,19 +105,8 @@ function resolveNodeBin(): string {
   return "node";
 }
 
-// Bundled uv directory (contains uv + uvx). When packaged, prepend this to
-// the brain's PATH so the Galaxy MCP server's `uvx` command resolves the shipped
-// binary rather than depending on the user's system uv install.
-function resolveUvDir(): string | null {
-  if (app?.isPackaged) {
-    return path.join(process.resourcesPath, "uv");
-  }
-  return null;
-}
-
 const LOOM_BIN = resolveLoomBin();
 const NODE_BIN = resolveNodeBin();
-const UV_DIR = resolveUvDir();
 
 export type AgentStatus = "running" | "stopped" | "error";
 
@@ -147,12 +136,6 @@ function buildBrainEnv(fresh: boolean): NodeJS.ProcessEnv {
   writeEnv(env, "LOCAL_EXEC", "on");
   Object.assign(env, noLocalShellSpawnExtras().env);
   if (fresh) writeEnv(env, "FRESH_SESSION", "1");
-  // Prepend the bundled uv directory to PATH when packaged so MCP servers
-  // configured with `command: "uvx"` (Galaxy MCP) find the shipped binary.
-  if (UV_DIR) {
-    const sep = process.platform === "win32" ? ";" : ":";
-    env.PATH = `${UV_DIR}${sep}${env.PATH ?? ""}`;
-  }
   return env;
 }
 

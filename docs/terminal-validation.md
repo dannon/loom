@@ -56,7 +56,7 @@ node /path/to/loom/bin/loom.js --provider anthropic --model claude-sonnet-4-6
 
 Notes:
 
-- The brain registers the Galaxy MCP server with pi at startup, and only when Galaxy credentials are available. `loom` no longer writes MCP config; it only removes the entries older versions left in `~/.pi/agent/mcp.json`.
+- The brain runs the Galaxy tools in-process and registers only brc-analytics with pi's MCP layer. `loom` no longer writes MCP config; it only removes the entries older versions left in `~/.pi/agent/mcp.json`.
 - Informational wrapper commands are side-effect free: `loom --help`, `loom --version`, `loom --list-models` should not rewrite MCP config.
 
 Check:

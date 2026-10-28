@@ -179,7 +179,7 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     }
     // Destructive Galaxy API call via raw curl/wget (DELETE /api/histories/{id}). A
     // guardrail, not a boundary -- routes the unknown command to the same destructive
-    // confirm as the MCP path (asks even a weak model) instead of a generic "unknown" ask.
+    // confirm as the tool path (asks even a weak model) instead of a generic "unknown" ask.
     // Catastrophic pipes were already denied above, so they never reach here.
     {
       const op = isGalaxyDestructiveCurl(command);
@@ -302,8 +302,8 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     return { decision: "allow", category: "write:in-jail", reason: "write inside workspace" };
   }
 
-  // A tool that writes a local file it is handed a path for -- galaxy-mcp's
-  // download_dataset with `file_path` is the one that exists -- must not land
+  // A tool that writes a local file it is handed a path for -- download_dataset
+  // with `file_path` is the one that exists -- must not land
   // on the analysis record or the harness-owned registry, any more than the
   // shell may. Lexical and resolved both, as for the write tools.
   for (const [key, value] of LOCAL_WRITER_TOOL.test(toolName)
@@ -324,7 +324,7 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     }
   }
 
-  // Destructive Galaxy MCP operations (whole-history delete/purge) -- called directly or
+  // Destructive Galaxy operations (whole-history delete/purge) -- called directly or
   // dispatched through the code-mode run_galaxy_tool envelope -- must be confirmed
   // regardless of tier (#338). Non-destructive Galaxy/MCP tools fall through to the allow.
   {

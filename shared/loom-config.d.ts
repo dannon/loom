@@ -85,7 +85,7 @@ export interface LoomConfig {
    *   locally or on Galaxy. Plan routing tags (\`[remote]\`/\`[hybrid]\`/\`[local]\`)
    *   describe the resulting mix.
    * - \`local\`: project is sandboxed to local execution. The agent must not
-   *   propose Galaxy steps even if Galaxy MCP is registered.
+   *   propose Galaxy steps even though the Galaxy tools are registered.
    */
   executionMode?: "local" | "cloud";
   /**

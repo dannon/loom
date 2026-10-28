@@ -191,6 +191,7 @@ export interface OrbitAPI {
             tooSmall?: boolean;
           }>
         >;
+        available?: string[];
       }
     | { ok: false; error: string }
   >;

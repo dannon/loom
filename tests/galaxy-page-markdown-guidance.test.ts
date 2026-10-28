@@ -1,21 +1,30 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import * as fs from "fs";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import * as state from "../extensions/loom/state";
-import { GALAXY_PAGE_MARKDOWN_GUIDANCE } from "../extensions/loom/galaxy-page-markdown-guidance";
-import { NOTEBOOK_PUSH_TO_GALAXY_DESCRIPTION } from "../extensions/loom/tools-sync";
+import { galaxyPageMarkdownGuidance } from "../extensions/loom/galaxy-page-markdown-guidance";
+import { galaxyToolFamily } from "../extensions/loom/galaxy-tool-source";
+import { notebookPushToGalaxyDescription } from "../extensions/loom/tools-sync";
 import { buildGalaxyPageBindingBlock } from "../extensions/loom/context";
+import { GALAXY } from "./galaxy-family-fixture";
 
 vi.mock("../extensions/loom/state");
-vi.mock("fs", async (importOriginal) => {
-  const actual = await importOriginal<typeof fs>();
-  return { ...actual, readFileSync: vi.fn() };
-});
+
+const GALAXY_PAGE_MARKDOWN_GUIDANCE = galaxyPageMarkdownGuidance(GALAXY);
+
+let dir: string;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  dir = mkdtempSync(join(tmpdir(), "page-guidance-"));
 });
 
-describe("GALAXY_PAGE_MARKDOWN_GUIDANCE", () => {
+afterEach(() => {
+  rmSync(dir, { recursive: true, force: true });
+});
+
+describe("galaxyPageMarkdownGuidance", () => {
   it("steers toward plain Markdown plus ```galaxy directive blocks", () => {
     expect(GALAXY_PAGE_MARKDOWN_GUIDANCE).toContain("```galaxy");
     expect(GALAXY_PAGE_MARKDOWN_GUIDANCE.toLowerCase()).toContain("plain markdown");
@@ -35,14 +44,15 @@ describe("notebook_push_to_galaxy tool description", () => {
   // yet -- so the always-present tool description is where the guidance has to
   // live to take effect at create time.
   it("carries the Galaxy-Flavored-Markdown authoring guidance", () => {
-    expect(NOTEBOOK_PUSH_TO_GALAXY_DESCRIPTION).toContain(GALAXY_PAGE_MARKDOWN_GUIDANCE);
+    expect(notebookPushToGalaxyDescription(GALAXY)).toContain(GALAXY_PAGE_MARKDOWN_GUIDANCE);
   });
 });
 
 describe("Galaxy page binding context block", () => {
   // Reinforces the guidance per turn during the update flow, once a binding exists.
-  it("surfaces the Galaxy-Flavored-Markdown authoring guidance", () => {
-    vi.mocked(state.getNotebookPath).mockReturnValue("/work/notebook.md");
+  it("surfaces the Galaxy-Flavored-Markdown authoring guidance", async () => {
+    const nbPath = join(dir, "notebook.md");
+    vi.mocked(state.getNotebookPath).mockReturnValue(nbPath);
     const nb = [
       "```loom-galaxy-page",
       "page_id: p1",
@@ -54,7 +64,9 @@ describe("Galaxy page binding context block", () => {
       "```",
       "",
     ].join("\n");
-    vi.mocked(fs.readFileSync).mockReturnValue(nb as never);
-    expect(buildGalaxyPageBindingBlock()).toContain(GALAXY_PAGE_MARKDOWN_GUIDANCE);
+    writeFileSync(nbPath, nb, "utf-8");
+    expect(await buildGalaxyPageBindingBlock()).toContain(
+      galaxyPageMarkdownGuidance(galaxyToolFamily()),
+    );
   });
 });

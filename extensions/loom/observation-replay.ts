@@ -28,6 +28,7 @@ import { readEnv } from "../../shared/orbit-env.js";
 import { normalizeSignature } from "../../shared/observation-contract.js";
 import { appendActivityEvent } from "./activity.js";
 import { getNotebookPath } from "./state.js";
+import { galaxyToolFamily } from "./galaxy-tool-source.js";
 import { resolveObservationsMode } from "./observations-config.js";
 import { shapeForMode } from "./observations.js";
 import {
@@ -123,9 +124,11 @@ export function registerObservationReplay(pi: ExtensionAPI): void {
         recordObservationActivity(kind, payload, REPLAY_SOURCE),
     };
 
+    // Names read the way the live trigger reads them, through the shell's Galaxy tools.
+    const family = galaxyToolFamily();
     for (const entry of entries) {
       if (entry.isError === false) continue;
-      const facts = factsForToolResult(entry.tool, entry.args ?? {}, entry.text ?? "");
+      const facts = factsForToolResult(entry.tool, entry.args ?? {}, entry.text ?? "", family);
       if (!facts) continue;
       const decision = decideToolResultObservation(state, {
         mcpTool: facts.mcpTool ?? "",

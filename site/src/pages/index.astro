@@ -90,7 +90,7 @@ const mcpConfig = `{
 const grounded = [
   {
     title: 'Real, versioned tools',
-    body: "The agent works from Galaxy's actual catalog — thousands of containerized, version-pinned tools — through Galaxy MCP. What it runs is installed and reproducible, not a name it made up.",
+    body: "The agent works from Galaxy's actual catalog — thousands of containerized, version-pinned tools — through its Galaxy tools. What it runs is installed and reproducible, not a name it made up.",
     icon: '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/>',
   },
   {
@@ -133,7 +133,7 @@ const faqs = [
   },
   {
     q: "Won't the AI just hallucinate tools and parameters?",
-    a: `That's the failure mode Galaxy grounding is built to avoid. Instead of inventing a pipeline from text, the agent works through Galaxy MCP against your server's real tool catalog and the curated <strong>IWC</strong> workflow collection — so the tools it runs actually exist, are version-pinned, and are containerized. It drafts the plan with the exact tools and parameters for you to approve <em>before</em> anything runs, and the run itself is a real Galaxy job with full provenance. The output is grounded in Galaxy's contracts, not a plausible-looking guess.`,
+    a: `That's the failure mode Galaxy grounding is built to avoid. Instead of inventing a pipeline from text, the agent works through its Galaxy tools against your server's real tool catalog and the curated <strong>IWC</strong> workflow collection — so the tools it runs actually exist, are version-pinned, and are containerized. It drafts the plan with the exact tools and parameters for you to approve <em>before</em> anything runs, and the run itself is a real Galaxy job with full provenance. The output is grounded in Galaxy's contracts, not a plausible-looking guess.`,
   },
   {
     q: "What if the tool I need isn't in Galaxy?",
@@ -141,7 +141,7 @@ const faqs = [
   },
   {
     q: 'Can I drive Galaxy from Claude Desktop or another agent — not just Orbit?',
-    a: `Yes. <a href="${url('/docs/galaxy-mcp')}">Galaxy MCP</a> (<code>uvx galaxy-mcp</code>) is a standalone Model Context Protocol server — point any MCP-capable client (Claude Desktop, Orbit, others) at a Galaxy instance and it can search and run tools, drive workflows, and manage histories. Orbit and Loom use it under the hood.`,
+    a: `Yes. <a href="${url('/docs/galaxy-mcp')}">Galaxy MCP</a> (<code>uvx galaxy-mcp</code>) is a standalone Model Context Protocol server — point any MCP-capable client (Claude Desktop and others) at a Galaxy instance and it can search and run tools, drive workflows, and manage histories. Orbit and Loom call the same Galaxy operations in-process, so they need no separate server.`,
   },
   {
     q: 'Is it open source? What does it cost?',
@@ -207,7 +207,7 @@ const faqs = [
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v6M12 15v6M3 12h6M15 12h6"/><circle cx="12" cy="12" r="3"/></svg>
       </div>
       <h3>Galaxy MCP</h3>
-      <p>A Model Context Protocol server that connects any agent — Claude Desktop, Orbit, anything — to a Galaxy instance to run real, reproducible compute.</p>
+      <p>A Model Context Protocol server that connects any agent — Claude Desktop or any other MCP client — to a Galaxy instance to run real, reproducible compute.</p>
       <a href={url('/') + '#mcp'} class="pillar__more">Connect your agent →</a>
     </div>
     <div class="pillar card gold-hover">
@@ -369,7 +369,7 @@ const faqs = [
           <button class="codecard__copy" data-copy={mcpConfig} type="button">Copy</button>
         </figcaption>
         <pre class="codecard__pre"><code>{mcpConfig}</code></pre>
-        <div class="codecard__note">Works with Claude Desktop, Orbit/Loom, and any MCP client.</div>
+        <div class="codecard__note">Works with Claude Desktop and any MCP client.</div>
       </figure>
     </div>
   </section>
@@ -390,7 +390,7 @@ const faqs = [
         </div>
         <div class="icard card">
           <h4><span class="icard__k">Terminal</span> Loom CLI</h4>
-          <p>The same brain, in your shell. Needs Node 22.19+ and <code>uv</code> for Galaxy MCP.</p>
+          <p>The same brain, in your shell. Needs Node 22.19+.</p>
           <pre class="icard__pre"><code>npm install -g @galaxyproject/loom
 loom</code></pre>
           <span class="icard__hint">Or run it once with <code>npx @galaxyproject/loom</code>.</span>

@@ -37,6 +37,7 @@ import {
 import { canonicalJson, type Attempt, type Registry } from "../extensions/loom/registry-schema";
 import { eligibleAttempt, SERVER, T0 } from "./registry-fixtures";
 import { ulid } from "../extensions/loom/ulid";
+import { GALAXY } from "./galaxy-family-fixture";
 
 const PLAN = `# Notebook
 
@@ -359,7 +360,7 @@ describe("the hook reads the session's registry", () => {
       heartbeatMs: null,
     });
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     registerEvidenceOverrideCommand(pi.api);
 
     const first = await pi.write(flipEdit);

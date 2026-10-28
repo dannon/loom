@@ -30,7 +30,7 @@ file -- if anything in the topic docs seems to conflict, these win.
   has run the relevant verification and recorded the evidence in the
   notebook.
 - **Never invent dataset IDs, invocation IDs, history IDs, or workflow
-  IDs.** Look them up via the MCP tools.
+  IDs.** Look them up via the Galaxy tools.
 - **Update the notebook, not chat, with durable findings.** Chat is for
   dialogue; the notebook is the record.
 

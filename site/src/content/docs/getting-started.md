@@ -28,7 +28,7 @@ macOS build is signed and notarized.
 
 ### Loom (CLI)
 
-The CLI needs Node 22.19+ and, for Galaxy MCP, [`uv`](https://docs.astral.sh/uv/).
+The CLI needs Node 22.19+.
 
 ```bash
 npm install -g @galaxyproject/loom
@@ -48,8 +48,9 @@ catalog while drafting plans, and route individual steps to Galaxy. Provide a
 Galaxy server URL and an API key (Orbit stores credentials in your OS keychain;
 the CLI reads `GALAXY_URL` / `GALAXY_API_KEY`).
 
-Galaxy access flows through [Galaxy MCP](/loom/docs/galaxy-mcp) — the bridge that
-lets any agent search and run tools, drive workflows, and manage histories.
+Galaxy access runs through in-process Galaxy tools to search and run tools, drive
+workflows, and manage histories. They are the same operations
+[Galaxy MCP](/loom/docs/galaxy-mcp) offers any MCP client.
 
 > Galaxy work is optional. Loom is useful for local exploration and planning even
 > before you connect a server.

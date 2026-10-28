@@ -17,7 +17,6 @@ import { setupContextInjection, formatConnectionStatus } from "./context";
 import { setupUIBridge } from "./ui-bridge";
 import { registerSessionLifecycle } from "./session-lifecycle";
 import { registerCommandsAsUserInput } from "./auto-resume";
-import { recordGalaxyConnected } from "./galaxy-cred-drift";
 import { registerActivityHooks } from "./activity-hooks";
 import { registerSubmissionCapture } from "./galaxy-submission-capture";
 import { isSubmissionReplayEnabled, registerSubmissionReplay } from "./submission-replay";
@@ -40,32 +39,33 @@ import { isSessionIndexEnabled } from "./session-index/is-enabled";
 import { registerSkillTriggers } from "./skill-triggers";
 import { registerIwcPlanCheck } from "./iwc-plan-check";
 import { registerSraImportGate } from "./sra-import-gate";
+import { registerGalaxyRepeatGuard } from "./galaxy-repeat-guard";
+import { registerGalaxyHistoryGuard } from "./galaxy-history-guard";
 import { registerEvidenceGate } from "./evidence-gate";
 import { registerEvidenceOverrideCommand } from "./evidence-override-command";
 import { registerProposalCommands } from "./proposal-commands";
 import { registerExecGuard } from "./exec-guard";
 import { registerSandbox } from "./sandbox";
 import { isLocalExecDisabled } from "./local-exec";
+import { capabilityProfile } from "../../shared/capability-profile.js";
+import { galaxyCredentials } from "./galaxy-api";
 import { registerSecretRedaction } from "./secret-redaction";
 import { registerLessonHint } from "./lesson-hint";
-import { withoutAppendedLessonHints } from "./lessons/pi-event-contract";
 import { registerLessonsSearchTool } from "./lessons/search-tool";
 import { isLessonReplayEnabled, registerLessonReplay } from "./lessons/replay";
 import { registerObservationTriggers } from "./observation-triggers";
 import { registerObservationsCommand } from "./observations-command";
 import { registerMcpOutputRecovery } from "./mcp-output";
 import { registerLoomMcpServers } from "./mcp-servers";
-import { galaxyMcpToolName } from "../../shared/galaxy-mcp-tools.js";
-import { galaxyCall, registerMcpRecovery } from "./mcp-recovery";
+import { registerGalaxyVersionCapture } from "./galaxy-version-capture";
+import type { GalaxyToolFamily } from "../../shared/galaxy-tool-family.js";
+import { registerGalaxyTools } from "./galaxy-tool-source";
+import { registerGalaxyDestructiveGate } from "./galaxy-destructive-gate";
+import { registerGalaxyOpPolicy } from "./galaxy-op-policy";
+import { registerGalaxyRecovery } from "./galaxy-recovery";
 import { registerGalaxyPollGuard } from "./galaxy-poll-guard";
 import { registerProgressUpdates } from "./progress-updates";
-import {
-  ALL_NUDGES_ARMED,
-  transportNudgeDecision,
-  type TransportNudgeArmed,
-} from "./galaxy-transport-error";
-import { GALAXY_UVX_MISSING_NUDGE, isGalaxyLauncherError } from "./galaxy-launcher-error";
-import * as fs from "fs";
+import { recordStore } from "./record-store";
 import {
   getState,
   getNotebookPath,
@@ -82,9 +82,12 @@ import {
 } from "./profiles";
 import { LoomWidgetKey, encodeMarkdownWidget } from "../../shared/loom-shell-contract.js";
 
-/** Status-bar label for a Galaxy tool -- galaxy-mcp's or Loom's own -- else undefined. */
-function galaxyToolLabel(toolName: string | undefined): string | undefined {
-  const bare = galaxyMcpToolName(toolName) ?? toolName?.match(/^galaxy_(.+)/)?.[1];
+/** Status-bar label for a Galaxy tool -- galaxy-ops' or Loom's own -- else undefined. */
+function galaxyToolLabel(
+  toolName: string | undefined,
+  family: GalaxyToolFamily,
+): string | undefined {
+  const bare = family.toolName(toolName) ?? toolName?.match(/^galaxy_(.+)/)?.[1];
   return bare?.replace(/_/g, " ");
 }
 
@@ -92,6 +95,9 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // Before anything registers a command, so every one of them counts as user
   // input for the automatic follow-up cap.
   registerCommandsAsUserInput(pi);
+  const profile = capabilityProfile();
+  // The shell's Galaxy tools go in first, so every guard below is handed their names.
+  const family = registerGalaxyTools(pi);
   // Local-execution safety gate + opt-in bash sandbox. Both only make sense
   // when the brain has a local execution surface. A shell that runs the brain
   // with no local exec -- the web/container remote shell (and eventually native
@@ -102,7 +108,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // action. Skipping both keeps the shell's gate the single tool_call authority.
   // Shells WITH a local exec surface (desktop, CLI) set LOOM_LOCAL_EXEC
   // authoritatively at spawn so an ambient value can't toggle this off here.
-  if (!isLocalExecDisabled()) {
+  if (profile.files) {
     // Register the gate first so its tool_call decision is the authoritative
     // boundary before anything else runs.
     registerExecGuard(pi);
@@ -111,6 +117,16 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
     // radius). Default-on file-write confinement lives in the gate itself.
     registerSandbox(pi);
   }
+  // exec-guard confirms a history delete only where it is registered (a files
+  // surface), and never reads galaxy-ops' destructiveHint, so the Galaxy tools
+  // get their own confirm; with files, exec-guard keeps update_history and this
+  // one asks only about the hinted tools. The remote container says LOCAL_EXEC=off
+  // in env, and its web-mode-gate refuses a history delete outright, so asking
+  // first would only ask about a call it then blocks.
+  registerGalaxyDestructiveGate(pi, family, {
+    classifyArgs: !profile.files && !isLocalExecDisabled(process.env),
+  });
+  registerGalaxyOpPolicy(pi);
   // Data-shaped backstop to the path-shaped gate: scrub known secret VALUES out
   // of tool OUTPUT before it returns to the model, so an approved/slipped read
   // (or an `env` dump) can't push API keys into the provider's logs (#183).
@@ -118,16 +134,21 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // tool_call boundary and the gate above is skipped.
   // Inspect saved MCP output before redaction so its previews receive the same
   // secret scrubbing as ordinary tool results (including in remote shells).
-  registerMcpOutputRecovery(pi);
-  registerMcpRecovery(pi);
-  registerGalaxyPollGuard(pi);
-  registerProgressUpdates(pi);
+  // Only pi's MCP layer truncates to a file, so it goes wherever an MCP server
+  // does: that is brc-analytics, and the Galaxy tools keep their own
+  // galaxy_read_output.
+  if (profile.mcpServers) registerMcpOutputRecovery(pi, family);
+  registerGalaxyRecovery(pi, family);
+  registerGalaxyPollGuard(pi, family);
+  registerProgressUpdates(pi, family);
   registerSecretRedaction(pi);
   // AFTER redaction, deliberately. pi runs tool_result handlers in
   // registration order and each sees the previous one's rewrite, so the
   // collector reads the content the model actually gets -- reading the raw
   // result would put an API key one normalization away from the wire.
-  registerObservationTriggers(pi);
+  registerObservationTriggers(pi, family);
+  // After the triggers, whose session_start forgets the last session's version.
+  registerGalaxyVersionCapture(pi, family);
   // AFTER redaction and after the observation triggers. pi feeds each
   // tool_result handler the previous one's content, so anything registered
   // after the hint reads it as part of the result -- a Galaxy error with no
@@ -138,7 +159,9 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // preview the model actually reads.
   registerLessonHint(pi);
 
-  registerLoomMcpServers(pi);
+  // brc-analytics is the one MCP server Loom brings; a shell with no MCP layer
+  // at all (the browser worker) says so with mcpServers.
+  if (profile.mcpServers) registerLoomMcpServers(pi);
 
   setupUIBridge(pi);
   registerSessionLifecycle(pi);
@@ -148,7 +171,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // LOOM_LOCAL_EXEC=off (the web/container shell), and capture has to work
   // there too. Registered after the session lifecycle so the notebook path is
   // already set by the time anything can fire.
-  registerSubmissionCapture(pi);
+  registerSubmissionCapture(pi, family);
   // Eval-only seam: replays recorded submission results through the hook above
   // so the Tier-1 scenarios can pin capture behavior without a model. Off
   // unless LOOM_SUBMISSION_REPLAY names a file inside the session directory.
@@ -168,9 +191,12 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   }
   // ── Capture, part two (#473): reconcile + enrichment ──────────────────────
   // Everything that happens to a recorded run after the submit: reconcile on
-  // session start, after galaxy_connect, every Nth poller tick and on
-  // /reconcile; per-job enrichment off the same queue. After the replay seam
-  // so a replayed session's blocks are on disk before the first reconcile.
+  // session start, every Nth poller tick and on /reconcile; per-job enrichment
+  // off the same queue. After the replay seam so a replayed session's blocks
+  // are on disk before the first reconcile.
+  // Provenance records and the reconcile cursor go through the provenance fs
+  // (galaxy-provenance.ts), which is in memory under a page notebook, so this
+  // registers under every profile.
   registerCaptureFollowThrough(pi);
   // Eval-only seam: answers Galaxy calls from a recorded fixture so the Tier-1
   // scenarios can drive reconcile and enrichment without a server. Off unless
@@ -187,25 +213,37 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   }
   // ── end capture, part two ─────────────────────────────────────────────────
 
-  registerPlanTools(pi);
-  registerGalaxyUploadTool(pi);
-  registerNotebookSyncTools(pi);
+  registerPlanTools(pi, family);
+  // Uploads a LOCAL file; without a file surface there is nothing to upload.
+  if (profile.files) {
+    registerGalaxyUploadTool(pi, family);
+  }
+  registerNotebookSyncTools(pi, family);
   registerSyncCommand(pi);
   registerSkillsCommand(pi);
   registerExecutionCommands(pi);
-  registerDashboardTools(pi);
+  // The terminal registers these because it writes the layout file for the
+  // next desktop session; a worker has neither a file nor a pane to show it in.
+  // Two ifs, not one block, so the tool order between them does not move.
+  if (profile.ui !== "worker") {
+    registerDashboardTools(pi);
+  }
   registerLessonsSearchTool(pi);
-  registerDashboardCommands(pi);
+  if (profile.ui !== "worker") {
+    registerDashboardCommands(pi);
+  }
   registerFeedbackCommand(pi);
   registerObservationsCommand(pi);
   registerLessonProposals(pi);
   registerLessonsCommand(pi);
   registerTesterIdCommand(pi);
   registerInstructionsCommand(pi);
-  registerSkillTriggers(pi);
-  registerIwcPlanCheck(pi);
-  registerEvidenceGate(pi);
-  registerSraImportGate(pi);
+  registerSkillTriggers(pi, family);
+  registerIwcPlanCheck(pi, family);
+  registerEvidenceGate(pi, family);
+  registerSraImportGate(pi, family);
+  registerGalaxyRepeatGuard(pi, family);
+  registerGalaxyHistoryGuard(pi, family);
   registerEvidenceOverrideCommand(pi);
   // ── Approval registry (#476): the model proposes with loom_propose; the user
   // approves with /approve (or revokes, or lists with /pending). The registry
@@ -243,22 +281,19 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
       }
       const { profiles, active } = loadProfiles();
       const profileNames = Object.keys(profiles);
+      const current = galaxyCredentials();
 
-      async function reloadOrMessage(url: string) {
-        if (typeof ctx.reload === "function") {
-          await ctx.reload();
-        } else {
-          pi.sendUserMessage(
-            `Please connect to Galaxy at ${url} using the API key from environment variables.`,
-          );
-        }
-      }
+      // The Galaxy tools read the credentials on every call, so setting the env is the whole
+      // switch; the reload resets what this session holds about the old server, such as its
+      // current history. Every shell that reaches here has a reload: the only
+      // command ctx without one is the browser's, which has no files and returned above.
+      const reloadSession = () => ctx.reload();
 
       const requestedName = args?.trim();
       if (requestedName) {
         if (switchProfile(requestedName)) {
           ctx.ui.notify(`Switched to ${requestedName} (${profiles[requestedName].url})`, "info");
-          await reloadOrMessage(profiles[requestedName].url);
+          await reloadSession();
         } else {
           ctx.ui.notify(
             `Unknown profile "${requestedName}". Use /profiles to see available profiles.`,
@@ -288,17 +323,12 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
           const name = profileNames[selectedIndex];
           switchProfile(name);
           ctx.ui.notify(`Switched to ${name} (${profiles[name].url})`, "info");
-          await reloadOrMessage(profiles[name].url);
+          await reloadSession();
           return;
         }
-      } else if (
-        profileNames.length === 1 &&
-        active &&
-        process.env.GALAXY_URL &&
-        process.env.GALAXY_API_KEY
-      ) {
+      } else if (profileNames.length === 1 && active && current.url && current.apiKey) {
         ctx.ui.notify(`Connecting to ${profiles[active].url}...`, "info");
-        await reloadOrMessage(profiles[active].url);
+        await reloadSession();
         return;
       }
 
@@ -328,7 +358,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
       process.env.GALAXY_API_KEY = apiKey;
 
       ctx.ui.notify(`Saved profile "${name}" and connecting to ${galaxyUrl}...`, "info");
-      await reloadOrMessage(galaxyUrl);
+      await reloadSession();
     },
   });
 
@@ -397,10 +427,11 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
         return;
       }
       const notebookPath = getNotebookPath();
-      if (notebookPath && fs.existsSync(notebookPath)) {
+      const store = notebookPath ? recordStore(notebookPath) : null;
+      if (store && (await store.stat()) !== null) {
         try {
-          const content = fs.readFileSync(notebookPath, "utf-8");
-          const header = `> \`${notebookPath}\`\n\n`;
+          const { content } = await store.read();
+          const header = `> \`${store.label}\`\n\n`;
           ctx.ui.setWidget(LoomWidgetKey.Notebook, encodeMarkdownWidget(header + content));
           setNotebookWidgetMode("open");
         } catch (err) {
@@ -488,19 +519,8 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // ─────────────────────────────────────────────────────────────────────────────
   const toolStartTimes = new Map<string, number>();
 
-  // Armed = that kind of nudge is allowed to fire. We fire once per outage,
-  // then disarm that kind so a galaxy retry loop doesn't spam the user, and
-  // re-arm after any healthy galaxy result. Per kind, so a timeout doesn't
-  // silence the reconnect advice for a drop that follows it.
-  let transportNudgeArmed: TransportNudgeArmed = { ...ALL_NUDGES_ARMED };
-  // Separate flag: a missing uvx is not transient, so unlike the transport
-  // nudge this one never re-arms. Saying it once per session is enough --
-  // repeating it every failed galaxy call would just be nagging about
-  // something the user cannot fix without leaving the app.
-  let uvxNudgeArmed = true;
-
   pi.on("tool_execution_start", async (event, ctx) => {
-    const label = galaxyToolLabel(event.toolName);
+    const label = galaxyToolLabel(event.toolName, family);
     if (label) {
       toolStartTimes.set(event.toolName, Date.now());
       ctx.ui.setStatus("galaxy-tool", `🔧 Running ${label}...`);
@@ -513,9 +533,9 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
     // (`sed -i`, editors) swaps the inode, and a plain truncate can race the
     // watcher's awaitWriteFinish window. This is content-guarded so it only
     // emits on a real change and is a no-op otherwise. #253
-    reemitNotebookIfChanged();
+    await reemitNotebookIfChanged();
 
-    const label = galaxyToolLabel(event.toolName);
+    const label = galaxyToolLabel(event.toolName, family);
     if (label) {
       const startTime = toolStartTimes.get(event.toolName);
       if (startTime) {
@@ -536,26 +556,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
       }
     }
 
-    if (event.toolName === "mcp__galaxy__connect" && !event.isError) {
-      // A non-error mcp__galaxy__connect means we're now bound to the current env
-      // creds (galaxy-mcp raises on failure -> isError), so advance the
-      // credential-drift baseline. Keyed off isError, not the loose success
-      // string below, which both false-matches ("unsuccessful") and would miss
-      // a success that omits the literal.
-      recordGalaxyConnected();
-      try {
-        const resultText =
-          typeof event.result === "string" ? event.result : JSON.stringify(event.result);
-        if (resultText.includes('"success": true') || resultText.includes("success")) {
-          const state = getState();
-          state.galaxyConnected = true;
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-
-    if (event.toolName === "mcp__galaxy__create_history" && !event.isError) {
+    if (family.toolName(event.toolName) === "create_history" && !event.isError) {
       try {
         const resultText =
           typeof event.result === "string" ? event.result : JSON.stringify(event.result);
@@ -570,54 +571,8 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("tool_result", async (event, ctx) => {
-    // Human-facing status only. mcp-recovery attaches the actual recovery
-    // steps to the agent's result, including on direct/proxy MCP surfaces.
-    try {
-      const name = galaxyCall(event.toolName, event.input)?.name;
-      const failed = event.isError || Boolean((event.details as { error?: unknown })?.error);
-      // Without Loom's own hint: lesson prose is not the tool's error text, but
-      // a tool that happens to open a block with the marker still is.
-      const resultText = failed
-        ? withoutAppendedLessonHints(event.content)
-            .filter((c) => c.type === "text")
-            .map((c) => c.text)
-            .join("\n")
-        : undefined;
-
-      // A launcher failure (`spawn uvx ENOENT`) must win over the reconnect
-      // nudge and suppress it: the server never started, so there is nothing to
-      // reconnect to, and sending the user to /mcp reconnect wastes their time.
-      // Fire once per outage on the same armed flag, so a retry loop can't spam.
-      if (isGalaxyLauncherError(name, resultText)) {
-        if (uvxNudgeArmed && ctx.hasUI) {
-          uvxNudgeArmed = false;
-          ctx.ui.notify(GALAXY_UVX_MISSING_NUDGE, "warning");
-        }
-        return;
-      }
-
-      const decision = transportNudgeDecision(transportNudgeArmed, name, resultText);
-      transportNudgeArmed = decision.armed;
-      if (decision.nudge && ctx.hasUI) ctx.ui.notify(decision.nudge, "warning");
-    } catch {
-      /* stale/headless context -- a dropped reconnect hint is fine */
-    }
-
-    if (event.toolName === "mcp__galaxy__connect") {
-      try {
-        const firstContent = event.content?.[0];
-        const resultText = firstContent && "text" in firstContent ? firstContent.text : undefined;
-        if (resultText && resultText.includes('"success": true')) {
-          const state = getState();
-          state.galaxyConnected = true;
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-
-    if (event.toolName === "mcp__galaxy__create_history") {
+  pi.on("tool_result", async (event) => {
+    if (family.toolName(event.toolName) === "create_history") {
       try {
         const firstContent = event.content?.[0];
         const resultText = firstContent && "text" in firstContent ? firstContent.text : undefined;

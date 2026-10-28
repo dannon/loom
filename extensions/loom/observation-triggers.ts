@@ -9,8 +9,8 @@
  * over and the user is reading anyway.
  *
  * Three triggers, all deterministic, none of them a model judgement:
- *   - a Galaxy tool result with isError (galaxy-mcp's `mcp__galaxy__*`, or
- *     one of Loom's own `galaxy_*` tools)
+ *   - a Galaxy tool result with isError (one the shell's Galaxy tool family
+ *     names, or one of Loom's own `galaxy_*` tools)
  *   - the same tool and the same normalized signature RETRY_LOOP_THRESHOLD times
  *   - the evidence gate blocking a plan-step completion
  * A fourth, the user's own `/observe`, lives in observations-command.ts and
@@ -36,7 +36,6 @@ import {
   extractDatatypes,
   extractToolIds,
   observationToolName,
-  recordGalaxyVersionFromConnect,
   resetGalaxyVersion,
   saveRetractToken,
   sentLogEntryFor,
@@ -56,6 +55,7 @@ import { onEvidenceDecision } from "./evidence-gate.js";
 import { appendActivityEvent } from "./activity.js";
 import { getNotebookPath } from "./state.js";
 import { confirmObservation, describeObservation } from "./observation-ui.js";
+import type { GalaxyToolFamily } from "../../shared/galaxy-tool-family.js";
 
 export const RETRY_LOOP_THRESHOLD = 3;
 /**
@@ -145,27 +145,6 @@ export function pendingObservationCount(): number {
 // -----------------------------------------------------------------------------
 
 /**
- * pi-mcp-adapter's `mcp({server, tool, args})` gateway. Loom no longer ships
- * it, but a user who installs the adapter as a pi package gets it back, and a
- * Galaxy failure through it should not be invisible. Resolved to pi's own
- * spelling so it goes through the same check as a direct call.
- */
-function proxiedGalaxyCall(
-  input: Record<string, unknown>,
-): { toolName: string; args: Record<string, unknown> } | undefined {
-  if (input.server !== undefined && input.server !== "galaxy") return;
-  const tool = typeof input.tool === "string" ? input.tool : "";
-  if (input.server !== "galaxy" && !/^(galaxy_|mcp__galaxy__)/.test(tool)) return;
-  try {
-    const args = typeof input.args === "string" ? JSON.parse(input.args) : (input.args ?? {});
-    if (!args || typeof args !== "object" || Array.isArray(args)) return;
-    return { toolName: `mcp__galaxy__${tool.replace(/^(?:galaxy_|mcp__galaxy__)/, "")}`, args };
-  } catch {
-    return;
-  }
-}
-
-/**
  * `mcpTool` comes out in wire spelling (see observationToolName), so the retry
  * key, the stage rules and the allowlist all see `galaxy_run_tool` whichever
  * way pi spelled the call.
@@ -174,14 +153,10 @@ export function factsForToolResult(
   toolName: string,
   input: Record<string, unknown>,
   text: string,
+  family: GalaxyToolFamily,
 ): ObservationFacts | null {
-  let args = input ?? {};
-  if (toolName === "mcp") {
-    const call = proxiedGalaxyCall(args);
-    if (!call) return null;
-    ({ toolName, args } = call);
-  }
-  const name = observationToolName(toolName);
+  const args = input ?? {};
+  const name = observationToolName(toolName, family);
   if (!name) return null;
   const raw = String(text ?? "").trim();
   if (!raw) return null;
@@ -189,6 +164,7 @@ export function factsForToolResult(
     kind: "tool-error",
     trigger: "tool_error",
     mcpTool: name,
+    inProcess: true as const,
     toolIds: extractToolIds(args),
     datatypes: extractDatatypes(args),
     rawSignature: raw,
@@ -503,7 +479,7 @@ function errorTextOf(content: ReadonlyArray<{ type: string; text?: string }>): s
 
 const EVIDENCE_MARKER = "assertion-failed|evidence-gate";
 
-export function registerObservationTriggers(pi: ExtensionAPI): void {
+export function registerObservationTriggers(pi: ExtensionAPI, family: GalaxyToolFamily): void {
   pi.on("session_start", async () => {
     resetObservationTriggers();
   });
@@ -512,16 +488,16 @@ export function registerObservationTriggers(pi: ExtensionAPI): void {
     // Registered AFTER secret redaction in index.ts, so `content` here is the
     // already-scrubbed text the model sees. Reading the raw result would put
     // an API key one normalization away from the wire.
-    const called =
-      event.toolName === "mcp" ? proxiedGalaxyCall(event.input ?? {})?.toolName : event.toolName;
-    if (observationToolName(called) === "galaxy_connect" && !event.isError) {
-      recordGalaxyVersionFromConnect(errorTextOf(event.content));
-    }
     if (resolveObservationsMode() === "off") return;
 
     const failed = event.isError || Boolean((event.details as { error?: unknown })?.error);
     if (!failed) return;
-    const facts = factsForToolResult(event.toolName, event.input, errorTextOf(event.content));
+    const facts = factsForToolResult(
+      event.toolName,
+      event.input,
+      errorTextOf(event.content),
+      family,
+    );
     if (!facts) return;
 
     const decision = decideToolResultObservation(state, {

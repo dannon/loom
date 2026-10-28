@@ -15,6 +15,9 @@ import {
 import type { DeliverDeps } from "../extensions/loom/observation-triggers.js";
 import type { Observation } from "../shared/observation-contract.js";
 import type { ObservationFacts } from "../extensions/loom/observations.js";
+import { observationToolName } from "../extensions/loom/observations.js";
+import { GALAXY } from "./galaxy-family-fixture";
+import { bareFamily } from "../shared/galaxy-tool-family.js";
 
 // The lesson switch is off by default; these suites are about what happens
 // once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.
@@ -100,17 +103,28 @@ describe("decideToolResultObservation", () => {
   });
 });
 
+describe("observationToolName", () => {
+  it("spells a Galaxy call in wire spelling and passes Loom's own galaxy_ tools through", () => {
+    expect(observationToolName("run_tool", GALAXY)).toBe("galaxy_run_tool");
+    expect(observationToolName("galaxy_job_record", GALAXY)).toBe("galaxy_job_record");
+    expect(observationToolName("bash", GALAXY)).toBeUndefined();
+    expect(observationToolName("Run-Tool", bareFamily(["Run-Tool"]))).toBeUndefined();
+  });
+});
+
 describe("factsForToolResult", () => {
-  it("reports galaxy-mcp's pi spelling in the wire spelling", () => {
+  it("reports a Galaxy tool in the wire spelling", () => {
     const facts = factsForToolResult(
-      "mcp__galaxy__run_tool",
+      "run_tool",
       { tool_id: "Filter1", file_type: "tabular" },
       "ToolExecutionError: dataset 2a56fb8e4c1d9f70b3ac55e1d2f80911 failed",
+      GALAXY,
     );
     expect(facts).toEqual({
       kind: "tool-error",
       trigger: "tool_error",
       mcpTool: "galaxy_run_tool",
+      inProcess: true,
       toolIds: ["Filter1"],
       datatypes: ["tabular"],
       rawSignature: "ToolExecutionError: dataset 2a56fb8e4c1d9f70b3ac55e1d2f80911 failed",
@@ -118,46 +132,14 @@ describe("factsForToolResult", () => {
   });
 
   it("passes Loom's own galaxy_* tools through unchanged", () => {
-    const facts = factsForToolResult("galaxy_upload_local_file", {}, "ENOSPC");
+    const facts = factsForToolResult("galaxy_upload_local_file", {}, "ENOSPC", GALAXY);
     expect(facts?.mcpTool).toBe("galaxy_upload_local_file");
   });
 
-  it("does not take another server's tools for galaxy-mcp's", () => {
-    // pi joins server and tool with `__`: this is run_tool on a server named galaxy__x.
-    expect(factsForToolResult("mcp__galaxy__x__run_tool", {}, "boom")).toBeNull();
-    // pi turns `-` and `.` into `_`: servers named galaxy-x, galaxy-, galaxy. and galaxy_.
-    expect(factsForToolResult("mcp__galaxy_x__run_tool", {}, "boom")).toBeNull();
-    expect(factsForToolResult("mcp__galaxy___run_tool", {}, "boom")).toBeNull();
-    expect(factsForToolResult("mcp__galaxy__", {}, "boom")).toBeNull();
-    // A name over pi's 64 is cut and hash-suffixed, separator and all.
-    const cut = `mcp__galaxy__${"a".repeat(42)}_540bde53`;
-    expect(cut).toHaveLength(64);
-    expect(factsForToolResult(cut, {}, "boom")).toBeNull();
-  });
-
-  it("still reads pi-mcp-adapter's proxy shape, for users who install it", () => {
-    const facts = factsForToolResult(
-      "mcp",
-      { server: "galaxy", tool: "run_tool", args: '{"tool_id":"Filter1"}' },
-      "boom",
-    );
-    expect(facts?.mcpTool).toBe("galaxy_run_tool");
-    expect(facts?.toolIds).toEqual(["Filter1"]);
-    expect(factsForToolResult("mcp", { tool: "mcp__galaxy__run_tool" }, "boom")?.mcpTool).toBe(
-      "galaxy_run_tool",
-    );
-    expect(factsForToolResult("mcp", { server: "other", tool: "run_tool" }, "boom")).toBeNull();
-    expect(factsForToolResult("mcp", { tool: "run_tool" }, "boom")).toBeNull();
-    // A model-written tool name that isn't a tool-name shape raises nothing.
-    expect(
-      factsForToolResult("mcp", { server: "galaxy", tool: "alice@clinic.org" }, "boom"),
-    ).toBeNull();
-  });
-
   it("ignores a non-galaxy tool and an empty result", () => {
-    expect(factsForToolResult("bash", { command: "ls" }, "No such file")).toBeNull();
-    expect(factsForToolResult("mcp__galaxy__run_tool", {}, "")).toBeNull();
-    expect(factsForToolResult("mcp__galaxy__run_tool", {}, "   ")).toBeNull();
+    expect(factsForToolResult("bash", { command: "ls" }, "No such file", GALAXY)).toBeNull();
+    expect(factsForToolResult("run_tool", {}, "", GALAXY)).toBeNull();
+    expect(factsForToolResult("run_tool", {}, "   ", GALAXY)).toBeNull();
   });
 });
 
@@ -421,7 +403,12 @@ describe("deliverObservation", () => {
   }
 
   it("hands the description prompt the built observation, never the raw facts", async () => {
-    const raw = factsForToolResult("mcp__galaxy__alice_clinic_org", {}, "Unknown tool")!;
+    const raw = factsForToolResult(
+      "alice_clinic_org",
+      {},
+      "Unknown tool",
+      bareFamily(["alice_clinic_org"]),
+    )!;
     expect(raw.mcpTool).toBe("galaxy_alice_clinic_org");
     const describe = vi.fn().mockResolvedValue("");
     const d = deps({ mode: "ask", describe });
@@ -650,7 +637,7 @@ describe("registerObservationTriggers", () => {
   }
 
   const failure = {
-    toolName: "mcp__galaxy__run_tool",
+    toolName: "run_tool",
     input: { tool_id: "Filter1" },
     content: [{ type: "text", text: "ToolExecutionError: Job 12345 refused a header-only table" }],
     isError: true,
@@ -672,7 +659,7 @@ describe("registerObservationTriggers", () => {
       ui: { confirm, input: vi.fn().mockResolvedValue(""), notify: vi.fn() },
     };
     const pi = fakePi();
-    registerObservationTriggers(pi.api as any);
+    registerObservationTriggers(pi.api as any, GALAXY);
     await pi.emit("session_start", {}, ctx);
 
     await pi.emit("tool_result", failure, ctx);
@@ -710,7 +697,7 @@ describe("registerObservationTriggers", () => {
       ui: { confirm, input: vi.fn().mockResolvedValue(""), notify: vi.fn() },
     };
     const pi = fakePi();
-    registerObservationTriggers(pi.api as any);
+    registerObservationTriggers(pi.api as any, GALAXY);
     await pi.emit("session_start", {}, ctx);
     await pi.emit("tool_result", failure, ctx);
     await pi.emit("agent_settled", {}, ctx);
@@ -733,20 +720,14 @@ describe("registerObservationTriggers", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).signature).toBe("unknown");
   });
 
-  it("counts a retry loop across galaxy-mcp's pi spelling", async () => {
+  it("counts a retry loop on a Galaxy tool", async () => {
     const { registerObservationTriggers, pendingObservationCount, lastObservationFacts } =
       await import("../extensions/loom/observation-triggers.js");
     const pi = fakePi();
-    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
+    registerObservationTriggers(pi.api as unknown as ExtensionAPI, GALAXY);
     await pi.emit("session_start", {}, {});
-    // The proxy spelling of the same call must land on the same retry key.
-    const proxied = {
-      ...failure,
-      toolName: "mcp",
-      input: { server: "galaxy", tool: "run_tool", args: failure.input },
-    };
     await pi.emit("tool_result", failure, {});
-    await pi.emit("tool_result", proxied, {});
+    await pi.emit("tool_result", failure, {});
     await pi.emit("tool_result", failure, {});
     // The first failure as a tool-error and the third as a retry-loop.
     expect(pendingObservationCount()).toBe(2);
@@ -756,17 +737,17 @@ describe("registerObservationTriggers", () => {
     });
   });
 
-  it("takes the Galaxy version from galaxy-mcp's connect under its pi spelling", async () => {
+  it("takes no Galaxy version from a connect-shaped result; galaxy-ops reports it", async () => {
     const { registerObservationTriggers } =
       await import("../extensions/loom/observation-triggers.js");
     const { getGalaxyVersion } = await import("../extensions/loom/observations.js");
     const pi = fakePi();
-    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
+    registerObservationTriggers(pi.api as unknown as ExtensionAPI, GALAXY);
     await pi.emit("session_start", {}, {});
     await pi.emit(
       "tool_result",
       {
-        toolName: "mcp__galaxy__connect",
+        toolName: "connect",
         input: {},
         content: [{ type: "text", text: '{"success": true, "version": "26.1.1"}' }],
         isError: false,
@@ -774,17 +755,7 @@ describe("registerObservationTriggers", () => {
       },
       {},
     );
-    expect(getGalaxyVersion()).toBe("26.1.1");
-  });
-
-  it("raises nothing for a failure on a server named galaxy__x", async () => {
-    const { registerObservationTriggers, pendingObservationCount } =
-      await import("../extensions/loom/observation-triggers.js");
-    const pi = fakePi();
-    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
-    await pi.emit("session_start", {}, {});
-    await pi.emit("tool_result", { ...failure, toolName: "mcp__galaxy__x__run_tool" }, {});
-    expect(pendingObservationCount()).toBe(0);
+    expect(getGalaxyVersion()).toBeUndefined();
   });
 
   it("raises one assertion-failed report per session however often the gate blocks", async () => {
@@ -792,7 +763,7 @@ describe("registerObservationTriggers", () => {
       await import("../extensions/loom/observation-triggers.js");
     const { notifyEvidenceDecision } = await import("../extensions/loom/evidence-gate.js");
     const pi = fakePi();
-    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
+    registerObservationTriggers(pi.api as unknown as ExtensionAPI, GALAXY);
     await pi.emit("session_start", {}, {});
     const block = {
       outcome: "blocked" as const,
@@ -816,7 +787,7 @@ describe("registerObservationTriggers", () => {
     const { registerObservationTriggers, pendingObservationCount } =
       await import("../extensions/loom/observation-triggers.js");
     const pi = fakePi();
-    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
+    registerObservationTriggers(pi.api as unknown as ExtensionAPI, GALAXY);
     await pi.emit("session_start", {}, {});
     await pi.emit("tool_result", failure, {});
     expect(pendingObservationCount()).toBe(0);
@@ -828,7 +799,7 @@ describe("registerObservationTriggers", () => {
     const { LESSON_HINT_MARKER } = await import("../shared/lesson-hint-marker.js");
     const { appendHintToContent } = await import("../extensions/loom/lessons/pi-event-contract");
     const pi = fakePi();
-    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
+    registerObservationTriggers(pi.api as unknown as ExtensionAPI, GALAXY);
     await pi.emit("session_start", {}, {});
     // No text of its own: without the filter the hint becomes the signature.
     const content = appendHintToContent(
@@ -846,7 +817,7 @@ describe("registerObservationTriggers", () => {
       await import("../extensions/loom/observation-triggers.js");
     const { LESSON_HINT_MARKER } = await import("../shared/lesson-hint-marker.js");
     const pi = fakePi();
-    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
+    registerObservationTriggers(pi.api as unknown as ExtensionAPI, GALAXY);
     await pi.emit("session_start", {}, {});
     const dressed = { type: "text", text: `${LESSON_HINT_MARKER} ${failure.content[0].text}` };
     await pi.emit("tool_result", { ...failure, content: [dressed] }, {});
@@ -872,7 +843,7 @@ describe("registerObservationTriggers", () => {
       },
     };
     const pi = fakePi();
-    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
+    registerObservationTriggers(pi.api as unknown as ExtensionAPI, GALAXY);
     await pi.emit("session_start", {}, ctx);
     const { appendHintToContent } = await import("../extensions/loom/lessons/pi-event-contract");
     const [hint] = appendHintToContent(
@@ -890,7 +861,7 @@ describe("registerObservationTriggers", () => {
     const { registerObservationTriggers, pendingObservationCount } =
       await import("../extensions/loom/observation-triggers.js");
     const pi = fakePi();
-    registerObservationTriggers(pi.api as unknown as ExtensionAPI);
+    registerObservationTriggers(pi.api as unknown as ExtensionAPI, GALAXY);
     await pi.emit("session_start", {}, {});
     await pi.emit("tool_result", { ...failure, isError: false }, {});
     await pi.emit("tool_result", { ...failure, toolName: "bash", input: { command: "ls" } }, {});

@@ -136,3 +136,30 @@ describe("a record edit made while the session wrote the record", () => {
     expect(page.content_editor).toContain("recorded automatically");
   });
 });
+
+describe("a section edit, as the browser writes it", () => {
+  // The fork cuts flat at every heading and ignores fences; the browser writes Orbit's cut so the
+  // refusals and the evidence gate judge the same bytes that land.
+  it("replaces a section's subsections with the ones section_content carries", async () => {
+    const page = galaxyPage("## Plan A\nq\n### Steps\n- [ ] 1\n## Plan B\nb");
+    const out = await call("update_page", {
+      page_id: "p1",
+      section_heading: "## Plan A",
+      section_content: "## Plan A\nq\n### Steps\n- [x] 1",
+      expect_hash: await read(),
+    });
+    expect(out.isError).toBe(false);
+    expect(page.content_editor).toBe("## Plan A\nq\n### Steps\n- [x] 1\n## Plan B\nb");
+  });
+
+  it("leaves a heading inside fenced code alone", async () => {
+    const page = galaxyPage("## Plan\n```markdown\n## Plan\n```\nold\n## Next\nn");
+    const out = await call("update_page", {
+      page_id: "p1",
+      section_heading: "## Plan",
+      section_content: "## Plan\nnew",
+    });
+    expect(out.isError).toBe(false);
+    expect(page.content_editor).toBe("## Plan\nnew\n## Next\nn");
+  });
+});

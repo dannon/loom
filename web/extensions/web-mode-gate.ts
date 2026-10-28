@@ -3,8 +3,8 @@
  *
  * Default-DENY allowlist for the remote brain's tool surface. The agent may
  * only reach the curated remote surface:
- *   - Galaxy / BRC-Analytics MCP tools (mcp__galaxy__*, mcp__brc_analytics__*)
- *     and the brain's own Galaxy tools (galaxy_*)
+ *   - the brain's in-process Galaxy tools, by their exact bare names, and its
+ *     own galaxy_* tools; BRC-Analytics' MCP tools (mcp__brc_analytics__*)
  *   - the brain's HTTP helper tools (gtn_*, notebook_*, skills_fetch)
  *   - path-gated edit/write/read, confined to the session notebook.md
  * Everything else -- bash/grep/find/ls, the pi-web-access egress tools
@@ -37,12 +37,69 @@ const PATH_GATED_TOOLS = new Set(["edit", "write", "read"]);
 // The curated remote surface. pi names MCP tools "mcp__<server>__<tool>", with
 // anything outside [A-Za-z0-9_] in the server name turned into "_". galaxy_*,
 // gtn_* and notebook_* are brain-registered tools.
-const ALLOWED_PREFIXES = ["mcp__galaxy__", "mcp__brc_analytics__", "galaxy_", "gtn_", "notebook_"];
+const ALLOWED_PREFIXES = ["mcp__brc_analytics__", "galaxy_", "gtn_", "notebook_"];
 
 /**
- * Another server's tools can pass a plain startsWith: "galaxy_" or "galaxy-"
- * gives mcp__galaxy___<tool>, and "galaxy__x" gives mcp__galaxy__x__<tool>.
- * The curated servers' own tool names never start with "_" or contain "__".
+ * The brain's in-process Galaxy tools: galaxy-ops' operations under their wire
+ * names, plus the bridges Loom adds. Bare names carry no prefix, so they are
+ * listed exactly; a tool galaxy-ops adds later stays closed until it is listed
+ * here (the test walks the registered tools to catch one). upload_file is
+ * registered but hidden, and is denied below.
+ */
+export const GALAXY_TOOLS: ReadonlySet<string> = new Set([
+  "get_user",
+  "run_tool",
+  "get_invocations",
+  "get_server_info",
+  "get_histories",
+  "list_history_ids",
+  "get_history_details",
+  "create_history",
+  "get_dataset_details",
+  "get_collection_details",
+  "get_history_contents",
+  "list_workflows",
+  "get_workflow_details",
+  "get_tool_details",
+  "search_tools_by_name",
+  "get_tool_panel",
+  "get_tool_citations",
+  "get_tool_run_examples",
+  "search_tools_by_keywords",
+  "get_job_details",
+  "update_history",
+  "cancel_workflow_invocation",
+  "get_iwc_workflows",
+  "get_iwc_workflow_details",
+  "search_iwc_workflows",
+  "recommend_iwc_workflows",
+  "import_workflow_from_iwc",
+  "list_user_tools",
+  "create_user_tool",
+  "delete_user_tool",
+  "run_user_tool",
+  "get_tool_input_template",
+  "get_workflow_input_template",
+  "invoke_workflow",
+  "upload_file_from_url",
+  "list_pages",
+  "get_page",
+  "create_page",
+  "update_page",
+  "list_page_revisions",
+  "get_page_revision",
+  "revert_page_revision",
+  "download_dataset",
+  "recommend_biocontainer",
+  "list_jobs",
+  "get_job_logs",
+]);
+
+/**
+ * Another server's tools can pass a plain startsWith: "brc_analytics_" gives
+ * mcp__brc_analytics___<tool>, and "brc_analytics__x" gives
+ * mcp__brc_analytics__x__<tool>. The curated server's own tool names never
+ * start with "_" or contain "__".
  */
 function hasToolPrefix(toolName: string, prefix: string): boolean {
   if (!toolName.startsWith(prefix)) return false;
@@ -52,17 +109,18 @@ function hasToolPrefix(toolName: string, prefix: string): boolean {
 }
 
 // Allowed tool names that don't share one of the prefixes above.
-// The MCP output reader only inspects registered artifacts from this session.
+// The MCP output reader only inspects brc-analytics' spilled output from this session.
 // `loom_propose` is the model's one registry write, validated before it lands.
 const ALLOWED_EXACT = new Set(["skills_fetch", "mcp_read_output", "loom_propose"]);
 
-// Brain tools that share an allowed prefix but must not run remotely. The
-// local-file uploader resolves whatever absolute path it is handed and sends
-// the bytes to Galaxy, so in the web shell or the interactive tool it would
+// Brain tools that share an allowed name but must not run remotely. The
+// local-file uploaders resolve whatever absolute path they are handed and send
+// the bytes to Galaxy, so in the web shell or the interactive tool they would
 // read the container's own files -- the Loom config with the operator's key
 // included -- past the notebook-only jail above. Remote users have no local
-// files to upload anyway; the URL upload covers that path.
-const DENIED_EXACT = new Set(["galaxy_upload_local_file"]);
+// files to upload anyway; the URL upload covers that path. galaxy-ops'
+// upload_file is hidden from the model, which does not stop a call by name.
+const DENIED_EXACT = new Set(["galaxy_upload_local_file", "upload_file"]);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The trustedRecord profile (registry design v3 §11)
@@ -71,16 +129,16 @@ const DENIED_EXACT = new Set(["galaxy_upload_local_file"]);
 /**
  * The interactive tool's guaranteed profile: an exact allowlist, so the
  * registry and the notebook can only change through tools whose effect has
- * been reviewed. The prefix allowlist above lets any `galaxy_*` or
- * `mcp__galaxy__*` tool through, including the raw submission tools and code
- * mode; under this profile only the names below run, with the argument
+ * been reviewed. The default allowlist above lets any `galaxy_*` tool and every
+ * in-process Galaxy tool through, including the raw submission tools; under
+ * this profile only the names below run, with the argument
  * constraints in `TRUSTED_RECORD_CONSTRAINTS`, and everything else -- a new
  * tool, a renamed one, another MCP server, a proxy -- is denied.
  *
  * Opt-in (`LOOM_TRUSTED_RECORD=1`), and off by default for now: with the raw
  * submission tools denied, nothing can run a tool or a workflow until
  * `loom_submit` (registry slice 3) exists. The schema-digest pinning v3 asks
- * for, and the exact galaxy-mcp pin in the GxIT image, come with enabling it.
+ * for comes with enabling it.
  */
 export const TRUSTED_RECORD_ALLOWED: ReadonlySet<string> = new Set([
   // Loom-native, reviewed with the registry.
@@ -100,61 +158,59 @@ export const TRUSTED_RECORD_ALLOWED: ReadonlySet<string> = new Set([
   "skills_fetch",
   "mcp_read_output",
   "lessons_search",
-  // galaxy-mcp: reads, and writes that land in Galaxy rather than here.
-  "mcp__galaxy__connect",
-  "mcp__galaxy__get_server_info",
-  "mcp__galaxy__get_user",
-  "mcp__galaxy__search",
-  "mcp__galaxy__search_tools_by_keywords",
-  "mcp__galaxy__search_tools_by_name",
-  "mcp__galaxy__get_tool_panel",
-  "mcp__galaxy__get_tool_details",
-  "mcp__galaxy__get_tool_input_template",
-  "mcp__galaxy__get_tool_citations",
-  "mcp__galaxy__get_tool_run_examples",
-  "mcp__galaxy__get_schemas",
-  "mcp__galaxy__list_workflows",
-  "mcp__galaxy__get_workflow_details",
-  "mcp__galaxy__get_workflow_input_template",
-  "mcp__galaxy__get_histories",
-  "mcp__galaxy__list_history_ids",
-  "mcp__galaxy__get_history_details",
-  "mcp__galaxy__get_history_contents",
-  "mcp__galaxy__get_dataset_details",
-  "mcp__galaxy__get_collection_details",
-  "mcp__galaxy__get_job_details",
-  "mcp__galaxy__get_invocations",
-  "mcp__galaxy__create_history",
-  "mcp__galaxy__update_history",
-  "mcp__galaxy__search_iwc_workflows",
-  "mcp__galaxy__get_iwc_workflows",
-  "mcp__galaxy__get_iwc_workflow_details",
-  "mcp__galaxy__recommend_iwc_workflows",
-  "mcp__galaxy__import_workflow_from_iwc",
-  "mcp__galaxy__upload_file_from_url",
-  "mcp__galaxy__get_page",
-  "mcp__galaxy__list_pages",
-  "mcp__galaxy__list_page_revisions",
-  "mcp__galaxy__get_page_revision",
-  "mcp__galaxy__create_user_tool",
-  "mcp__galaxy__list_user_tools",
-  "mcp__galaxy__download_dataset",
+  // In-process Galaxy tools: reads, and writes that land in Galaxy rather than here.
+  "galaxy_read_output",
+  "get_server_info",
+  "get_user",
+  "search_tools_by_keywords",
+  "search_tools_by_name",
+  "get_tool_panel",
+  "get_tool_details",
+  "get_tool_input_template",
+  "get_tool_citations",
+  "get_tool_run_examples",
+  "recommend_biocontainer",
+  "list_workflows",
+  "get_workflow_details",
+  "get_workflow_input_template",
+  "get_histories",
+  "list_history_ids",
+  "get_history_details",
+  "get_history_contents",
+  "get_dataset_details",
+  "get_collection_details",
+  "get_job_details",
+  "list_jobs",
+  "get_job_logs",
+  "get_invocations",
+  "create_history",
+  "update_history",
+  "search_iwc_workflows",
+  "get_iwc_workflows",
+  "get_iwc_workflow_details",
+  "recommend_iwc_workflows",
+  "import_workflow_from_iwc",
+  "upload_file_from_url",
+  "get_page",
+  "list_pages",
+  "list_page_revisions",
+  "get_page_revision",
+  "create_user_tool",
+  "list_user_tools",
+  "download_dataset",
 ]);
 
 /** Tools deliberately left out, with why. Anything in neither list is denied too. */
 export const TRUSTED_RECORD_EXCLUDED: Readonly<Record<string, string>> = {
-  mcp__galaxy__run_tool: "submits outside the approval; loom_submit is the gated path",
-  mcp__galaxy__invoke_workflow: "submits outside the approval; loom_submit is the gated path",
-  mcp__galaxy__run_user_tool: "submits outside the approval; loom_submit is the gated path",
-  mcp__galaxy__run_galaxy_tool: "code mode runs arbitrary operations",
-  mcp__galaxy__delete_user_tool: "not reviewed yet",
-  mcp__galaxy__cancel_workflow_invocation: "not reviewed yet",
-  mcp__galaxy__upload_file: "reads a file on the Loom host",
-  mcp__galaxy__create_page:
-    "Page content carries the registry; notebook_push_to_galaxy is the one writer",
-  mcp__galaxy__update_page:
-    "Page content carries the registry; notebook_push_to_galaxy is the one writer",
-  mcp__galaxy__revert_page_revision:
+  run_tool: "submits outside the approval; loom_submit is the gated path",
+  invoke_workflow: "submits outside the approval; loom_submit is the gated path",
+  run_user_tool: "submits outside the approval; loom_submit is the gated path",
+  delete_user_tool: "not reviewed yet",
+  cancel_workflow_invocation: "not reviewed yet",
+  upload_file: "reads a file on the Loom host",
+  create_page: "Page content carries the registry; notebook_push_to_galaxy is the one writer",
+  update_page: "Page content carries the registry; notebook_push_to_galaxy is the one writer",
+  revert_page_revision:
     "Page content carries the registry; notebook_push_to_galaxy is the one writer",
   galaxy_upload_local_file: "reads a file on the Loom host",
   lesson_propose: "writes the local lesson bank, which the registry profile doesn't review",
@@ -171,16 +227,14 @@ export const TRUSTED_RECORD_EXCLUDED: Readonly<Record<string, string>> = {
 const TRUSTED_RECORD_CONSTRAINTS: Readonly<
   Record<string, (input: Record<string, unknown>) => string | null>
 > = {
-  // The memory form only: with a file_path galaxy-mcp writes wherever it is told.
-  mcp__galaxy__download_dataset: (input) =>
+  // The memory form only: with a file_path galaxy-ops writes wherever it is told.
+  download_dataset: (input) =>
     input.file_path !== undefined && input.file_path !== null
       ? "download_dataset with a file_path writes a local file; use it without one"
       : null,
   // Same rule as the default profile: no destructive history update.
-  mcp__galaxy__update_history: (input) =>
-    classifyGalaxyDestructive("mcp__galaxy__update_history", input)
-      ? "a destructive history update"
-      : null,
+  update_history: (input) =>
+    classifyGalaxyDestructive("update_history", input) ? "a destructive history update" : null,
 };
 
 export function isTrustedRecordProfile(): boolean {
@@ -258,15 +312,16 @@ export function shouldBlockTool(
     if (isPathAllowed(raw, allowlist, cwd)) return undefined;
     return { block: true, reason: `path "${raw}" is not in the remote-mode allowlist` };
   }
-  // Destructive Galaxy ops (whole-history delete/purge) -- called directly or via the
-  // code-mode run_galaxy_tool envelope -- are blocked in remote mode: this gate has no
-  // confirmation UI to require an are-you-sure (#338). It runs before the allowlist so a
-  // delete/purge isn't waved through as a curated Galaxy call. A remote-confirm UX is a
-  // follow-up.
+  // Destructive Galaxy ops (whole-history delete/purge) -- called directly or through a
+  // proxy -- stay blocked in remote mode (#338), even though the brain's destructive gate can
+  // now confirm the tools galaxy-ops marks destructive here: a headless --mode json container
+  // has no one to answer that confirm, and losing a whole history is the case not worth
+  // risking. It runs before the allowlist so a delete/purge isn't waved through as a curated
+  // Galaxy call.
   if (classifyGalaxyDestructive(toolName, input)) {
     return {
       block: true,
-      reason: `${toolName} is a destructive Galaxy operation; blocked in remote mode (no confirmation UI available)`,
+      reason: `${toolName} is a destructive Galaxy operation; blocked in remote mode (delete or purge the history in Galaxy itself)`,
     };
   }
   if (profile === "trustedRecord") return trustedRecordBlock(toolName, input);
@@ -278,7 +333,7 @@ export function shouldBlockTool(
     };
   }
   // Curated remote surface -> allowed.
-  if (ALLOWED_EXACT.has(toolName)) return undefined;
+  if (ALLOWED_EXACT.has(toolName) || GALAXY_TOOLS.has(toolName)) return undefined;
   if (ALLOWED_PREFIXES.some((p) => hasToolPrefix(toolName, p))) return undefined;
   // Default deny: bash/grep/find/ls, egress tools, experiments, future tools.
   return { block: true, reason: `${toolName} is not available in remote mode` };

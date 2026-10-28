@@ -69,7 +69,7 @@ reference; Olit reuses Orbit's chat interface.
 | Agent runtime | Local or server (pi) | Browser worker (pi-durable) |
 | Computation | Local environment and Galaxy | Galaxy, plus Pyodide |
 | Shell | Yes | No |
-| Galaxy access | MCP | Your Galaxy session |
+| Galaxy access | In-process galaxy-ops, your API key | Your Galaxy session |
 | Delivered as | Desktop app or web service | Galaxy visualization plugin |
 
 For a shell, local software or unrestricted networking, use Orbit.
@@ -89,6 +89,11 @@ npm run dev        # builds (fetching Pyodide and the skills corpus on first run
 npm test           # unit tests, linting, type checks, vendored-file checks, browser tests
 npm run stale      # where the pinned upstreams stand
 ```
+
+`core/src/agent/pi-host.ts` (Orbit's ExtensionAPI over pi-durable) has a type-only import of
+`@earendil-works/pi-coding-agent`, and `pi-host.orbit.test.ts` boots `extensions/loom` on it, so
+`npm run typecheck` and `npm run test:unit` in `core/` also need the repo root installed (`npm ci`
+at the top level; CI does both). Neither package is a dependency of this workspace.
 
 `npm run dev` against a local Galaxy and a model:
 

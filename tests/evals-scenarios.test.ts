@@ -181,10 +181,13 @@ import {
 } from "../extensions/loom/observations";
 import { factsForToolResult } from "../extensions/loom/observation-triggers";
 import { scanObservationForLeaks, validateObservation } from "../shared/observation-contract.js";
+import { bareFamily } from "../shared/galaxy-tool-family.js";
 import type { ObservationEnvelope } from "../extensions/loom/observations";
 
 describe("observation-redaction-hostile-result: the fixture against the real pipeline", () => {
   const dir = path.join(scenariosDir, "observation-redaction-hostile-result");
+  // The shell's Galaxy tools, under the names the model calls.
+  const family = bareFamily(["run_tool"]);
   const entries = fs
     .readFileSync(path.join(dir, "cwd", "observations.jsonl"), "utf-8")
     .split("\n")
@@ -229,7 +232,7 @@ describe("observation-redaction-hostile-result: the fixture against the real pip
       "unknown",
     ];
     entries.forEach((entry, i) => {
-      const facts = factsForToolResult(entry.tool, entry.args, entry.text)!;
+      const facts = factsForToolResult(entry.tool, entry.args, entry.text, family)!;
       const checked = buildCheckedObservation(facts, envelope, "full");
       expect(checked.errors, entry.text).toEqual([]);
       expect(checked.leaks, entry.text).toEqual([]);
@@ -242,7 +245,7 @@ describe("observation-redaction-hostile-result: the fixture against the real pip
 
   it("leaves nothing identifying in what the builder produces, sendable or not", () => {
     for (const entry of entries) {
-      const facts = factsForToolResult(entry.tool, entry.args, entry.text)!;
+      const facts = factsForToolResult(entry.tool, entry.args, entry.text, family)!;
       for (const shape of ["full", "structured"] as const) {
         const obs = buildObservation(facts, envelope, shape);
         expect(validateObservation(obs), obs.signature).toEqual({ ok: true });

@@ -126,26 +126,6 @@ function dumpRun(
   }
 }
 
-/**
- * Point uv back at the real cache. The fake HOME would otherwise give every
- * run an empty one, and `uvx galaxy-mcp` would reinstall from PyPI on each
- * spawn -- long enough to blow pi's 10s wait for direct MCP servers before the
- * first prompt, so the model's opening Galaxy calls come back "Tool not found"
- * and the run grades a cold install instead of Loom.
- */
-export function uvCacheEnv(
-  env: NodeJS.ProcessEnv = process.env,
-  home = os.homedir(),
-): Record<string, string> {
-  return {
-    UV_CACHE_DIR:
-      env.UV_CACHE_DIR ?? path.join(env.XDG_CACHE_HOME ?? path.join(home, ".cache"), "uv"),
-    UV_PYTHON_INSTALL_DIR:
-      env.UV_PYTHON_INSTALL_DIR ??
-      path.join(env.XDG_DATA_HOME ?? path.join(home, ".local", "share"), "uv", "python"),
-  };
-}
-
 function readNotebook(cwd: string): string | null {
   const nbPath = path.join(cwd, "notebook.md");
   if (!fs.existsSync(nbPath)) return null;
@@ -222,7 +202,6 @@ function spawnLoom(
     LOOM_FRESH_SESSION: "1",
     HOME: fakeHome, // isolates ~/.loom/config.json reads
     USERPROFILE: fakeHome, // os.homedir() reads this one on Windows
-    ...uvCacheEnv(),
   };
 
   const args = ["--mode", "json"];

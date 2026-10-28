@@ -21,7 +21,9 @@
  *   by real submissions. If you are auditing a record and the activity log
  *   has that row in it, the provenance in that notebook was replayed.
  *
- * Each line: `{tool, args?, result, isError?, stepAnchor?}`.
+ * Each line: `{tool, args?, result, isError?, stepAnchor?}`. `tool` is the name the model would
+ * have called, read through the shell's Galaxy tool family the way a live call is, so a name no
+ * shell offers any more (the retired MCP spelling of run_tool) is refused rather than recorded.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -29,7 +31,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { readEnv } from "../../shared/orbit-env.js";
 import { appendActivityEvent } from "./activity";
-import { handleSubmissionResult } from "./galaxy-submission-capture";
+import { handleSubmissionResult, submissionToolName } from "./galaxy-submission-capture";
+import { galaxyToolFamily } from "./galaxy-tool-source";
 import { getNotebookPath, setCurrentStepAnchor } from "./state";
 
 export interface ReplayEntry {
@@ -106,14 +109,29 @@ export function registerSubmissionReplay(pi: ExtensionAPI): void {
       payload: { file: path.relative(sessionDir, file), entries: entries.length },
     });
 
+    const family = galaxyToolFamily();
     for (const [index, entry] of entries.entries()) {
+      const toolName = submissionToolName(entry.tool, family);
+      if (!toolName) {
+        appendActivityEvent(sessionDir, {
+          timestamp: new Date().toISOString(),
+          kind: "submission.unparsed",
+          source: "submission-replay",
+          payload: {
+            tool: entry.tool,
+            step_anchor: entry.stepAnchor ?? null,
+            reason: `${entry.tool} is not a Galaxy submission tool this shell offers`,
+          },
+        });
+        continue;
+      }
       // Set it for every entry, not just the ones that name one: leaving the
       // previous entry's anchor in place made an entry with no `stepAnchor`
       // inherit its predecessor's step instead of being unattributed.
       setCurrentStepAnchor(entry.stepAnchor ?? null);
       await handleSubmissionResult(
         `replay-${index}`,
-        entry.tool,
+        toolName,
         entry.result,
         entry.isError === true,
         // Replay has no start event, so hand the dispatch details straight in

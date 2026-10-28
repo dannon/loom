@@ -21,8 +21,10 @@ Today the primary shells are:
 
 - `loom` -- terminal CLI ([`bin/loom.js`](../bin/loom.js))
 - Orbit -- Electron desktop shell ([`app/`](../app/))
+- the web shell -- the Orbit renderer over a WebSocket to a brain subprocess ([`web/`](../web/))
+- the browser shell -- Orbit's chat UI with the agent in a browser worker, shipped as the Olit Galaxy visualization plugin ([`browser/`](../browser/))
 
-The key rule is that shells do not become alternate brains. They render and orchestrate the same Loom runtime.
+The key rule is that shells do not become alternate brains. They render and orchestrate the same Loom runtime. The browser shell is the one exception today: it still carries its own agent, which is being replaced by this brain (see [Browser shell](#browser-shell-browser)).
 
 ## System overview
 
@@ -33,7 +35,7 @@ Shell (CLI / Orbit / future web)
   ↓ Pi RPC over JSON-line stdio
 Loom brain (Pi extension in extensions/loom/)
   ↓
-Galaxy MCP (galaxy-mcp via uvx) + Galaxy tools/workflows
+In-process Galaxy tools (galaxy-ops) + Galaxy tools/workflows
   ↓
 notebook.md + git history in the analysis directory
 ```
@@ -43,7 +45,9 @@ Core repository areas:
 - [`extensions/loom/`](../extensions/loom/) -- brain runtime (Pi extension)
 - [`bin/loom.js`](../bin/loom.js) -- CLI bootstrap
 - [`app/`](../app/) -- Orbit Electron shell
-- [`shared/`](../shared/) -- cross-boundary contracts (config, shell-contract, team-dispatch-contract)
+- [`web/`](../web/) -- web shell (Orbit renderer over a WebSocket)
+- [`browser/`](../browser/) -- browser shell (agent in a worker; Olit)
+- [`shared/`](../shared/) -- cross-boundary contracts (config, shell-contract, team-dispatch-contract, capability profile)
 - analysis directory -- `notebook.md`, `activity.jsonl`, git history
 
 ## Design principles
@@ -85,7 +89,7 @@ The Loom brain is loaded as a Pi extension from [`extensions/loom/`](../extensio
 
 - boots Pi in RPC mode with `extensions/loom` loaded
 - loads `~/.loom/config.json` via `shared/loom-config.js`
-- clears the Galaxy/BRC entries older versions left in `~/.pi/agent/mcp.json` (the brain now registers those servers with pi itself, Galaxy only when credentials are present), saving the old file as `mcp.json.loom-backup` first; a `galaxy` or `brc-analytics` entry the user wrote for pi's built-in MCP is left alone and reported, since a file entry wins over the registration
+- clears the Galaxy/BRC entries older versions left in `~/.pi/agent/mcp.json` (the brain now registers brc-analytics with pi itself and runs the Galaxy tools in-process), saving the old file as `mcp.json.loom-backup` first; a `galaxy` or `brc-analytics` entry the user wrote for pi's built-in MCP is left alone and reported, since a file entry wins over the registration
 - forwards `GALAXY_URL` / `GALAXY_API_KEY` into the agent's environment
 
 The CLI never owns analysis semantics. Slash commands behave the same as in Orbit; widget events collapse to text summaries in the terminal.
@@ -109,6 +113,20 @@ The web shell shares the Orbit renderer over a WebSocket bridge to a brain subpr
 
 The hosted multi-user shape is deferred -- the IT pathway gives per-user isolation for free without a multi-tenant server.
 
+### Browser shell (`browser/`)
+
+The browser shell runs with no server process of its own. Orbit's chat UI (imported from `app/src/renderer`, not copied) mounts in the page, the agent runs in a worker, and conversations persist in the browser's private storage. It ships as `@galaxyproject/olit`, a Galaxy visualization plugin; [`browser/LAYOUT.md`](../browser/LAYOUT.md) maps the packages.
+
+It is mid-migration, so it does not yet follow the one-brain rule:
+
+- **Today** the worker runs its own agent in `browser/core/src/agent/` on pi-durable (`Runtime.open`), with its own prompt, tools and guards, and its own galaxy-ops-backed Galaxy tools. Those brain modules are an interim copy, slated for deletion; the worker, `pi-host.ts`, storage and the other shell support in that directory stay.
+- **The target** is the worker booting this brain (`extensions/loom/`) through `browser/core/src/agent/pi-host.ts`, pi-coding-agent's `ExtensionAPI` reproduced over pi-durable, with browser-only behavior layered on top of Orbit's rather than in place of it.
+- **What is in place, on the brain side:** the brain asks the capability profile ([`shared/capability-profile.js`](../shared/capability-profile.js)) what the shell can do -- a local shell, a local file surface, where the notebook lives, direct network, pi's MCP layer, which UI answers prompts -- instead of reading shell-specific env vars. The Node shells derive it from env; a shell with no env installs one with `setCapabilityProfile`. The brain's Galaxy tools come from one in-process source over galaxy-ops ([`galaxy-tool-source.ts`](../extensions/loom/galaxy-tool-source.ts)), the shared source for the galaxy-ops operation tools in the CLI, Orbit and the web shell; Galaxy MCP is no longer launched. Notebook records and provenance go through seams ([`record-store-seam.ts`](../extensions/loom/record-store-seam.ts), [`provenance-fs.ts`](../extensions/loom/provenance-fs.ts)) so a shell without a filesystem can supply its own.
+- **What is proven, under Node only:** `browser/core/src/agent/pi-host.orbit.test.ts` boots the brain on pi-host with a worker-shaped profile (no shell, no local files, the notebook on a Page, `ui: "worker"`) and pins the Node reaches it observes and the import edges it scans for in `pi-host.orbit.golden.json`; `tests/galaxy-output.test.ts` keeps the hot-path modules free of Node imports.
+- **Not done yet:** nothing in the production worker installs the profile or boots the brain; it still runs its own agent and tools. Booting the brain in the worker, then deleting the duplicated brain modules, are the remaining steps.
+
+Until then, new brain behavior goes in `extensions/loom/` and `shared/`, not in the browser's copy (see [`CLAUDE.md`](../CLAUDE.md)).
+
 ## Shared contracts
 
 Cross-boundary code lives in [`shared/`](../shared/):
@@ -129,7 +147,7 @@ User types in Orbit
 → main forwards to AgentManager
 → AgentManager writes a JSON-RPC line to the brain's stdin
 → Pi + Loom process the turn
-→ tools edit notebook.md (Edit/Write) or call galaxy-mcp
+→ tools edit notebook.md (Edit/Write) or call the in-process Galaxy tools
 → chokidar fires on notebook write
 → ui-bridge encodes a Notebook widget payload
 → main forwards events to renderer
@@ -224,6 +242,7 @@ The shell must not:
 
 - Local execution mode is an exception path, not a mature first-class runtime.
 - Native Windows Orbit is remote-only (no local bash shell); local execution on Windows still needs WSL2 until a WSL/container local power-mode backend lands behind the `isLocalShellAvailable` seam.
-- Orbit is the richest shell; the CLI is intentionally thinner; the web shell is undecided.
+- Orbit is the richest shell; the CLI is intentionally thinner; the web shell's hosted multi-user mode is deferred.
+- The browser shell still runs its own agent (`browser/core/src/agent/`) until the worker boots this brain; see [Browser shell](#browser-shell-browser).
 - Notebook persistence is local-directory-based, which is correct for local shells but must be reconsidered for any hosted deployment.
 - Skill repo allowlist is `galaxyproject/*` only -- third-party skill repos would need a more permissive `isAllowedSkillUrl` (and a story for prompt-injection risk).

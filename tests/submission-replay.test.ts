@@ -12,6 +12,7 @@ import { resetSubmissionCapture } from "../extensions/loom/galaxy-submission-cap
 import { findInvocationBlocks } from "../extensions/loom/notebook-writer";
 import { findJobBlocks } from "../extensions/loom/galaxy-job-block";
 import { resetState, setNotebookPath } from "../extensions/loom/state";
+import { registerGalaxyTools, setGalaxyToolSource } from "../extensions/loom/galaxy-tool-source";
 
 let tmpDir: string;
 let nbPath: string;
@@ -23,6 +24,8 @@ beforeEach(() => {
   resetState();
   resetSubmissionCapture();
   setNotebookPath(nbPath);
+  // The shell's Galaxy tools, as index.ts registers them before any session starts.
+  registerGalaxyTools({ registerTool: () => {} } as never);
 });
 
 afterEach(() => {
@@ -30,6 +33,7 @@ afterEach(() => {
   resetSubmissionCapture();
   fs.rmSync(tmpDir, { recursive: true, force: true });
   delete process.env.LOOM_SUBMISSION_REPLAY;
+  setGalaxyToolSource(null);
 });
 
 const INVOCATION = {
@@ -58,6 +62,16 @@ async function runReplay(): Promise<void> {
     },
   } as never);
   for (const h of handlers) await h({ type: "session_start" }, {});
+}
+
+function activityRows(): { kind: string; source: string; payload: Record<string, unknown> }[] {
+  const file = path.join(tmpDir, "activity.jsonl");
+  if (!fs.existsSync(file)) return [];
+  return fs
+    .readFileSync(file, "utf-8")
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l));
 }
 
 function activityKinds(): string[] {
@@ -123,18 +137,9 @@ describe("submission replay: containment", () => {
 describe("submission replay: parsing", () => {
   it("skips blank and malformed lines rather than aborting", () => {
     const entries = parseReplayFile(
-      [
-        '{"tool":"mcp__galaxy__run_tool"}',
-        "",
-        "not json",
-        "{}",
-        '{"tool":"mcp__galaxy__upload_file"}',
-      ].join("\n"),
+      ['{"tool":"run_tool"}', "", "not json", "{}", '{"tool":"upload_file"}'].join("\n"),
     );
-    expect(entries.map((e) => e.tool)).toEqual([
-      "mcp__galaxy__run_tool",
-      "mcp__galaxy__upload_file",
-    ]);
+    expect(entries.map((e) => e.tool)).toEqual(["run_tool", "upload_file"]);
   });
 });
 
@@ -143,7 +148,7 @@ describe("submission replay: driving the hook", () => {
     fs.writeFileSync(
       path.join(tmpDir, "submissions.jsonl"),
       JSON.stringify({
-        tool: "mcp__galaxy__invoke_workflow",
+        tool: "invoke_workflow",
         args: { workflow_id: "c0ffee1234567890" },
         stepAnchor: "plan-a-step-1",
         result: INVOCATION,
@@ -167,7 +172,7 @@ describe("submission replay: driving the hook", () => {
     const outside = path.join(os.tmpdir(), `loom-replay-outside-${Date.now()}.jsonl`);
     fs.writeFileSync(
       outside,
-      JSON.stringify({ tool: "mcp__galaxy__invoke_workflow", result: INVOCATION }) + "\n",
+      JSON.stringify({ tool: "invoke_workflow", result: INVOCATION }) + "\n",
       "utf-8",
     );
     process.env.LOOM_SUBMISSION_REPLAY = path.relative(tmpDir, outside);
@@ -198,12 +203,12 @@ describe("submission replay: driving the hook", () => {
       path.join(tmpDir, "submissions.jsonl"),
       [
         JSON.stringify({
-          tool: "mcp__galaxy__run_tool",
+          tool: "run_tool",
           stepAnchor: "plan-a-step-1",
           result: jobs("j1"),
         }),
         // No stepAnchor: this one belongs to no step.
-        JSON.stringify({ tool: "mcp__galaxy__run_tool", result: jobs("j2") }),
+        JSON.stringify({ tool: "run_tool", result: jobs("j2") }),
       ].join("\n") + "\n",
       "utf-8",
     );
@@ -215,5 +220,46 @@ describe("submission replay: driving the hook", () => {
     const anchorOf = (id: string) => blocks.find((b) => b.jobId === id)?.notebookAnchor;
     expect(anchorOf("j1")).toBe("plan-a-step-1");
     expect(anchorOf("j2")).toBe("unattributed");
+  });
+
+  it("records the bare name the model called", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "submissions.jsonl"),
+      JSON.stringify({ tool: "invoke_workflow", result: INVOCATION }) + "\n",
+      "utf-8",
+    );
+    process.env.LOOM_SUBMISSION_REPLAY = "submissions.jsonl";
+    await runReplay();
+    const registered = activityRows().find((r) => r.kind === "submission.registered");
+    expect(registered?.payload).toMatchObject({ tool: "invoke_workflow" });
+  });
+
+  it("refuses galaxy-mcp's spelling, which no shell offers any more", async () => {
+    const jobs = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ success: true, data: { jobs: [{ id: "j9", tool_id: "fastp" }] } }),
+        },
+      ],
+      details: { server: "galaxy" },
+    };
+    fs.writeFileSync(
+      path.join(tmpDir, "submissions.jsonl"),
+      JSON.stringify({ tool: "mcp__galaxy__run_tool", stepAnchor: "plan-a-step-1", result: jobs }) +
+        "\n",
+      "utf-8",
+    );
+    process.env.LOOM_SUBMISSION_REPLAY = "submissions.jsonl";
+
+    await runReplay();
+
+    expect(findJobBlocks(fs.readFileSync(nbPath, "utf-8"))).toHaveLength(0);
+    expect(activityKinds()).not.toContain("submission.registered");
+    const unparsed = activityRows().find((r) => r.kind === "submission.unparsed");
+    expect(unparsed).toMatchObject({
+      source: "submission-replay",
+      payload: { tool: "mcp__galaxy__run_tool", step_anchor: "plan-a-step-1" },
+    });
   });
 });

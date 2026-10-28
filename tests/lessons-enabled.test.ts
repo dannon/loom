@@ -176,17 +176,19 @@ describe("setLessonsEnabled", () => {
 
 describe("every surface is silent while the switch is off", () => {
   const failing = {
-    toolName: "mcp__galaxy__run_tool",
+    toolName: "run_tool",
     input: { tool_id: "bwa_mem" },
     content: [{ type: "text" as const, text: `Error: ${SIGNATURE} hg38` }],
   };
 
-  it("the store is empty, so the hint, the /execute note and the reproduction index have nothing", () => {
+  it("the store is empty, so the hint, the /execute note and the reproduction index have nothing", async () => {
     plantLesson();
     expect(getLessonStore().lessons).toEqual([]);
     expect(decideHintForEvent(failing, new Set())).toBeNull();
     expect(buildStepLessonNote("align reads with bwa against the build")).toBe("");
-    expect(buildReproductionLessonsContext("reproduce the published RNA-seq analysis")).toBe("");
+    expect(await buildReproductionLessonsContext("reproduce the published RNA-seq analysis")).toBe(
+      "",
+    );
   });
 
   it("the same planted lesson hints once the config turns the switch on", () => {

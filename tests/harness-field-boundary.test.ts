@@ -33,6 +33,7 @@ import {
 } from "../extensions/loom/galaxy-job-block";
 import { registerPlanTools } from "../extensions/loom/tools";
 import type { HarnessBlockFields } from "../extensions/loom/harness-block-fields";
+import { GALAXY } from "./galaxy-family-fixture";
 
 const INV_ID = "f2db41e1fa331b3e";
 const JOB_ID = "bbd44e69cb8906b5";
@@ -140,7 +141,7 @@ function recordTools(): { invocation: ToolDef; job: ToolDef } {
   const tools: ToolDef[] = [];
   const api = { registerTool: (def: ToolDef) => tools.push(def) };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registerPlanTools(api as any);
+  registerPlanTools(api as any, GALAXY);
   const invocation = tools.find((t) => t.name === "galaxy_invocation_record");
   const job = tools.find((t) => t.name === "galaxy_job_record");
   if (!invocation || !job) throw new Error("record tools not registered");

@@ -8,10 +8,9 @@
 
 /**
  * Module-level session state. Just enough to wire the file watcher,
- * track Galaxy connection, and route notebook changes to UI listeners.
+ * track the current Galaxy history, and route notebook changes to UI listeners.
  */
 export interface AnalystState {
-  galaxyConnected: boolean;
   currentHistoryId: string | null;
   notebookPath: string | null;
   notebookLoaded: boolean;

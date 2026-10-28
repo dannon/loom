@@ -26,17 +26,19 @@ it wrote is often more informative than a screenshot.
 
 ## Developer setup
 
-You need **Node 22.19+** (see [`.nvmrc`](.nvmrc)), **git**, and
-[**uv**](https://docs.astral.sh/uv/) on `PATH` (Galaxy MCP runs through it).
+You need **Node 22.19+** (see [`.nvmrc`](.nvmrc)) and **git**. The Galaxy tools run
+in-process, so Galaxy needs nothing else. [**uv**](https://docs.astral.sh/uv/) is optional: the
+vendored planemo skills can run planemo through `uvx`, or use a pip-installed planemo.
 
 ```bash
 # macOS
-brew install node git uv
+brew install node git
+brew install uv            # optional, for the planemo skills' uvx route
 
 # Ubuntu/Debian
 sudo apt install -y git curl build-essential
 curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash && source ~/.bashrc && nvm install --lts
-curl -LsSf https://astral.sh/uv/install.sh | sh
+curl -LsSf https://astral.sh/uv/install.sh | sh   # optional, for the planemo skills' uvx route
 ```
 
 Then:

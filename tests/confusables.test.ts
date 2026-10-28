@@ -54,7 +54,7 @@ describe("findConfusablesMatch", () => {
   const candidates = [
     "mcp__brc_analytics__get_organism",
     "mcp__brc_analytics__search_organisms",
-    "mcp__galaxy__run_tool",
+    "run_tool",
     "web_search",
   ];
 

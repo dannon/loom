@@ -54,14 +54,14 @@ jobs:
             platform: darwin
           # Linux x64 — produces .deb, .rpm, and .zip. Works natively on
           # Linux and inside WSL2 (with WSLg) on Windows 11.
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             arch: x64
             platform: linux
           # Linux arm64 — same .deb/.rpm/.zip outputs, built natively on
           # GitHub's free arm64 Linux runner (public repos). Unblocks arm64
           # hosts (Jetson, Raspberry Pi, arm64 servers) that can't run the x64
           # installer or its bundled x64 uv. ubuntu-24.04-arm is the arm64
-          # counterpart to ubuntu-latest (currently 24.04).
+          # counterpart to the pinned x64 ubuntu-24.04.
           - os: ubuntu-24.04-arm
             arch: arm64
             platform: linux
@@ -102,7 +102,7 @@ jobs:
   publish:
     needs: build
     if: github.ref_type == 'tag'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -140,7 +140,7 @@ jobs:
   # gates quality.
   publish-npm:
     if: github.ref_type == 'tag'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       id-token: write
       contents: read

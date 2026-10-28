@@ -102,7 +102,12 @@ export interface ToolResultAssertions {
 
 export interface ToolResultExpectation {
   name: string;
-  /** Each key must be present in the result's `details` with this value (compared as strings). */
+  /**
+   * Each key must be present in the result's `details` with this value
+   * (compared as strings). A key that is not a top-level field is read as a
+   * dotted path, with or without a leading `details.` -- `details.galaxy.tool`
+   * and `galaxy.tool` both reach the in-process Galaxy tools' nested facts.
+   */
   detailsContains?: Record<string, string>;
   /** The result's text content must contain this substring. */
   textContains?: string;
@@ -178,9 +183,9 @@ export interface Scenario {
    */
   requiresModel?: boolean;
   /**
-   * The scenario needs a live Galaxy MCP server: GALAXY_URL and GALAXY_API_KEY
-   * in the environment (or evals/.env). Without them no galaxy server
-   * registers, and a run would fail as if the model had chosen not to call a
+   * The scenario needs a live Galaxy: GALAXY_URL and GALAXY_API_KEY in the
+   * environment (or evals/.env). Without them every Galaxy call fails on
+   * credentials, and a run would fail as if the model had chosen not to call a
    * Galaxy tool -- so the runner skips it instead.
    */
   requiresGalaxy?: boolean;

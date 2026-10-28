@@ -5,7 +5,8 @@ import {
   INVOCATION_FAILURE_REFERENCE,
   JOB_FAILURE_REFERENCE,
 } from "../extensions/loom/invocation-failure-hint";
-import { applySkillTriggers } from "../extensions/loom/skill-triggers";
+import { applySkillTriggers, skillTriggers } from "../extensions/loom/skill-triggers";
+import { GALAXY } from "./galaxy-family-fixture";
 
 // The hint now fires through the skill-triggers table; drive it the way a
 // galaxy_invocation_check_all result reaches it.
@@ -14,6 +15,7 @@ function appendInvocationFailureHint<T extends { type: string; text?: string }>(
     applySkillTriggers(
       { toolName: "galaxy_invocation_check_all", isError: false, content },
       () => [],
+      skillTriggers(GALAXY),
     )?.content ?? null
   );
 }

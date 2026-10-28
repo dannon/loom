@@ -1,0 +1,25 @@
+{
+  "name": "execution (bare tools): an approved plan is actually executed",
+  "description": "The Galaxy tools are galaxy-ops operations registered in-process under bare names. Three turns: once approval is given and the parameters are reviewed, the agent must actually call run_tool rather than print the call as a code block. The dataset is named by position so the scenario resolves against any Galaxy.",
+  "tier": 2,
+  "requiresModel": true,
+  "requiresGalaxy": true,
+  "inputs": [
+    "Run the Add column tool (tool id `addValue`) on the first dataset in history hist1, adding the value 7 as a new column. Draft a plan first and wait for my approval.",
+    "I approve the plan above. Show the full parameter table for review before executing.",
+    "The parameters look right. Go ahead and run it."
+  ],
+  "timeoutMs": 420000,
+  "assertions": {
+    "toolCalls": {
+      "mustInclude": [
+        {
+          "name": "run_tool",
+          "argsContains": {
+            "tool_id": "addValue"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -170,28 +170,41 @@ describe("toolCandidates / toolMatches", () => {
 });
 
 describe("mcpToolMatches", () => {
-  it("compares after stripping either prefix, on both sides", () => {
+  it("compares after stripping the galaxy_ prefix, on both sides", () => {
     expect(mcpToolMatches("galaxy_run_tool", "galaxy_run_tool")).toBe(true);
-    expect(mcpToolMatches("mcp__galaxy__run_tool", "galaxy_run_tool")).toBe(true);
+    expect(mcpToolMatches("run_tool", "galaxy_run_tool")).toBe(true);
     expect(mcpToolMatches("galaxy_run_tool", "run_tool")).toBe(true);
     expect(mcpToolMatches("galaxy_run_tool", "galaxy_upload_file")).toBe(false);
     expect(mcpToolMatches("", "galaxy_run_tool")).toBe(false);
   });
 
-  it("does not take another server sharing the galaxy prefix for galaxy-mcp", () => {
-    // A server named "galaxy_" or "galaxy__x" registers under pi as
-    // mcp__galaxy___<tool> or mcp__galaxy__x__<tool>.
-    expect(mcpToolMatches("mcp__galaxy___run_tool", "galaxy_run_tool")).toBe(false);
-    expect(mcpToolMatches("mcp__galaxy__x__run_tool", "galaxy_run_tool")).toBe(false);
+  it("does not take another MCP server's tool for a Galaxy one", () => {
+    // pi registers a server's tools as mcp__<server>__<tool>.
+    expect(mcpToolMatches("mcp__brc_analytics__run_tool", "galaxy_run_tool")).toBe(false);
     expect(mcpToolMatches("mcp__Galaxy__run_tool", "galaxy_run_tool")).toBe(false);
   });
 
   it("does not let a lesson's tool name line up with such a server either", () => {
     // The corpus validator accepts these spellings, so the matcher has to
     // refuse them itself.
-    expect(mcpToolMatches("mcp__galaxy___run_tool", "galaxy__run_tool")).toBe(false);
-    expect(mcpToolMatches("mcp__galaxy__x__run_tool", "galaxy_x__run_tool")).toBe(false);
+    expect(
+      mcpToolMatches("mcp__brc_analytics__run_tool", "galaxy_mcp__brc_analytics__run_tool"),
+    ).toBe(false);
     expect(mcpToolMatches("galaxy__run_tool", "galaxy__run_tool")).toBe(false);
+  });
+
+  it("still fires a stored lesson written against the retired mcp__galaxy__ spelling", () => {
+    expect(mcpToolMatches("run_tool", "mcp__galaxy__run_tool")).toBe(true);
+    expect(mcpToolMatches("galaxy_run_tool", "mcp__galaxy__run_tool")).toBe(true);
+    expect(mcpToolMatches("upload_file", "mcp__galaxy__run_tool")).toBe(false);
+    // The shape check still applies after the legacy strip.
+    expect(mcpToolMatches("run_tool", "mcp__galaxy___run_tool")).toBe(false);
+    expect(mcpToolMatches("x__run_tool", "mcp__galaxy__x__run_tool")).toBe(false);
+  });
+
+  it("takes the legacy spelling from the lesson only, not from a call", () => {
+    // A server the user named "galaxy" is not the in-process Galaxy tools.
+    expect(mcpToolMatches("mcp__galaxy__run_tool", "galaxy_run_tool")).toBe(false);
   });
 });
 
@@ -257,13 +270,13 @@ describe("matchToolEvent", () => {
     ]);
   });
 
-  it("matches the tool and its arguments when pi spells it mcp__galaxy__", () => {
+  it("matches the tool and its arguments under its bare name", () => {
     const byMcp = lesson("a/mcp", { mcp_tools: ["galaxy_run_tool"] });
     const byTool = lesson("b/tool", { tools: ["featurecounts"] });
-    const out = matchToolEvent(
-      ev({ toolName: "mcp__galaxy__run_tool", input: { tool_id: GUID } }),
-      [byMcp, byTool],
-    );
+    const out = matchToolEvent(ev({ toolName: "run_tool", input: { tool_id: GUID } }), [
+      byMcp,
+      byTool,
+    ]);
     expect(out.map((m) => [m.lesson.id, m.trigger])).toEqual([
       ["a/mcp", "tool"],
       ["b/tool", "tool"],

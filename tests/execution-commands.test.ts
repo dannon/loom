@@ -81,6 +81,8 @@ describe("registerExecutionCommands", () => {
     expect(prompt).toContain("Only after verification succeeds");
     expect(prompt).toContain("created but not verified");
     expect(prompt).toContain("Do NOT claim the artifact or step is done");
+    // There is no Galaxy MCP server to invoke through any more.
+    expect(prompt).not.toMatch(/Galaxy MCP|MCP tools/);
   });
 
   it("arms the step anchor and goes live when the run starts", async () => {

@@ -11,7 +11,7 @@
  *   npm run evals -- <scenario>         -- filter to a single scenario directory
  *   npm run evals -- --model <id>       -- filter to a single model id
  *   npm run evals -- <scenario> --model <id>
- *   npm run evals -- galaxy-mcp --galaxy-cleanup   -- purge this run's loom-eval-* histories
+ *   npm run evals -- galaxy-tools --galaxy-cleanup -- purge this run's loom-eval-* histories
  *
  * A scenario filter that isn't an exact directory name matches as a prefix.
  */
