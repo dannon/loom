@@ -192,13 +192,14 @@ describe("a turn", () => {
     expect(contentText(results(result.entries)[0].content)).toBe("all done");
   });
 
-  it("ends a run that spends its turns, as pi-durable's turn limit", async () => {
+  it("ends a run that spends its turns, on the round that reaches the cap", async () => {
     const replies = Array.from({ length: 5 }, () => ({
       calls: [{ name: "get_server_info", args: {} }],
     }));
     const { result } = await turn(replies, { max_steps: 3 });
-    expect(result).toMatchObject({ status: "unanswered", reason: "turn_limit" });
-    expect(results(result.entries)).toHaveLength(3);
+    const ends = results(result.entries);
+    expect(ends).toHaveLength(3);
+    expect((ends[2].details as { turnLimit?: boolean }).turnLimit).toBe(true);
   });
 
   it("refuses a tool the session does not grant, naming the capability", async () => {

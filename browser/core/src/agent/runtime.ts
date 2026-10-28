@@ -219,6 +219,7 @@ export class Runtime {
     const extension = agentExtension({
       brand,
       galaxy,
+      maxTurns: config.max_steps || MAX_STEPS,
       clients: (signal) => ({
         galaxy: connectGalaxy({ ...galaxyOptions, signal }),
         web: connectWeb(signal),
@@ -264,7 +265,6 @@ export class Runtime {
         registry,
         settings: {
           ...LOOP,
-          maxTurns: config.max_steps || MAX_STEPS,
           get compaction() {
             const reserveTokens =
               current.config.ai_reserve_tokens ||

@@ -221,6 +221,8 @@ export class ChatView {
         this.card(message.toolCallId, message.toolName);
         this.chat.updateToolCard(message.toolCallId, message.isError ? "error" : "done", text);
       }
+      // The round at the turn cap ends the run without an answer; say so, not that it went quiet.
+      if ((message.details as { turnLimit?: boolean } | undefined)?.turnLimit) this.run.exhausted = true;
       const made = artifactsOf([entry]);
       if (made.length && !this.restoring) this.hooks.artifacts(made, false);
     }

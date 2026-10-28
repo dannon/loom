@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Models } from "@earendil-works/pi-ai";
+import { createModels } from "@earendil-works/pi-ai";
 import {
   createRegistry,
   defineDoc,
@@ -849,8 +849,9 @@ describe("the follow-up policy document", () => {
       history: "latest",
       fork: "initial",
       initial: () => ({ automatic: 0, paused: false }),
+      checkpointWhen: () => false,
     });
-    const options = { models: {} as Models, registry: createRegistry() };
+    const options = { models: createModels(), registry: createRegistry() };
     const first = await Harness.open(await openNodeSqliteStorage(file), options, context);
     const conversation = await first.createConversation(
       { ownership: { kind: "ownerless" } },

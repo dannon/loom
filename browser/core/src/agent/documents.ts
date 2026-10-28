@@ -14,6 +14,7 @@ export const Binding = defineDoc<{
   history: "latest",
   fork: "current",
   initial: () => ({}),
+  checkpointWhen: () => false,
 });
 
 export const MAX_AUTO_FOLLOW_UPS = 3;
@@ -44,6 +45,7 @@ export const FollowUps = defineDoc<Policy>({
   fork: "initial",
   initial: () => ({ automatic: 0, paused: false, pending: [] }),
   migrate: (value) => ({ automatic: 0, paused: false, pending: [], ...value }) as Policy,
+  checkpointWhen: () => false,
 });
 
 /** Why settled work waits for the user rather than starting a run, or undefined when it need not. */
@@ -65,4 +67,5 @@ export const Sessions = defineDoc<{
   version: 1,
   scope: "session",
   initial: () => ({ byHistory: {}, bySaved: {} }),
+  checkpointWhen: () => false,
 });

@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { Models } from "@earendil-works/pi-ai";
+import { createModels } from "@earendil-works/pi-ai";
 import {
   createRegistry,
   defineExtension,
@@ -184,7 +184,7 @@ async function watching(
   });
   const registry = createRegistry();
   registry.install(defineExtension({ name: "watch", tasks: [watch] }));
-  const harness = await Harness.open(storage, { models: {} as Models, registry }, context);
+  const harness = await Harness.open(storage, { models: createModels(), registry }, context);
   return { harness, watch };
 }
 

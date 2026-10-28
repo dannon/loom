@@ -55,14 +55,18 @@ export interface AgentHost {
   prompt: (input: { model?: string; provider?: string; datasetId?: string }) => string;
   ask?: AskFor;
   watch: Task<Watched, any, any, object>;
+  /** Tool rounds one run may take; the round that reaches it ends the run. */
+  maxTurns?: number;
 }
 
-/** What the agent remembers of one run: the guards' counts and the empty-answer retry. */
+/** What the agent remembers of one run: the guards' counts, the empty-answer retry, its rounds. */
 interface Run {
   id: SubmissionId | undefined;
   guard: ReturnType<typeof guards>;
   /** Whether the last empty answer was already asked again; a tool call since clears it. */
   retried: boolean;
+  /** Responses that called tools; a reload starts the count over. */
+  rounds: number;
 }
 
 const finish = defineTool({
@@ -132,6 +136,7 @@ export function agentExtension(host: AgentHost) {
         ask: host.ask && ((title, message) => host.ask!(title, message, conversationId)),
       }),
       retried: false,
+      rounds: 0,
     };
     runs.set(conversationId, run);
     return run;
@@ -192,6 +197,7 @@ export function agentExtension(host: AgentHost) {
           const run = await runOf(api, api.conversationId, context);
           run.guard.observe(calls);
           run.retried = false;
+          run.rounds += 1;
         },
         onYield: async (answer, api, context) => {
           const run = await runOf(api, api.conversationId, context);
@@ -210,7 +216,9 @@ export function agentExtension(host: AgentHost) {
           return reason ? { block: reason } : undefined;
         },
         afterTool: async (call, result, api, context) => {
-          const out = settled(await runOf(api, api.conversationId, context), call, result);
+          const run = await runOf(api, api.conversationId, context);
+          const out = settled(run, call, result);
+          if (!call.parent && run.rounds >= (host.maxTurns ?? MAX_STEPS)) return lastRound(out);
           return out === result ? undefined : out;
         },
       }),
@@ -218,6 +226,21 @@ export function agentExtension(host: AgentHost) {
   });
 
   return extension;
+}
+
+/**
+ * A result of the round that reaches the turn cap, which ends the run once every result of the
+ * round says so. pi-durable's own per-conversation `maxTurns` replaces this once it is released.
+ */
+function lastRound(result: ToolExecutionResult): ToolExecutionResult {
+  const details = result.details;
+  return {
+    ...result,
+    control: { ...result.control, terminate: true },
+    ...(details === undefined || (typeof details === "object" && !Array.isArray(details) && details)
+      ? { details: { ...details, turnLimit: true } }
+      : {}),
+  };
 }
 
 /** The reason a `beforeTool` block gave, from the diagnostic that carries it. */

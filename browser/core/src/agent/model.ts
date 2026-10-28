@@ -191,6 +191,8 @@ export function agentModels(env: Record<string, string | undefined> = {}) {
     fetchDeferred: (...args: Parameters<Models["fetchDeferred"]>) => inner.fetchDeferred(...args),
     cancelDeferred: (...args: Parameters<Models["cancelDeferred"]>) =>
       inner.cancelDeferred(...args),
+    // The Harness's identity wrapper binds this one eagerly, so it has to exist.
+    getAuth: inner.getAuth.bind(inner),
   } as unknown as Models;
 
   /** Make `target` reachable through `models`; its model and the key it sends. */
