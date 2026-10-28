@@ -1,0 +1,110 @@
+{
+  "op": "run_tool",
+  "server": "https://test.galaxyproject.org",
+  "capturedAt": "2026-10-17",
+  "args": {
+    "tool_id": "cat1",
+    "history_id": "f1c07d6d09a43dbd",
+    "inputs": {
+      "input1": {
+        "src": "hda",
+        "id": "69f114a93d358944"
+      }
+    }
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"data\":{\"outputs\":[{\"id\":\"6154384954d94839\",\"hda_ldda\":\"hda\",\"uuid\":\"e45bf599-5c5b-436c-aefe-da6f1e08453a\",\"hid\":3,\"file_ext\":\"bed\",\"peek\":null,\"model_class\":\"HistoryDatasetAssociation\",\"name\":\"Concatenate multiple datasets or collections on dataset 1\",\"deleted\":false,\"purged\":false,\"visible\":true,\"state\":\"new\",\"history_content_type\":\"dataset\",\"file_size\":0,\"create_time\":\"2026-10-17T20:59:59.711648\",\"update_time\":\"2026-10-17T20:59:59.711652\",\"data_type\":\"galaxy.datatypes.interval.Bed\",\"genome_build\":\"?\",\"validated_state\":\"unknown\",\"validated_state_message\":null,\"misc_info\":null,\"misc_blurb\":\"queued\",\"tags\":[],\"history_id\":\"f1c07d6d09a43dbd\",\"metadata_dbkey\":\"?\",\"metadata_data_lines\":3,\"metadata_comment_lines\":0,\"metadata_columns\":4,\"metadata_column_types\":[\"str\",\"int\",\"int\",\"str\"],\"metadata_column_names\":[\"Chrom\",\"Start\",\"End\",\"Name\",\"Score\",\"Strand\",\"ThickStart\",\"ThickEnd\",\"ItemRGB\",\"BlockCount\",\"BlockSizes\",\"BlockStarts\"],\"metadata_delimiter\":\"\\t\",\"metadata_chromCol\":1,\"metadata_startCol\":2,\"metadata_endCol\":3,\"metadata_strandCol\":0,\"metadata_nameCol\":4,\"metadata_viz_filter_cols\":[4],\"output_name\":\"out_file1\"}],\"output_collections\":[],\"jobs\":[{\"model_class\":\"Job\",\"id\":\"6cdd6edf01c98f71\",\"state\":\"new\",\"exit_code\":null,\"update_time\":\"2026-10-17T20:59:59.720663\",\"create_time\":\"2026-10-17T20:59:59.702896\",\"galaxy_version\":\"27.0\",\"tool_id\":\"cat1\",\"tool_version\":\"1.0.0\",\"history_id\":\"f1c07d6d09a43dbd\"}],\"implicit_collections\":[],\"produces_entry_points\":false},\"success\":true,\"message\":\"Started tool 'cat1' in history 'f1c07d6d09a43dbd'\",\"count\":null,\"pagination\":null}"
+      }
+    ],
+    "structuredContent": {
+      "data": {
+        "outputs": [
+          {
+            "id": "6154384954d94839",
+            "hda_ldda": "hda",
+            "uuid": "e45bf599-5c5b-436c-aefe-da6f1e08453a",
+            "hid": 3,
+            "file_ext": "bed",
+            "peek": null,
+            "model_class": "HistoryDatasetAssociation",
+            "name": "Concatenate multiple datasets or collections on dataset 1",
+            "deleted": false,
+            "purged": false,
+            "visible": true,
+            "state": "new",
+            "history_content_type": "dataset",
+            "file_size": 0,
+            "create_time": "2026-10-17T20:59:59.711648",
+            "update_time": "2026-10-17T20:59:59.711652",
+            "data_type": "galaxy.datatypes.interval.Bed",
+            "genome_build": "?",
+            "validated_state": "unknown",
+            "validated_state_message": null,
+            "misc_info": null,
+            "misc_blurb": "queued",
+            "tags": [],
+            "history_id": "f1c07d6d09a43dbd",
+            "metadata_dbkey": "?",
+            "metadata_data_lines": 3,
+            "metadata_comment_lines": 0,
+            "metadata_columns": 4,
+            "metadata_column_types": ["str", "int", "int", "str"],
+            "metadata_column_names": [
+              "Chrom",
+              "Start",
+              "End",
+              "Name",
+              "Score",
+              "Strand",
+              "ThickStart",
+              "ThickEnd",
+              "ItemRGB",
+              "BlockCount",
+              "BlockSizes",
+              "BlockStarts"
+            ],
+            "metadata_delimiter": "\t",
+            "metadata_chromCol": 1,
+            "metadata_startCol": 2,
+            "metadata_endCol": 3,
+            "metadata_strandCol": 0,
+            "metadata_nameCol": 4,
+            "metadata_viz_filter_cols": [4],
+            "output_name": "out_file1"
+          }
+        ],
+        "output_collections": [],
+        "jobs": [
+          {
+            "model_class": "Job",
+            "id": "6cdd6edf01c98f71",
+            "state": "new",
+            "exit_code": null,
+            "update_time": "2026-10-17T20:59:59.720663",
+            "create_time": "2026-10-17T20:59:59.702896",
+            "galaxy_version": "27.0",
+            "tool_id": "cat1",
+            "tool_version": "1.0.0",
+            "history_id": "f1c07d6d09a43dbd"
+          }
+        ],
+        "implicit_collections": [],
+        "produces_entry_points": false
+      },
+      "success": true,
+      "message": "Started tool 'cat1' in history 'f1c07d6d09a43dbd'",
+      "count": null,
+      "pagination": null
+    },
+    "details": {
+      "galaxy": {
+        "tool": "run_tool",
+        "elapsedMs": 923
+      }
+    },
+    "isError": false
+  }
+}

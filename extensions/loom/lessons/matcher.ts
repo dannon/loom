@@ -24,7 +24,6 @@
  */
 
 import { normalizeSignature, UNKNOWN_SIGNATURE } from "../../../shared/observation-contract.js";
-import { GALAXY_MCP_PREFIX, galaxyMcpToolName } from "../../../shared/galaxy-mcp-tools.js";
 import type { Lesson, Match, MatchTrigger } from "./types";
 
 /** Lower is more specific, so a signature hit beats an ambient step-text hit. */
@@ -188,32 +187,36 @@ export function toolMatches(candidates: Set<string>, want: string): boolean {
 }
 
 /**
- * The Galaxy tool behind a name, or undefined when it is not one. A
- * `mcp__galaxy__` name goes through galaxyMcpToolName, so another server that
- * shares the prefix (`mcp__galaxy___x`, `mcp__galaxy__a__x`, a server named
- * "Galaxy") is not galaxy-mcp. The remainder is held to galaxy-mcp's own name
- * shape -- no leading "_", no "__" -- on both sides, so a lesson naming
- * `galaxy__x` cannot line up with such a server either.
+ * Lessons written before the in-process tools named Galaxy tools this way; a
+ * user's lessons dir can still hold them, so they keep firing on the bare call.
+ */
+const LEGACY_LESSON_PREFIX = "mcp__galaxy__";
+
+/**
+ * The Galaxy tool behind a name, or undefined when it is not one. The remainder
+ * is held to the Galaxy tools' own name shape -- no leading "_", no "__" -- on
+ * both sides, so a lesson naming `galaxy__x` cannot line up with another
+ * server's `mcp__<server>__x` spelling.
  */
 function galaxyToolOf(name: string): string | undefined {
   const raw = name.trim();
-  const tool = raw.startsWith(GALAXY_MCP_PREFIX)
-    ? galaxyMcpToolName(raw)
-    : raw.toLowerCase().startsWith("galaxy_")
-      ? raw.slice("galaxy_".length)
-      : raw;
+  const tool = raw.toLowerCase().startsWith("galaxy_") ? raw.slice("galaxy_".length) : raw;
   if (!tool || tool.startsWith("_") || tool.includes("__")) return undefined;
   return tool.toLowerCase();
 }
 
 /**
- * Compared after stripping either prefix from both sides, so a lesson written
- * against `galaxy_run_tool` still fires when the call arrived as
- * `mcp__galaxy__run_tool`.
+ * Compared after stripping the `galaxy_` prefix from both sides, so a lesson
+ * written against `galaxy_run_tool` still fires when the call arrived as
+ * `run_tool`. The legacy prefix is stripped from the lesson only: a call named
+ * `mcp__galaxy__x` comes from a server the user added, not the Galaxy tools.
  */
 export function mcpToolMatches(toolName: string, want: string): boolean {
+  const lessonTool = want.trim().toLowerCase().startsWith(LEGACY_LESSON_PREFIX)
+    ? want.trim().slice(LEGACY_LESSON_PREFIX.length)
+    : want;
   const a = galaxyToolOf(toolName);
-  const b = galaxyToolOf(want);
+  const b = galaxyToolOf(lessonTool);
   return a !== undefined && b !== undefined && a === b;
 }
 
@@ -251,9 +254,9 @@ function rank(matches: Match[]): Match[] {
 
 export interface ToolEventInput {
   /**
-   * pi's tool name: galaxy-mcp tools as `mcp__galaxy__<name>`, Loom's own as
-   * `galaxy_<name>`. mcpToolMatches strips either prefix, so a lesson can name
-   * the tool either way.
+   * pi's tool name: the Galaxy tools by their bare names, Loom's own as
+   * `galaxy_<name>`. mcpToolMatches strips the `galaxy_` prefix, so a lesson can
+   * name the tool either way.
    */
   toolName: string;
   /** The call's arguments. */

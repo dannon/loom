@@ -3,7 +3,7 @@
 > **Stopgap, not a home.** Much of this file encodes _process_ -- behavior the
 > agent should follow -- as prompt-level nudges. That is a pragmatic patch for
 > loom, not where this belongs. Each such entry is a candidate to migrate into a
-> more durable substrate (the galaxy-mcp protocol, a skill, or a deterministic
+> more durable substrate (galaxy-ops, a skill, or a deterministic
 > check) and to be deleted here once that substrate enforces it. Prefer fixing
 > the substrate over growing this file.
 
@@ -61,11 +61,11 @@ gtn_fetch(url: "<url from search>")       → read the tutorial content
 
 ## Calling Galaxy tools: build inputs from the schema
 
-Before `mcp__galaxy__run_tool`, look up the tool's real parameter schema and
+Before `run_tool`, look up the tool's real parameter schema and
 match it exactly — do not guess input names. The fastest path:
 
-1. **`mcp__galaxy__get_tool_details(tool_id, io_details=True)`** returns the
-   full parameter schema. (`mcp__galaxy__get_tool_input_template(tool_id)` is
+1. **`get_tool_details(tool_id, io_details=True)`** returns the
+   full parameter schema. (`get_tool_input_template(tool_id)` is
    the shortcut — it hands back a ready-to-fill `inputs` skeleton with
    placeholders.)
 2. Build `inputs` to the exact parameter names. They are often not what
@@ -87,8 +87,8 @@ match it exactly — do not guess input names. The fastest path:
 
 If a tool call fails with an opaque or parameter-shaped error — in
 particular `Required parameter(s) kwd not provided in request` — treat it
-as **your `inputs` not matching this tool**, not as the MCP or the Galaxy
-version being incompatible. Re-fetch the schema, fix `inputs`, and retry.
+as **your `inputs` not matching this tool**, not as the Galaxy tools or the
+Galaxy version being incompatible. Re-fetch the schema, fix `inputs`, and retry.
 That `kwd` message is a known Galaxy server quirk that masks an input
 error; it does not mean a parameter literally named `kwd` is missing.
 
@@ -99,7 +99,7 @@ error; it does not mean a parameter literally named `kwd` is missing.
   "Calling Galaxy tools" above. Re-fetch the schema and retry.
 - **Empty results from Galaxy queries**: Check `visible: true` filter,
   increase limits, verify dataset exists.
-- **Dataset ID vs HID**: Galaxy MCP uses dataset IDs (long strings),
+- **Dataset ID vs HID**: the Galaxy tools use dataset IDs (long strings),
   not history item numbers.
 - **Job monitoring**: `galaxy_invocation_check_all` advances in-flight
   invocations deterministically; agent doesn't have to poll job-by-job.

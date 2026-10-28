@@ -11,8 +11,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as path from "path";
 import { getNotebookPath } from "./state";
 import { appendActivityEvent } from "./activity";
-import { collectSecretValues, redactSecrets } from "./secret-redaction";
-import { loadConfig } from "../../shared/loom-config.js";
+import { currentSecretValues, redactSecrets } from "./secret-redaction";
 import { withoutAppendedLessonHints } from "./lessons/pi-event-contract";
 
 // Read-only / filesystem-traversal tools clutter the log without telling the
@@ -25,7 +24,7 @@ const NOISY_TOOLS = new Set(["read", "grep", "glob", "ls", "find", "lessons_sear
 // Tools whose argument shape is known to carry credentials. activity.jsonl
 // lives in the project cwd and users may share the dir (commit it, send it
 // over for help) — never persist secrets there.
-const CREDENTIAL_TOOLS = new Set(["mcp__galaxy__connect", "galaxy_set_profile"]);
+const CREDENTIAL_TOOLS = new Set(["galaxy_set_profile"]);
 
 // Argument keys that universally indicate secrets, redacted on every tool.
 const CREDENTIAL_KEYS = new Set([
@@ -126,7 +125,7 @@ export function registerActivityHooks(pi: ExtensionAPI): void {
     if (NOISY_TOOLS.has(event.toolName)) return;
     const dir = sessionDir();
     if (!dir) return;
-    const secrets = collectSecretValues(loadConfig(), process.env);
+    const secrets = currentSecretValues({ auth: false });
     appendActivityEvent(dir, {
       timestamp: new Date().toISOString(),
       kind: "tool.end",

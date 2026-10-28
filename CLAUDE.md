@@ -44,9 +44,27 @@ cd app && npm start
 - Startup/shutdown/restore behavior belongs in `extensions/loom/session-lifecycle.ts`.
 - `/execute` and `/run` are brain-owned command semantics in `extensions/loom/execution-commands.ts`.
 - Orbit should stay a shell, not a second brain.
+- One brain, many shells applies to the browser shell (`browser/`) too, and that is where it is
+  most at risk right now. `browser/core/src/agent/` is the browser's own agent on pi-durable, with
+  its own prompt, tools and guards: an interim copy of the brain that Orbit's brain is replacing.
+  Once the worker boots Orbit's brain, the duplicated brain modules there are deleted; the worker,
+  `pi-host.ts`, storage and the other shell support stay. Fix bugs there when you have to, but
+  put new brain behavior (prompt text, guards, Galaxy tool handling, notebook and record semantics)
+  in `extensions/loom/` and `shared/`. If the browser needs something Orbit lacks, add it to Orbit
+  and let the browser pick it up; browser-only behavior goes on top of Orbit's, not in place of it.
+- A shell says what it can do through the capability profile (`shared/capability-profile.js`),
+  and swaps storage or tools through the brain's seams (`galaxy-tool-source.ts`,
+  `record-store-seam.ts`, `provenance-fs.ts`), not by forking brain code. `pi-host.orbit.test.ts`
+  boots `extensions/loom` on the browser's host under Node and pins, in `pi-host.orbit.golden.json`,
+  the Node reaches it observes and the import edges it scans for; a brain change that adds one of
+  those shows up there.
 - `extensions/loom/vendor/` is generated from `galaxyproject/agentic-plugins` at the commit pinned
   in `scripts/skills.manifest.json`. Change the manifest and run `npm run sync:skills`; never
-  hand-edit the vendored files. `npm run check:skills` is the CI drift gate.
+  hand-edit the vendored files. `npm run check:skills` is the CI drift gate. The browser shell
+  copies its galaxy-skills corpus from the same tree (`browser/core/scripts/install_skills.js`), so
+  a manifest bump moves both shells; rebuild the browser and commit its `core/skills.lock.json`.
+  Orbit's system-prompt goldens carry the skills catalog too, so a bump that changes a description
+  also needs `npx vitest run -u tests/system-prompt-surface.test.ts`.
 
 ## Validation bias
 

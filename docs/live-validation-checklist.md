@@ -5,7 +5,7 @@ This checklist matches the notebook-only Loom runtime: `notebook.md` is the dura
 ## Preconditions
 
 - Node.js and npm available
-- `uv` or `uvx` available for `galaxy-mcp`
+- `uv`/`uvx` only if testing the vendored planemo skills (the Galaxy tools run in-process)
 - A working `pi` CLI installed
 - Galaxy API key ready for the target server if testing Galaxy
 
@@ -78,7 +78,7 @@ Expected:
 - `notebook.md` contains a fenced `loom-invocation` block with `invocation_id`, `galaxy_server_url`, `notebook_anchor`, `label`, `submitted_at`, `status`, and `summary`
 - polling transitions the block from `in_progress` to `completed` or `failed`
 - the related markdown checklist item is updated after the status transition
-- the URL-backed file is fetched server-side (via `mcp__galaxy__upload_file_from_url`, or a bioblend `put_url` call), not downloaded locally and re-uploaded
+- the URL-backed file is fetched server-side (via `upload_file_from_url`, or a bioblend `put_url` call), not downloaded locally and re-uploaded
 
 ## 5. Validate restart and sidecars
 

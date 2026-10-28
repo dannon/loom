@@ -55,21 +55,6 @@ export const shownAs = (
   hash: string,
 ): string | undefined => (sessionId ? shown.get(shownKey(sessionId, pageId, hash)) : undefined);
 
-/** The text of every section headed by `heading`, split as galaxy-ops' section edit splits it. */
-export function sectionsHeaded(content: string, heading: string): string[] {
-  const out: string[] = [];
-  let inside = false;
-  content.split("\n").forEach((line, i) => {
-    const opens = /^#{1,6}\s/.test(line);
-    if (opens || i === 0) {
-      inside = opens && line === heading;
-      if (inside) out.push("");
-    }
-    if (inside) out[out.length - 1] += `${line}\n`;
-  });
-  return out;
-}
-
 export interface RecordTarget {
   galaxy: Galaxy;
   /** The session's record page, which the agent created and named; none yet means no edit. */

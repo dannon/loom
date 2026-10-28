@@ -12,11 +12,11 @@
 //   npm run measure:context -- --save DIR   # also keep the raw request bodies
 //
 // The prompt is held until every MCP server reports connected, because the
-// adapter only exposes a server's tools once it has listed them -- a cold
-// galaxy-mcp start would otherwise race the first request and vanish from it.
+// adapter only exposes a server's tools once it has listed them. That is
+// brc-analytics alone; the Galaxy tools are in-process and need no wait.
 //
 // Token counts are chars/4 estimates -- good for before/after comparisons,
-// not for billing. The Galaxy run registers galaxy-mcp against usegalaxy.org
+// not for billing. The Galaxy run points the in-process tools at usegalaxy.org
 // with a dummy key, so it needs network access but never authenticates.
 
 import { spawn } from "node:child_process";
@@ -25,6 +25,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { allOperations } from "@galaxyproject/galaxy-ops";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const TIMEOUT_MS = 120_000;
@@ -43,7 +44,16 @@ if (!flag("--no-galaxy")) runs.push({ name: "galaxy", galaxy: true });
 
 const tok = (s) => Math.round(s.length / 4);
 
-// Buckets are checked in order; first match wins.
+// The in-process Galaxy tools' bare names: galaxy-ops' operations plus the
+// ones Loom adds beside them.
+const GALAXY_OPS_NAMES = new Set([
+  ...allOperations.map((op) => op.name),
+  "list_jobs",
+  "get_job_logs",
+  "galaxy_read_output",
+]);
+
+// Buckets are checked in order; first match wins. Empty ones are not printed.
 const TOOL_GROUPS = [
   ["pi builtins", (n) => /^(read|write|edit|bash|grep|find|ls)$/.test(n)],
   ["mcp gateway", (n) => /^mcp($|_)|^mcpScript$/.test(n)],
@@ -53,7 +63,8 @@ const TOOL_GROUPS = [
     (n) => /^(web_search|fetch_content|get_search_content|source_check|code_search)$|^gtn_/.test(n),
   ],
   ["skills", (n) => n.startsWith("skills_")],
-  ["galaxy-mcp", (n) => n.startsWith("galaxy_")],
+  ["galaxy-ops", (n) => GALAXY_OPS_NAMES.has(n)],
+  ["galaxy (loom)", (n) => n.startsWith("galaxy_")],
   ["loom", () => true],
 ];
 

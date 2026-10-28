@@ -19,6 +19,7 @@ import {
 import * as anchors from "../extensions/loom/notebook-anchors";
 import { findJobBlocks, upsertJobBlock } from "../extensions/loom/galaxy-job-block";
 import { registerPlanTools } from "../extensions/loom/tools";
+import { GALAXY } from "./galaxy-family-fixture";
 
 interface ToolDef {
   name: string;
@@ -35,7 +36,7 @@ function recordTools(): { invocation: ToolDef; job: ToolDef } {
   const tools: ToolDef[] = [];
   const api = { registerTool: (def: ToolDef) => tools.push(def) };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registerPlanTools(api as any);
+  registerPlanTools(api as any, GALAXY);
   const invocation = tools.find((t) => t.name === "galaxy_invocation_record");
   const job = tools.find((t) => t.name === "galaxy_job_record");
   if (!invocation || !job) throw new Error("record tools not registered");
@@ -588,7 +589,7 @@ describe("record tools: annotate what the harness already recorded", () => {
         invocationId: INV_ID,
         galaxyServerUrl: "https://usegalaxy.org",
         notebookAnchor: "unattributed",
-        label: "mcp__galaxy__invoke_workflow",
+        label: "invoke_workflow",
         submittedAt: "2026-09-16T15:30:00Z",
         status: "in_progress",
         serverVerified: true,
@@ -640,7 +641,7 @@ describe("record tools: annotate what the harness already recorded", () => {
         jobId: JOB_ID,
         galaxyServerUrl: "https://usegalaxy.org",
         notebookAnchor: "unattributed",
-        label: "mcp__galaxy__run_tool",
+        label: "run_tool",
         toolId: "bwa_mem",
         submittedAt: "2026-09-16T15:30:00Z",
         status: "in_progress",
@@ -733,7 +734,7 @@ describe("record tools: annotate what the harness already recorded", () => {
     expect(res.success).toBe(false);
     const [block] = findInvocationBlocks(readFileSync(nbPath, "utf-8"));
     expect(block.notebookAnchor).toBe("unattributed");
-    expect(block.label).toBe("mcp__galaxy__invoke_workflow");
+    expect(block.label).toBe("invoke_workflow");
   });
 
   it("still refuses an id Galaxy denies, even with a block already carrying it", async () => {
@@ -759,7 +760,7 @@ describe("record tools: annotate what the harness already recorded", () => {
       invocationId: INV_ID,
       galaxyServerUrl: "https://other.galaxy.test",
       notebookAnchor: "unattributed",
-      label: "mcp__galaxy__invoke_workflow",
+      label: "invoke_workflow",
       submittedAt: "2026-09-16T15:30:00Z",
       status: "in_progress",
       serverVerified: false,

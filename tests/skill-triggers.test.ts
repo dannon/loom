@@ -5,15 +5,17 @@ import { join } from "path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   applySkillTriggers,
-  IWC_CANDIDATES_HINT,
+  iwcCandidatesHint,
   registerSkillTriggers,
+  skillTriggers,
   type SkillTrigger,
 } from "../extensions/loom/skill-triggers";
 import { INVOCATION_FAILED_HINT } from "../extensions/loom/invocation-failure-hint";
 import { resetState, setNotebookPath } from "../extensions/loom/state";
 import { resetActivity } from "../extensions/loom/activity";
+import { GALAXY } from "./galaxy-family-fixture";
 
-const TOOLS = ["mcp__brc_analytics__get_organism", "mcp__galaxy__run_tool"];
+const TOOLS = ["mcp__brc_analytics__get_organism", "run_tool"];
 // "brс" -- the "с" is Cyrillic.
 const CONFUSED = "mcp__brс_analytics__get_organism";
 const FAILED_CHECK = JSON.stringify({
@@ -22,12 +24,23 @@ const FAILED_CHECK = JSON.stringify({
 });
 
 const text = (t: string) => ({ type: "text", text: t });
+const TRIGGERS = skillTriggers(GALAXY);
+const IWC_CANDIDATES_HINT = iwcCandidatesHint(GALAXY);
+
+describe("iwcCandidatesHint", () => {
+  it("names the family's details tool, byte for byte", () => {
+    expect(IWC_CANDIDATES_HINT).toBe(
+      "[loom] These are ranked by word overlap, not relevance. Before offering one, call `get_iwc_workflow_details` on the plausible candidates and check their inputs against the data the user actually has (reads vs count tables, paired vs single-end). A workflow that needs another's outputs first is half of a chain, not a match. If none fit, say so. If nothing came back, retry once with just the assay; if the query had no searchable terms, ask the user what they want to find out.",
+    );
+  });
+});
 
 describe("applySkillTriggers -- the ported rows", () => {
   it("points a confusable tool name at the real one on a not-found error", () => {
     const out = applySkillTriggers(
       { toolName: CONFUSED, isError: true, content: [text(`Tool ${CONFUSED} not found`)] },
       () => TOOLS,
+      TRIGGERS,
     );
     expect(out?.fired.map((f) => f.id)).toEqual(["tool-name-confusables"]);
     expect(out?.content[0].text).toContain("Did you mean `mcp__brc_analytics__get_organism`?");
@@ -37,6 +50,7 @@ describe("applySkillTriggers -- the ported rows", () => {
     const out = applySkillTriggers(
       { toolName: "made_up", isError: true, content: [text("Tool made_up not found")] },
       () => TOOLS,
+      TRIGGERS,
     );
     expect(out).toBeNull();
   });
@@ -45,19 +59,18 @@ describe("applySkillTriggers -- the ported rows", () => {
     const out = applySkillTriggers(
       { toolName: "galaxy_invocation_check_one", isError: false, content: [text(FAILED_CHECK)] },
       () => TOOLS,
+      TRIGGERS,
     );
     expect(out?.fired.map((f) => f.id)).toEqual(["invocation-failed"]);
     expect(out?.content[0].text).toContain(INVOCATION_FAILED_HINT);
   });
 
   it("reminds the model to vet IWC candidates on recommend and search results", () => {
-    for (const toolName of [
-      "mcp__galaxy__recommend_iwc_workflows",
-      "mcp__galaxy__search_iwc_workflows",
-    ]) {
+    for (const toolName of ["recommend_iwc_workflows", "search_iwc_workflows"]) {
       const out = applySkillTriggers(
         { toolName, isError: false, content: [text('{"data":[],"count":0}')] },
         () => TOOLS,
+        TRIGGERS,
       );
       expect(out?.fired.map((f) => f.id)).toEqual(["iwc-candidates"]);
       expect(out?.content[0].text).toContain(IWC_CANDIDATES_HINT);
@@ -68,31 +81,33 @@ describe("applySkillTriggers -- the ported rows", () => {
     const truncated = '{"data": [{"name": "RNA-Seq\n\n[Output truncated: 2000 lines shown]';
     const out = applySkillTriggers(
       {
-        toolName: "mcp__galaxy__recommend_iwc_workflows",
+        toolName: "recommend_iwc_workflows",
         isError: false,
         content: [text(truncated)],
       },
       () => TOOLS,
+      TRIGGERS,
     );
     expect(out?.content[0].text).toContain(IWC_CANDIDATES_HINT);
   });
 
   it("leaves other IWC tools and failed IWC calls alone", () => {
     for (const [toolName, isError] of [
-      ["mcp__galaxy__get_iwc_workflow_details", false],
-      ["mcp__galaxy__import_workflow_from_iwc", false],
-      ["mcp__galaxy__recommend_iwc_workflows", true],
+      ["get_iwc_workflow_details", false],
+      ["import_workflow_from_iwc", false],
+      ["recommend_iwc_workflows", true],
     ] as const) {
       expect(
-        applySkillTriggers({ toolName, isError, content: [text("{}")] }, () => TOOLS),
+        applySkillTriggers({ toolName, isError, content: [text("{}")] }, () => TOOLS, TRIGGERS),
       ).toBeNull();
     }
   });
 
   it("only watches the tools a row names", () => {
     const out = applySkillTriggers(
-      { toolName: "mcp__galaxy__run_tool", isError: false, content: [text(FAILED_CHECK)] },
+      { toolName: "run_tool", isError: false, content: [text(FAILED_CHECK)] },
       () => TOOLS,
+      TRIGGERS,
     );
     expect(out).toBeNull();
   });
@@ -102,12 +117,14 @@ describe("applySkillTriggers -- the ported rows", () => {
       applySkillTriggers(
         { toolName: "galaxy_invocation_check_all", isError: true, content: [text(FAILED_CHECK)] },
         () => TOOLS,
+        TRIGGERS,
       ),
     ).toBeNull();
     expect(
       applySkillTriggers(
         { toolName: CONFUSED, isError: false, content: [text(`Tool ${CONFUSED} not found`)] },
         () => TOOLS,
+        TRIGGERS,
       ),
     ).toBeNull();
   });
@@ -157,7 +174,7 @@ describe("registerSkillTriggers", () => {
 
   function hook() {
     const on = vi.fn();
-    registerSkillTriggers({ on, getActiveTools: () => TOOLS } as unknown as ExtensionAPI);
+    registerSkillTriggers({ on, getActiveTools: () => TOOLS } as unknown as ExtensionAPI, GALAXY);
     const handler = on.mock.calls.find(([n]) => n === "message_end")![1];
     return (message: unknown) => handler({ message });
   }
@@ -222,7 +239,7 @@ describe("registerSkillTriggers", () => {
     const fire = hook();
     const res = fire({
       role: "toolResult",
-      toolName: "mcp__galaxy__run_tool",
+      toolName: "run_tool",
       toolCallId: "call-3",
       isError: false,
       content: [text("{}")],

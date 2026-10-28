@@ -15,6 +15,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { registerSraImportGate } from "../extensions/loom/sra-import-gate";
+import { GALAXY } from "./galaxy-family-fixture";
 
 // Real Pi event ordering matters: all sibling calls must be visible to the
 // gate BEFORE the first tool executes. A mock that calls hooks in our preferred
@@ -34,7 +35,7 @@ describe("SRA gate through the Pi runtime", () => {
         noPromptTemplates: true,
         noThemes: true,
         noContextFiles: true,
-        extensionFactories: [registerSraImportGate],
+        extensionFactories: [(pi) => registerSraImportGate(pi, GALAXY)],
         systemPrompt: "SRA gate test fixture.",
       });
       await loader.reload();
@@ -90,7 +91,7 @@ describe("SRA gate through the Pi runtime", () => {
               ? runs.map((run, i) => ({
                   type: "toolCall",
                   id: `single-${i}`,
-                  name: "mcp__galaxy__run_tool",
+                  name: "run_tool",
                   arguments: inputsFor(run),
                 }))
               : turn === 1
@@ -98,7 +99,7 @@ describe("SRA gate through the Pi runtime", () => {
                     {
                       type: "toolCall",
                       id: "batch",
-                      name: "mcp__galaxy__run_tool",
+                      name: "run_tool",
                       arguments: inputsFor(runs.join(",")),
                     },
                   ]
@@ -134,10 +135,10 @@ describe("SRA gate through the Pi runtime", () => {
         modelRuntime: runtime,
         model: runtime.getModel("sra-gate-fixture", "fixture"),
         thinkingLevel: "off",
-        tools: ["mcp__galaxy__run_tool"],
+        tools: ["run_tool"],
         customTools: [
           {
-            name: "mcp__galaxy__run_tool",
+            name: "run_tool",
             label: "Fixture Galaxy run",
             description: "Test-only Galaxy submission",
             parameters: Type.Object({

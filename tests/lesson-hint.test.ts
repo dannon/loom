@@ -328,7 +328,7 @@ describe("recordSurfacing + registerLessonHint", () => {
   }
 
   const event = () => ({
-    toolName: "mcp__galaxy__run_tool",
+    toolName: "run_tool",
     toolCallId: "call-1",
     input: { tool_id: "hisat2" },
     content: [text("No reference index registered for build mm39")],

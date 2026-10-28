@@ -54,11 +54,11 @@ describe("parseObservationReplayFile", () => {
   it("skips blank and malformed lines and entries with no tool", () => {
     const entries = parseObservationReplayFile(
       [
-        '{"tool":"mcp__galaxy__run_tool","text":"boom","isError":true}',
+        '{"tool":"run_tool","text":"boom","isError":true}',
         "",
         "{ broken",
         '{"text":"no tool here"}',
-        '{"tool":"mcp__galaxy__invoke_workflow","args":{"tool_id":"Filter1"},"text":"bang"}',
+        '{"tool":"invoke_workflow","args":{"tool_id":"Filter1"},"text":"bang"}',
       ].join("\n"),
     );
     expect(entries).toHaveLength(2);

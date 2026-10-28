@@ -1,0 +1,79 @@
+{
+  "op": "upload_file",
+  "server": "https://test.galaxyproject.org",
+  "capturedAt": "2026-10-17",
+  "args": {
+    "path": "/tmp/input.txt",
+    "history_id": "f1c07d6d09a43dbd"
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"data\":{\"outputs\":[{\"id\":\"69f114a93d358944\",\"hda_ldda\":\"hda\",\"uuid\":\"ffffd0d7-e8a0-4c4a-93a6-d2e344a84d43\",\"hid\":1,\"file_ext\":\"auto\",\"peek\":null,\"model_class\":\"HistoryDatasetAssociation\",\"name\":\"input.txt\",\"deleted\":false,\"purged\":false,\"visible\":true,\"state\":\"queued\",\"history_content_type\":\"dataset\",\"file_size\":0,\"create_time\":\"2026-10-17T20:59:38.858710\",\"update_time\":\"2026-10-17T20:59:38.858713\",\"data_type\":\"galaxy.datatypes.data.Data\",\"genome_build\":\"?\",\"validated_state\":\"unknown\",\"validated_state_message\":null,\"misc_info\":null,\"misc_blurb\":null,\"tags\":[],\"history_id\":\"f1c07d6d09a43dbd\",\"metadata_dbkey\":\"?\",\"output_name\":\"output0\"}],\"output_collections\":[],\"jobs\":[{\"model_class\":\"Job\",\"id\":\"5517124ff5f55d4f\",\"state\":\"new\",\"exit_code\":null,\"update_time\":\"2026-10-17T20:59:38.950842\",\"create_time\":\"2026-10-17T20:59:38.869760\",\"galaxy_version\":\"27.0\",\"tool_id\":\"__DATA_FETCH__\",\"tool_version\":\"0.1.0\",\"history_id\":\"f1c07d6d09a43dbd\"}],\"implicit_collections\":[],\"produces_entry_points\":false},\"success\":true,\"message\":\"Uploaded input.txt (1 job(s))\",\"count\":null,\"pagination\":null}"
+      }
+    ],
+    "structuredContent": {
+      "data": {
+        "outputs": [
+          {
+            "id": "69f114a93d358944",
+            "hda_ldda": "hda",
+            "uuid": "ffffd0d7-e8a0-4c4a-93a6-d2e344a84d43",
+            "hid": 1,
+            "file_ext": "auto",
+            "peek": null,
+            "model_class": "HistoryDatasetAssociation",
+            "name": "input.txt",
+            "deleted": false,
+            "purged": false,
+            "visible": true,
+            "state": "queued",
+            "history_content_type": "dataset",
+            "file_size": 0,
+            "create_time": "2026-10-17T20:59:38.858710",
+            "update_time": "2026-10-17T20:59:38.858713",
+            "data_type": "galaxy.datatypes.data.Data",
+            "genome_build": "?",
+            "validated_state": "unknown",
+            "validated_state_message": null,
+            "misc_info": null,
+            "misc_blurb": null,
+            "tags": [],
+            "history_id": "f1c07d6d09a43dbd",
+            "metadata_dbkey": "?",
+            "output_name": "output0"
+          }
+        ],
+        "output_collections": [],
+        "jobs": [
+          {
+            "model_class": "Job",
+            "id": "5517124ff5f55d4f",
+            "state": "new",
+            "exit_code": null,
+            "update_time": "2026-10-17T20:59:38.950842",
+            "create_time": "2026-10-17T20:59:38.869760",
+            "galaxy_version": "27.0",
+            "tool_id": "__DATA_FETCH__",
+            "tool_version": "0.1.0",
+            "history_id": "f1c07d6d09a43dbd"
+          }
+        ],
+        "implicit_collections": [],
+        "produces_entry_points": false
+      },
+      "success": true,
+      "message": "Uploaded input.txt (1 job(s))",
+      "count": null,
+      "pagination": null
+    },
+    "details": {
+      "galaxy": {
+        "tool": "upload_file",
+        "elapsedMs": 402
+      }
+    },
+    "isError": false
+  }
+}

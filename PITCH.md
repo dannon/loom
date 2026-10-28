@@ -21,7 +21,7 @@ Loom makes the working record explicit while the analysis is happening. Plans, p
 2. Loom creates or opens `notebook.md`.
 3. The researcher asks for exploration, a plan, execution, interpretation, or publication help.
 4. For multi-step plans, the agent drafts in chat first, waits for plan approval, shows parameters, waits for parameter approval, then edits the notebook.
-5. Galaxy work runs through Galaxy MCP by default when credentials are available.
+5. Galaxy work runs through the in-process Galaxy tools by default when credentials are available.
 6. Completed Galaxy invocations are recorded as `loom-invocation` blocks and updated by polling tools.
 
 The approval sequence is model guidance, not a hard runtime gate. The notebook is still user-editable markdown, and manual override is allowed when the researcher explicitly asks for it.

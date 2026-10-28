@@ -27,8 +27,6 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import * as fs from "fs";
-import * as fsp from "fs/promises";
 import * as path from "path";
 import { stringify as stringifyYaml } from "yaml";
 import { appendActivityEvent } from "./activity";
@@ -61,9 +59,15 @@ import {
   type InvocationYaml,
 } from "./notebook-writer";
 import { readMcpOutputFile } from "./mcp-output";
-import { ensureAttemptRecord, provenanceRelativePath } from "./galaxy-provenance";
+import { galaxyOutputStore } from "./galaxy-output-store";
+import {
+  ensureAttemptRecord,
+  provenanceRelativePath,
+  writeProvenanceSidecar,
+} from "./galaxy-provenance";
 import { getCurrentStepAnchor, getNotebookPath, setCurrentStepAnchor } from "./state";
 import { ulid } from "./ulid";
+import type { GalaxyToolFamily } from "../../shared/galaxy-tool-family.js";
 
 /** What a block carries when nothing pointed the submission at a plan step. */
 export const UNATTRIBUTED = "unattributed";
@@ -436,22 +440,11 @@ async function writeUdtDefinition(
   const stem = safeTool ? `${safeTool}-${safeUuid}` : safeUuid;
 
   const relative = path.join(UDT_PROVENANCE_DIR, `${stem}.yaml`);
-  const absolute = path.join(analysisDir, relative);
-  await fsp.mkdir(path.dirname(absolute), { recursive: true });
-  try {
-    // `wx` is O_CREAT | O_EXCL: create it or fail. That refuses to follow a
-    // symlink planted at the path (writing through it would land outside the
-    // provenance directory) and refuses to overwrite an existing definition.
-    await fsp.writeFile(absolute, stringifyYaml(representation), {
-      encoding: "utf-8",
-      flag: "wx",
-    });
-  } catch (err) {
-    // Already there: the uuid is in the name, so the same uuid means the same
-    // definition and the existing file is the record. Anything else is a real
-    // failure and the caller reports the submission as unrecorded.
-    if ((err as NodeJS.ErrnoException)?.code !== "EEXIST") throw err;
-  }
+  // Exclusive create: a planted symlink is refused and an existing definition
+  // kept (the uuid is in the name, so the same uuid means the same definition).
+  // Anything else is a real failure and the caller reports the submission as
+  // unrecorded.
+  await writeProvenanceSidecar(analysisDir, ["udt", `${stem}.yaml`], stringifyYaml(representation));
   // Always POSIX separators in the notebook: the block is read on whatever
   // platform opens the analysis next, not the one that wrote it.
   return relative.split(path.sep).join("/");
@@ -462,18 +455,23 @@ async function writeUdtDefinition(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Re-read a result pi's MCP support truncated.
+ * Re-read a result that reached the hook cut short.
  *
- * Past 20 KB pi cuts the middle out of the text and saves the full copy to a
- * temp file. What's left is not valid JSON, so without this a big mapped-over
- * submission -- precisely the one whose record matters most -- would log
- * `submission.unparsed`.
+ * Past 20 KB pi's MCP support cuts the middle out of the text and saves the
+ * full copy to a temp file; the in-process Galaxy tools show a preview instead
+ * and keep the full copy in the in-memory output store. Either way what's left
+ * is not valid JSON, so without this a big mapped-over submission -- precisely
+ * the one whose record matters most -- would log `submission.unparsed`.
  */
 // A big mapped-over submission is exactly the one whose record matters, so read
 // well past mcp_read_output's preview limit before giving up on it.
 const SUBMISSION_MAX_BYTES = 256 * 1024 * 1024;
 
 async function rereadTruncated(resolved: ResolvedResult): Promise<ResolvedResult> {
+  if (resolved.outputId) {
+    const text = galaxyOutputStore().get(resolved.outputId);
+    if (text !== undefined) return { ...resolved, value: undefined, text };
+  }
   if (!resolved.truncatedPath) return resolved;
   try {
     // Same confinement mcp_read_output applies: only a file pi itself wrote.
@@ -490,6 +488,9 @@ async function rereadTruncated(resolved: ResolvedResult): Promise<ResolvedResult
 /**
  * Handle one finished submission tool. Exported so the Tier-1 scenarios can
  * replay a recorded result through exactly this path.
+ *
+ * `toolName` is the name the model called; it picks the parser and is what the
+ * activity rows record.
  */
 export async function handleSubmissionResult(
   toolCallId: string,
@@ -500,8 +501,8 @@ export async function handleSubmissionResult(
 ): Promise<void> {
   const dispatch = takeDispatch(toolCallId, toolName, dispatchOverride);
 
-  // A failed submission is not a submission: galaxy-mcp raises rather than
-  // returning success=false, and nothing was created.
+  // A failed submission is not a submission: the Galaxy tools mark a
+  // success=false envelope as an error, and nothing was created.
   if (isError) return;
 
   const notebookPath = getNotebookPath();
@@ -516,7 +517,7 @@ export async function handleSubmissionResult(
   // would let a different payload overturn a verdict we already reached.
   if (
     !outcome.ok &&
-    resolved.truncatedPath &&
+    (resolved.truncatedPath || resolved.outputId) &&
     parseGalaxyResultEnvelope(resolved) === null &&
     toolName !== "galaxy_upload_local_file"
   ) {
@@ -665,19 +666,32 @@ async function recordAttempt(
   }
 }
 
-export function registerSubmissionCapture(pi: ExtensionAPI): void {
+/**
+ * The tool name when it is a submission this shell offers, else undefined: a
+ * Galaxy tool the family names, or Loom's own galaxy_upload_local_file, which is
+ * outside the family. A name the family does not claim is not this shell's tool,
+ * so it is not a submission either.
+ */
+export function submissionToolName(toolName: string, family: GalaxyToolFamily): string | undefined {
+  if (toolName === "galaxy_upload_local_file") return toolName;
+  const tool = family.toolName(toolName);
+  return tool !== undefined && isSubmissionTool(tool) ? tool : undefined;
+}
+
+export function registerSubmissionCapture(pi: ExtensionAPI, family: GalaxyToolFamily): void {
   pi.on("tool_execution_start", async (event) => {
-    if (!isSubmissionTool(event.toolName)) return;
+    const toolName = submissionToolName(event.toolName, family);
+    if (!toolName) return;
     const args = (event.args && typeof event.args === "object" ? event.args : {}) as Record<
       string,
       unknown
     >;
-    rememberDispatch(event.toolCallId, event.toolName, args);
+    rememberDispatch(event.toolCallId, toolName, args);
   });
 
   pi.on("tool_execution_end", async (event) => {
-    const toolName = event.toolName;
-    if (!isSubmissionTool(toolName)) return;
+    const toolName = submissionToolName(event.toolName, family);
+    if (!toolName) return;
     try {
       await handleSubmissionResult(
         event.toolCallId,

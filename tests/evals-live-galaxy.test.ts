@@ -1,15 +1,17 @@
 import { describe, it, expect } from "vitest";
+import fs from "fs";
 import path from "path";
+import { allOperations } from "@galaxyproject/galaxy-ops";
 import { evaluate } from "../evals/lib/assertions";
 import { filterScenarioDirs } from "../evals/lib/select";
-import { makeRunId, substituteRunId, uvCacheEnv } from "../evals/lib/runner";
+import { makeRunId, substituteRunId } from "../evals/lib/runner";
 import {
   EVAL_HISTORY_PREFIX,
   purgeEvalHistories,
   selectEvalHistories,
   type FetchLike,
 } from "../evals/lib/galaxy-teardown";
-import type { AnyEvent, Assertions, ScenarioRun } from "../evals/lib/types";
+import type { AnyEvent, Assertions, Scenario, ScenarioRun } from "../evals/lib/types";
 
 function run(events: AnyEvent[], assertions: Assertions): ScenarioRun {
   return {
@@ -41,7 +43,7 @@ function chat(text: string): AnyEvent {
 }
 
 describe("evals toolResults assertions", () => {
-  const userResult = end("mcp__galaxy__get_user", '{"data":{"username":"alice","id":"1"}}', {
+  const userResult = end("get_user", '{"data":{"username":"alice","id":"1"}}', {
     details: { server: "galaxy", tool: "get_user" },
   });
 
@@ -51,7 +53,7 @@ describe("evals toolResults assertions", () => {
         toolResults: {
           mustSucceed: [
             {
-              name: "mcp__galaxy__get_user",
+              name: "get_user",
               detailsContains: { server: "galaxy" },
               textContains: "username",
             },
@@ -63,12 +65,12 @@ describe("evals toolResults assertions", () => {
   });
 
   it("mustSucceed fails on an error result, wrong details, or missing text", () => {
-    const errored = end("mcp__galaxy__get_user", "Tool not found", { isError: true });
+    const errored = end("get_user", "Tool not found", { isError: true });
     for (const [events, expectation] of [
-      [[errored], { name: "mcp__galaxy__get_user" }],
-      [[userResult], { name: "mcp__galaxy__get_user", detailsContains: { server: "brc" } }],
-      [[userResult], { name: "mcp__galaxy__get_user", textContains: "[loom MCP output" }],
-      [[], { name: "mcp__galaxy__get_user" }],
+      [[errored], { name: "get_user" }],
+      [[userResult], { name: "get_user", detailsContains: { server: "brc" } }],
+      [[userResult], { name: "get_user", textContains: "[loom MCP output" }],
+      [[], { name: "get_user" }],
     ] as const) {
       const failures = evaluate(
         run([...events], { toolResults: { mustSucceed: [{ ...expectation }] } }),
@@ -77,11 +79,47 @@ describe("evals toolResults assertions", () => {
     }
   });
 
+  it("detailsContains reads dotted paths into nested details", () => {
+    const bare = end("run_tool", '{"success":true}', {
+      details: { server: "galaxy", galaxy: { tool: "run_tool", outputId: "01ABC" } },
+    });
+    const grade = (detailsContains: Record<string, string>) =>
+      evaluate(
+        run([bare], { toolResults: { mustSucceed: [{ name: "run_tool", detailsContains }] } }),
+      ).map((f) => f.assertion);
+    expect(grade({ "details.galaxy.tool": "run_tool" })).toEqual([]);
+    expect(grade({ "galaxy.tool": "run_tool" })).toEqual([]);
+    expect(grade({ "details.galaxy.outputId": "01ABC", server: "galaxy" })).toEqual([]);
+    expect(grade({ server: "galaxy" })).toEqual([]);
+    for (const miss of [
+      { "details.galaxy.tool": "get_user" },
+      { "details.galaxy.missing": "x" },
+      { "galaxy.tool.deeper": "run_tool" },
+      { "details.nothing.here": "x" },
+    ]) {
+      expect(grade(miss), JSON.stringify(miss)).toEqual(["toolResults.mustSucceed"]);
+    }
+  });
+
+  it("a top-level key that contains a dot is still read as one key", () => {
+    const dotted = end("run_tool", "{}", {
+      details: { "galaxy.tool": "flat", galaxy: { tool: "nested" } },
+    });
+    const failures = evaluate(
+      run([dotted], {
+        toolResults: {
+          mustSucceed: [{ name: "run_tool", detailsContains: { "galaxy.tool": "flat" } }],
+        },
+      }),
+    );
+    expect(failures).toEqual([]);
+  });
+
   it("mustNotSucceed tolerates a blocked call but not a successful one", () => {
-    const blocked = end("mcp__galaxy__update_history", "Destructive op denied", { isError: true });
-    const ok = end("mcp__galaxy__update_history", '{"data":{"deleted":true}}');
+    const blocked = end("update_history", "Destructive op denied", { isError: true });
+    const ok = end("update_history", '{"data":{"deleted":true}}');
     const assertions: Assertions = {
-      toolResults: { mustNotSucceed: ["mcp__galaxy__update_history"] },
+      toolResults: { mustNotSucceed: ["update_history"] },
     };
     expect(evaluate(run([blocked], assertions))).toEqual([]);
     expect(evaluate(run([blocked, ok], assertions)).map((f) => f.assertion)).toEqual([
@@ -92,46 +130,35 @@ describe("evals toolResults assertions", () => {
   it("echoedInChat requires the captured value in the chat", () => {
     const assertions: Assertions = {
       toolResults: {
-        echoedInChat: [{ name: "mcp__galaxy__get_user", pattern: '"username":\\s*"([^"]+)"' }],
+        echoedInChat: [{ name: "get_user", pattern: '"username":\\s*"([^"]+)"' }],
       },
     };
     expect(evaluate(run([userResult, chat("You are alice.")], assertions))).toEqual([]);
     const miss = evaluate(run([userResult, chat("You are bob.")], assertions));
     expect(miss.map((f) => f.detail)).toEqual([
-      "chat never repeated the 'mcp__galaxy__get_user' value \"alice\"",
+      "chat never repeated the 'get_user' value \"alice\"",
     ]);
     const noResult = evaluate(run([chat("You are alice.")], assertions));
-    expect(noResult[0].detail).toMatch(/no successful 'mcp__galaxy__get_user' result/);
+    expect(noResult[0].detail).toMatch(/no successful 'get_user' result/);
   });
 });
 
 describe("evals scenario selection", () => {
-  const dirs = ["/s/galaxy-mcp-a", "/s/galaxy-mcp-b", "/s/routing-clear-galaxy", "/s/galaxy"];
+  const dirs = ["/s/galaxy-tools-a", "/s/galaxy-tools-b", "/s/routing-clear-galaxy", "/s/galaxy"];
 
   it("an exact name wins over a prefix", () => {
     expect(filterScenarioDirs(dirs, "galaxy")).toEqual(["/s/galaxy"]);
   });
 
   it("a non-exact filter selects the whole prefix family", () => {
-    expect(filterScenarioDirs(dirs, "galaxy-mcp")).toEqual(["/s/galaxy-mcp-a", "/s/galaxy-mcp-b"]);
+    expect(filterScenarioDirs(dirs, "galaxy-tools")).toEqual([
+      "/s/galaxy-tools-a",
+      "/s/galaxy-tools-b",
+    ]);
   });
 
   it("no filter selects everything", () => {
     expect(filterScenarioDirs(dirs, undefined)).toEqual(dirs);
-  });
-});
-
-describe("evals uv cache passthrough", () => {
-  it("defaults to the real home's cache and honors explicit settings", () => {
-    // path.join, not literals: the runner builds these with the platform separator.
-    expect(uvCacheEnv({}, "/home/u")).toEqual({
-      UV_CACHE_DIR: path.join("/home/u", ".cache", "uv"),
-      UV_PYTHON_INSTALL_DIR: path.join("/home/u", ".local", "share", "uv", "python"),
-    });
-    expect(uvCacheEnv({ UV_CACHE_DIR: "/c", XDG_DATA_HOME: "/d" }, "/home/u")).toEqual({
-      UV_CACHE_DIR: "/c",
-      UV_PYTHON_INSTALL_DIR: path.join("/d", "uv", "python"),
-    });
   });
 });
 
@@ -204,5 +231,82 @@ describe("evals Galaxy teardown", () => {
       fetchImpl,
     });
     expect(result).toEqual({ purged: [], failed: [] });
+  });
+});
+
+describe("evals live Galaxy scenarios", () => {
+  const scenariosDir = path.resolve(__dirname, "..", "evals", "scenarios");
+  const load = (name: string) =>
+    JSON.parse(
+      fs.readFileSync(path.join(scenariosDir, name, "scenario.json"), "utf-8"),
+    ) as Scenario;
+  const LIVE = [
+    "galaxy-tools-destructive-gate",
+    "galaxy-tools-job-capture",
+    "galaxy-tools-large-output",
+    "galaxy-tools-sra-gate",
+    "galaxy-tools-upload-hidden",
+    "iwc-find-from-question-tools",
+    "plan-consults-iwc-tools",
+    "execution-after-approval-tools",
+  ];
+  // Snapshot: allOperations is one mutable array shared by both galaxy-ops entries.
+  const ops = new Set([...allOperations].map((o) => o.name));
+  const loomTools = new Set(["galaxy_read_output", "galaxy_upload_local_file"]);
+
+  it("no scenario is left on the galaxy-mcp path", () => {
+    const dirs = fs.readdirSync(scenariosDir);
+    expect(dirs.filter((d) => d.startsWith("galaxy-mcp"))).toEqual([]);
+    for (const d of dirs) {
+      const env = load(d).env ?? {};
+      expect(
+        Object.keys(env).filter((k) => /GALAXY_TOOLS$/.test(k)),
+        d,
+      ).toEqual([]);
+    }
+  });
+
+  for (const clone of LIVE) {
+    it(`${clone} needs a model and a Galaxy, and names no MCP spelling`, () => {
+      const c = load(clone);
+      expect(c.tier).toBe(2);
+      expect(c.requiresModel).toBe(true);
+      expect(c.requiresGalaxy).toBe(true);
+      expect(c.env).toBeUndefined();
+      expect(JSON.stringify(c)).not.toContain("mcp__galaxy__");
+      expect(JSON.stringify(c)).not.toContain("mcp_read_output");
+    });
+
+    it(`${clone} names only tools the bare path registers`, () => {
+      const a = load(clone).assertions;
+      const names = [
+        ...(a.toolCalls?.mustInclude ?? []).map((m) => m.name),
+        ...(a.toolCalls?.mustNotInclude ?? []),
+        ...(a.toolResults?.mustSucceed ?? []).map((m) => m.name),
+        ...(a.toolResults?.mustNotSucceed ?? []),
+      ];
+      expect(names.length).toBeGreaterThan(0);
+      for (const n of names) expect(ops.has(n) || loomTools.has(n), n).toBe(true);
+    });
+  }
+
+  it("the job-capture clone grades a bare run_tool result by its nested details", () => {
+    const c = load("galaxy-tools-job-capture");
+    const toolResults = c.assertions.toolResults!;
+    const result = (details: object) =>
+      evaluate(run([end("run_tool", '{"success":true}', { details })], { toolResults }));
+    expect(result({ galaxy: { tool: "run_tool", elapsedMs: 12 } })).toEqual([]);
+    expect(result({ server: "galaxy", tool: "run_tool" }).map((f) => f.assertion)).toEqual([
+      "toolResults.mustSucceed",
+    ]);
+  });
+
+  it("init-gate-galaxy-no-connection pins empty credentials", () => {
+    // Configured credentials count as connected (there is no connect tool),
+    // so ambient GALAXY_* would let /execute through.
+    expect(load("init-gate-galaxy-no-connection").env).toMatchObject({
+      GALAXY_URL: "",
+      GALAXY_API_KEY: "",
+    });
   });
 });
