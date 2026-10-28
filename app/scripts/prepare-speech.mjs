@@ -81,6 +81,7 @@ export async function prepareSpeech(platform = process.platform, arch = process.
       return;
     }
   }
+  const [cmake, prefix] = cmakeCommand();
   const archive = path.join(cache, `whisper-${spec.commit}.tar.gz`);
   await download(
     `https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/${spec.commit}`,
@@ -99,7 +100,6 @@ export async function prepareSpeech(platform = process.platform, arch = process.
   );
   fs.chmodSync(model, 0o644);
   const build = path.join(cache, `build-${platform}-${arch}-${spec.commit}`);
-  const [cmake, prefix] = cmakeCommand();
   const options = [
     "-S",
     source,
@@ -146,7 +146,15 @@ export async function prepareSpeech(platform = process.platform, arch = process.
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  // `npm start` passes --best-effort: a dev box without CMake or a compiler still
+  // gets Orbit, just with the microphone hidden (DictationService reports the
+  // runtime unavailable). Packaging calls prepareSpeech() directly and must fail.
+  const bestEffort = process.argv.includes("--best-effort");
   prepareSpeech().catch((error) => {
+    if (bestEffort) {
+      console.warn(`[speech] dictation unavailable in this dev build: ${error.message}`);
+      return;
+    }
     console.error(error.message);
     process.exitCode = 1;
   });
