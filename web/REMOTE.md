@@ -1,6 +1,6 @@
 # Orbit Web -- remote mode
 
-A single-user, container-shaped Loom shell that operates exclusively against a Galaxy instance via env-injected credentials. No local filesystem, no `bash`, no `~/.loom/config.json`. The agent's only operating surface is Galaxy MCP, BRC-Analytics MCP, and a path-gated `edit`/`write`/`read` for the session `notebook.md`.
+A single-user, container-shaped Loom shell that operates exclusively against a Galaxy instance via env-injected credentials. No local filesystem, no `bash`, no `~/.loom/config.json`. The agent's only operating surface is the in-process Galaxy tools, BRC-Analytics MCP, and a path-gated `edit`/`write`/`read` for the session `notebook.md`.
 
 ## Env contract
 

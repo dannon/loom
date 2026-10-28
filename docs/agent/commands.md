@@ -8,41 +8,45 @@ Loom registers a small set of tools at the extension layer:
 | ---------------------------- | ----------------------------------------------------------------------------------------------- |
 | GTN tutorials                | `gtn_search`, `gtn_fetch`                                                                       |
 | Skills                       | `skills_fetch` (SKILL.md / reference docs; `repo: "foundry"` reads bundled Foundry casts)       |
-| Saved MCP output             | `mcp_read_output` (search/page an oversized MCP response pi already saved)                      |
+| Saved Galaxy output          | `galaxy_read_output` (search/page an oversized Galaxy response held for this session)           |
+| Saved MCP output             | `mcp_read_output` (search/page an oversized brc-analytics MCP response pi already saved)        |
 | Galaxy invocations           | `galaxy_invocation_record`, `galaxy_invocation_check_all`, `galaxy_invocation_check_one`        |
 | Dashboard                    | `dashboard_read`, `dashboard_update`                                                            |
 | Multi-agent (experimental)   | `team_dispatch` (gated by `LOOM_TEAM_DISPATCH=1`)                                               |
 | Session index (experimental) | `chat_search`, `chat_session_context`, `chat_find_tool_calls` (gated by `LOOM_SESSION_INDEX=1`) |
 
-Galaxy MCP (separately registered when credentials are present)
-provides `mcp__galaxy__connect`, `mcp__galaxy__search_tools_by_name`,
-`mcp__galaxy__run_tool`, `mcp__galaxy__invoke_workflow`, `mcp__galaxy__search_iwc_workflows`,
-history/dataset operations, etc.
+The Galaxy tools run in-process through galaxy-ops and are always registered,
+under the operations' own names: `search_tools_by_name`, `run_tool`,
+`invoke_workflow`, `search_iwc_workflows`, history/dataset operations, etc.
+There is no connect step; `/connect` stores the credentials they use.
 
 Pi built-ins (`bash`, `read_file`, `write_file`, `edit_file`, `glob`,
 `grep`, `list_files`) are always available.
 
 There are no `analysis_*` plan tools. Plans are markdown sections.
 
-Oversized MCP responses get an automatic bounded preview. Use
-`mcp_read_output` with the notice's `outputId` (or an older notice's saved
-path) to search with a literal `query`, navigate via JSON `pointer`, or page
-with `offset`/`limit`. Object previews explicitly omit large/nested values;
-follow their pointers for exact fields. Text offsets count characters,
-so single-line JSON does not trap the reader at a line-size limit.
-Only adapter artifacts registered on the current session branch are readable,
-including after resume. Inspection is capped at 32 MB per file; pages are
-bounded and known secret values are redacted. Temporary files can expire:
-repeat only a narrower read-only lookup, never a submission just to recover
-its output.
+Oversized responses get an automatic bounded preview, and two readers take
+its `outputId`: `galaxy_read_output` for Galaxy responses and
+`mcp_read_output` for brc-analytics responses, which go through pi's MCP
+layer. Both search with a literal `query`, navigate via JSON `pointer`, or
+page with `offset`/`limit`. Object previews explicitly omit large/nested
+values; follow their pointers for exact fields. Text offsets count
+characters, so single-line JSON does not trap the reader at a line-size
+limit. Pages are bounded and known secret values are redacted.
 
-For installed tools, use `mcp__galaxy__search_tools_by_name` (name, ID, description)
+Saved Galaxy outputs live in memory for the session only. `mcp_read_output`
+also takes an older notice's saved path; only adapter artifacts registered on
+the current session branch are readable, including after resume, and
+inspection is capped at 32 MB per file. Either kind can be gone: repeat only
+a narrower read-only lookup, never a submission just to recover its output.
+
+For installed tools, use `search_tools_by_name` (name, ID, description)
 and inspect candidate schemas. Loom blocks the catalog-wide
 `search_tools_by_keywords` schema fan-out before dispatch. Input-datatype-only
 matches still require schema inspection; a name search does not prove absence.
 Timeouts receive agent-facing recovery guidance. Identical timed-out reads are
-held until one verified adapter reconnect permits a retry; a successful read
-allows later polling again. Submissions have unknown outcomes after a timeout
+held until some other Galaxy call succeeds, which permits one retry; a
+successful read allows later polling again. Submissions have unknown outcomes after a timeout
 and require Galaxy-state inspection before any retry. The harness does not
 automatically replay mutations.
 
@@ -59,7 +63,7 @@ verification or that a background LLM worker has been started.
 
 Large user-defined tool lists are shown as compact catalogs with names, versions,
 Galaxy IDs/UUIDs, containers, and active/hidden flags. Full embedded scripts and
-schemas stay in the saved MCP response. `mcp_read_output` searches catalog
+schemas stay in the saved Galaxy response. `galaxy_read_output` searches catalog
 metadata and pages the records; a returned `definitionPointer` selects the
 chosen tool's full definition. The catalog reports both response size and source
 pagination, so a partial page never establishes that no other tools exist.

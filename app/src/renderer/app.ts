@@ -29,7 +29,12 @@ import {
 import { applyOrbitTheme } from "./theme.js";
 import { caretVisualLineFlags, shouldRecallOnArrow } from "./input-history-nav.js";
 import { shouldAcceptSlashCommandOnEnter } from "./slash-popup-nav.js";
-import { buildDiscoveredModelOptions, type ModelOption } from "./model-options.js";
+import {
+  buildDiscoveredModelOptions,
+  pickOfferedProvider,
+  unavailableProviders,
+  type ModelOption,
+} from "./model-options.js";
 import { planModelDiscovery } from "./model-discovery-gate.js";
 import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
 import {
@@ -762,7 +767,7 @@ galaxyStatus.addEventListener("click", () => {
 // configured. Cloud (default) lets the agent decide per-plan whether each
 // step routes locally or to Galaxy. The gate is prompt-level guidance from
 // the brain (see extensions/loom/context.ts), not enforced by
-// unregistering Galaxy MCP — flipping the toggle restarts the agent so the
+// unregistering the Galaxy tools — flipping the toggle restarts the agent so the
 // new mode reaches the prompt.
 
 const execLocalBtn = document.getElementById("exec-mode-local") as HTMLButtonElement;
@@ -1369,7 +1374,11 @@ async function checkFirstRun(): Promise<void> {
     const hasKey = active ? Boolean(cfg.llm?.providers?.[active]?.hasApiKey) : false;
     if (!hasKey) {
       remoteKeyEntry = true;
-      if (active) welcomeProvider.value = active;
+      welcomeProvider.value = pickOfferedProvider(
+        active,
+        providerOptionValues(welcomeProvider),
+        welcomeProvider.value,
+      );
       selectWelcomeProvider(welcomeProvider.value);
       void updateWelcomeAuthUi();
       // Remote: cwd is fixed (/tmp/loom-session) and Galaxy creds are injected,
@@ -1405,6 +1414,7 @@ async function populateDynamicModelData(): Promise<void> {
   try {
     const res = await window.orbit.listAllModels();
     if (!res.ok) return;
+    if (res.available?.length) pruneProviderPickers(res.available);
     const newModels: Record<string, ModelChoice[]> = {};
     const newPricing: typeof PRICING = {};
     const newWindows: typeof CONTEXT_WINDOWS = {};
@@ -1452,6 +1462,26 @@ async function populateDynamicModelData(): Promise<void> {
   }
 }
 void populateDynamicModelData();
+
+function providerOptionValues(select: HTMLSelectElement): string[] {
+  return Array.from(select.options, (o) => o.value);
+}
+
+// Drop picker entries for providers pi no longer ships (#598).
+function pruneProviderPickers(available: readonly string[]): void {
+  for (const select of [prefsProvider, welcomeProvider]) {
+    const dead = unavailableProviders(providerOptionValues(select), available, [
+      CUSTOM_ENDPOINT_PROVIDER,
+    ]);
+    const before = select.value;
+    for (const opt of Array.from(select.options)) {
+      if (dead.includes(opt.value)) opt.remove();
+    }
+    // Removing the selected option moves the selection without a change event,
+    // which would leave the provider's fields showing the dead one.
+    if (select.value !== before) select.dispatchEvent(new Event("change"));
+  }
+}
 
 function captureUsage(event: Record<string, unknown>): void {
   // message_start carries model info; message updates carry rolling usage
@@ -3490,10 +3520,6 @@ let MODELS_BY_PROVIDER: Record<string, ModelChoice[]> = {
     { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
     { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash (fast)" },
   ],
-  ollama: [
-    { id: "qwen3-coder:30b", label: "Qwen3-Coder 30B (local, A5000) — free" },
-    { id: "qwen3:8b", label: "Qwen3 8B (local, fast) — free" },
-  ],
   "openai-compatible": [],
 };
 
@@ -3998,7 +4024,11 @@ async function openPreferences(): Promise<void> {
       savedBaseUrl: p.baseUrl ?? "",
     };
   }
-  prefsActiveProvider = config.llm?.active || "anthropic";
+  prefsActiveProvider = pickOfferedProvider(
+    config.llm?.active,
+    providerOptionValues(prefsProvider),
+    "anthropic",
+  );
   prefsProvider.value = prefsActiveProvider;
   loadProviderFields(prefsActiveProvider);
   await updatePrefsAuthUi();

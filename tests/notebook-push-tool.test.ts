@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import * as sync from "../extensions/loom/galaxy-pages-sync";
+import { GALAXY } from "./galaxy-family-fixture";
 
 vi.mock("../extensions/loom/galaxy-pages-sync");
 
@@ -34,7 +35,7 @@ describe("notebook_push_to_galaxy tool", () => {
     const { api, tools } = makeFakeApi();
     const { registerNotebookSyncTools } = await import("../extensions/loom/tools-sync");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    registerNotebookSyncTools(api as any);
+    registerNotebookSyncTools(api as any, GALAXY);
 
     const tool = tools.find((t) => t.name === "notebook_push_to_galaxy");
     expect(tool).toBeDefined();

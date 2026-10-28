@@ -471,7 +471,7 @@ describe("decide", () => {
 
 describe("decide -- destructive Galaxy operations (#338)", () => {
   const del = {
-    toolName: "mcp__galaxy__update_history",
+    toolName: "update_history",
     toolInput: { deleted: true, history_id: "h" },
   };
 
@@ -509,7 +509,7 @@ describe("decide -- destructive Galaxy operations (#338)", () => {
         toolName: "mcp",
         toolInput: {
           server: "galaxy",
-          tool: "mcp__galaxy__update_history",
+          tool: "update_history",
           args: JSON.stringify({ deleted: true, history_id: "h" }),
         },
         modelTier: "weak",
@@ -521,15 +521,12 @@ describe("decide -- destructive Galaxy operations (#338)", () => {
   });
 
   it("does NOT gate a non-destructive Galaxy tool (catch-all unchanged)", () => {
-    expect(
-      decide(req({ toolName: "mcp__galaxy__get_histories", toolInput: {} }), deps).decision,
-    ).toBe("allow");
+    expect(decide(req({ toolName: "get_histories", toolInput: {} }), deps).decision).toBe("allow");
   });
 
   it("does NOT gate a rename-only update_history", () => {
     expect(
-      decide(req({ toolName: "mcp__galaxy__update_history", toolInput: { name: "renamed" } }), deps)
-        .decision,
+      decide(req({ toolName: "update_history", toolInput: { name: "renamed" } }), deps).decision,
     ).toBe("allow");
   });
 
@@ -811,7 +808,7 @@ describe.each(WORKSPACE_STATE_DIR_NAMES)("decide -- %s state dir", (D) => {
     const dl = (file_path: string) =>
       decide(
         req({
-          toolName: "mcp__galaxy__download_dataset",
+          toolName: "download_dataset",
           toolInput: { dataset_id: "a1", file_path },
         }),
         deps,

@@ -1,8 +1,8 @@
 // Orbit sends a large fixed prefix on every turn, before the user has typed
 // anything: the baseline system prompt assembled by setupContextInjection in
 // extensions/loom/context.ts (~8K tokens, and it grows every time someone adds
-// a skill or a context block there) plus the tool schemas for Galaxy MCP's ~37
-// tools. A model whose entire context window is smaller than that prefix
+// a skill or a context block there) plus the schemas for the ~48 in-process
+// Galaxy tools. A model whose entire context window is smaller than that prefix
 // overflows on the first message -- plain gpt-4's 8K window did exactly that to
 // two beta testers, neither of whom ever got a working turn (#418).
 //

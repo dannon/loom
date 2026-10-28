@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { registerProgressUpdates, PROGRESS_INTERVAL_MS } from "../extensions/loom/progress-updates";
+import { GALAXY } from "./galaxy-family-fixture";
 
 function harness(hasUI = true) {
   const on = vi.fn();
   const notify = vi.fn();
-  registerProgressUpdates({ on } as unknown as ExtensionAPI);
+  registerProgressUpdates({ on } as unknown as ExtensionAPI, GALAXY);
   const context = { hasUI, ui: { notify } } as unknown as ExtensionContext;
   return {
     notify,
@@ -24,7 +25,7 @@ describe("user-visible progress without model calls", () => {
     h.fire("agent_start");
     h.fire("tool_execution_start", {
       toolCallId: "x",
-      toolName: "mcp__galaxy__run_user_tool",
+      toolName: "run_user_tool",
       args: { secret: "do-not-display" },
     });
     expect(h.notify).toHaveBeenCalledWith("Progress: submitting work to Galaxy.", "info");

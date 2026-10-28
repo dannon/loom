@@ -1,0 +1,105 @@
+{
+  "op": "upload_file_from_url",
+  "server": "https://test.galaxyproject.org",
+  "capturedAt": "2026-10-17",
+  "args": {
+    "url": "https://raw.githubusercontent.com/galaxyproject/galaxy/dev/test-data/1.bed",
+    "history_id": "f1c07d6d09a43dbd",
+    "file_type": "bed"
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"data\":{\"outputs\":[{\"id\":\"d3c4434d4a45f5c7\",\"hda_ldda\":\"hda\",\"uuid\":\"983a0b1d-8f57-4c9b-94c1-8007764e63c4\",\"hid\":2,\"file_ext\":\"bed\",\"peek\":null,\"model_class\":\"HistoryDatasetAssociation\",\"name\":\"https://raw.githubusercontent.com/galaxyproject/galaxy/dev/test-data/1.bed\",\"deleted\":false,\"purged\":false,\"visible\":true,\"state\":\"queued\",\"history_content_type\":\"dataset\",\"file_size\":0,\"create_time\":\"2026-10-17T20:59:39.165502\",\"update_time\":\"2026-10-17T20:59:39.165506\",\"data_type\":\"galaxy.datatypes.interval.Bed\",\"genome_build\":\"?\",\"validated_state\":\"unknown\",\"validated_state_message\":null,\"misc_info\":null,\"misc_blurb\":null,\"tags\":[],\"history_id\":\"f1c07d6d09a43dbd\",\"metadata_dbkey\":\"?\",\"metadata_data_lines\":0,\"metadata_comment_lines\":0,\"metadata_columns\":3,\"metadata_column_types\":[],\"metadata_column_names\":[\"Chrom\",\"Start\",\"End\",\"Name\",\"Score\",\"Strand\",\"ThickStart\",\"ThickEnd\",\"ItemRGB\",\"BlockCount\",\"BlockSizes\",\"BlockStarts\"],\"metadata_delimiter\":\"\\t\",\"metadata_chromCol\":1,\"metadata_startCol\":2,\"metadata_endCol\":3,\"metadata_strandCol\":0,\"metadata_nameCol\":null,\"metadata_viz_filter_cols\":[4],\"output_name\":\"output0\"}],\"output_collections\":[],\"jobs\":[{\"model_class\":\"Job\",\"id\":\"73d7527921714ccc\",\"state\":\"new\",\"exit_code\":null,\"update_time\":\"2026-10-17T20:59:39.198623\",\"create_time\":\"2026-10-17T20:59:39.185787\",\"galaxy_version\":\"27.0\",\"tool_id\":\"upload1\",\"tool_version\":\"1.1.7\",\"history_id\":\"f1c07d6d09a43dbd\"}],\"implicit_collections\":[],\"produces_entry_points\":false},\"success\":true,\"message\":\"Submitted URL upload to history f1c07d6d09a43dbd\",\"count\":null,\"pagination\":null}"
+      }
+    ],
+    "structuredContent": {
+      "data": {
+        "outputs": [
+          {
+            "id": "d3c4434d4a45f5c7",
+            "hda_ldda": "hda",
+            "uuid": "983a0b1d-8f57-4c9b-94c1-8007764e63c4",
+            "hid": 2,
+            "file_ext": "bed",
+            "peek": null,
+            "model_class": "HistoryDatasetAssociation",
+            "name": "https://raw.githubusercontent.com/galaxyproject/galaxy/dev/test-data/1.bed",
+            "deleted": false,
+            "purged": false,
+            "visible": true,
+            "state": "queued",
+            "history_content_type": "dataset",
+            "file_size": 0,
+            "create_time": "2026-10-17T20:59:39.165502",
+            "update_time": "2026-10-17T20:59:39.165506",
+            "data_type": "galaxy.datatypes.interval.Bed",
+            "genome_build": "?",
+            "validated_state": "unknown",
+            "validated_state_message": null,
+            "misc_info": null,
+            "misc_blurb": null,
+            "tags": [],
+            "history_id": "f1c07d6d09a43dbd",
+            "metadata_dbkey": "?",
+            "metadata_data_lines": 0,
+            "metadata_comment_lines": 0,
+            "metadata_columns": 3,
+            "metadata_column_types": [],
+            "metadata_column_names": [
+              "Chrom",
+              "Start",
+              "End",
+              "Name",
+              "Score",
+              "Strand",
+              "ThickStart",
+              "ThickEnd",
+              "ItemRGB",
+              "BlockCount",
+              "BlockSizes",
+              "BlockStarts"
+            ],
+            "metadata_delimiter": "\t",
+            "metadata_chromCol": 1,
+            "metadata_startCol": 2,
+            "metadata_endCol": 3,
+            "metadata_strandCol": 0,
+            "metadata_nameCol": null,
+            "metadata_viz_filter_cols": [4],
+            "output_name": "output0"
+          }
+        ],
+        "output_collections": [],
+        "jobs": [
+          {
+            "model_class": "Job",
+            "id": "73d7527921714ccc",
+            "state": "new",
+            "exit_code": null,
+            "update_time": "2026-10-17T20:59:39.198623",
+            "create_time": "2026-10-17T20:59:39.185787",
+            "galaxy_version": "27.0",
+            "tool_id": "upload1",
+            "tool_version": "1.1.7",
+            "history_id": "f1c07d6d09a43dbd"
+          }
+        ],
+        "implicit_collections": [],
+        "produces_entry_points": false
+      },
+      "success": true,
+      "message": "Submitted URL upload to history f1c07d6d09a43dbd",
+      "count": null,
+      "pagination": null
+    },
+    "details": {
+      "galaxy": {
+        "tool": "upload_file_from_url",
+        "elapsedMs": 244
+      }
+    },
+    "isError": false
+  }
+}

@@ -30,6 +30,7 @@ import {
   startGalaxyPoller,
   stopGalaxyPoller,
 } from "../extensions/loom/galaxy-poller";
+import { json } from "./galaxy-test-helpers";
 
 const GALAXY = "https://galaxy.example";
 const KEY = "e2e-key";
@@ -57,17 +58,17 @@ function fakeGalaxy(replies: Record<string, Reply>) {
     seen.push({ url: raw, key: headers.get("x-api-key") });
     const url = new URL(raw);
     if (headers.get("x-api-key") !== KEY) {
-      return json(403, { err_msg: "Provided API key is not valid.", err_code: 403001 });
+      return json({ err_msg: "Provided API key is not valid.", err_code: 403001 }, 403);
     }
     const m = url.pathname.match(/^\/api\/invocations\/([^/]+)$/);
     const reply = m ? replies[m[1]] : undefined;
-    if (!m || !reply) return json(404, { err_msg: "Not found", err_code: 404001 });
-    if (reply.kind === "status") return json(reply.status, reply.body);
+    if (!m || !reply) return json({ err_msg: "Not found", err_code: 404001 }, 404);
+    if (reply.kind === "status") return json(reply.body, reply.status);
     if (reply.kind === "redirect") {
       return new Response(null, { status: 302, headers: { location: reply.location } });
     }
     const withJobs = url.searchParams.get("step_details") === "true";
-    return json(200, {
+    return json({
       id: m[1],
       state: reply.state,
       workflow_id: "wf-1",
@@ -82,13 +83,6 @@ function fakeGalaxy(replies: Record<string, Reply>) {
     });
   });
   return seen;
-}
-
-function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
 }
 
 const job = (state: string, id = `j-${state}`): Job => ({ id, state, tool_id: "fastqc" });

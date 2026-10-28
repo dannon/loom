@@ -97,15 +97,12 @@ that check is the only thing standing between a neighbour and the agent -- prefe
   container; if it points somewhere not writable in the container (e.g. a macOS
   `/var/folders/...` path), `tsx`'s IPC setup fails with `EACCES`. The tool
   command forces `TMPDIR=/tmp`.
-- **galaxy-mcp (`uvx`) is bundled and pre-warmed.** The agent's Galaxy
-  _tool/workflow execution_ surface runs through `uvx galaxy-mcp` (a Python MCP
-  server), and `node:22-slim` ships no Python or `uvx`. The runtime image now
-  copies `uv` from Astral's published image and pre-warms `galaxy-mcp` plus a
-  managed Python into a node-owned uv cache at build time, so the server
-  resolves from that baked cache at launch -- verified to start fully offline
-  (`--network none`). Earlier images failed here with `spawn uvx ENOENT`, and
-  Galaxy tools silently vanished (notebook -> Page persistence kept working,
-  since it uses the brain's direct Galaxy API rather than MCP).
+- **Galaxy tools run in-process.** The agent's Galaxy tool/workflow execution
+  goes through galaxy-ops inside the brain, so the container needs no Python or
+  `uvx` for Galaxy. The runtime image still copies `uv` and pre-warms
+  `galaxy-mcp` into a node-owned cache, left over from when Galaxy ran through
+  `uvx galaxy-mcp`; nothing launches it now, and taking uv out of the image is a
+  separate cleanup.
 
 ## 5. What the user gets
 

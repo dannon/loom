@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildDiscoveredModelOptions } from "../app/src/renderer/model-options.js";
+import {
+  buildDiscoveredModelOptions,
+  pickOfferedProvider,
+  unavailableProviders,
+} from "../app/src/renderer/model-options.js";
 
 describe("buildDiscoveredModelOptions", () => {
   it("lists every discovered id", () => {
@@ -43,5 +47,32 @@ describe("buildDiscoveredModelOptions", () => {
   it("trims ids so a padded response still matches the saved model", () => {
     const opts = buildDiscoveredModelOptions([" a/one "], "a/one");
     expect(opts).toEqual([{ id: "a/one", label: "a/one", selected: true }]);
+  });
+});
+
+describe("unavailableProviders (#598)", () => {
+  it("flags picker entries pi doesn't ship, but never the kept ones", () => {
+    expect(
+      unavailableProviders(
+        ["anthropic", "ollama", "openai-compatible"],
+        ["anthropic", "openai"],
+        ["openai-compatible"],
+      ),
+    ).toEqual(["ollama"]);
+  });
+});
+
+describe("pickOfferedProvider (#598)", () => {
+  it("keeps a saved provider the picker offers", () => {
+    expect(pickOfferedProvider("openai", ["anthropic", "openai"], "anthropic")).toBe("openai");
+    expect(pickOfferedProvider("OpenAI", ["anthropic", "openai"], "anthropic")).toBe("openai");
+  });
+
+  // Showing a blank picker and saving it would write the dead provider back.
+  it("falls back when the saved provider is gone", () => {
+    expect(pickOfferedProvider("ollama", ["anthropic", "openai"], "anthropic")).toBe("anthropic");
+    expect(pickOfferedProvider(undefined, ["anthropic"], "anthropic")).toBe("anthropic");
+    // Never a fallback the picker can't show either.
+    expect(pickOfferedProvider("ollama", ["openai", "google"], "anthropic")).toBe("openai");
   });
 });

@@ -1,27 +1,32 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   GALAXY_POLL_INTERVAL_MS,
+  galaxyPollGuidance,
   registerGalaxyPollGuard,
 } from "../extensions/loom/galaxy-poll-guard";
+import {
+  createMemoryOutputStore,
+  setGalaxyOutputStore,
+} from "../extensions/loom/galaxy-output-store";
+import { bareFamily } from "../shared/galaxy-tool-family.js";
+import { GALAXY } from "./galaxy-family-fixture";
+import { guardHooks, SPELLED } from "./galaxy-test-helpers";
 
 function harness() {
-  const on = vi.fn();
-  registerGalaxyPollGuard({ on } as unknown as ExtensionAPI);
   const abort = new AbortController();
   const notify = vi.fn();
   const ctx = { hasUI: true, ui: { notify }, signal: abort.signal } as unknown as ExtensionContext;
-  const fire = (name: string, event: unknown) =>
-    on.mock.calls.find(([n]) => n === name)![1](event, ctx);
+  const fire = guardHooks(registerGalaxyPollGuard, GALAXY, ctx);
   return {
     abort,
     notify,
     fire,
-    check: (name = "mcp__galaxy__get_dataset_details", args = { dataset_id: "data1" }) =>
+    check: (name = "get_dataset_details", args = { dataset_id: "data1" }) =>
       fire("tool_call", { toolName: name, input: args }),
     result: (state: string, extras = {}) =>
       fire("tool_result", {
-        toolName: "mcp__galaxy__get_dataset_details",
+        toolName: "get_dataset_details",
         input: { dataset_id: "data1" },
         isError: false,
         content: [
@@ -38,7 +43,23 @@ function harness() {
   };
 }
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  setGalaxyOutputStore(null);
+});
+
+describe("galaxyPollGuidance", () => {
+  // The connected system-prompt snapshot pins the bytes; this pins the family's spelling.
+  it("names the family's status tool", () => {
+    const text = galaxyPollGuidance(SPELLED);
+    expect(text.startsWith("### Waiting for Galaxy and reporting progress\n")).toBe(true);
+    expect(text).toContain(
+      "Do not repeatedly call\ngx_get_dataset_details, launch a shell polling loop",
+    );
+    expect(text).toContain("galaxy_job_record or galaxy_invocation_record");
+    expect(text).toContain("two-minute cooldown");
+  });
+});
 
 describe("Galaxy polling cooldown", () => {
   it("directs an unfinished response to notebook tracking and preserves the original metadata", () => {
@@ -78,10 +99,8 @@ describe("Galaxy polling cooldown", () => {
   it("does not throttle other datasets, terminal results, or mutations", async () => {
     const h = harness();
     h.result("running");
-    expect(
-      await h.check("mcp__galaxy__get_dataset_details", { dataset_id: "other" }),
-    ).toBeUndefined();
-    expect(await h.check("mcp__galaxy__run_tool")).toBeUndefined();
+    expect(await h.check("get_dataset_details", { dataset_id: "other" })).toBeUndefined();
+    expect(await h.check("run_tool")).toBeUndefined();
     h.result("ok");
     expect(await h.check()).toBeUndefined();
     h.result("error");
@@ -106,5 +125,117 @@ describe("Galaxy polling cooldown", () => {
     expect(await h.check()).toBeUndefined();
     expect(h.result("running", { details: { error: "call_failed" } })).toBeUndefined();
     expect(await h.check()).toBeUndefined();
+  });
+});
+
+describe("invocation reads", () => {
+  function invocationHarness() {
+    const ctx = {
+      hasUI: false,
+      ui: { notify: vi.fn() },
+      signal: new AbortController().signal,
+    } as unknown as ExtensionContext;
+    const fire = guardHooks(
+      registerGalaxyPollGuard,
+      bareFamily(["get_invocations", "get_dataset_details"]),
+      ctx,
+    );
+    const input = { invocation_id: "inv1" };
+    return {
+      fire,
+      check: (args: Record<string, unknown> = input) =>
+        fire("tool_call", { toolName: "get_invocations", input: args }),
+      result: (state: string) =>
+        fire("tool_result", {
+          toolName: "get_invocations",
+          input,
+          isError: false,
+          content: [
+            { type: "text", text: JSON.stringify({ success: true, data: { id: "inv1", state } }) },
+          ],
+        }),
+    };
+  }
+
+  it("holds a repeated read of an invocation that is still scheduling", async () => {
+    vi.useFakeTimers();
+    const h = invocationHarness();
+    const annotated = h.result("ready");
+    expect(annotated.content[1].text).toContain("still ready");
+    let released = false;
+    const call = h.check().then(() => {
+      released = true;
+    });
+    await vi.advanceTimersByTimeAsync(GALAXY_POLL_INTERVAL_MS - 1);
+    expect(released).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await call;
+    expect(released).toBe(true);
+  });
+
+  describe("a spilled invocation, whose content is a prose preview", () => {
+    const PREVIEW =
+      "Large Galaxy response saved in memory. Showing a bounded preview.\n{...}\n[loom Galaxy output]";
+    const envelope = (state: string) => ({ success: true, data: { id: "inv1", state, steps: [] } });
+    const spilled = (
+      h: ReturnType<typeof invocationHarness>,
+      state: string,
+      structured: boolean,
+    ) => {
+      const store = createMemoryOutputStore();
+      setGalaxyOutputStore(store);
+      const outputId = structured
+        ? "01JAAAAAAAAAAAAAAAAAAAAAAA"
+        : store.put(JSON.stringify(envelope(state)), "get_invocations");
+      return h.fire("tool_result", {
+        toolName: "get_invocations",
+        input: { invocation_id: "inv1" },
+        isError: false,
+        content: [{ type: "text", text: PREVIEW }],
+        details: { galaxy: { tool: "get_invocations", outputId, elapsedMs: 1 } },
+        ...(structured ? { structuredContent: envelope(state) } : {}),
+      });
+    };
+
+    async function held(h: ReturnType<typeof invocationHarness>) {
+      let released = false;
+      const call = h.check().then(() => {
+        released = true;
+      });
+      await vi.advanceTimersByTimeAsync(GALAXY_POLL_INTERVAL_MS - 1);
+      const early = released;
+      await vi.advanceTimersByTimeAsync(1);
+      await call;
+      return early === false && released;
+    }
+
+    it.each([
+      ["was dropped, reading the saved output", "ready", false],
+      ["survived, reading it", "new", true],
+    ])("holds a repeated read when structuredContent %s", async (_name, state, structured) => {
+      vi.useFakeTimers();
+      const h = invocationHarness();
+      const annotated = spilled(h, state, structured);
+      expect(annotated.content[0].text).toBe(PREVIEW);
+      expect(annotated.content[1].text).toContain("[Loom background monitoring]");
+      expect(annotated.content[1].text).toContain(`still ${state}`);
+      expect(await held(h)).toBe(true);
+    });
+
+    it("lets a spilled finished invocation through", async () => {
+      const h = invocationHarness();
+      expect(spilled(h, "scheduled", false)).toBeUndefined();
+      expect(await h.check()).toBeUndefined();
+    });
+  });
+
+  it("lets reads through once Galaxy has scheduled every step", async () => {
+    const h = invocationHarness();
+    h.result("new");
+    expect(h.result("scheduled")).toBeUndefined();
+    expect(await h.check()).toBeUndefined();
+    // A listing names no single invocation, so there is nothing to hold.
+    h.result("ready");
+    expect(await h.check({ history_id: "h1" })).toBeUndefined();
   });
 });

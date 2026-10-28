@@ -19,7 +19,8 @@ lives in `docs/superpowers/specs/2026-05-09-orbit-web-remote-only-design.md`.
 
 Same as the developer install in the root [`README.md`](../README.md):
 
-- Node 22.19+ and `uv` on `PATH` (uv is needed by galaxy-mcp, same as the CLI).
+- Node 22.19+. `uv` on `PATH` is optional, same as the CLI: only the vendored
+  planemo skills' `uvx` route uses it; the Galaxy tools run in-process.
 - A configured `~/.loom/config.json` with at least an LLM API key. The web
   server reads the exact same config as Orbit and the CLI, so if either of
   those already works, you're set. Otherwise you can fill it in from the
@@ -102,7 +103,7 @@ Browser  ──(WebSocket /ws)──>  web/server.ts  ──(JSON-line stdio)─
   calls over a WebSocket (`/ws`) instead of IPC.
 - For each browser it spawns one `node bin/loom.js --mode rpc` subprocess --
   identical brain (`extensions/loom`), identical agent loop, identical Galaxy
-  MCP path to Orbit and the CLI. Some control channels (config get/save,
+  tool path to Orbit and the CLI. Some control channels (config get/save,
   cwd get/set, restart, reset-session) are handled by the server directly;
   everything else forwards to the brain.
 
@@ -119,7 +120,7 @@ some flows are stubbed.
 - Config get/save and cwd selection (directory picker is prompt-based, no
   native dialog)
 - Agent event streaming and extension UI requests
-- The real LLM planning/execution and Galaxy MCP connectivity
+- The real LLM planning/execution and Galaxy tool calls
 
 **Stubbed / not bridged (will error or silently no-op):**
 

@@ -19,6 +19,7 @@ import { ensureAttemptRecord, writeEnrichment } from "../extensions/loom/galaxy-
 import { buildJobRecord } from "../extensions/loom/galaxy-enrich";
 import type { HarnessBlockFields } from "../extensions/loom/harness-block-fields";
 import { ulid } from "../extensions/loom/ulid";
+import { GALAXY } from "./galaxy-family-fixture";
 
 const PLAN = `# Notebook
 
@@ -223,7 +224,7 @@ describe("the hook warns and never blocks on enrichment", () => {
     process.env.LOOM_EVIDENCE_GATE = "deny";
     fs.writeFileSync(nbPath, PLAN + "\n" + upsertJobBlock("", job(), { enrichment: "pending" }));
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     const result = await pi.flip();
     expect(result?.block).toBeFalsy();
     const rows = fs

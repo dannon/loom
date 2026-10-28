@@ -34,27 +34,27 @@ PROXY_API_KEY=<your-key>
 (Variable names match `~/work/tacc-inference/.env` so symlinking that file
 straight in works: `ln -s ~/work/tacc-inference/.env evals/.env`.)
 
-Scenarios marked `requiresGalaxy: true` call Galaxy MCP tools and need a real
+Scenarios marked `requiresGalaxy: true` call the Galaxy tools and need a real
 server. Add `GALAXY_URL` and `GALAXY_API_KEY` (a test.galaxyproject.org account
 is the safe choice) to `evals/.env` to run them; without both, the runner skips
-them with a warning rather than grading a Galaxy server that never registered.
+them with a warning rather than grading a Galaxy that was never configured.
 
-## Live Galaxy MCP mechanics (`galaxy-mcp-*`)
+## Live Galaxy tool mechanics (`galaxy-tools-*`)
 
-The `galaxy-mcp-*` scenarios drive a real model against a real Galaxy
-(test.galaxyproject.org is the intended target) to check the MCP plumbing
-rather than model judgment: that the server registers and its tools resolve
-under `mcp__galaxy__*`, that `upload_file` stays hidden in favor of Loom's
+The `galaxy-tools-*` scenarios drive a real model against a real Galaxy
+(test.galaxyproject.org is the intended target) to check the in-process tool
+plumbing rather than model judgment: that galaxy-ops' operations resolve under
+their bare names, that `upload_file` stays hidden in favor of Loom's
 uploader, that an oversized result is saved and readable with
-`mcp_read_output`, that the destructive-delete and SRA fan-out gates fire on
-calls arriving through pi's MCP, and that a real tool run lands as a
-`loom-job` block the poller follows to completion. They are slow (minutes
-per run), depend on a shared public server and its queue, and need both
-model and Galaxy credentials -- run them by hand when touching the MCP
-layer, not as a per-commit gate:
+`galaxy_read_output`, that the destructive-delete and SRA fan-out gates fire on
+the bare calls, and that a real tool run lands as a `loom-job` block the
+poller follows to completion. They are slow (minutes per run), depend on a
+shared public server and its queue, and need both model and Galaxy
+credentials -- run them by hand when touching the Galaxy tool layer, not as a
+per-commit gate:
 
 ```bash
-npm run evals -- galaxy-mcp --model tacc:minimax-m2.7 --galaxy-cleanup
+npm run evals -- galaxy-tools --model tacc:minimax-m2.7 --galaxy-cleanup
 ```
 
 A scenario filter that isn't an exact directory name matches as a prefix,
@@ -135,13 +135,13 @@ findings log for the live caveat). To add a paid reference baseline
 The submission-capture hook fires on `tool_execution_end`, which needs a real
 tool call, which needs a model turn -- and the Tier 1 scenarios are
 deliberately model-free. `LOOM_SUBMISSION_REPLAY` bridges that: it names a
-JSONL file, relative to the scenario's cwd, whose lines are recorded galaxy-mcp
-results, and each is fed through the same dispatch path a live submission
+JSONL file, relative to the scenario's cwd, whose lines are recorded Galaxy
+tool results, and each is fed through the same dispatch path a live submission
 takes. One line per submission:
 
 ```json
 {
-  "tool": "mcp__galaxy__run_tool",
+  "tool": "run_tool",
   "args": { "tool_id": "fastp" },
   "stepAnchor": "plan-a-step-1",
   "result": { "content": [{ "type": "text", "text": "<the GalaxyResult envelope as JSON>" }] }
@@ -149,9 +149,10 @@ takes. One line per submission:
 ```
 
 The fixtures under `scenarios/submission-capture-*/cwd/submissions.jsonl` are
-the shapes galaxy-mcp 1.9.0 really returns, read out of its source. `result` is
-a pi tool result, so the envelope sits in a text content block the way pi's
-MCP tools deliver it.
+the `GalaxyResult` envelope shapes galaxy-mcp 1.9.0 returned, read out of its
+source; galaxy-ops answers with the same envelope. `result` is a pi tool
+result, so the envelope sits in a text content block. A `tool` the shell no
+longer offers is logged as `submission.unparsed`, not recorded.
 
 The seam is off unless the variable is set, the file must resolve inside the
 session directory, and every replay writes a `submission.replay` activity row
@@ -215,8 +216,8 @@ recorded run to verify; the `gate-scripted-*` scenarios do that to produce the
 ## Out of scope (for now)
 
 LLM-judge plan-_quality_ scoring (the same scenarios with a rubric pass),
-full analyses executed end to end against a live Galaxy (the `galaxy-mcp-*`
-scenarios cover the MCP mechanics, not analysis outcomes), and notebook
+full analyses executed end to end against a live Galaxy (the `galaxy-tools-*`
+scenarios cover the tool mechanics, not analysis outcomes), and notebook
 discipline / session-lifecycle scenarios. The assertion library leaves seams
 for each. See the plan for sequencing.
 

@@ -829,7 +829,6 @@ export function registerIpcHandlers(agent: AgentManager): void {
       "openai",
       "openai-codex",
       "google",
-      "ollama",
       "openrouter",
       "groq",
       "mistral",
@@ -878,7 +877,10 @@ export function registerIpcHandlers(agent: AgentManager): void {
           };
         });
       }
-      return { ok: true as const, providers: out };
+      // What pi ships, independent of which models survived the filters above
+      // -- the renderer prunes its static provider picker against this (#598).
+      const available = getProviders().filter((p) => USER_FACING_PROVIDERS.has(p));
+      return { ok: true as const, providers: out, available };
     } catch (err) {
       return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
     }

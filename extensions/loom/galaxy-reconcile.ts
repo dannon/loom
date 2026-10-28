@@ -23,14 +23,13 @@
  * ended, toasts it, and queues the follow-up.
  *
  * Runs on session start (the reconnect path: a session ending never meant the
- * remote work stopped), after `galaxy_connect`, every RECONCILE_EVERY_N_TICKS
- * poller ticks, and on `/reconcile`. Idempotent: a second run over the same
+ * remote work stopped), every RECONCILE_EVERY_N_TICKS poller ticks, and on
+ * `/reconcile`. Idempotent: a second run over the same
  * history finds every id already claimed and writes nothing.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as path from "path";
-import { galaxyMcpToolName } from "../../shared/galaxy-mcp-tools.js";
 import { appendActivityEvent } from "./activity";
 import {
   INVOCATION_SCHEDULING_DONE,
@@ -109,8 +108,7 @@ const STAMP_MARGIN_MS = 10 * 60_000;
 /** Direct existence checks per run, so a long notebook costs a bounded number of GETs. */
 const MAX_VERIFY_PER_RUN = 100;
 
-export type ReconcileTrigger =
-  "session_start" | "galaxy_connect" | "tick" | "command" | "page_pull" | "page_resume";
+export type ReconcileTrigger = "session_start" | "tick" | "command" | "page_pull" | "page_resume";
 
 export interface ReconcileDeps {
   listJobs: typeof galaxyListHistoryJobs;
@@ -922,8 +920,8 @@ function summarize(result: {
 }
 
 /**
- * Register reconcile and enrichment: session start, `galaxy_connect`, the
- * poller tick, and `/reconcile`.
+ * Register reconcile and enrichment: session start, the poller tick, and
+ * `/reconcile`.
  */
 export function registerCaptureFollowThrough(pi: ExtensionAPI): void {
   pi.on("session_start", async () => {
@@ -933,13 +931,6 @@ export function registerCaptureFollowThrough(pi: ExtensionAPI): void {
     // behind it, so a person asking right away sees its result.
     void followThrough("session_start").catch((err) => {
       console.error("[reconcile] session start failed:", err);
-    });
-  });
-
-  pi.on("tool_execution_end", async (event) => {
-    if (event.isError || galaxyMcpToolName(event.toolName) !== "connect") return;
-    void followThrough("galaxy_connect").catch((err) => {
-      console.error("[reconcile] after connect failed:", err);
     });
   });
 

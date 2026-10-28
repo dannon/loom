@@ -9,7 +9,6 @@ import { loadConfig as loadLoomConfig } from "../shared/loom-config.js";
 import { migrateStateDir } from "../shared/state-dir.js";
 import { spawn } from "child_process";
 import { getLoomVersion, detectInstall } from "./update-check.js";
-import { isUvxAvailable, uvxMissingNotice } from "./uvx-check.js";
 import { resolveHideThinking, isInteractiveTerminal } from "./thinking-pref.js";
 import { hasStoredCredential, isProviderUsable, pickSignedInFallback } from "./provider-auth.js";
 import { SEED_OAUTH_ONLY_PROVIDERS } from "../shared/provider-auth-caps.js";
@@ -17,6 +16,12 @@ import { EX_CONFIG } from "../shared/brain-exit.js";
 import { resolvePiExtensionDir } from "./pi-extension-path.js";
 import { migrateLegacyMcpConfig } from "./legacy-mcp-config.js";
 import { loadPiDefaultModels, piDefaultModel } from "../shared/pi-default-model.js";
+import {
+  isKnownProvider,
+  modelsJsonProviders,
+  unknownProviderMessage,
+  userExtensionsMayRegisterProviders,
+} from "../shared/known-provider.js";
 import { pickChannel } from "../shared/version-compare.js";
 import {
   isCustomProvider,
@@ -308,12 +313,12 @@ if (activeLlmProvider && OAUTH_ONLY_PROVIDERS.has(activeLlmProvider)) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Galaxy credential + MCP registration
+// Galaxy credentials
 //
 // Credentials come from ~/.loom/config.json (written by /connect) or env
-// vars (CI/testing). Galaxy MCP registers whenever credentials are present;
+// vars (CI/testing). The in-process Galaxy tools are always registered;
 // the agent decides per-plan whether to use Galaxy. The `executionMode`
-// field affects prompt guidance, not MCP registration.
+// field affects prompt guidance, not which tools are registered.
 // ─────────────────────────────────────────────────────────────────────────────
 
 let galaxyUrl = null;
@@ -452,6 +457,31 @@ or unset "llm.active" in ~/.loom/config.json.`;
     and injects ${envVar} into the brain.
 
   * Unset "llm.active" in ~/.loom/config.json.`;
+}
+
+/**
+ * A saved provider pi no longer ships (ollama after pi 1.1.0, #598) makes pi
+ * exit 1 on startup, which Orbit retries until its budget runs out. Catch it
+ * here so it exits EX_CONFIG with a message the shell can show.
+ */
+async function checkProviderKnown() {
+  const skipFlags = ["--version", "--help", "-h", "--list-models"];
+  if (userArgs.some((a) => skipFlags.some((f) => a.startsWith(f)))) return;
+  // Only the provider we inject is ours to vouch for.
+  if (hasArg("--provider") || hasArg("--models")) return;
+  if (!activeLlmProvider || isCustomProvider(activeLlmConfig)) return;
+  if (userExtensionsMayRegisterProviders(agentDir, process.cwd())) return;
+  let builtIn;
+  try {
+    ({ getProviders: builtIn } = await import("@earendil-works/pi-ai/compat"));
+  } catch {
+    // Can't see pi's registry -- leave the verdict to pi.
+    return;
+  }
+  const extra = modelsJsonProviders(join(agentDir, "models.json"));
+  if (isKnownProvider(activeLlmProvider, builtIn(), extra)) return;
+  console.error(unknownProviderMessage(activeLlmProvider));
+  process.exit(EX_CONFIG);
 }
 
 /**
@@ -668,15 +698,8 @@ if (userArgs[0] === "update") {
   });
   child.on("exit", (code) => process.exit(code ?? 0));
 } else {
+  await checkProviderKnown();
   checkLLMProvider();
-
-  // Galaxy is configured but the uvx runner that launches galaxy-mcp is missing.
-  // Warn (don't block): Loom is still useful without Galaxy, and pi would
-  // otherwise fail to spawn that server with a buried error. Orbit bundles
-  // uv onto PATH before spawn, so this only fires for standalone CLI installs.
-  if (galaxyUrl && galaxyApiKey && !isUvxAvailable()) {
-    console.error(`\n${uvxMissingNotice()}\n`);
-  }
 
   // Resolve pi-coding-agent's own version by walking up from its entry point to
   // the package root. Used to pin the changelog watermark below.

@@ -1,14 +1,19 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import {
   collectSecretValues,
+  currentSecretValues,
   loadPiAuth,
   redactSecrets,
   redactContent,
+  registerSecretRedaction,
   REDACTED,
 } from "../extensions/loom/secret-redaction";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { setGalaxyTransport } from "../extensions/loom/galaxy-api";
+import { setConfigSource } from "../shared/config-source.js";
 
 describe("collectSecretValues", () => {
   it("gathers plaintext + encrypted keys from llm providers and galaxy profiles", () => {
@@ -50,6 +55,16 @@ describe("collectSecretValues", () => {
   it("ignores short/empty values so ordinary output isn't mangled", () => {
     const config = { llm: { active: "x", providers: { x: { apiKey: "abc" } } } } as never;
     expect(collectSecretValues(config, { GALAXY_API_KEY: "" })).toEqual([]);
+  });
+
+  it("takes extra values a caller already holds, under the same length rule", () => {
+    const secrets = collectSecretValues({} as never, {}, null, [
+      "extra-key-000000",
+      "short",
+      7,
+      null,
+    ]);
+    expect(secrets).toEqual(["extra-key-000000"]);
   });
 
   it("tolerates a config with no llm/galaxy sections", () => {
@@ -164,5 +179,135 @@ describe("pi auth.json (the credentials Loom cannot encrypt at rest)", () => {
     expect(collectSecretValues({} as never, {}, loadPiAuth(dir))).toContain(
       "DISK-ACCESS-0000000000",
     );
+  });
+});
+
+describe("currentSecretValues (what the hooks scrub right now)", () => {
+  let dir: string;
+  const prev = {
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+    PI: process.env.PI_CODING_AGENT_DIR,
+  };
+  afterEach(() => {
+    setGalaxyTransport(null);
+    setConfigSource(null);
+    process.env.HOME = prev.HOME;
+    process.env.USERPROFILE = prev.USERPROFILE;
+    if (prev.PI === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = prev.PI;
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function sandbox(): void {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-current-secrets-"));
+    process.env.HOME = dir;
+    process.env.USERPROFILE = dir;
+    process.env.PI_CODING_AGENT_DIR = path.join(dir, "agent");
+    fs.mkdirSync(path.join(dir, "agent"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "agent", "auth.json"),
+      JSON.stringify({ p: { type: "oauth", access: "AUTH-JSON-TOKEN-00000" } }),
+    );
+  }
+
+  it("reads pi's auth.json and the transport's Galaxy key on the default path", () => {
+    sandbox();
+    setGalaxyTransport({
+      credentials: () => ({ url: "http://g.test", apiKey: "transport-key-1234567" }),
+    });
+    const secrets = currentSecretValues();
+    expect(secrets).toContain("AUTH-JSON-TOKEN-00000");
+    expect(secrets).toContain("transport-key-1234567");
+  });
+
+  it("leaves auth.json out for the activity log and lesson text (auth: false)", () => {
+    sandbox();
+    setGalaxyTransport({
+      credentials: () => ({ url: "http://g.test", apiKey: "transport-key-1234567" }),
+    });
+    const secrets = currentSecretValues({ auth: false });
+    expect(secrets).toContain("transport-key-1234567");
+    expect(secrets).not.toContain("AUTH-JSON-TOKEN-00000");
+  });
+
+  it("takes the shell's list instead of auth.json while a config source is installed", () => {
+    sandbox();
+    setGalaxyTransport({
+      credentials: () => ({ url: "http://g.test", apiKey: "transport-key-1234567" }),
+    });
+    setConfigSource({
+      load: () => ({ llm: { active: "x", providers: { x: { apiKey: "source-config-key-000" } } } }),
+      secrets: () => ["shell-held-secret-000"],
+    });
+    const secrets = currentSecretValues();
+    expect(secrets).toContain("transport-key-1234567");
+    expect(secrets).toContain("source-config-key-000");
+    expect(secrets).toContain("shell-held-secret-000");
+    expect(secrets).not.toContain("AUTH-JSON-TOKEN-00000");
+  });
+});
+
+describe("the tool_result redactor and structuredContent", () => {
+  afterEach(() => setGalaxyTransport(null));
+  const KEY = "transport-key-1234567";
+  function handler() {
+    let h: ((event: unknown) => Promise<unknown>) | undefined;
+    registerSecretRedaction({
+      on: (_name: string, fn: typeof h) => (h = fn),
+    } as unknown as ExtensionAPI);
+    setGalaxyTransport({ credentials: () => ({ url: "http://g.test", apiKey: KEY }) });
+    return h!;
+  }
+
+  it("scrubs a secret only structuredContent carries, as with a spilled preview", async () => {
+    const out = (await handler()({
+      content: [{ type: "text", text: "Large Galaxy response saved. Preview: {...}" }],
+      structuredContent: { success: true, data: { deep: [{ token: `x ${KEY} y` }] } },
+    })) as { content?: unknown; structuredContent: unknown };
+    expect(out.content).toBeUndefined();
+    expect(out.structuredContent).toEqual({
+      success: true,
+      data: { deep: [{ token: `x ${REDACTED} y` }] },
+    });
+  });
+
+  it("keeps structuredContent, scrubbed, when it rewrites the text", async () => {
+    const env = { success: true, data: { key: KEY, n: 3 } };
+    const out = (await handler()({
+      content: [{ type: "text", text: JSON.stringify(env) }],
+      structuredContent: env,
+    })) as { content: { text: string }[]; structuredContent: unknown };
+    expect(out.content[0].text).not.toContain(KEY);
+    expect(out.structuredContent).toEqual({ success: true, data: { key: REDACTED, n: 3 } });
+    expect(env.data.key).toBe(KEY);
+  });
+
+  it("changes nothing when neither holds a secret", async () => {
+    expect(
+      await handler()({
+        content: [{ type: "text", text: "fine" }],
+        structuredContent: { success: true, data: { n: 1 } },
+      }),
+    ).toBeUndefined();
+  });
+  it("scrubs a secret that is an object key", async () => {
+    const env = { success: true, data: { [KEY]: { n: 1 } } };
+    const out = (await handler()({
+      content: [{ type: "text", text: JSON.stringify(env) }],
+      structuredContent: env,
+    })) as { content: { text: string }[]; structuredContent: unknown };
+    expect(out.content[0].text).not.toContain(KEY);
+    expect(JSON.stringify(out.structuredContent)).not.toContain(KEY);
+    expect(out.structuredContent).toEqual({ success: true, data: { [REDACTED]: { n: 1 } } });
+  });
+
+  it("scrubs a secret an object's toJSON serializes", async () => {
+    const leaky = { toJSON: () => ({ token: KEY }) };
+    const out = (await handler()({
+      content: [{ type: "text", text: JSON.stringify({ data: leaky }) }],
+      structuredContent: { data: leaky },
+    })) as { structuredContent?: unknown };
+    expect(JSON.stringify(out.structuredContent ?? null)).not.toContain(KEY);
   });
 });

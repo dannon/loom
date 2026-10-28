@@ -12,9 +12,11 @@ import {
   getDatasetDetails,
   getInvocations,
   type GalaxyContext,
+  type GalaxyVersionReport,
   type InvocationDetail,
 } from "@galaxyproject/galaxy-ops";
-import { fetchSameOriginOnly } from "../../shared/redirect-guard.js";
+import { RedirectRefusedError, fetchSameOriginOnly } from "../../shared/redirect-guard.js";
+import { transportCode } from "./galaxy-failure";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Galaxy API response types
@@ -86,9 +88,27 @@ const GALAXY_REDIRECT_LABELS = {
   urlSettingLabel: "GALAXY_URL",
 } as const;
 
+/** The Galaxy URL and key in play, as given -- not normalized, possibly unset. */
+export interface GalaxyCredentials {
+  url: string | undefined;
+  apiKey: string | undefined;
+}
+
+/**
+ * The one place the brain reads Galaxy credentials. Without an argument it asks
+ * the transport, so a shell with no process env (the browser worker) can supply
+ * them, and falls back to GALAXY_URL/GALAXY_API_KEY. Pass `env` to read a given
+ * environment instead -- pure helpers and tests do. Writers (/connect,
+ * switchProfile) still publish into process.env.
+ */
+export function galaxyCredentials(env?: NodeJS.ProcessEnv): GalaxyCredentials {
+  if (!env && transport.credentials) return transport.credentials();
+  const source = env ?? process.env;
+  return { url: source.GALAXY_URL, apiKey: source.GALAXY_API_KEY };
+}
+
 export function getGalaxyConfig(): GalaxyConfig | null {
-  const url = process.env.GALAXY_URL;
-  const apiKey = process.env.GALAXY_API_KEY;
+  const { url, apiKey } = galaxyCredentials();
   if (!url || !apiKey) return null;
   // Galaxy URLs from the config profile / env often arrive scheme-less
   // (e.g. "test.galaxyproject.org/"). The MCP layer tolerates that, but
@@ -121,26 +141,51 @@ export class GalaxyApiError extends Error {
   }
 }
 
+type GalaxyFetch = (url: string, init: RequestInit) => Promise<Response>;
+
 /**
- * Replaces the network for every Galaxy call made here, galaxy-ops' included.
+ * How the brain reaches Galaxy when process env and the network aren't the
+ * answer. Every part is optional; an empty transport is the default.
+ */
+export interface GalaxyTransport {
+  /** Replaces the network for every Galaxy call made here, galaxy-ops' included. */
+  fetch?: GalaxyFetch;
+  /** Supplies the URL and key in place of GALAXY_URL/GALAXY_API_KEY. */
+  credentials?: () => GalaxyCredentials;
+  /** The answers are recorded, not live, so provenance marks them as fixtures. */
+  fixture?: boolean;
+}
+
+let transport: GalaxyTransport = {};
+// The transport's own fetch while a fixture stands in for it.
+let liveFetch: GalaxyFetch | undefined;
+
+export function setGalaxyTransport(next: GalaxyTransport | null): void {
+  transport = next ?? {};
+  liveFetch = undefined;
+}
+
+/**
  * Set only by the Tier-1 fixture seam (galaxy-fixture.ts) and by tests: the
  * capture scenarios have to exercise reconcile and enrichment against recorded
  * responses, and there is no other layer every one of those calls shares.
+ * Swaps only the fetch, so installed credentials survive both setting and
+ * clearing it, and clearing it puts back whatever fetch the transport had.
  */
-type GalaxyFetch = (url: string, init: RequestInit) => Promise<Response>;
-let fetchOverride: GalaxyFetch | null = null;
-
 export function setGalaxyFetchOverride(fetchImpl: GalaxyFetch | null): void {
-  fetchOverride = fetchImpl;
+  if (transport.fixture !== true) liveFetch = transport.fetch;
+  transport = fetchImpl
+    ? { ...transport, fetch: fetchImpl, fixture: true }
+    : { ...transport, fetch: liveFetch, fixture: false };
 }
 
-/** Whether Galaxy answers are coming from an override rather than a server. */
+/** Whether Galaxy answers are coming from a recorded fixture rather than a server. */
 export function isGalaxyFetchOverridden(): boolean {
-  return fetchOverride !== null;
+  return transport.fixture === true;
 }
 
 function galaxyFetch(url: string, init: RequestInit): Promise<Response> {
-  if (fetchOverride) return fetchOverride(url, init);
+  if (transport.fetch) return transport.fetch(url, init);
   return fetchSameOriginOnly(url, init, GALAXY_REDIRECT_LABELS);
 }
 
@@ -236,7 +281,7 @@ export interface GalaxyJobListing {
 }
 
 /**
- * One page of a history's jobs, oldest first.
+ * One page of a history's jobs, newest first (Galaxy sorts create_time descending).
  *
  * `date_range_min` is a day, not an instant: Galaxy filters it against
  * `update_time` and its accepted formats have moved between releases, while a
@@ -399,20 +444,71 @@ function galaxyOpsFetch(callerSignal?: AbortSignal): typeof fetch {
     const body =
       req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
     const signal = callerSignal ? AbortSignal.any([req.signal, callerSignal]) : req.signal;
-    return galaxyFetch(req.url, { method: req.method, headers: req.headers, body, signal });
+    try {
+      return await galaxyFetch(req.url, { method: req.method, headers: req.headers, body, signal });
+    } catch (err) {
+      throw withTransportCode(err);
+    }
   };
+}
+
+/**
+ * undici's "fetch failed" with its cause code appended, since galaxy-ops builds the model's
+ * message from `.message` alone. Aborts and refused redirects keep their own wording.
+ */
+function withTransportCode(err: unknown): unknown {
+  if (!(err instanceof Error) || err instanceof RedirectRefusedError) return err;
+  if (err.name === "AbortError" || err.name === "TimeoutError") return err;
+  const code = transportCode(err);
+  if (!code || err.message.includes(code)) return err;
+  const Ctor = err.constructor as new (message: string, options?: ErrorOptions) => Error;
+  return new Ctor(`${err.message} (${code})`, { cause: err.cause ?? err });
+}
+
+/**
+ * How long galaxy-ops' /api/version lookup may take. At least undici's 10 s connect timeout, so
+ * the probe cannot call a server unreachable that every other op would still reach -- and
+ * get_server_info is the one op that fails outright when the probe does.
+ */
+export const GALAXY_VERSION_PROBE_MS = 15_000;
+
+// galaxy-ops keeps a version report per context, and there is a context per call, so without
+// this every call would probe again. The whole report is kept rather than handed back as
+// `serverVersion`: a supplied version has no payload, so get_server_info would lose version_minor.
+let versionCache: { url: string; report: GalaxyVersionReport } | undefined;
+// Bumped by a reset, so a lookup that started before it cannot store an old server's answer.
+let versionEpoch = 0;
+
+/** Forget the cached Galaxy version, as a new session or a /connect must. */
+export function resetGalaxyOpsVersion(): void {
+  versionCache = undefined;
+  versionEpoch++;
 }
 
 /** A galaxy-ops context on the configured server, or null without credentials. */
 export function galaxyOpsContext(signal?: AbortSignal): GalaxyContext | null {
   const config = getGalaxyConfig();
   if (!config) return null;
-  return createGalaxyContext({
+  const ctx = createGalaxyContext({
     baseUrl: config.url,
     apiKey: config.apiKey,
     signal,
     fetchImpl: galaxyOpsFetch(signal),
+    versionProbeTimeoutMs: GALAXY_VERSION_PROBE_MS,
   });
+  const cached = versionCache?.url === config.url ? versionCache.report : undefined;
+  if (cached) return { ...ctx, galaxyVersion: () => Promise.resolve(cached) };
+  const lookup = ctx.galaxyVersion;
+  if (!lookup) return ctx;
+  const epoch = versionEpoch;
+  return {
+    ...ctx,
+    galaxyVersion: async () => {
+      const report = await lookup();
+      if (report.payload && epoch === versionEpoch) versionCache = { url: config.url, report };
+      return report;
+    },
+  };
 }
 
 /**

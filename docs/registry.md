@@ -41,7 +41,8 @@ chose; they say whether those checks held, not whether the science is right.
   keep the shell off `notebook.md` and `activity.jsonl`. A script the model writes and runs
   can still write any file; the classifier judges command strings, not programs. Anything
   such a script writes into the registry fails the signature check and comes back as an
-  import. Raw galaxy-mcp submissions stay reachable on the desktop.
+  import. Raw Galaxy tool submissions (`run_tool`, `invoke_workflow`) stay reachable on the
+  desktop.
 - **One residual no design closes.** A response lost after Galaxy accepted a submission
   cannot be made exactly-once; the attempt becomes `submission_unknown` and only the user
   can attribute it. (A user-defined tool can't change under the harness: Galaxy has no
@@ -200,7 +201,7 @@ attempt eligible that the formula alone would not.
 ## Evaluating
 
 `registry-evaluator.ts` runs at the end of every capture pass (`followThrough` in
-`galaxy-reconcile.ts`): session start, `galaxy_connect`, every poller tick -- which is where
+`galaxy-reconcile.ts`): session start, every poller tick -- which is where
 terminal transitions and enrichment completions land -- every twentieth tick's reconcile,
 `/reconcile`, and after a Page pull or resume. For each attempt with a submission it asks
 Galaxy about the run (the invocation and every job it ran, or the one job, and the
@@ -298,7 +299,7 @@ readers excluded, the direct Page writers excluded (Page content carries the reg
 `file_path`. A test fails
 when a registered tool is neither allowed nor excluded. It stays off until `loom_submit`
 exists, since nothing could run a tool under it; the schema-digest pinning and the exact
-galaxy-mcp pin come with turning it on.
+galaxy-ops pin come with turning it on.
 
 ## Proposing and approving
 

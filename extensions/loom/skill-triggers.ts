@@ -19,6 +19,7 @@ import { appendActivityEvent } from "./activity";
 import { findConfusablesMatch } from "./confusables";
 import { hasFailedTransition, INVOCATION_FAILED_HINT } from "./invocation-failure-hint";
 import { getNotebookPath } from "./state";
+import type { GalaxyToolFamily } from "../../shared/galaxy-tool-family.js";
 
 export interface HintContext {
   toolName: string;
@@ -44,15 +45,15 @@ export interface SkillTrigger {
 // agent-loop.js wording when dispatch finds no tool by that exact name.
 const NOT_FOUND_RE = /^Tool\s+(\S+)\s+not found\b/;
 
-export const IWC_CANDIDATES_HINT =
+export const iwcCandidatesHint = (family: GalaxyToolFamily) =>
   "[loom] These are ranked by word overlap, not relevance. Before offering one, call " +
-  "`mcp__galaxy__get_iwc_workflow_details` on the plausible candidates and check their inputs " +
+  `\`${family.tool("get_iwc_workflow_details")}\` on the plausible candidates and check their inputs ` +
   "against the data the user actually has (reads vs count tables, paired vs single-end). " +
   "A workflow that needs another's outputs first is half of a chain, not a match. If none " +
   "fit, say so. If nothing came back, retry once with just the assay; if the query had no " +
   "searchable terms, ask the user what they want to find out.";
 
-export const SKILL_TRIGGERS: readonly SkillTrigger[] = [
+export const skillTriggers = (family: GalaxyToolFamily): readonly SkillTrigger[] => [
   {
     // STOPGAP for #100: the model emitted a Cyrillic/Greek lookalike in a tool
     // name. Only the first text block carries agent-loop's message.
@@ -80,9 +81,9 @@ export const SKILL_TRIGGERS: readonly SkillTrigger[] = [
     // adapter's output guard can truncate a big result into non-JSON, so the
     // body can't be relied on.
     id: "iwc-candidates",
-    tools: new Set(["mcp__galaxy__recommend_iwc_workflows", "mcp__galaxy__search_iwc_workflows"]),
+    tools: new Set([family.tool("recommend_iwc_workflows"), family.tool("search_iwc_workflows")]),
     on: "success",
-    hint: () => IWC_CANDIDATES_HINT,
+    hint: () => iwcCandidatesHint(family),
   },
 ];
 
@@ -100,7 +101,7 @@ export interface FiredHint {
 export function applySkillTriggers<T extends ContentBlock>(
   msg: { toolName: string; isError: boolean; content: T[] },
   activeTools: () => string[],
-  triggers: readonly SkillTrigger[] = SKILL_TRIGGERS,
+  triggers: readonly SkillTrigger[],
 ): { content: T[]; fired: FiredHint[] } | null {
   let content = msg.content;
   const fired: FiredHint[] = [];
@@ -128,7 +129,8 @@ export function applySkillTriggers<T extends ContentBlock>(
   return fired.length > 0 ? { content, fired } : null;
 }
 
-export function registerSkillTriggers(pi: ExtensionAPI): void {
+export function registerSkillTriggers(pi: ExtensionAPI, family: GalaxyToolFamily): void {
+  const triggers = skillTriggers(family);
   pi.on("message_end", (event) => {
     const msg = event.message;
     if (msg.role !== "toolResult" || !msg.toolName) return;
@@ -136,6 +138,7 @@ export function registerSkillTriggers(pi: ExtensionAPI): void {
     const applied = applySkillTriggers(
       { toolName: msg.toolName, isError: !!msg.isError, content: msg.content },
       () => pi.getActiveTools(),
+      triggers,
     );
     if (!applied) return;
 

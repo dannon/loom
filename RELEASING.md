@@ -31,12 +31,12 @@ Review the draft and publish manually when ready.
 | ---------------- | ----- | ----------------------------------------------------------------------------------------------- |
 | macos-latest     | arm64 | `Orbit-<version>-arm64.dmg`, `Orbit-darwin-arm64-<version>.zip`                                 |
 | macos-26-intel   | x64   | `Orbit-<version>-x64.dmg`, `Orbit-darwin-x64-<version>.zip`                                     |
-| ubuntu-latest    | x64   | `orbit_<version>_amd64.deb`, `orbit-<version>-1.x86_64.rpm`, `Orbit-linux-x64-<version>.zip`    |
+| ubuntu-24.04     | x64   | `orbit_<version>_amd64.deb`, `orbit-<version>-1.x86_64.rpm`, `Orbit-linux-x64-<version>.zip`    |
 | ubuntu-24.04-arm | arm64 | `orbit_<version>_arm64.deb`, `orbit-<version>-1.aarch64.rpm`, `Orbit-linux-arm64-<version>.zip` |
 | windows-latest   | x64   | `Orbit-<version> Setup.exe`                                                                     |
 
 The macOS builds run on native GitHub runners — no cross-compilation, no universal binary.
-The Linux builds run on `ubuntu-latest` (x64) and `ubuntu-24.04-arm` (arm64); each
+The Linux builds run on `ubuntu-24.04` (x64) and `ubuntu-24.04-arm` (arm64); each
 produces a `.deb` (Debian/Ubuntu), `.rpm` (Fedora/RHEL/openSUSE), and a `.zip`
 tarball. The Linux arm64 leg unblocks arm64 hosts (Jetson, Raspberry Pi, arm64
 servers) that can't run the x64 installer or its bundled x64 `uv`.
