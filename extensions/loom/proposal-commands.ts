@@ -358,6 +358,8 @@ export async function propose(
 export interface CommandReply {
   level: "info" | "warning" | "error";
   message: string;
+  /** Set by /approve when it recorded a new live approval: the proposal to submit now. */
+  approved?: string;
 }
 
 const PROPOSAL_ARG = /^\s*(\S+)\s*$/;
@@ -520,6 +522,7 @@ export async function approveCommand(
   }
   return {
     level: "info",
+    approved: id,
     message:
       `Approved ${id} (attempt ${result.attemptId}, spec_revision ${result.specRevision.slice(0, 12)}).\n\n` +
       renderProposalTable(proposal, {
@@ -529,6 +532,15 @@ export async function approveCommand(
       }) +
       `\n\nEditing the proposal from here revokes this approval.`,
   };
+}
+
+/** The turn /approve starts so the approved run is submitted straight away. */
+export function approvedRunPrompt(id: string): string {
+  return (
+    `[Loom approval] The user approved ${id}. Submit exactly that run now with the Galaxy tools, ` +
+    `then record it with galaxy_job_record (or galaxy_invocation_record for a workflow), passing ` +
+    `proposalId: "${id}".`
+  );
 }
 
 export async function revokeCommand(deps: ProposalDeps, args: string): Promise<CommandReply> {
@@ -764,7 +776,13 @@ Give every parameter you set a rationale. Leave version unset to take what Galax
       const confirm = ctx.hasUI
         ? (title: string, message: string) => ctx.ui.confirm(title, message)
         : undefined;
-      reply(ctx, await approveCommand(deps, args ?? "", { confirm }));
+      const r = await approveCommand(deps, args ?? "", { confirm });
+      reply(ctx, r);
+      // A slash command starts no turn, so without this the approved run waits
+      // for the user's next message. Only the user's /approve reaches here.
+      if (r.approved) {
+        pi.sendUserMessage(approvedRunPrompt(r.approved), { deliverAs: "followUp" });
+      }
     },
   });
 

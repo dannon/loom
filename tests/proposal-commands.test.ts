@@ -3,6 +3,7 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   approveCommand,
+  approvedRunPrompt,
   checkProposalDrift,
   checkProposalDriftNow,
   noteProposalBinding,
@@ -379,6 +380,28 @@ describe("edit after approve revokes, on the next read", () => {
       payload: { proposal_id: id, attempt_id: attempt, reason: "edited" },
     });
     expect((await pendingCommand(deps())).message).toMatch(new RegExp(`${id} -- approval revoked`));
+  });
+
+  it("starts a turn to submit the run once approved, and only then", async () => {
+    const sent: string[] = [];
+    let handler: ((args: string, ctx: unknown) => Promise<void>) | undefined;
+    const pi = {
+      registerTool: () => {},
+      registerCommand: (name: string, c: { handler: typeof handler }) => {
+        if (name === "approve") handler = c.handler;
+      },
+      on: () => {},
+      sendUserMessage: (text: string) => sent.push(text),
+    } as never;
+    registerProposalCommands(pi, deps());
+    const id = await proposed();
+    const ctx = { hasUI: false, ui: { notify: () => {} } };
+    await handler!(`${id} --yes`, ctx);
+    expect(sent).toEqual([approvedRunPrompt(id)]);
+    expect(sent[0]).toContain(`proposalId: "${id}"`);
+    await handler!(`${id} --yes`, ctx); // already approved: nothing new to submit
+    await handler!("prop-nope --yes", ctx);
+    expect(sent).toHaveLength(1);
   });
 
   it("an edit to the label alone leaves the approval live", async () => {
