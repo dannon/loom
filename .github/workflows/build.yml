@@ -81,6 +81,15 @@ jobs:
       - name: Smoke test packed tarball
         run: npm run smoke:pack
 
+      # The packaging hook builds whisper.cpp and fetches the dictation model
+      # (~65 MB, minutes of compile) unless app/.speech-stage/speech already holds
+      # a verified runtime, so keep that directory across runs with the same pins.
+      - name: Cache dictation runtime
+        uses: actions/cache@v5
+        with:
+          path: app/.speech-stage/speech
+          key: speech-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app/scripts/speech-assets.json') }}
+
       - name: Package Electron app
         working-directory: app
         run: npx electron-forge package
