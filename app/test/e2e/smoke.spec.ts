@@ -26,12 +26,12 @@ function packagedExecutablePath(): string {
   const root = path.resolve(__dirname, "../..");
   const arch = process.arch;
   if (process.platform === "linux") {
-    return path.join(root, "out", `Orbit-linux-${arch}`, "orbit");
+    return path.join(root, "out", `Orbit-linux-${arch}`, "orbit-desktop");
   }
   if (process.platform === "darwin") {
     // Inner binary name follows forge.config.ts `executableName`, which is the
-    // proper-cased "Orbit" on darwin (the lowercase variant is Linux/Windows
-    // only -- see the comment on executableName for why).
+    // proper-cased "Orbit" on darwin, `orbit-desktop` on Linux and `orbit` on
+    // Windows -- see the comment on executableName for why.
     return path.join(
       root,
       "out",

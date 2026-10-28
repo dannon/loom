@@ -3,7 +3,7 @@
 # Orbit Installer
 #
 # One-line install:
-#   curl -fsSL https://raw.githubusercontent.com/galaxyproject/loom/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/galaxyproject/orbit/main/install.sh | bash
 #
 
 set -e
@@ -50,13 +50,13 @@ else
     warn "Neither uv nor python3 found. galaxy-mcp may need manual setup."
 fi
 
-# Install loom
-info "Installing loom..."
-npm install -g @galaxyproject/loom
-success "loom installed"
+# Install the Orbit CLI
+info "Installing the Orbit CLI..."
+npm install -g @galaxyproject/orbit
+success "orbit installed"
 
 echo ""
 echo -e "${GREEN}Installation complete!${NC}"
 echo ""
-echo "Run 'loom' to start. Use /connect to set your Galaxy credentials."
+echo "Run 'orbit' to start. Use /connect to set your Galaxy credentials."
 echo ""

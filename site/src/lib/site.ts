@@ -1,5 +1,5 @@
 // Shared site constants + base-path-aware URL helper.
-// import.meta.env.BASE_URL is "/loom/" in production, "/" in some dev setups.
+// import.meta.env.BASE_URL is "/orbit/" in production, "/" in some dev setups.
 
 const raw = import.meta.env.BASE_URL;
 export const BASE = raw.replace(/\/$/, "");
@@ -11,10 +11,10 @@ export function url(path = "/"): string {
 }
 
 export const links = {
-  loom: "https://github.com/galaxyproject/loom",
+  loom: "https://github.com/galaxyproject/orbit",
   mcp: "https://github.com/galaxyproject/galaxy-mcp",
-  releases: "https://github.com/galaxyproject/loom/releases",
-  npm: "https://www.npmjs.com/package/@galaxyproject/loom",
+  releases: "https://github.com/galaxyproject/orbit/releases",
+  npm: "https://www.npmjs.com/package/@galaxyproject/orbit",
   skills: "https://github.com/galaxyproject/galaxy-skills",
   galaxy: "https://galaxyproject.org",
   iwc: "https://iwc.galaxyproject.org",

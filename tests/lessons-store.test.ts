@@ -46,7 +46,7 @@ const entry = (over: Record<string, unknown> = {}) => ({
 const snapshot = (lessons: unknown[]) => ({
   schema: 1,
   built_at: "2026-09-30T00:00:00.000Z",
-  source: { repo: "galaxyproject/loom", commit: "deadbeef" },
+  source: { repo: "galaxyproject/orbit", commit: "deadbeef" },
   licence: "CC-BY-4.0",
   lessons,
 });

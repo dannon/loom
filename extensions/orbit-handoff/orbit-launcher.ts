@@ -73,10 +73,12 @@ export function findOrbit(deps: FindOrbitDeps = realDeps()): string | null {
     return acceptable(override, deps) ? override : null;
   }
   if (deps.platform === "darwin") {
-    // The bundle is Orbit.app but the inner binary is lowercase `orbit`
-    // (forge.config.ts sets executableName: "orbit", which CFBundleExecutable
-    // inherits). Pointing at capital-O Orbit silently misses every real install.
+    // forge.config.ts sets executableName "Orbit" on darwin, which
+    // CFBundleExecutable inherits, so the real binary is capital-O. The
+    // lowercase pair covers bundles built before that was the case.
     const candidates = [
+      "/Applications/Orbit.app/Contents/MacOS/Orbit",
+      `${deps.homedir}/Applications/Orbit.app/Contents/MacOS/Orbit`,
       "/Applications/Orbit.app/Contents/MacOS/orbit",
       `${deps.homedir}/Applications/Orbit.app/Contents/MacOS/orbit`,
     ];

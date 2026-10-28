@@ -13,7 +13,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { findOrbit, launchOrbit } from "./orbit-launcher";
 import { isDesktopShell } from "../../shared/orbit-env.js";
 
-const RELEASE_URL = "https://github.com/galaxyproject/loom/releases";
+const RELEASE_URL = "https://github.com/galaxyproject/orbit/releases";
 
 export async function handleOrbitHandoff(
   _args: string | undefined,

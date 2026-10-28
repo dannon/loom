@@ -33,7 +33,7 @@ test("offline microphone dictation fills the editable draft without sending", as
           root,
           "out",
           `Orbit-${process.platform}-${process.arch}`,
-          process.platform === "win32" ? "orbit.exe" : "orbit",
+          process.platform === "win32" ? "orbit.exe" : "orbit-desktop",
         );
   const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "orbit-speech-e2e-"));
   const isolatedHome = path.join(scratch, "home");

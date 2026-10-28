@@ -173,13 +173,13 @@ async function stageNodeBundle(platform: string, arch: string): Promise<void> {
   const tarballPath = path.join(TARBALL_CACHE_DIR, filename);
 
   if (fs.existsSync(tarballPath)) {
-    console.log(`[loom-stage] reusing cached ${filename}`);
+    console.log(`[orbit-stage] reusing cached ${filename}`);
   } else {
-    console.log(`[loom-stage] downloading ${url}`);
+    console.log(`[orbit-stage] downloading ${url}`);
     await downloadFile(url, tarballPath);
   }
 
-  console.log(`[loom-stage] extracting ${filename}`);
+  console.log(`[orbit-stage] extracting ${filename}`);
   if (platform === "win32") {
     execSync(
       `powershell -Command "Expand-Archive -Path '${tarballPath}' -DestinationPath '${ORBIT_STAGE_PARENT}'"`,
@@ -216,7 +216,7 @@ async function stageUvBundle(platform: string, arch: string): Promise<void> {
   const key = `${platform}-${arch}`;
   const target = UV_TARGETS[key];
   if (!target) {
-    throw new Error(`[loom-stage] no uv target mapping for ${key}; add it to UV_TARGETS.`);
+    throw new Error(`[orbit-stage] no uv target mapping for ${key}; add it to UV_TARGETS.`);
   }
   const isWin = platform === "win32";
   const ext = isWin ? "zip" : "tar.gz";
@@ -230,13 +230,13 @@ async function stageUvBundle(platform: string, arch: string): Promise<void> {
   const tarballPath = path.join(TARBALL_CACHE_DIR, filename);
 
   if (fs.existsSync(tarballPath)) {
-    console.log(`[loom-stage] reusing cached ${filename}`);
+    console.log(`[orbit-stage] reusing cached ${filename}`);
   } else {
-    console.log(`[loom-stage] downloading ${url}`);
+    console.log(`[orbit-stage] downloading ${url}`);
     await downloadFile(url, tarballPath);
   }
 
-  console.log(`[loom-stage] extracting ${filename}`);
+  console.log(`[orbit-stage] extracting ${filename}`);
   if (isWin) {
     execSync(
       `powershell -Command "Expand-Archive -Path '${tarballPath}' -DestinationPath '${UV_STAGE_DIR}'"`,
@@ -362,12 +362,18 @@ const config: ForgeConfig = {
     // @electron/packager derives CFBundleDisplayName (the name Finder shows
     // under the app icon) from executableName, not from `name` above -- so a
     // lowercase value here makes the macOS app read "orbit" even though the
-    // bundle is Orbit.app. The lowercase binary is only wanted for the Linux
-    // deb/rpm CLI command; macOS has no need for it. Use the proper-cased name
-    // on darwin and keep lowercase elsewhere. Each platform builds on its own
-    // native runner (same assumption the codesign gate below relies on), so
-    // process.platform reflects the target OS family here.
-    executableName: process.platform === "darwin" ? "Orbit" : "orbit",
+    // bundle is Orbit.app. On Linux the executable is `orbit-desktop` so it
+    // never collides with the `orbit` CLI from npm on PATH (the deb/rpm makers
+    // below are named to match). Windows keeps `orbit.exe`: nothing on PATH
+    // competes with it there. Each platform builds on its own native runner
+    // (same assumption the codesign gate below relies on), so process.platform
+    // reflects the target OS family here.
+    executableName:
+      process.platform === "linux"
+        ? "orbit-desktop"
+        : process.platform === "darwin"
+          ? "Orbit"
+          : "orbit",
     icon: "resources/icon",
     appBundleId: "org.galaxyproject.orbit",
     appCategoryType: "public.app-category.developer-tools",
@@ -377,7 +383,7 @@ const config: ForgeConfig = {
     },
     // Copies the staged Orbit bundle, Node runtime, and uv binary to
     // Contents/Resources/ in the packaged app. agent.ts resolves
-    // process.resourcesPath/{loom,node,uv}/... at brain spawn time.
+    // process.resourcesPath/{orbit,node,uv}/... at brain spawn time.
     extraResource: [ORBIT_STAGE_DIR, NODE_STAGE_DIR, UV_STAGE_DIR, SPEECH_STAGE_DIR],
     ...macCodesign,
   },
@@ -438,9 +444,9 @@ const config: ForgeConfig = {
     // spawned as a subprocess, so that depth is unavoidable, and even with the
     // deepest path pruned to 254 chars nuget's internal staging still exceeds
     // 260. Windows ships as the portable maker-zip .zip until the installer's
-    // path problem is solved; set LOOM_WIN_SQUIRREL=1 to build the installer
+    // path problem is solved; set ORBIT_WIN_SQUIRREL=1 to build the installer
     // while iterating on it.
-    ...(process.env.LOOM_WIN_SQUIRREL === "1"
+    ...(process.env.ORBIT_WIN_SQUIRREL === "1"
       ? [
           {
             name: "@electron-forge/maker-squirrel",
@@ -462,6 +468,15 @@ const config: ForgeConfig = {
         options: {
           maintainer: "Galaxy Project contributors",
           homepage: "https://galaxyproject.org",
+          // electron-installer names the /usr/bin symlink, the .desktop
+          // entry's Exec line and the /usr/lib dir after the package name;
+          // `bin` only picks the file inside that dir. So the package itself
+          // has to be orbit-desktop for the npm CLI's `orbit` to stay free.
+          // These makers cannot declare Replaces/Obsoletes, so the 0.8 package
+          // (`orbit`) stays installed beside this one until the user removes
+          // it; INSTALL.md says how.
+          name: "orbit-desktop",
+          bin: "orbit-desktop",
           // electron-installer-debian's computed default depends omit ALSA, but
           // Electron links libasound.so.2 -- without it Orbit fails to launch on
           // Ubuntu/WSL2 with "error while loading shared libraries". depends is
@@ -483,6 +498,9 @@ const config: ForgeConfig = {
       config: {
         options: {
           homepage: "https://galaxyproject.org",
+          // Same naming story as the deb maker above.
+          name: "orbit-desktop",
+          bin: "orbit-desktop",
         },
       },
     },

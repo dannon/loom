@@ -36,7 +36,7 @@ import {
   modelsProbeRequest,
 } from "./endpoint-probe.js";
 import { discoverProviderModels } from "./model-discovery.js";
-import { checkLatestVersion, checkRepoMoved } from "./version-check.js";
+import { checkLatestVersion } from "./version-check.js";
 import { resolveReleasePageUrl } from "./release-page.js";
 import { postFeedback } from "./feedback.js";
 import type { FeedbackPayload } from "../../../shared/feedback-contract.js";
@@ -56,7 +56,7 @@ import { resolveStateDir } from "../../../shared/state-dir.js";
 import { agentPromptPayload } from "../../../shared/agent-prompt.js";
 
 /** Where "report an issue" files go. One place to flip when the repo is renamed. */
-const ISSUE_REPO = "galaxyproject/loom";
+const ISSUE_REPO = "galaxyproject/orbit";
 
 /**
  * Sentinel the renderer sends back in a secret field when the user did NOT
@@ -738,12 +738,6 @@ export function registerIpcHandlers(agent: AgentManager): void {
   // itself caches the GitHub response for 24h on disk.
   ipc.handle("version:check", async () => {
     return await checkLatestVersion();
-  });
-
-  // "Loom is now Orbit" safety net for installs whose auto-update may not
-  // follow the GitHub repo rename. Same on-disk cache/throttle as version:check.
-  ipc.handle("version:repo-moved", async () => {
-    return await checkRepoMoved();
   });
 
   // Running app version + packaged flag for the what's-new banner. Unlike

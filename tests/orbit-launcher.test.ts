@@ -6,7 +6,7 @@ import {
   launchOrbit,
   type FindOrbitDeps,
 } from "../extensions/orbit-handoff/orbit-launcher";
-import { handleOrbitHandoff } from "../extensions/orbit-handoff";
+import orbitHandoffExtension, { handleOrbitHandoff } from "../extensions/orbit-handoff";
 
 vi.mock("node:child_process", () => ({ spawn: vi.fn() }));
 
@@ -83,15 +83,30 @@ describe("isNodeCliShim", () => {
 
 describe("findOrbit -- darwin", () => {
   it("returns /Applications/Orbit.app's binary when installed", () => {
-    const macPath = "/Applications/Orbit.app/Contents/MacOS/orbit";
+    const macPath = "/Applications/Orbit.app/Contents/MacOS/Orbit";
     const d = deps({ platform: "darwin", existsSync: (p) => p === macPath });
     expect(findOrbit(d)).toBe(macPath);
   });
 
   it("falls back to ~/Applications/Orbit.app when system Applications is empty", () => {
-    const userMacPath = "/home/me/Applications/Orbit.app/Contents/MacOS/orbit";
+    const userMacPath = "/home/me/Applications/Orbit.app/Contents/MacOS/Orbit";
     const d = deps({ platform: "darwin", existsSync: (p) => p === userMacPath });
     expect(findOrbit(d)).toBe(userMacPath);
+  });
+
+  it("still finds a bundle whose inner binary is the older lowercase orbit", () => {
+    const old = "/Applications/Orbit.app/Contents/MacOS/orbit";
+    const d = deps({ platform: "darwin", existsSync: (p) => p === old });
+    expect(findOrbit(d)).toBe(old);
+  });
+
+  it("prefers the capital-O binary over the lowercase one in the same bundle", () => {
+    const present = new Set([
+      "/Applications/Orbit.app/Contents/MacOS/Orbit",
+      "/Applications/Orbit.app/Contents/MacOS/orbit",
+    ]);
+    const d = deps({ platform: "darwin", existsSync: (p) => present.has(p) });
+    expect(findOrbit(d)).toBe("/Applications/Orbit.app/Contents/MacOS/Orbit");
   });
 
   it("returns null when neither location has Orbit", () => {
@@ -238,5 +253,18 @@ describe("handleOrbitHandoff -- launch (no auto-exit)", () => {
     expect(shutdown).not.toHaveBeenCalled();
     // ... and tells the user how to close it themselves
     expect(notify).toHaveBeenCalledWith(expect.stringMatching(/Ctrl-D|\/exit/), "info");
+  });
+});
+
+describe("the handoff extension", () => {
+  it("registers /desktop and keeps /orbit as an alias of it", () => {
+    const registerCommand = vi.fn();
+    orbitHandoffExtension({ registerCommand } as never);
+    const names = registerCommand.mock.calls.map((c) => c[0]);
+    expect(names).toEqual(["desktop", "orbit"]);
+    for (const [, def] of registerCommand.mock.calls) {
+      expect(def.handler).toBe(handleOrbitHandoff);
+    }
+    expect(registerCommand.mock.calls[1][1].description).toMatch(/alias/i);
   });
 });

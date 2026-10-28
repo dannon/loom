@@ -13,7 +13,7 @@
 // Orbit depends on a range that spans both shapes, so a fresh install resolves to
 // whichever the registry serves today. Hardcoding either specifier breaks the
 // other half. pi-mcp-adapter 2.12.0 added its exports map on 2026-07-24 and that
-// silently broke `npm install -g @galaxyproject/loom` -- the CLI died on startup
+// silently broke `npm install -g @galaxyproject/orbit` -- the CLI died on startup
 // before printing anything. Try both and take whichever answers.
 
 import { dirname } from "node:path";

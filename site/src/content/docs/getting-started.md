@@ -50,7 +50,7 @@ the CLI reads `GALAXY_URL` / `GALAXY_API_KEY`).
 
 Galaxy access runs through in-process Galaxy tools to search and run tools, drive
 workflows, and manage histories. They are the same operations
-[Galaxy MCP](/loom/docs/galaxy-mcp) offers any MCP client.
+[Galaxy MCP](/orbit/docs/galaxy-mcp) offers any MCP client.
 
 > Galaxy work is optional. Loom is useful for local exploration and planning even
 > before you connect a server.
@@ -74,4 +74,4 @@ workflows, and manage histories. They are the same operations
 Everything the agent decides and does is written to `notebook.md` as plain
 markdown, and auto-committed to git. There is no parallel hidden state store — the
 notebook is the durable working record, and Galaxy histories remain the
-computational truth. See [Concepts](/loom/docs/concepts) for the full model.
+computational truth. See [Concepts](/orbit/docs/concepts) for the full model.

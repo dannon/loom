@@ -159,7 +159,7 @@ them, and they are part of the schema.
 interface LessonSnapshot {
   schema: 1;
   built_at: string; // ISO
-  source: { repo: "galaxyproject/loom"; commit: string };
+  source: { repo: "galaxyproject/orbit"; commit: string };
   licence: "CC-BY-4.0";
   lessons: Lesson[];
 }
@@ -182,6 +182,6 @@ passed as of the snapshot's own `built_at`. `tags` in the snapshot is the
 authored tags plus the lesson's `stage` values and `trigger.formats`, deduped.
 
 Published file:
-`https://raw.githubusercontent.com/galaxyproject/loom/main/lessons/snapshot.json`.
+`https://raw.githubusercontent.com/galaxyproject/orbit/main/lessons/snapshot.json`.
 A lesson's canonical page:
-`https://github.com/galaxyproject/loom/blob/main/lessons/<id>.md`.
+`https://github.com/galaxyproject/orbit/blob/main/lessons/<id>.md`.

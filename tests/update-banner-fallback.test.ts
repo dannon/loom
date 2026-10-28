@@ -18,7 +18,7 @@ describe("showReleaseFallback", () => {
   });
 
   it("reveals the release URL as selectable text inside the banner", () => {
-    const url = "https://github.com/galaxyproject/loom/releases/tag/v0.5.2";
+    const url = "https://github.com/galaxyproject/orbit/releases/tag/v0.5.2";
     showReleaseFallback(banner, url);
     const fallback = banner.querySelector(".update-banner-fallback");
     expect(fallback).not.toBeNull();
@@ -26,7 +26,7 @@ describe("showReleaseFallback", () => {
   });
 
   it("puts the exact URL in a dedicated selectable element", () => {
-    const url = "https://github.com/galaxyproject/loom/releases/latest";
+    const url = "https://github.com/galaxyproject/orbit/releases/latest";
     showReleaseFallback(banner, url);
     const urlEl = banner.querySelector(".update-banner-fallback-url");
     expect(urlEl).not.toBeNull();
@@ -34,7 +34,7 @@ describe("showReleaseFallback", () => {
   });
 
   it("uses a neutral note by default (no failure is asserted on a plain reveal)", () => {
-    showReleaseFallback(banner, "https://github.com/galaxyproject/loom/releases/latest");
+    showReleaseFallback(banner, "https://github.com/galaxyproject/orbit/releases/latest");
     expect(banner.querySelector(".update-banner-fallback-note")!.textContent).toBe(
       NEUTRAL_FALLBACK_NOTE,
     );
@@ -43,7 +43,7 @@ describe("showReleaseFallback", () => {
   it("shows the given note when the open is a confirmed failure", () => {
     showReleaseFallback(
       banner,
-      "https://github.com/galaxyproject/loom/releases/latest",
+      "https://github.com/galaxyproject/orbit/releases/latest",
       OPEN_FAILED_FALLBACK_NOTE,
     );
     expect(banner.querySelector(".update-banner-fallback-note")!.textContent).toBe(
@@ -52,7 +52,7 @@ describe("showReleaseFallback", () => {
   });
 
   it("resets a stale failure note back to neutral on a later success", () => {
-    const url = "https://github.com/galaxyproject/loom/releases/latest";
+    const url = "https://github.com/galaxyproject/orbit/releases/latest";
     showReleaseFallback(banner, url, OPEN_FAILED_FALLBACK_NOTE);
     showReleaseFallback(banner, url); // e.g. a retry that opened successfully
     expect(banner.querySelector(".update-banner-fallback-note")!.textContent).toBe(
@@ -61,24 +61,24 @@ describe("showReleaseFallback", () => {
   });
 
   it("is idempotent -- a second call reuses the element and updates the URL", () => {
-    showReleaseFallback(banner, "https://github.com/galaxyproject/loom/releases/tag/v1");
-    showReleaseFallback(banner, "https://github.com/galaxyproject/loom/releases/tag/v2");
+    showReleaseFallback(banner, "https://github.com/galaxyproject/orbit/releases/tag/v1");
+    showReleaseFallback(banner, "https://github.com/galaxyproject/orbit/releases/tag/v2");
     expect(banner.querySelectorAll(".update-banner-fallback").length).toBe(1);
     expect(banner.querySelector(".update-banner-fallback-url")!.textContent).toBe(
-      "https://github.com/galaxyproject/loom/releases/tag/v2",
+      "https://github.com/galaxyproject/orbit/releases/tag/v2",
     );
   });
 
   it("clearReleaseFallback removes a shown fallback and is a no-op when absent", () => {
     clearReleaseFallback(banner); // absent: must not throw
-    showReleaseFallback(banner, "https://github.com/galaxyproject/loom/releases/latest");
+    showReleaseFallback(banner, "https://github.com/galaxyproject/orbit/releases/latest");
     expect(banner.querySelector(".update-banner-fallback")).not.toBeNull();
     clearReleaseFallback(banner);
     expect(banner.querySelector(".update-banner-fallback")).toBeNull();
   });
 
   it("offers a copy button that copies the URL to the clipboard", async () => {
-    const url = "https://github.com/galaxyproject/loom/releases/latest";
+    const url = "https://github.com/galaxyproject/orbit/releases/latest";
     let copied: string | null = null;
     Object.defineProperty(globalThis.navigator, "clipboard", {
       configurable: true,
@@ -100,7 +100,7 @@ describe("showReleaseFallback", () => {
 
 describe("openReleaseWithFallback", () => {
   let banner: HTMLElement;
-  const url = "https://github.com/galaxyproject/loom/releases/tag/v0.5.2";
+  const url = "https://github.com/galaxyproject/orbit/releases/tag/v0.5.2";
 
   beforeEach(() => {
     document.body.innerHTML = `<div id="update-banner"></div>`;

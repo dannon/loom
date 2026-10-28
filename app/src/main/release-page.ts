@@ -14,10 +14,10 @@
  * what we validated is exactly what gets opened.
  */
 
-const LATEST_RELEASES_PAGE = "https://github.com/galaxyproject/loom/releases/latest";
+const LATEST_RELEASES_PAGE = "https://github.com/galaxyproject/orbit/releases/latest";
 
 // Both names stay valid across the Loom -> Orbit repo rename: old links in
-// the CHANGELOG keep working, and the moved notice points at the new repo.
+// the CHANGELOG keep working after the repo rename.
 const RELEASES_PATH_PREFIXES = ["/galaxyproject/loom/releases/", "/galaxyproject/orbit/releases/"];
 
 export function resolveReleasePageUrl(url: unknown): string {

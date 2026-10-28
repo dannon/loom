@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { resolveReleasePageUrl } from "../app/src/main/release-page.js";
 
-const LATEST = "https://github.com/galaxyproject/loom/releases/latest";
+const LATEST = "https://github.com/galaxyproject/orbit/releases/latest";
 
 describe("resolveReleasePageUrl", () => {
-  it("passes a valid loom releases URL through untouched", () => {
+  it("passes an old loom releases URL (CHANGELOG links from before the rename) through untouched", () => {
     const url = "https://github.com/galaxyproject/loom/releases/tag/v0.5.2";
     expect(resolveReleasePageUrl(url)).toBe(url);
     expect(resolveReleasePageUrl(LATEST)).toBe(LATEST);
@@ -27,10 +27,13 @@ describe("resolveReleasePageUrl", () => {
 
   it("pins to the latest releases page for a non-releases loom URL", () => {
     expect(resolveReleasePageUrl("https://github.com/galaxyproject/loom/issues/368")).toBe(LATEST);
+    expect(
+      resolveReleasePageUrl("https://github.com/galaxyproject/loom/releases/../issues/1"),
+    ).toBe(LATEST);
   });
 
   it("pins to the latest releases page for a foreign host", () => {
-    expect(resolveReleasePageUrl("https://evil.example/galaxyproject/loom/releases/tag/x")).toBe(
+    expect(resolveReleasePageUrl("https://evil.example/galaxyproject/orbit/releases/tag/x")).toBe(
       LATEST,
     );
   });
@@ -38,7 +41,7 @@ describe("resolveReleasePageUrl", () => {
   it("pins to the latest releases page for a look-alike host prefix", () => {
     // github.com.evil.com must not satisfy the pin.
     expect(
-      resolveReleasePageUrl("https://github.com.evil.com/galaxyproject/loom/releases/tag/x"),
+      resolveReleasePageUrl("https://github.com.evil.com/galaxyproject/orbit/releases/tag/x"),
     ).toBe(LATEST);
   });
 
@@ -49,27 +52,27 @@ describe("resolveReleasePageUrl", () => {
   it("does not let path traversal escape the /releases/ pin", () => {
     // These match a naive string prefix but normalize out of /releases/.
     expect(
-      resolveReleasePageUrl("https://github.com/galaxyproject/loom/releases/../issues/1"),
+      resolveReleasePageUrl("https://github.com/galaxyproject/orbit/releases/../issues/1"),
     ).toBe(LATEST);
     expect(
-      resolveReleasePageUrl("https://github.com/galaxyproject/loom/releases/%2e%2e/issues/1"),
+      resolveReleasePageUrl("https://github.com/galaxyproject/orbit/releases/%2e%2e/issues/1"),
     ).toBe(LATEST);
   });
 
   it("returns the normalized URL for traversal that stays within /releases/", () => {
     expect(
-      resolveReleasePageUrl("https://github.com/galaxyproject/loom/releases/../releases/tag/v1"),
-    ).toBe("https://github.com/galaxyproject/loom/releases/tag/v1");
+      resolveReleasePageUrl("https://github.com/galaxyproject/orbit/releases/../releases/tag/v1"),
+    ).toBe("https://github.com/galaxyproject/orbit/releases/tag/v1");
   });
 
   it("pins for a userinfo-bearing look-alike that is not github.com", () => {
     expect(
-      resolveReleasePageUrl("https://github.com@evil.example/galaxyproject/loom/releases/tag/v1"),
+      resolveReleasePageUrl("https://github.com@evil.example/galaxyproject/orbit/releases/tag/v1"),
     ).toBe(LATEST);
   });
 
   it("pins to the latest releases page for http (non-https) releases URL", () => {
-    expect(resolveReleasePageUrl("http://github.com/galaxyproject/loom/releases/tag/v1")).toBe(
+    expect(resolveReleasePageUrl("http://github.com/galaxyproject/orbit/releases/tag/v1")).toBe(
       LATEST,
     );
   });

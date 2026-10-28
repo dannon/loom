@@ -604,7 +604,7 @@ Set up one of the following:
 
   3. Custom provider (~/.pi/agent/models.json):
      For local/self-hosted models via litellm, ollama, etc.
-     See: https://github.com/galaxyproject/loom#local-llms
+     See: https://github.com/galaxyproject/orbit#local-llms
 
   4. OAuth login:
      Run with --provider anthropic (or openai, google, etc.)
@@ -686,7 +686,7 @@ if (userArgs[0] === "update") {
   if (!cmd) {
     console.error(
       `Orbit looks like a source checkout, not an npm install -- can't self-update.\n` +
-        `To upgrade an installed copy: npm install -g @galaxyproject/loom@${channel}`,
+        `To upgrade an installed copy: npm install -g @galaxyproject/orbit@${channel}`,
     );
     process.exit(0);
   }

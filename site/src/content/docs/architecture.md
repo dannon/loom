@@ -38,7 +38,7 @@ same contract.
 The durable state is `notebook.md`. Plans, decisions, results, and interpretation
 all live as markdown sections inside it; the agent maintains them via standard
 `Edit` / `Write` tools. The only structured side-records are `loom-invocation`
-YAML blocks for in-flight Galaxy work. See [Concepts](/loom/docs/concepts).
+YAML blocks for in-flight Galaxy work. See [Concepts](/orbit/docs/concepts).
 
 This keeps Loom aligned with the broader Galaxy ecosystem: **Galaxy is the
 substrate, Page is the shareable artifact, and Loom is one live authoring shell.**
@@ -46,7 +46,7 @@ substrate, Page is the shareable artifact, and Loom is one live authoring shell.
 ## Galaxy integration
 
 Galaxy work runs through in-process Galaxy tools (galaxy-ops, the operations
-[Galaxy MCP](/loom/docs/galaxy-mcp) serves) when credentials are available. During
+[Galaxy MCP](/orbit/docs/galaxy-mcp) serves) when credentials are available. During
 planning the agent surveys the workflow registry and tool catalog, then routes each
 step to Galaxy or local execution as appropriate.
 
