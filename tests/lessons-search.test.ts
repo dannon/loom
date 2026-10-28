@@ -159,7 +159,7 @@ describe("renderFullLesson", () => {
     expect(out.indexOf("## Intervention")).toBeLessThan(out.indexOf("## Validate"));
     expect(out.indexOf("## Validate")).toBeLessThan(out.indexOf("## Does NOT apply when"));
     expect(out).not.toContain("## Cause");
-    expect(out).toContain("shipped with Loom");
+    expect(out).toContain("shipped with Orbit");
     expect(out).toContain("reproduction/condition-mapping-not-in-the-deposit");
   });
 

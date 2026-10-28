@@ -22,7 +22,7 @@ import { armLessonProposal } from "./lessons/propose.js";
 export const NUDGE_CUSTOM_TYPE = "loom-lesson-proposal-nudge";
 
 export const NUDGE_TEXT = [
-  "Loom noticed the user just recorded a correction to something you said about the science or",
+  "Orbit noticed the user just recorded a correction to something you said about the science or",
   "the data. That is the best moment to capture a lesson, because somebody who knows the subject",
   "has just told you the right answer.",
   "",

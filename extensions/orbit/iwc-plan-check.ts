@@ -29,7 +29,7 @@ export const iwcTools = (family: GalaxyToolFamily): ReadonlySet<string> =>
   );
 
 export const iwcPlanNudge = (family: GalaxyToolFamily): string =>
-  "[Loom check] That plan was drafted without checking the IWC workflow registry. Call " +
+  "[Orbit check] That plan was drafted without checking the IWC workflow registry. Call " +
   `\`${family.tool("recommend_iwc_workflows")}\` with the analysis goal now. If a workflow (or a short ` +
   "chain of them) covers it and fits the user's data, revise the draft to run it on Galaxy; " +
   "if nothing fits, or the user asked for something else, keep the draft and say you " +

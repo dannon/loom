@@ -86,7 +86,7 @@ describe("the rendered skills router", () => {
 
   it("says the catalog is bundled when every repo is, and does not promise a refresh", () => {
     const rendered = renderDefaultRouter();
-    expect(rendered).toContain("ships with Loom");
+    expect(rendered).toContain("ships with Orbit");
     expect(rendered).not.toContain("refreshes each session");
     expect(rendered).toContain("(bundled)");
   });

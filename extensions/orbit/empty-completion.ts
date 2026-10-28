@@ -72,7 +72,7 @@ export function registerEmptyCompletionCheck(pi: ExtensionAPI): void {
         /* stale context -- fall through to stderr */
       }
       // Headless runs (--print) would otherwise end exactly as silently as #605.
-      console.error(`loom: ${text}`);
+      console.error(`orbit: ${text}`);
     };
     if (retried) {
       retried = false;

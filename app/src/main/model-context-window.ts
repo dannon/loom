@@ -33,7 +33,7 @@ function hasKnownContextWindow(window: unknown): window is number {
 }
 
 /**
- * Drop models whose context window is too small to run a Loom session at all.
+ * Drop models whose context window is too small to run an Orbit session at all.
  *
  * Two deliberate escape hatches, both of which fail toward showing a model
  * rather than hiding one:

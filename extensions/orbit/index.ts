@@ -1,5 +1,5 @@
 /**
- * Loom — Galaxy co-scientist extension for Pi.dev.
+ * Orbit — Galaxy co-scientist extension for Pi.dev.
  *
  * Brain-side runtime that supports markdown-driven Galaxy bioinformatics
  * analyses. The notebook (`notebook.md`) is the durable record; plans live
@@ -83,7 +83,7 @@ import {
 } from "./profiles";
 import { OrbitWidgetKey, encodeMarkdownWidget } from "../../shared/orbit-shell-contract.js";
 
-/** Status-bar label for a Galaxy tool -- galaxy-ops' or Loom's own -- else undefined. */
+/** Status-bar label for a Galaxy tool -- galaxy-ops' or Orbit's own -- else undefined. */
 function galaxyToolLabel(
   toolName: string | undefined,
   family: GalaxyToolFamily,
@@ -153,14 +153,14 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // AFTER redaction and after the observation triggers. pi feeds each
   // tool_result handler the previous one's content, so anything registered
   // after the hint reads it as part of the result -- a Galaxy error with no
-  // text of its own would get Loom's hint as its error signature (the triggers
+  // text of its own would get Orbit's hint as its error signature (the triggers
   // also drop hint blocks themselves, so this is the first line of defence).
   // Lesson text is redacted where it is rendered, so it needs nothing from the
   // redactor. After the oversized-output recovery, so it lands after the
   // preview the model actually reads.
   registerLessonHint(pi);
 
-  // brc-analytics is the one MCP server Loom brings; a shell with no MCP layer
+  // brc-analytics is the one MCP server Orbit brings; a shell with no MCP layer
   // at all (the browser worker) says so with mcpServers.
   if (profile.mcpServers) registerOrbitMcpServers(pi);
 
@@ -397,7 +397,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
     description: "Show Galaxy connection and notebook status",
     handler: async (_args, ctx) => {
       const lines: string[] = [];
-      lines.push("🔬 Loom Status");
+      lines.push("🔬 Orbit Status");
       lines.push("");
       for (const line of formatConnectionStatus(ctx)) {
         lines.push(line);
@@ -451,9 +451,9 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // ─────────────────────────────────────────────────────────────────────────────
   // /compact — manually compact the conversation to reclaim context
   // ─────────────────────────────────────────────────────────────────────────────
-  // Guards a second Loom /compact from racing the first: pi's compact() has no
+  // Guards a second Orbit /compact from racing the first: pi's compact() has no
   // internal concurrency guard (it just resets its abort controller), so a
-  // concurrent call orphans the in-flight run. This only covers Loom-initiated
+  // concurrent call orphans the in-flight run. This only covers Orbit-initiated
   // compactions -- pi's own auto-compaction isn't observable from an extension
   // (ExtensionContext exposes no isCompacting), so that race is left to pi.
   // Cleared in both completion callbacks and on a synchronous compact() throw.

@@ -10,7 +10,7 @@ import { describeSandboxInitFailure } from "./sandbox-init-message";
 import { galaxyCredentials } from "../galaxy-api";
 
 /**
- * Bash OS sandbox (opt-in). When enabled (`--sandbox` / LOOM_SANDBOX=1 /
+ * Bash OS sandbox (opt-in). When enabled (`--sandbox` / ORBIT_SANDBOX=1 /
  * guardian.sandbox) and the platform supports it, `bash` runs inside an OS sandbox
  * (sandbox-exec / bubblewrap via ASRT): its writes are confined to the workspace
  * and its network to an allowlist, so an allowed command's blast radius is the
@@ -104,7 +104,7 @@ export function registerSandbox(pi: ExtensionAPI): void {
     handler: async (_args, ctx) => {
       if (!resolveSandbox(loadGuardianConfig())) {
         ctx.ui.notify(
-          "Bash sandbox is off. Enable with --sandbox, LOOM_SANDBOX=1, or guardian.sandbox in config. (Your file-tool writes are confined to the analysis dir regardless.)",
+          "Bash sandbox is off. Enable with --sandbox, ORBIT_SANDBOX=1, or guardian.sandbox in config. (Your file-tool writes are confined to the analysis dir regardless.)",
           "info",
         );
         return;

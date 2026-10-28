@@ -65,12 +65,12 @@ __pycache__/
 *.swp
 *~
 
-# Loom per-analysis conda env (large, reproducible from the notebook's
+# Orbit per-analysis conda env (large, reproducible from the notebook's
 # Environment table rather than committed bytes)
 .loom/env/
 .orbit/env/
 
-# Loom session sidecars
+# Orbit session sidecars
 activity.jsonl
 session.jsonl
 `;
@@ -98,7 +98,7 @@ export function isOrbitManagedRepo(cwd: string): boolean {
 /**
  * Make sure `cwd` is inside a git repo. If it isn't, run `git init`,
  * drop a bioinformatics-friendly .gitignore, and create an initial commit.
- * Returns true only for repos Loom created or previously marked as managed.
+ * Returns true only for repos Orbit created or previously marked as managed.
  */
 export function ensureGitRepo(cwd: string): boolean {
   try {

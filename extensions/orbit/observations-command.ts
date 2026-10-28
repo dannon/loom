@@ -62,7 +62,7 @@ export function formatObservationsStatus(info: {
   counts: { sent: number; queued: number; retracted: number; cancelled: number };
 }): string {
   const lines = [
-    "Observations -- failure patterns reported back so they become lessons Loom surfaces to everyone",
+    "Observations -- failure patterns reported back so they become lessons Orbit surfaces to everyone",
     "",
     `  mode: ${info.mode}`,
   ];
@@ -280,7 +280,7 @@ async function doRetract(ctx: ExtensionContext, id: string): Promise<void> {
     }
     if (removal === "failed") {
       ctx.ui.notify(
-        `Couldn't update the local outbox to cancel ${id}, so nothing was changed. Check that the Loom state directory is writable.`,
+        `Couldn't update the local outbox to cancel ${id}, so nothing was changed. Check that the Orbit state directory is writable.`,
         "error",
       );
       return;

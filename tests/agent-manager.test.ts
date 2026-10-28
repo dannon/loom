@@ -567,7 +567,7 @@ describe("AgentManager", () => {
 
         proc.stderr.emit(
           "data",
-          Buffer.from('loom: provider "openai-codex" requires a sign-in.\n'),
+          Buffer.from('orbit: provider "openai-codex" requires a sign-in.\n'),
         );
         proc.emit("exit", 78, null);
 

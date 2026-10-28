@@ -1,5 +1,5 @@
 /**
- * The MCP servers Loom brings with it, registered with pi's built-in MCP support.
+ * The MCP servers Orbit brings with it, registered with pi's built-in MCP support.
  *
  * Registrations live only in this session, so the brain registers on every load.
  * Galaxy is not one of them: its tools run in-process (galaxy-tool-source.ts).

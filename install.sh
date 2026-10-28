@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Loom Installer
+# Orbit Installer
 #
 # One-line install:
 #   curl -fsSL https://raw.githubusercontent.com/galaxyproject/loom/main/install.sh | bash
@@ -21,7 +21,7 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 echo ""
 echo -e "${GREEN}╔════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║     Loom Installer                        ║${NC}"
+echo -e "${GREEN}║     Orbit Installer                        ║${NC}"
 echo -e "${GREEN}║     Galaxy Co-Scientist for Bioinformatics ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
 echo ""

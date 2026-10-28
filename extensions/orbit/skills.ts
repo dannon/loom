@@ -3,7 +3,7 @@
  * into the list the agent actually sees — applies the alpha-time
  * github.com/galaxyproject/* allowlist as a defense-in-depth filter
  * (the renderer already blocks at save time, but a hand-edited
- * `~/.loom/config.json` shouldn't be able to bypass).
+ * `~/.orbit/config.json` shouldn't be able to bypass).
  *
  * Both the `skills_fetch` tool registration (`tools.ts`) and the
  * system-prompt builder (`context.ts`) import from here so the

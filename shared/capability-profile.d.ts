@@ -3,7 +3,7 @@ export interface CapabilityProfile {
   files: boolean;
   notebook: "file" | "page";
   network: boolean;
-  /** pi's MCP layer, for the servers Loom brings (brc-analytics). */
+  /** pi's MCP layer, for the servers Orbit brings (brc-analytics). */
   mcpServers: boolean;
   ui: "desktop" | "terminal" | "worker";
 }

@@ -17,7 +17,7 @@ export function loadGuardianConfig(): GuardianConfig {
 /**
  * Bypass is ON if (env flag OR config) AND NOT force-off. The agent can never
  * flip the env or config: those are human-only channels (the gate makes
- * writing ~/.loom/config.json gated and editing guardian.* catastrophic).
+ * writing ~/.orbit/config.json gated and editing guardian.* catastrophic).
  */
 export function resolveBypass(cfg: GuardianConfig): boolean {
   if (readEnv("SAFE") === "1") return false;

@@ -468,9 +468,9 @@ export async function fetchGalaxyLiveSnapshot(
 // ── Which history ────────────────────────────────────────────────────────────
 
 /**
- * The history this analysis is attached to, as Loom already tracks it. No
+ * The history this analysis is attached to, as Orbit already tracks it. No
  * user-typed ids: the widget cannot ask for one anyway (the widget channel is
- * push-only) and every id that reaches a request has to be one Loom wrote down.
+ * push-only) and every id that reaches a request has to be one Orbit wrote down.
  *
  * The notebook's `loom-galaxy-page` binding wins, and only when it names the
  * server we are actually talking to -- a notebook carried over from another
@@ -489,7 +489,7 @@ export function historyIdFromNotebook(content: string | null, serverUrl: string)
   return last?.historyId || null;
 }
 
-/** Is anything Loom launched still going? Drives the poll cadence, nothing else. */
+/** Is anything Orbit launched still going? Drives the poll cadence, nothing else. */
 export function notebookHasLiveWork(content: string | null): boolean {
   if (!content) return false;
   if (findInvocationBlocks(content).some((b) => b.status === "in_progress")) return true;
@@ -505,7 +505,7 @@ export function notebookHasLiveWork(content: string | null): boolean {
  * place that knows whether anything is in flight, and one thing to stop.
  */
 const ACTIVE_INTERVAL_MS = 15_000;
-/** Nothing Loom launched is running. The history can still move -- a user can
+/** Nothing Orbit launched is running. The history can still move -- a user can
  *  upload in Galaxy's own UI -- so we keep looking, just not four times a minute. */
 const IDLE_INTERVAL_MS = 60_000;
 /** Consecutive failures widen the gap from ACTIVE up to this. */

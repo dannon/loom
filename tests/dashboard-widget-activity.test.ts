@@ -197,7 +197,7 @@ describe("summarizeEvent", () => {
 
   it("does not claim the user typed a prompt the brain sent itself", () => {
     expect(summaryOf(event("user.prompt", { text: "go on" }, { source: "extension" }))).toBe(
-      "Loom followed up: go on",
+      "Orbit followed up: go on",
     );
   });
 

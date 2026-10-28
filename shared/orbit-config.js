@@ -26,7 +26,7 @@ export const ALLOWED_SKILLS_PREFIX = "https://github.com/galaxyproject/";
  * A configured repo reads from the package when it is one of the defaults and is
  * still pointed at that default's URL and branch. Anything else -- another
  * branch, another URL, a repo we do not ship -- is fetched, which is what the
- * skill-author workflow of pointing Loom at a branch depends on. Lives here
+ * skill-author workflow of pointing Orbit at a branch depends on. Lives here
  * because the brain and the Preferences table have to agree on the answer.
  */
 export function isBundledSkillRepo(repo) {
@@ -168,7 +168,7 @@ export function saveConfig(config) {
   }
   const dest = getConfigPath();
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  // Atomic write: never leave a half-written ~/.loom/config.json behind.
+  // Atomic write: never leave a half-written ~/.orbit/config.json behind.
   // A power-loss / process-kill mid-write would otherwise truncate the
   // config and lose the user's API keys + skills + profiles. The .tmp
   // file lives next to the dest so the rename is on the same filesystem.

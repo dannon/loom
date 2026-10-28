@@ -44,7 +44,7 @@ actually have. If a lesson does not apply, say so and move on. If it does,
 say which one you are following and why.`;
 
 /**
- * Scrub every secret value Loom holds out of lesson text. Config is re-read on
+ * Scrub every secret value Orbit holds out of lesson text. Config is re-read on
  * each call so a key added mid-session is covered, the same as the redactor.
  */
 export function redactLessonText(text: string): string {

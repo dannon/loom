@@ -125,8 +125,8 @@ export function registerExecGuard(pi: ExtensionAPI): void {
     // re-discloses rather than silently proceeding.
     if (!config.consentAcknowledged) {
       const ok = await ctx.ui.confirm(
-        "Loom runs actions on your computer",
-        "Loom can run shell commands and read/write files as you. Commands from the AI are gated, but no gate is perfect -- only use it in workspaces you trust. Continue?",
+        "Orbit runs actions on your computer",
+        "Orbit can run shell commands and read/write files as you. Commands from the AI are gated, but no gate is perfect -- only use it in workspaces you trust. Continue?",
         {},
       );
       if (!ok) {

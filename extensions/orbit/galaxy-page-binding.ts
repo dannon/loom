@@ -133,7 +133,7 @@ export function upsertGalaxyPageBlock(content: string, binding: GalaxyPageBindin
 
 /**
  * Remove every `loom-galaxy-page` block from the content. Used on push so
- * Galaxy doesn't render Loom's internal binding metadata, and defensively
+ * Galaxy doesn't render Orbit's internal binding metadata, and defensively
  * on pull in case the remote echoed it back.
  */
 export function stripGalaxyPageBlocks(content: string): string {

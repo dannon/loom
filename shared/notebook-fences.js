@@ -1,4 +1,4 @@
-// Fence names for the typed blocks Loom keeps in notebook.md. Shared so the
+// Fence names for the typed blocks Orbit keeps in notebook.md. Shared so the
 // brain and the Orbit renderer agree on what counts as one of our blocks.
 //
 // The product is being renamed from Loom to Orbit, and notebooks outlive any

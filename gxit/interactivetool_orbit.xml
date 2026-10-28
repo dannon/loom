@@ -1,5 +1,5 @@
 <tool id="interactive_tool_orbit" tool_type="interactive" name="Orbit" version="0.1.0">
-    <description>conversational AI analysis workbench (Loom)</description>
+    <description>conversational AI analysis workbench (Orbit)</description>
     <requirements>
         <!-- Replace with the published image, or a locally-built tag for a dev
              instance (see gxit/README.md). -->

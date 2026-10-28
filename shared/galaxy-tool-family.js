@@ -2,7 +2,7 @@
  * How a shell names its Galaxy tools to the model, so a guard can ask "is this
  * run_tool?" without knowing which tools that shell registered. Every shell
  * runs galaxy-ops in-process under the operations' own names (`run_tool`,
- * `get_dataset_details`, ...); Loom's own Galaxy tools (galaxy_job_record,
+ * `get_dataset_details`, ...); Orbit's own Galaxy tools (galaxy_job_record,
  * galaxy_upload_local_file, ...) are a different family and keep their names.
  *
  * @typedef {object} GalaxyToolFamily

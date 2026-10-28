@@ -45,7 +45,7 @@ export function formatLessonsStatus(info: {
         "/lessons on turns the loop on, after one confirm.",
       ];
   if (info.source === "env") {
-    const name = info.via ?? "LOOM_LESSONS";
+    const name = info.via ?? "ORBIT_LESSONS";
     lines.push(
       info.enabled
         ? `(Set by ${name}=on in the environment, which reads lessons only; reporting stays off until /lessons on writes the config.)`
@@ -127,7 +127,7 @@ function write(ctx: ExtensionCommandContext, enabled: boolean): boolean {
   } catch (err) {
     // setLessonsEnabled only throws messages it authored, including the case
     // where the config isn't writable (a read-only or remote install).
-    ctx.ui.notify(err instanceof Error ? err.message : "Couldn't write the Loom config.", "error");
+    ctx.ui.notify(err instanceof Error ? err.message : "Couldn't write the Orbit config.", "error");
     return false;
   }
 }

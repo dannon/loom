@@ -50,7 +50,7 @@ export function normalizeEndpointApi(value) {
 
 /**
  * Build a permissive model def from just a model id. Cost is zeroed (custom
- * endpoints are typically free, self-hosted, or billed somewhere Loom cannot
+ * endpoints are typically free, self-hosted, or billed somewhere Orbit cannot
  * see) and the model is registered for selection; the key is supplied
  * separately at runtime.
  *

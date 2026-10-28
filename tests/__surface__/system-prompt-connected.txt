@@ -51,11 +51,11 @@ the LLM provider's request logs.
 If a tool call fails because a credential is missing or wrong:
 
 - **Galaxy** -- point the user at Orbit's Preferences -> Galaxy panel
-  (URL + API key fields), or the brain config at `~/.loom/config.json`
+  (URL + API key fields), or the brain config at `~/.orbit/config.json`
   for headless setups. The Galaxy tools pick the key up automatically
   when it is present; no chat paste needed.
 - **LLM providers** -- same path: Orbit's Preferences -> API Key, or
-  `~/.loom/config.json`'s `llm.providers` map (one entry per provider,
+  `~/.orbit/config.json`'s `llm.providers` map (one entry per provider,
   pointed to by `llm.active`). The renderer encrypts via Electron
   `safeStorage` if available.
 - **Other MCP credentials** -- point at the relevant config file or
@@ -404,7 +404,7 @@ An invocation's internal workflow_id is not a stored_workflow_id; resolve the
 stored workflow before linking it. Do not substitute dataset UUIDs, collection
 element IDs, or numeric history item numbers for HDA/HDCA IDs.
 
-Keep machine-readable IDs in loom-galaxy-page, loom-invocation, and loom-job YAML blocks unchanged. Add readable Markdown links in the surrounding notebook
+Keep machine-readable IDs in orbit-galaxy-page, orbit-invocation, and orbit-job YAML blocks unchanged. Add readable Markdown links in the surrounding notebook
 prose so the durable record is useful in other Markdown viewers too. Empty slugs,
 timestamps, and non-artifact metadata are plain text, not invented links.
 
@@ -533,7 +533,7 @@ resources before deciding what runs where:
   the `udt-authoring` skill first (see Skills repositories below) rather
   than writing the YAML from memory.
 - **Workflow invocation**: a single run of a Galaxy workflow on a
-  history. Tracked in the notebook via `loom-invocation` blocks.
+  history. Tracked in the notebook via `orbit-invocation` blocks.
 - **IWC**: Intergalactic Workflow Commission -- registry of curated
   workflows. See "Finding a community workflow" above.
 
@@ -594,7 +594,7 @@ Preserve requested extraction settings and compression; splitting into
 separate jobs is justified only by different settings or a demonstrated
 server/resource limit, not by the number of samples alone.
 
-Loom records the import job itself; bind it to its plan step with
+Orbit records the import job itself; bind it to its plan step with
 galaxy_job_record and note the returned collection ID in the notebook. Before using the
 collection, verify population state, expected accession count and identifiers,
 forward/reverse members, dataset states and appropriate content checks. A job
@@ -638,7 +638,7 @@ block afterwards revokes the approval. Once approved, submit exactly what
 was proposed with the usual Galaxy tools, and pass `proposalId` when you
 record the run.
 
-**The harness records the run; you name the step it belongs to.** Loom
+**The harness records the run; you name the step it belongs to.** Orbit
 writes the notebook block itself the moment a Galaxy submission answers,
 reading the id out of Galaxy's own response, so the poller is already
 watching the run before your next turn starts. What it cannot reliably know
@@ -646,9 +646,9 @@ is which plan step the run is for, so bind every run immediately after
 submission, inside an `/execute` or not: workflow runs with `galaxy_invocation_record({
 invocationId, notebookAnchor, label })` and tool runs with
 `galaxy_job_record({ jobId, notebookAnchor, label })`. The call sets the
-label and anchor on the block Loom already wrote, and writes a new block only
+label and anchor on the block Orbit already wrote, and writes a new block only
 if nothing in the notebook carries that id. Use the IDs returned by Galaxy.
-Runs Loom finds in the history that no block recorded are written with
+Runs Orbit finds in the history that no block recorded are written with
 `notebook_anchor: unattributed`; bind them the same way, and the user can run
 `/reconcile` to re-check the history against the notebook.
 
@@ -698,7 +698,7 @@ meaningful milestone, and about once a minute while actively working. Explain
 what you verified, what is running, and what comes next. Do not claim scientific
 success from a successful tool response alone.
 
-Loom records every Galaxy submission itself, so a queued/running run is already
+Orbit records every Galaxy submission itself, so a queued/running run is already
 being watched: the background monitor checks every 15 seconds without model
 calls and queues completion verification. Bind the run to its plan step with
 galaxy_job_record or galaxy_invocation_record and a real notebook anchor; don't
@@ -710,7 +710,7 @@ Repeated status reads of an unfinished resource have a two-minute cooldown.
 
 ## Skills repositories (operational know-how)
 
-Use the `skills_fetch({ repo, path })` tool to load a skill on demand. **Don't guess operational patterns from training data — fetch the relevant skill first.** The catalog below ships with Loom and reads from disk, so it works offline. When `repo` is omitted, the first enabled repo is used.
+Use the `skills_fetch({ repo, path })` tool to load a skill on demand. **Don't guess operational patterns from training data — fetch the relevant skill first.** The catalog below ships with Orbit and reads from disk, so it works offline. When `repo` is omitted, the first enabled repo is used.
 
 ### Configured repos
 

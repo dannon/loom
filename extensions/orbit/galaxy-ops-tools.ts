@@ -259,7 +259,7 @@ export function galaxyOpsEntry(): { operations: readonly string[]; hasUploadFile
 }
 
 /**
- * An operation Loom supplies because galaxy-ops does not have it yet, in galaxy-ops' own shape.
+ * An operation Orbit supplies because galaxy-ops does not have it yet, in galaxy-ops' own shape.
  * It runs through the same wrapper as every operation; only its tool's words and schema may
  * differ from what the operation would render on its own.
  */

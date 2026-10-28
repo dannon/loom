@@ -1,5 +1,5 @@
 /**
- * Tool registrations for Loom <-> Galaxy Pages sync.
+ * Tool registrations for Orbit <-> Galaxy Pages sync.
  *
  * Thin wrappers around the helpers in galaxy-pages-sync.ts. The helpers do
  * all the work (locking, network, binding-block math); these registrations
@@ -190,7 +190,7 @@ that weren't pushed yet.`,
     description: `One-shot resume of a Galaxy page into the local notebook: writes the
 loom-galaxy-page binding block and replaces local content with the remote
 page body in a single locked operation. Use this when starting a fresh
-Loom session against a page that was created or last edited in the Galaxy
+Orbit session against a page that was created or last edited in the Galaxy
 UI -- it saves the user from having to do notebook_link_galaxy_page then
 notebook_pull_from_galaxy. Refuses to clobber when the notebook is already
 bound to a different page on the same server (use notebook_link_galaxy_page
@@ -239,7 +239,7 @@ to switch explicitly). Idempotent when re-resuming the same page.`,
     description: `Bind the local notebook.md to an existing Galaxy page without pushing
 or pulling content. Inserts a loom-galaxy-page block with the page's id,
 slug, server URL, and latest revision id. Use this when an analysis was
-started in the Galaxy UI and the user wants Loom to take over editing.`,
+started in the Galaxy UI and the user wants Orbit to take over editing.`,
     parameters: Type.Object({
       page_id: Type.String({
         description: "Encoded page id (or slug) to link to.",

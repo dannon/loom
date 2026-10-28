@@ -13,7 +13,7 @@ import chokidar, { type FSWatcher } from "chokidar";
 import { NotebookChangedError, type RecordStore, type RecordVersion } from "./record-store";
 
 // Per-write scratch name. A fixed `<file>.tmp` is shared by every writer, so
-// two of them (two Loom processes on one notebook, or one process that abandons
+// two of them (two Orbit processes on one notebook, or one process that abandons
 // a guarded write while another is staging one) can overwrite or delete each
 // other's staging file and rename the wrong bytes into place. Random names cost
 // nothing and take that off the table; paired with the `wx` flag below they also

@@ -110,7 +110,7 @@ export const MAX_CAS_ATTEMPTS = 3;
  * the callers that mutate a block from outside a poll. An unguarded whole-record
  * write renders the record from content captured before whatever landed in
  * between -- a poll advancing a block, an agent `edit`, a `bash` append -- and
- * the in-process lock cannot help, because it only orders Loom's own writers.
+ * the in-process lock cannot help, because it only orders Orbit's own writers.
  *
  * Call with the record lock held. `read()` takes the version *before* the body
  * on purpose: a version taken afterwards would let a write that landed in

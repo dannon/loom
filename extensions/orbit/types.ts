@@ -1,5 +1,5 @@
 /**
- * Types for the Loom session state.
+ * Types for the Orbit session state.
  *
  * Plans, steps, decisions, etc. are no longer typed structures — the notebook
  * (markdown) is the durable record. State here covers connection, notebook

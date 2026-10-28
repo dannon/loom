@@ -1,5 +1,5 @@
 /**
- * Push / pull / link helpers for Loom <-> Galaxy Page sync.
+ * Push / pull / link helpers for Orbit <-> Galaxy Page sync.
  *
  * v1 contract (see ./galaxy-page-binding.ts for full notes):
  *  - push is unconditional local-wins

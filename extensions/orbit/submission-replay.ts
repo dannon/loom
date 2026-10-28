@@ -136,7 +136,7 @@ export function registerSubmissionReplay(pi: ExtensionAPI): void {
         entry.isError === true,
         // Replay has no start event, so hand the dispatch details straight in
         // rather than letting the hook fall back to "unattributed". `replayed`
-        // is what keeps the blocks from claiming a submission Loom watched and
+        // is what keeps the blocks from claiming a submission Orbit watched and
         // a server that answered, neither of which happened here.
         { args: entry.args ?? {}, stepAnchor: entry.stepAnchor ?? null, replayed: true },
       );

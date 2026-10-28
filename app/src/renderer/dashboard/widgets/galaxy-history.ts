@@ -4,7 +4,7 @@
  * Draws the history this analysis is attached to as it moves: one row per
  * visible dataset or collection, a state pill, and a headline counting what is
  * waiting, running, finished and failed. Distinct from the jobs panel, which
- * shows what *Loom* launched and wrote down; this shows what Galaxy itself
+ * shows what *Orbit* launched and wrote down; this shows what Galaxy itself
  * reports for the history, including work the user did in Galaxy's own UI.
  *
  * Everything here is built with createElement + textContent. Dataset names,

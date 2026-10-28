@@ -13,14 +13,14 @@ import { readEnv } from "../../shared/orbit-env.js";
 
 /**
  * /feedback -- gather feedback inline via ctx.ui and POST it to the capture
- * worker. Cross-shell: ctx.ui renders in Orbit and the Loom CLI alike. The
+ * worker. Cross-shell: ctx.ui renders in Orbit desktop and the Orbit CLI alike. The
  * brain cannot open Orbit's HTML modal (no plumbing), so this is the brain's
  * own capture path. Guards on ctx.hasUI so it never POSTs an empty payload in
  * non-interactive/RPC mode.
  */
 export function registerFeedbackCommand(pi: ExtensionAPI): void {
   pi.registerCommand("feedback", {
-    description: "Send feedback about Loom to the team (captures optional diagnostics).",
+    description: "Send feedback about Orbit to the team (captures optional diagnostics).",
     handler: async (args: string | undefined, ctx: ExtensionContext) => {
       if (!ctx.hasUI) {
         ctx.ui.notify(
@@ -38,7 +38,7 @@ export function registerFeedbackCommand(pi: ExtensionAPI): void {
 
       const includeDiagnostics = await ctx.ui.confirm(
         "Include diagnostics?",
-        "Attach system info + a summary of recent activity (tool names, arguments, and truncated results), sent to the Loom team's private feedback store. Credentials and API keys are redacted.",
+        "Attach system info + a summary of recent activity (tool names, arguments, and truncated results), sent to the Orbit team's private feedback store. Credentials and API keys are redacted.",
       );
 
       // Opaque tester code (config, env override) -- non-secret; lets the team

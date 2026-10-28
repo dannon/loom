@@ -27,7 +27,7 @@ export interface FeedbackResult {
 }
 
 /**
- * Best-effort read of the Loom package version so loom-cli rows carry a build for
+ * Best-effort read of the Orbit package version so loom-cli rows carry a build for
  * triage. Resolves the repo-root package.json the same way the brain resolves
  * ../../shared at runtime. Returns undefined if it can't be read (safe fallback).
  */

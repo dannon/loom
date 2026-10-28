@@ -23,7 +23,7 @@ export function registerSkillsCommand(pi: ExtensionAPI): void {
         if (sub === "status") {
           const summary = catalogSummary()
             .map((r) => {
-              if (r.bundled) return `${r.repo}: ${r.count} skill(s) bundled with Loom`;
+              if (r.bundled) return `${r.repo}: ${r.count} skill(s) bundled with Orbit`;
               return r.cached
                 ? `${r.repo}: ${r.count} skill(s) cached`
                 : `${r.repo}: not cached yet (run /skills refresh to fetch the latest)`;

@@ -4,8 +4,8 @@
  * The exec-guard decides whether a path may be read; this is the data-shaped
  * companion that ensures a known secret VALUE never rides a tool result back
  * into the model's context (and from there into the provider's request logs).
- * It is value-based by design: we redact the concrete keys Loom holds -- the
- * provider/Galaxy API keys in ~/.loom/config.json and the secret-valued env
+ * It is value-based by design: we redact the concrete keys Orbit holds -- the
+ * provider/Galaxy API keys in ~/.orbit/config.json and the secret-valued env
  * vars the agent process carries -- so there are no false positives on ordinary
  * output. It is a defense-in-depth backstop for the guard, and it also catches
  * vectors the guard can't (an `env` dump, a key pasted into some other file).
@@ -119,7 +119,7 @@ export function collectSecretValues(
     add(p?.apiKeyEncrypted);
   }
   for (const name of SECRET_ENV_VARS) add(env[name]);
-  // pi's auth.json: the one credential class Loom cannot encrypt at rest, so
+  // pi's auth.json: the one credential class Orbit cannot encrypt at rest, so
   // value-redaction is the only backstop its tokens get.
   for (const cred of Object.values((auth ?? {}) as Record<string, unknown>)) {
     if (!cred || typeof cred !== "object") continue;

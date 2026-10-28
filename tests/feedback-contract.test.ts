@@ -32,12 +32,12 @@ describe("feedback contract", () => {
     expect(validateFeedbackPayload({ ...valid, title: "" })).toBe(false);
   });
 
-  it("still has the CLI send loom-cli until the worker accepts orbit-cli", () => {
-    expect(CLI_FEEDBACK_SOURCE).toBe("loom-cli");
+  it("sends orbit-cli, which the worker accepts", () => {
+    expect(CLI_FEEDBACK_SOURCE).toBe("orbit-cli");
   });
 
   it("accepts both CLI source spellings", () => {
-    expect(validateFeedbackPayload({ ...valid, source: "loom-cli" })).toBe(true);
+    expect(validateFeedbackPayload({ ...valid, source: "orbit-cli" })).toBe(true);
     expect(validateFeedbackPayload({ ...valid, source: "orbit-cli" })).toBe(true);
   });
 

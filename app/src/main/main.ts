@@ -137,7 +137,7 @@ function startConfigWatcher(): void {
 }
 
 function getDefaultCwd(cliArgs?: CliArgs): string {
-  // Priority: --cwd CLI arg > LOOM_CWD env > brain config.defaultCwd > hardcoded.
+  // Priority: --cwd CLI arg > ORBIT_CWD env > brain config.defaultCwd > hardcoded.
   // config.defaultCwd is rewritten by AgentManager.switchCwd on every in-app
   // directory change, so a clean restart reopens the last-used directory (#312).
   let configDefaultCwd: string | undefined;

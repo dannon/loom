@@ -117,7 +117,7 @@ const ID_TOKEN = /^[A-Za-z0-9._:/+@~-]{1,512}$/;
  * Turn a block's raw `key: value` fields into a Proposal, or say what is
  * wrong with it. Collection fields are single-line JSON, like the harness
  * fields on the other block types. Unknown keys are ignored, so a block
- * written by a newer Loom still reads. `spec_revision` is never read: it is
+ * written by a newer Orbit still reads. `spec_revision` is never read: it is
  * display only, and the registry is the truth.
  */
 export function parseProposalFields(get: (key: string) => string | undefined): {

@@ -10,7 +10,7 @@
 //     the deep subpath is refused with ERR_PACKAGE_PATH_NOT_EXPORTED -- only the
 //     bare specifier works, and it points at index.ts anyway.
 //
-// Loom depends on a range that spans both shapes, so a fresh install resolves to
+// Orbit depends on a range that spans both shapes, so a fresh install resolves to
 // whichever the registry serves today. Hardcoding either specifier breaks the
 // other half. pi-mcp-adapter 2.12.0 added its exports map on 2026-07-24 and that
 // silently broke `npm install -g @galaxyproject/loom` -- the CLI died on startup
@@ -37,8 +37,8 @@ export function resolvePiExtensionDir(name, resolveSpecifier) {
     }
   }
   throw new Error(
-    `loom: could not resolve the "${name}" extension. Tried:\n${failures.join("\n")}\n` +
+    `orbit: could not resolve the "${name}" extension. Tried:\n${failures.join("\n")}\n` +
       `This usually means the package is missing or was published with an entry ` +
-      `point Loom does not know about. Reinstalling Loom normally fixes it.`,
+      `point Orbit does not know about. Reinstalling Orbit normally fixes it.`,
   );
 }

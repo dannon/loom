@@ -14,7 +14,7 @@
  * separately, don't infer the cause from job counts. Only the interpretation
  * *depth* is a pull: the reason-code table and the API-surface map are
  * reference material that can't be inlined into a hint, and they are bundled
- * with Loom rather than fetched, so the pointer resolves offline.
+ * with Orbit rather than fetched, so the pointer resolves offline.
  */
 
 import { VENDOR_REPO_NAME } from "./vendor-skills";

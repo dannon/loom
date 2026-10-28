@@ -77,12 +77,12 @@ function withinFolded(abs: string, dir: string): boolean {
 // Dedicated credential stores: the home-relative dirs and exact files above
 // that exist solely to hold secrets. The agent has no legitimate reason to read
 // their CONTENTS, so reads are denied for every model tier (not just downgraded
-// to an ask). This is the floor that closes #183 -- ~/.loom/config.json is a
+// to an ask). This is the floor that closes #183 -- ~/.orbit/config.json is a
 // store. The basename patterns (.env, *.pem, *.key, ...) are deliberately NOT
 // stores: those can be project fixtures, so they keep the ask/deny-by-tier path.
 // `agentDir` is injected so tests can relocate the store the same way
 // PI_CODING_AGENT_DIR does in a real run; the default resolves it exactly as
-// the rest of Loom does.
+// the rest of Orbit does.
 export function isCredentialStore(
   absPath: string,
   home: string,
@@ -135,7 +135,7 @@ const RACY_WINDOW_MS = 1000;
  * watchResolution). What a candidate resolves to can only change when an
  * entry in one of those dirs is created, removed, renamed or replaced, and
  * each of those rewrites that dir -- so a symlink planted at
- * `~/.loom/config.json`, a renamed ancestor relinked to its old name, or a
+ * `~/.orbit/config.json`, a renamed ancestor relinked to its old name, or a
  * link halfway down the chain re-pointed somewhere else all show up on the
  * very next call. ctime is in the signature because mtime alone can be put
  * back with `touch -r`, and no ordinary file call can set ctime.
@@ -455,17 +455,17 @@ function hasSegment(p: string, name: string): boolean {
 
 // Write targets gated even inside the workspace jail. A file under `.git`
 // (hooks run on the next git operation; config can redirect hooksPath) or under
-// a state dir (`.loom` or `.orbit` -- Loom's own session state) should never be
+// a state dir (`.loom` or `.orbit` -- Orbit's own session state) should never be
 // written by the model silently -- it uses git commands for repo ops, not the
 // write tool.
 //
 // `home` enables the one carve-out we need: Orbit files analyses under
 // $HOME/.loom/analyses/<name>/ (and, after the rename, $HOME/.orbit/analyses),
 // so those workspaces sit under a state-dir segment yet are the agent's actual
-// work product, not Loom state. Writes there are allowed -- but a *nested*
+// work product, not Orbit state. Writes there are allowed -- but a *nested*
 // `.git`/`.loom`/`.orbit` inside an analysis (a real repo's hooks, or the
 // per-workspace state dir) stays protected. Everything else with a `.git` or
-// state-dir segment -- Loom's home state, some other repo's .git, a
+// state-dir segment -- Orbit's home state, some other repo's .git, a
 // per-workspace state dir outside the analyses tree, or a path whose cwd
 // happens to sit inside one -- stays gated. `.git` is never carved out: a
 // workspace is never legitimately inside one. Pass home="" for the plain
@@ -501,7 +501,7 @@ function hasStateSegment(p: string): boolean {
   return WORKSPACE_STATE_DIR_NAMES.some((name) => hasSegment(p, name));
 }
 
-// Loom's own state: a path with a state-dir segment that is NOT the analyses
+// Orbit's own state: a path with a state-dir segment that is NOT the analyses
 // tree Orbit hands the agent as a workspace. Split out of isProtectedWritePath
 // so the bash classifier can reuse exactly this carve-out without also
 // inheriting the `.git` rule -- a `.git` write through bash is an ordinary

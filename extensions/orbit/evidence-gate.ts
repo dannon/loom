@@ -1,11 +1,11 @@
 /**
  * Evidence gate for plan-step completion.
  *
- * Loom's system prompt says "Evidence comes before assertion -- you must run an
+ * Orbit's system prompt says "Evidence comes before assertion -- you must run an
  * actual verification step before marking a notebook step complete", and
  * `docs/agent/galaxy-routing.md` is sharper still: "Treat invocation YAML
  * status as Galaxy job state. Treat the plan checkbox as verified-result
- * state." Nothing checked either one. Loom hard-gates what can hurt you
+ * state." Nothing checked either one. Orbit hard-gates what can hurt you
  * (exec-guard, write-jail, destructive deletes) and asked nicely for the thing
  * the product is actually for.
  *
@@ -17,7 +17,7 @@
  * before changing status", step 6 "Only after verification succeeds, edit the
  * markdown checkbox". So a flip-only edit is the **documented honest shape**,
  * and a gate keyed on "this edit added nothing" would fire on exactly the
- * behaviour Loom teaches. Absence of evidence is not decidable from one write:
+ * behaviour Orbit teaches. Absence of evidence is not decidable from one write:
  * Galaxy evidence lands in a `loom-invocation` block at end of file, prose
  * evidence may sit in a results section, and the honest sequence spans two
  * edits.
@@ -717,7 +717,7 @@ export function contradictionReason(c: Contradiction): string {
   return (
     `Marking "${c.step.text}" complete contradicts its own Galaxy invocation ` +
     `block, which reads \`status: ${c.invocation.status}\`. That status is written ` +
-    `by Loom's poller from Galaxy job state, not by you. A \`- [x]\` means the ` +
+    `by Orbit's poller from Galaxy job state, not by you. A \`- [x]\` means the ` +
     `result was verified, so it cannot precede the run succeeding.\n` +
     `If the run is still going, leave the step pending. If it failed, mark it ` +
     `\`- [!]\` and record what failed. If Galaxy has actually finished and the ` +
@@ -736,7 +736,7 @@ function registryReason(c: RegistryContradiction): string {
   const address = c.step.anchor ?? c.step.key;
   const record =
     `The approval registry holds a recorded run for this step that is not eligible to ` +
-    `hand off (${c.hold.missing.join("; ")}). Loom writes that record from Galaxy's own ` +
+    `hand off (${c.hold.missing.join("; ")}). Orbit writes that record from Galaxy's own ` +
     `answers; nothing in the notebook changes it.`;
   const head =
     c.kind === "flip"

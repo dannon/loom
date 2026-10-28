@@ -2,7 +2,7 @@
  * User standing instructions -- the ORBIT.md (or legacy LOOM.md) a researcher writes once so they
  * stop re-explaining their preferences every session.
  *
- * pi ships its own AGENTS.md/CLAUDE.md discovery, but Loom's
+ * pi ships its own AGENTS.md/CLAUDE.md discovery, but Orbit's
  * before_agent_start returns a system prompt that REPLACES pi's base
  * (core/extensions/runner.js:866, `currentSystemPrompt = result.systemPrompt`),
  * so pi's context files never reach the model. We do our own discovery here,
@@ -36,7 +36,7 @@ export const MAX_LINES = 200;
 export const MAX_FILES = 8;
 
 export const TRUNCATION_MARKER =
-  "\n\n[... truncated by Loom -- standing instructions are capped at 8KB / 200 lines ...]";
+  "\n\n[... truncated by Orbit -- standing instructions are capped at 8KB / 200 lines ...]";
 
 export type InstructionScope = "global" | "workspace";
 
@@ -326,7 +326,7 @@ function attr(value: string): string {
 /**
  * The GLOBAL file only, rendered for the cached system prompt.
  *
- * Goes last in the before_agent_start array: every Loom constraint has been
+ * Goes last in the before_agent_start array: every Orbit constraint has been
  * stated by then, so the user's own preferences are read inside that frame.
  * Safe to give that slot because the user wrote this file themselves.
  *

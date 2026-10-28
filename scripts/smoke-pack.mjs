@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Tarball smoke test: npm-pack the Loom package, extract into a tmpdir,
+// Tarball smoke test: npm-pack the Orbit package, extract into a tmpdir,
 // install runtime deps, and run `node bin/orbit.js --help` to verify the
 // published surface is self-contained and at least starts up.
 //

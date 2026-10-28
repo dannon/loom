@@ -1,5 +1,5 @@
 /**
- * Context injection for the Loom session.
+ * Context injection for the Orbit session.
  *
  * Notebook is the durable record. State is just connection + path. The agent
  * gets the notebook content (tail-capped excerpt + recent activity tail) and
@@ -189,7 +189,7 @@ function buildActiveModelBlock(): string {
  * Surface the Orbit tester ID directly into the prompt so the agent answers
  * "what's my tester ID?" from local config instead of guessing at Galaxy
  * (issue #189). The id is an opaque, non-secret beta-tester code stored in
- * ~/.loom/config.json (or LOOM_TESTER_ID). Reads ONLY testerId -- never the
+ * ~/.orbit/config.json (or LOOM_TESTER_ID). Reads ONLY testerId -- never the
  * rest of the config, and never tells the agent to open the file (#183).
  */
 export function buildTesterIdBlock(): string {
@@ -198,7 +198,7 @@ export function buildTesterIdBlock(): string {
   return `## Orbit tester ID
 
 This session's Orbit tester ID is **${testerId}**. It comes from the local
-Orbit/Loom config, not from Galaxy. When the user asks about their tester ID,
+Orbit config, not from Galaxy. When the user asks about their tester ID,
 report this value directly and do **not** call Galaxy tools such as
 \`${galaxyToolFamily().tool("get_user")}\`. The tester ID is not a Galaxy account attribute; it's an
 opaque, non-secret code that rides along on feedback submissions.
@@ -562,7 +562,7 @@ function buildOperatingDisciplineBlock(): string {
 
 /**
  * Verification discipline. This is deliberately brain-side policy:
- * shells render progress, but Loom decides when evidence is sufficient to
+ * shells render progress, but Orbit decides when evidence is sufficient to
  * call a research artifact complete.
  */
 export function buildVerificationDisciplineBlock(): string {
@@ -656,7 +656,7 @@ export function renderSkillsSection(
   // description of machinery that no longer runs for it.
   const allBundled = repos.every((r) => bundled.has(r.name));
   const freshness = allBundled
-    ? `The catalog below ships with Loom and reads from disk, so it works offline.`
+    ? `The catalog below ships with Orbit and reads from disk, so it works offline.`
     : `The catalog below refreshes each session; deep reference docs cache for 24h.`;
   return renderSkillsRouter(
     repos.map((r) => ({

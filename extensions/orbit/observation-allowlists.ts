@@ -8,7 +8,7 @@
 //     lib/galaxy/config/sample/datatypes_conf.xml.sample
 //     tools/, lib/galaxy/tools/, lib/galaxy/datatypes/converters/ (tool ids)
 //
-// Regenerate when galaxy-ops is bumped or Loom's Galaxy floor moves; see the
+// Regenerate when galaxy-ops is bumped or Orbit's Galaxy floor moves; see the
 // script header for the command.
 
 /**

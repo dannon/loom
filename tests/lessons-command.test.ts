@@ -81,7 +81,7 @@ describe("formatLessonsStatus", () => {
   it("adds a third line when the env has the last word", () => {
     const text = formatLessonsStatus({ enabled: false, source: "env", observationsMode: "off" });
     expect(text.split("\n")).toHaveLength(3);
-    expect(text).toContain("LOOM_LESSONS=off");
+    expect(text).toContain("ORBIT_LESSONS=off");
     expect(text).toContain("can't be changed from here");
   });
 });

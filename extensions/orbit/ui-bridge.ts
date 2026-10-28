@@ -2,7 +2,7 @@
  * UI bridge — emits the Notebook widget when notebook.md changes.
  *
  * The Activity tab in shells is now driven directly by the renderer's
- * own shell + proc-monitor streams (Orbit) or terminal output (Loom CLI),
+ * own shell + proc-monitor streams (Orbit desktop) or terminal output (Orbit CLI),
  * so no Activity widget is emitted from here. activity.jsonl is still
  * written on disk by the activity-hooks module for debug.
  */

@@ -889,7 +889,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
 
 /**
  * Node's fetch ignores the proxy environment variables that curl and most
- * shells honour, and Loom sets nothing up to compensate -- so on a network
+ * shells honour, and Orbit sets nothing up to compensate -- so on a network
  * that only reaches the internet through a proxy, every probe here fails no
  * matter how correct the URL and key are. We can't fix that from inside the
  * catch block, but we can stop the user re-checking a URL that was fine.

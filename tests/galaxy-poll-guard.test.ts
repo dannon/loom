@@ -217,7 +217,7 @@ describe("invocation reads", () => {
       const h = invocationHarness();
       const annotated = spilled(h, state, structured);
       expect(annotated.content[0].text).toBe(PREVIEW);
-      expect(annotated.content[1].text).toContain("[Loom background monitoring]");
+      expect(annotated.content[1].text).toContain("[Orbit background monitoring]");
       expect(annotated.content[1].text).toContain(`still ${state}`);
       expect(await held(h)).toBe(true);
     });

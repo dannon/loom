@@ -3,7 +3,7 @@
  *
  * Serves the Orbit renderer via Vite and bridges a WebSocket to a
  * loom subprocess (bin/orbit.js --mode rpc). Single user, single
- * subprocess, same ~/.loom/config.json as the CLI and Electron app.
+ * subprocess, same ~/.orbit/config.json as the CLI and Electron app.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -137,7 +137,7 @@ function getCwd(): string {
   return cwd;
 }
 
-// ── Loom subprocess ──────────────────────────────────────────────────────────
+// ── Orbit subprocess ──────────────────────────────────────────────────────────
 
 let coreProcess: ChildProcess | null = null;
 let activeSocket: WebSocket | null = null;
@@ -245,7 +245,7 @@ function startCore(opts: { fresh?: boolean } = {}): void {
     writeEnv(env, "LOCAL_EXEC", "on");
   }
 
-  log("starting loom subprocess", { bin: CORE_BIN, cwd, remote: IS_REMOTE_MODE });
+  log("starting orbit core subprocess", { bin: CORE_BIN, cwd, remote: IS_REMOTE_MODE });
 
   coreProcess = spawn("node", args, {
     stdio: ["pipe", "pipe", "pipe"],
@@ -484,7 +484,7 @@ wss.on("connection", (socket) => {
   // In remote mode with no resolvable provider key, hold off spawning: the
   // renderer's key-entry screen drives agent:provide-llm-key, which spawns.
   // Non-remote (desktop/dev) is unchanged -- the brain reads its own
-  // ~/.loom/config.json key, which never reaches this env-only check.
+  // ~/.orbit/config.json key, which never reaches this env-only check.
   if (!coreProcess && (!IS_REMOTE_MODE || llmKeyPresent())) startCore();
 
   socket.on("message", (raw) => {

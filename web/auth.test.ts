@@ -18,7 +18,7 @@ describe("evaluateBind", () => {
   it("refuses an exposed bind with no token and no opt-out", () => {
     const d = evaluateBind("0.0.0.0", undefined, false);
     expect(d.ok).toBe(false);
-    expect(d.error).toMatch(/LOOM_WEB_TOKEN/);
+    expect(d.error).toMatch(/ORBIT_WEB_TOKEN/);
   });
   it("allows an exposed bind once a token is set", () => {
     expect(evaluateBind("0.0.0.0", "s3cret", false).ok).toBe(true);

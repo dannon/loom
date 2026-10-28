@@ -153,7 +153,7 @@ const PARAMETERS = Type.Object({
 const DESCRIPTION = `Propose ONE lesson drawn from what happened in this session, for the user to
 approve. The user always sees the draft and decides; nothing is written without that.
 
-Only call this when the user asked -- they typed /lesson, or Loom told you they corrected you and
+Only call this when the user asked -- they typed /lesson, or Orbit told you they corrected you and
 they then said yes to writing it down. Never call it on your own initiative: an unasked call is
 refused and recorded.
 

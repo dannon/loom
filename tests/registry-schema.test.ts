@@ -170,8 +170,8 @@ describe("migrations", () => {
     expect(migrateToCurrent(doc)).toBe(doc);
   });
 
-  it("refuses a document from a newer Loom", () => {
-    expect(() => migrateToCurrent(registryWith({ version: 4 as 3 }))).toThrow(/newer Loom/);
+  it("refuses a document from a newer Orbit", () => {
+    expect(() => migrateToCurrent(registryWith({ version: 4 as 3 }))).toThrow(/newer Orbit/);
   });
 
   it("refuses an older version with no migration registered", () => {

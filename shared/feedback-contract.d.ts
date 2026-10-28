@@ -2,7 +2,7 @@ export declare const SCHEMA_VERSION: 1;
 export declare const FEEDBACK_ROUTE: "/feedback";
 export declare const FEEDBACK_KEY_HEADER: "X-Orbit-Feedback-Key";
 export declare const FEEDBACK_ENDPOINT_URL: string;
-export declare const CLI_FEEDBACK_SOURCE: "loom-cli";
+export declare const CLI_FEEDBACK_SOURCE: "orbit-cli";
 
 export interface FeedbackSysinfo {
   appVersion?: string;

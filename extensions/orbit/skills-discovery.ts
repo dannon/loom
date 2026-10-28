@@ -11,7 +11,7 @@ import {
 import { hasBundledContent, isBundledRepo, readBundledCatalog } from "./vendor-skills";
 export type { ConfiguredSkillRepo };
 
-/** The product-surface id Loom claims. A skill opts in with `surfaces: [loom]`. */
+/** The product-surface id Orbit claims. A skill opts in with `surfaces: [loom]`. */
 export const SURFACE_ID = SKILLS_SURFACE_ID;
 
 /** Catalog freshness window. SKILL.md frontmatter + the tree listing use this; deep refs stay 24h. */

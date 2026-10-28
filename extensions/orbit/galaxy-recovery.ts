@@ -47,7 +47,7 @@ const GALAXY_AUTH_HINT =
   "Galaxy refused the request's credentials, or none are configured. Ask the user to run /connect; do not retry until they have.";
 
 const MUTATION_OUTCOME =
-  "This operation may already have been accepted by Galaxy. Its result is UNKNOWN. Inspect the destination history, jobs/invocations or affected resource before considering any retry. Reuse accepted work, and if you find the accepted job or invocation, record it with galaxy_job_record or galaxy_invocation_record -- Loom cannot capture a submission whose call failed. Do not blindly repeat a submission, upload, create, update or delete; do not invent IDs or claim success.";
+  "This operation may already have been accepted by Galaxy. Its result is UNKNOWN. Inspect the destination history, jobs/invocations or affected resource before considering any retry. Reuse accepted work, and if you find the accepted job or invocation, record it with galaxy_job_record or galaxy_invocation_record -- Orbit cannot capture a submission whose call failed. Do not blindly repeat a submission, upload, create, update or delete; do not invent IDs or claim success.";
 
 // galaxy-ops reports any HTTP status but 401/403/404 as a connection failure, so a "dropped"
 // call is often a rejected argument (a 400 or 422): the advice sends the model to the message. A

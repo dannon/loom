@@ -717,7 +717,7 @@ export function migrateToCurrent(
       fail("registry.version", "missing or not an integer");
     }
     if (version > CURRENT_REGISTRY_VERSION) {
-      fail("registry.version", `written by a newer Loom (version ${version})`);
+      fail("registry.version", `written by a newer Orbit (version ${version})`);
     }
     const step = migrations[version];
     if (!step) fail("registry.version", `no migration from version ${version}`);

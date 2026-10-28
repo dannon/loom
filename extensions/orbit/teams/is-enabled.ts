@@ -5,7 +5,7 @@ import { readEnv } from "../../../shared/orbit-env.js";
  * Whether the experimental team_dispatch tool is opted in.
  *
  * Resolution order (env wins so a developer can flip it for one session
- * without touching ~/.loom/config.json):
+ * without touching ~/.orbit/config.json):
  *   1. LOOM_TEAM_DISPATCH env var -- "1" -> on, "0" -> off (explicit
  *      override of an on-config), anything else -> defer to config.
  *   2. config.experiments.teamDispatch -- boolean.

@@ -2211,7 +2211,7 @@ function handleSlashCommand(text: string): boolean {
     return true;
   }
 
-  // Loom commands — pass through to agent
+  // Orbit commands — pass through to agent
   if (cmd === "plan" || cmd === "status" || cmd === "decisions" || cmd === "profiles") {
     chat.addUserMessage(text);
     promptAgent(`/${cmd}`);
@@ -3807,7 +3807,7 @@ function renderSkillsRows(): void {
       const bundled = isBundledSkillRepo(prefsSkillsState[idx]);
       badge.textContent = bundled ? `bundled @${SKILLS_PIN.commit.slice(0, 7)}` : "";
       badge.title = bundled
-        ? `Ships inside Loom from ${SKILLS_PIN.repo}@${SKILLS_PIN.commit}` +
+        ? `Ships inside Orbit from ${SKILLS_PIN.repo}@${SKILLS_PIN.commit}` +
           `${SKILLS_PIN.commitDate ? ` (${SKILLS_PIN.commitDate})` : ""}. ` +
           `Point it at another branch or URL to fetch it live instead.`
         : "";
@@ -4436,7 +4436,7 @@ function openReportModal(): void {
   const draft = feedbackDraft.load();
   reportTitle.value = draft.title;
   reportBody.value = draft.body;
-  // Default ON: the primary destination is Loom's private capture store, not a
+  // Default ON: the primary destination is Orbit's private capture store, not a
   // public issue, so opt-out is fine. The user can still uncheck before sending,
   // and the public GitHub fallback (POST failure) sends text only -- no
   // diagnostics -- so this never auto-publishes logs to a public issue. The

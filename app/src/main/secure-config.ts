@@ -14,7 +14,7 @@ export function isAvailable(): boolean {
   // env makes us skip the probe entirely; encrypted secrets just stay
   // unread for the duration of the test.
   if (readEnv("DISABLE_SAFE_STORAGE") === "1") return false;
-  // Dev (`npm start`, unpackaged) shares ~/.loom/config.json with the installed
+  // Dev (`npm start`, unpackaged) shares ~/.orbit/config.json with the installed
   // app but runs as a different, cdhash-pinned Electron binary. If dev touched
   // safeStorage it would create and own the "<App> Safe Storage" keychain item,
   // and the installed Developer ID build would no longer match its ACL -- the

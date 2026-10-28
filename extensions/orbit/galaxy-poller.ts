@@ -192,7 +192,7 @@ const MAX_MISSING_CHECK_ATTEMPTS = 3;
  * Every in-flight block we've seen this session, keyed `<kind>:<id>`. The
  * notebook is the poller's only index of what to watch, so a block that leaves
  * it -- an agent edit, a `bash` rewrite, a hand-pruned file -- takes a live
- * Galaxy run out of Loom's sight with nothing said. We can't put the block back
+ * Galaxy run out of Orbit's sight with nothing said. We can't put the block back
  * (it is the user's file, and re-inserting it would fight whoever removed it),
  * but we can refuse to let it go quietly. Reset per session in
  * startGalaxyPoller.
@@ -263,7 +263,7 @@ function announceMissingBlock(block: TrackedBlock, state: string | undefined): v
   }
   if (notify) {
     notify(
-      `⚠️ Galaxy: "${block.label}" is still ${state ?? "running"} on Galaxy, but its ${block.kind} block is gone from the notebook — Loom has stopped tracking it.`,
+      `⚠️ Galaxy: "${block.label}" is still ${state ?? "running"} on Galaxy, but its ${block.kind} block is gone from the notebook — Orbit has stopped tracking it.`,
       "warning",
     );
   }
@@ -320,7 +320,7 @@ const MAX_JOB_PERSIST_ATTEMPTS = 3;
  * only poll-owned fields so a concurrent label edit survives, and hand the stamp
  * to writeNotebook so an out-of-band edit fails the compare-and-swap instead of
  * being silently overwritten (#391). The lock alone can't do this -- it only
- * orders Loom's own writers, and the agent edits notebook.md directly.
+ * orders Orbit's own writers, and the agent edits notebook.md directly.
  */
 async function persistJobUpdate(
   nbPath: string,

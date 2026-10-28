@@ -162,7 +162,7 @@ export interface OrbitConfig {
    */
   /**
    * Recorded lessons -- short notes on situations that go wrong -- read from
-   * the corpus shipped with Loom plus `~/.loom/lessons/<namespace>/<slug>.md`.
+   * the corpus shipped with Orbit plus `~/.loom/lessons/<namespace>/<slug>.md`.
    * Retrieval is entirely local, so no query ever leaves the machine.
    *
    * Off unless `enabled` is exactly `true` (the `/lessons on` command writes
@@ -184,7 +184,7 @@ export interface OrbitConfig {
     enabled?: boolean;
     /**
      * Turn the gate into a pass-through (allow everything). Human-only: the
-     * agent can never set this, because writing ~/.loom/config.json is itself
+     * agent can never set this, because writing ~/.orbit/config.json is itself
      * gated. Also settable via --dangerously-bypass-permissions / env.
      */
     dangerouslyBypassPermissions?: boolean;

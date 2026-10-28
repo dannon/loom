@@ -4,7 +4,7 @@
  *
  * The submission hook records what it watches happen. What it cannot watch:
  * a turn that died between the submit and the result, a run started from
- * code mode or from Galaxy's own UI while Loom was open, a session resumed
+ * code mode or from Galaxy's own UI while Orbit was open, a session resumed
  * after a crash. Galaxy is the source of truth and the notebook is a
  * reconciled projection of it, so this lists the bound history's invocations
  * and jobs and writes a block for every one no block claims -- as

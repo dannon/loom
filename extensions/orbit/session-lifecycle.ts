@@ -245,7 +245,7 @@ function syncSessionJsonlSymlink(ctx: ExtensionContext): void {
     try {
       const existing = fs.lstatSync(linkPath);
       if (!existing.isSymbolicLink()) {
-        console.warn("session.jsonl exists and is not a Loom symlink; leaving it untouched");
+        console.warn("session.jsonl exists and is not an Orbit symlink; leaving it untouched");
         return;
       }
       fs.unlinkSync(linkPath);
@@ -289,7 +289,7 @@ export function planStartupGreeting(status: ActiveGalaxyStatus, isOrbit: boolean
       kind: "notify",
       level: "warning",
       text:
-        `Welcome to Loom. A Galaxy profile is configured, but its API key only decrypts inside Orbit -- ` +
+        `Welcome to Orbit. A Galaxy profile is configured, but its API key only decrypts inside the Orbit desktop app -- ` +
         `Galaxy tools won't work in this terminal. Run from Orbit, export GALAXY_API_KEY, or /connect a server. ` +
         `What would you like to work on?`,
     };
@@ -299,7 +299,7 @@ export function planStartupGreeting(status: ActiveGalaxyStatus, isOrbit: boolean
     kind: "notify",
     level: "info",
     text:
-      `Welcome to Loom. No Galaxy server is configured, so work runs locally for now -- use /connect to set one up. ` +
+      `Welcome to Orbit. No Galaxy server is configured, so work runs locally for now -- use /connect to set one up. ` +
       `What would you like to work on?`,
   };
 }

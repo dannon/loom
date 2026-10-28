@@ -70,7 +70,7 @@ function pointsAtOrbitServer(name, entry) {
 /**
  * Loom wrote its entries for the adapter, pointing at its own galaxy-mcp or BRC
  * server. One that also has a pi field had it added by hand afterwards -- still
- * Loom's entry, holding the plaintext key and an exclude list pi ignores -- but
+ * Orbit's entry, holding the plaintext key and an exclude list pi ignores -- but
  * an entry that turns the server off is a choice the brain's registration would
  * undo if the entry went away, so it stays.
  * @param {string} name @param {unknown} entry
@@ -216,12 +216,12 @@ function translateAdapterEntry(name, entry) {
   entry.enabled = false;
   return (
     `MCP server "${name}" used ${unsupported.join(", ")}, which pi's built-in MCP ` +
-    `does not support, so Loom disabled it in mcp.json. Review it and re-enable with /mcp.`
+    `does not support, so Orbit disabled it in mcp.json. Review it and re-enable with /mcp.`
   );
 }
 
 /**
- * Remove Loom's own servers and the adapter's settings from a parsed mcp.json,
+ * Remove Orbit's own servers and the adapter's settings from a parsed mcp.json,
  * and translate the user's remaining servers to pi's built-in MCP fields.
  * @param {Record<string, any>} config
  * @returns {{ changed: boolean, empty: boolean, removedGalaxy: boolean, notices: string[], shadowing: string[] }}
@@ -270,10 +270,10 @@ function shadowingNotice(name, mcpConfigPath) {
   const what =
     name === "galaxy"
       ? "the Galaxy server and key saved there, not the profile from /connect"
-      : "that BRC Analytics server, not the one Loom ships";
+      : "that BRC Analytics server, not the one Orbit ships";
   return (
     `${mcpConfigPath} still has a "${name}" entry written for pi's built-in MCP. ` +
-    `A file entry wins over the brain's registration, so Loom will use ${what}. ` +
+    `A file entry wins over the brain's registration, so Orbit will use ${what}. ` +
     `Remove the entry if that is not what you want.`
   );
 }
@@ -302,7 +302,7 @@ function renameWithRetry(tmpPath, dest) {
  * its current bytes go to `<path>.loom-backup` (mode 0600; it may carry a key).
  * Nothing here throws: a file that cannot be updated is left as it was and
  * described in the returned notices, because refusing to start would leave the
- * user with no way to fix it from inside Loom, and there is no restriction to
+ * user with no way to fix it from inside Orbit, and there is no restriction to
  * lose when the file cannot be written at all.
  * @param {string} mcpConfigPath
  * @returns {{ notices: string[] }} messages for the launcher to print
@@ -352,11 +352,11 @@ export function migrateLegacyMcpConfig(mcpConfigPath) {
     // over the brain's registration (pinning every session to that account and
     // key), and the user's own servers lose the tool restrictions pi ignores.
     const why = removedGalaxy
-      ? `Loom will keep using the Galaxy account saved there`
-      : `the servers Loom meant to migrate keep settings pi ignores, such as tool restrictions`;
+      ? `Orbit will keep using the Galaxy account saved there`
+      : `the servers Orbit meant to migrate keep settings pi ignores, such as tool restrictions`;
     notices.push(
       `Could not update ${mcpConfigPath} (${err instanceof Error ? err.message : err}), ` +
-        `so ${why}. Fix the file's permissions, or remove those entries, and restart Loom.`,
+        `so ${why}. Fix the file's permissions, or remove those entries, and restart Orbit.`,
     );
   }
   return { notices };

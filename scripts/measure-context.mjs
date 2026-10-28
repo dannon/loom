@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Measure the fixed context Loom sends on every turn: the assembled system
+// Measure the fixed context Orbit sends on every turn: the assembled system
 // prompt plus every tool schema. Boots `bin/orbit.js --mode rpc` against a
 // throwaway HOME whose only provider is a local mock Anthropic endpoint,
 // captures the first /v1/messages request, and reports what's in it.
@@ -45,7 +45,7 @@ if (!flag("--no-galaxy")) runs.push({ name: "galaxy", galaxy: true });
 const tok = (s) => Math.round(s.length / 4);
 
 // The in-process Galaxy tools' bare names: galaxy-ops' operations plus the
-// ones Loom adds beside them.
+// ones Orbit adds beside them.
 const GALAXY_OPS_NAMES = new Set([
   ...allOperations.map((op) => op.name),
   "list_jobs",

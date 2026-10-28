@@ -129,7 +129,7 @@ jobs:
             artifacts/**/*.rpm
           fail_on_unmatched_files: true
 
-  # Publish the @galaxyproject/loom npm package (the Loom CLI -- not Orbit) via
+  # Publish the @galaxyproject/loom npm package (the Orbit CLI -- not the desktop app) via
   # OIDC trusted publishing. No NPM_TOKEN and no 2FA OTP: GitHub mints a
   # short-lived id-token that npm verifies against the package's configured
   # trusted publisher (npmjs.com -> package Settings -> Trusted Publisher,

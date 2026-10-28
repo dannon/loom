@@ -51,7 +51,7 @@ export const SUBMISSION_TOOLS: Readonly<Record<string, SubmissionKind>> = {
   run_user_tool: "jobs",
   upload_file_from_url: "jobs",
   upload_file: "jobs",
-  // Loom-native (galaxy-upload.ts), not a galaxy-ops operation: its result shape
+  // Orbit-native (galaxy-upload.ts), not a galaxy-ops operation: its result shape
   // is ours, so it is parsed from `details` rather than from the JSON text.
   galaxy_upload_local_file: "jobs",
   create_user_tool: "udt",
@@ -75,7 +75,7 @@ export interface SubmittedJob {
   historyId?: string;
   /**
    * Galaxy's job state when the submission call returned. Only set when the
-   * caller already waited the work out -- Loom's uploader blocks until ingest
+   * caller already waited the work out -- Orbit's uploader blocks until ingest
    * finishes, so an `ok` upload is done before its block is ever written.
    */
   state?: string;
@@ -122,7 +122,7 @@ export interface ResolvedResult {
    * show in full; the caller may re-read it.
    */
   outputId?: string;
-  /** Loom-native tool details, when the tool is one of ours. */
+  /** Orbit-native tool details, when the tool is one of ours. */
   details?: Record<string, unknown>;
 }
 
@@ -403,7 +403,7 @@ function parseCreateUserTool(data: unknown, _args: Record<string, unknown>): Par
 }
 
 /**
- * Loom's own uploader. Not an MCP passthrough, so the ids come from the tool's
+ * Orbit's own uploader. Not an MCP passthrough, so the ids come from the tool's
  * `details` rather than from a `GalaxyResult`: `galaxy-upload.ts` reads
  * `jobs[]` off the `/tools/fetch` response and carries the ids there.
  */

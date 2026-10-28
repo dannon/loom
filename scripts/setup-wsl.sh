@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Loom / Orbit WSL2 setup script
+# Orbit WSL2 setup script
 # Run this INSIDE an Ubuntu WSL2 instance on Windows.
 #
 # Prerequisites (run in PowerShell as Administrator first):
@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-echo "=== Loom / Orbit WSL2 Setup ==="
+echo "=== Orbit WSL2 Setup ==="
 echo ""
 
 # ── Check we're in WSL2 ──────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ else
   echo "uv/uvx found."
 fi
 
-# ── Clone Loom ───────────────────────────────────────────────────────────────
+# ── Clone Orbit ───────────────────────────────────────────────────────────────
 LOOM_DIR="$HOME/loom"
 if [ ! -d "$LOOM_DIR" ]; then
   echo "Cloning loom..."
@@ -81,7 +81,7 @@ echo ""
 echo "To start Orbit (the Electron shell):"
 echo "  cd ~/loom/app && npm start"
 echo ""
-echo "Or to use the Loom CLI directly:"
+echo "Or to use the Orbit CLI directly:"
 echo "  cd ~/loom && node bin/orbit.js"
 echo ""
 echo "Notes:"

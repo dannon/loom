@@ -11,7 +11,7 @@
  *
  * Isolation: each test gets a fresh tmpdir for HOME, cwd, and Electron's
  * userData. Without this, the launched binary reads the developer's real
- * ~/.loom/config.json (LLM keys, Galaxy creds) and ~/.orbit state, and the
+ * ~/.orbit/config.json (LLM keys, Galaxy creds) and ~/.orbit state, and the
  * test side-effects on real analysis directories. The inherited env is also
  * scrubbed of GALAXY_* so a developer with creds set in their shell doesn't
  * accidentally launch the test against a real Galaxy server.

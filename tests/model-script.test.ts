@@ -451,6 +451,6 @@ describe("team_dispatch under the seam", () => {
       },
     );
     const result = await execute!("id", spec, undefined, () => undefined, ctx);
-    expect(result.content[0].text).toMatch(/unavailable while LOOM_MODEL_SCRIPT is set/);
+    expect(result.content[0].text).toMatch(/unavailable while ORBIT_MODEL_SCRIPT is set/);
   });
 });

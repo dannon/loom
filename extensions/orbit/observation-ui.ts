@@ -29,9 +29,9 @@ import type { ObservationsMode } from "./observations-config.js";
  * nothing about what the report is for.
  */
 export const PURPOSE_STATEMENT =
-  "Reports like this are how recurring problems get turned into lessons Loom surfaces " +
+  "Reports like this are how recurring problems get turned into lessons Orbit surfaces " +
   "to everyone -- including you -- the next time it happens, and into fixes in Galaxy " +
-  "and Loom.";
+  "and Orbit.";
 
 export const PRIVACY_STATEMENT =
   "Only the fields above are sent, to the Galaxy team's private intake queue, tied to " +
@@ -81,7 +81,7 @@ export async function confirmObservation(
   try {
     return await ctx.ui.confirm(
       "Send this observation to the Galaxy team?",
-      `Loom hit something that looks like a failure pattern. ${PURPOSE_STATEMENT}\n\n` +
+      `Orbit hit something that looks like a failure pattern. ${PURPOSE_STATEMENT}\n\n` +
         (note ? `${note}\n\n` : "") +
         `${renderObservationForConfirm(obs)}\n\n${PRIVACY_STATEMENT}`,
     );

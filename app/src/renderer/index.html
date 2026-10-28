@@ -704,7 +704,7 @@
             <div class="prefs-row">
               <label for="prefs-default-cwd">Default directory</label>
               <div class="prefs-row-with-btn">
-                <input id="prefs-default-cwd" type="text" placeholder="~/.loom/analyses" />
+                <input id="prefs-default-cwd" type="text" placeholder="~/.orbit/analyses" />
                 <button id="prefs-browse-cwd" class="plan-btn">Browse</button>
               </div>
             </div>
@@ -722,7 +722,7 @@
             <h3>Skills</h3>
             <p class="prefs-help">
               GitHub repos of <code>SKILL.md</code> files. The agent loads them on demand via the
-              <code>skills_fetch</code> tool. A repo marked <em>bundled</em> ships inside Loom at
+              <code>skills_fetch</code> tool. A repo marked <em>bundled</em> ships inside Orbit at
               the commit shown and is read from disk, so it works offline; point one at a different
               branch or URL and it is fetched from GitHub instead.
               <strong>Alpha restriction:</strong> only repos under
@@ -759,7 +759,7 @@
           <section class="prefs-section" id="prefs-section-safety">
             <h3>Safety</h3>
             <p class="prefs-help">
-              By default Loom gates the AI's local actions: shell commands and writes outside your
+              By default Orbit gates the AI's local actions: shell commands and writes outside your
               workspace need your approval, and destructive patterns are blocked. Bypassing
               permissions turns that gate off entirely — the AI can run any command and edit any
               file as you, with no prompts. Only enable this in an environment you fully control.
@@ -805,11 +805,11 @@
     <div id="welcome-overlay" class="modal-overlay hidden">
       <div class="modal welcome-modal">
         <div class="modal-header">
-          <h2>Welcome to orbit</h2>
+          <h2>Welcome to Orbit</h2>
         </div>
         <div class="modal-body">
           <p class="welcome-intro">
-            orbit is an AI-driven bioinformatics analysis app. Configure your LLM provider to get
+            Orbit is an AI-driven bioinformatics analysis app. Configure your LLM provider to get
             started. You can change settings later in Preferences.
           </p>
 
@@ -1002,7 +1002,7 @@
         <div class="modal-body">
           <div id="report-form-fields">
             <div class="report-account-note">
-              Your feedback goes straight to the Loom team's private feedback store — no GitHub
+              Your feedback goes straight to the Orbit team's private feedback store — no GitHub
               account needed. If that service is unreachable, Orbit falls back to opening a
               pre-filled issue on
               <a
@@ -1045,7 +1045,7 @@
               </p>
               <p>
                 Both are on by default for the beta so we get useful diagnostics. Feedback goes to
-                Loom's private feedback store; uncheck either box to leave it out. If the store is
+                Orbit's private feedback store; uncheck either box to leave it out. If the store is
                 unreachable and we fall back to a public GitHub issue, only your text is sent —
                 never these diagnostics.
               </p>

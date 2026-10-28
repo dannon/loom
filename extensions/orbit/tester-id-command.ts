@@ -3,7 +3,7 @@
  *
  * With no argument it prints the current tester ID; with an argument it sets it.
  *
- * Beta onboarding asks testers to put a `testerId` in ~/.loom/config.json. That
+ * Beta onboarding asks testers to put a `testerId` in ~/.orbit/config.json. That
  * file is a credential store, so the agent's edit/write to it is floored by the
  * exec-guard -- a hard deny on low-capability models and an unreachable
  * read-then-edit on every tier once #194 landed (issue #222). This gives the
@@ -76,7 +76,7 @@ export function setTesterId(id: string): void {
       JSON.parse(fs.readFileSync(configPath, "utf-8"));
     } catch (err) {
       throw new Error(
-        "~/.loom/config.json couldn't be read, so it wasn't changed -- fix or remove the file and try again.",
+        "~/.orbit/config.json couldn't be read, so it wasn't changed -- fix or remove the file and try again.",
         { cause: err },
       );
     }
@@ -87,7 +87,7 @@ export function setTesterId(id: string): void {
     saveConfig(cfg);
   } catch (err) {
     throw new Error(
-      "Couldn't write ~/.loom/config.json -- check file permissions and free space, then try again.",
+      "Couldn't write ~/.orbit/config.json -- check file permissions and free space, then try again.",
       { cause: err },
     );
   }
@@ -96,7 +96,7 @@ export function setTesterId(id: string): void {
 export function registerTesterIdCommand(pi: ExtensionAPI): void {
   pi.registerCommand("tester-id", {
     description:
-      "Show or set your Orbit beta tester ID (writes only testerId to ~/.loom/config.json).",
+      "Show or set your Orbit beta tester ID (writes only testerId to ~/.orbit/config.json).",
     handler: async (args: string | undefined, ctx: ExtensionContext) => {
       const raw = (args ?? "").trim();
 

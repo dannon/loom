@@ -4,7 +4,7 @@
  * A subset mirror of C4's `Lesson`, not a re-declaration of all of C3: the
  * snapshot round-trips every authoring field, and this module names only the
  * ones the matcher, the renderers and the search index actually touch.
- * Everything optional is optional because a snapshot built by a newer Loom may
+ * Everything optional is optional because a snapshot built by a newer Orbit may
  * add or drop fields this one has never heard of.
  */
 

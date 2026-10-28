@@ -597,7 +597,7 @@ export async function approveCommand(
 /** The turn /approve starts so the approved run is submitted straight away. */
 export function approvedRunPrompt(id: string): string {
   return (
-    `[Loom approval] The user approved ${id}. Submit exactly that run now with the Galaxy tools, ` +
+    `[Orbit approval] The user approved ${id}. Submit exactly that run now with the Galaxy tools, ` +
     `then record it with galaxy_job_record (or galaxy_invocation_record for a workflow), passing ` +
     `proposalId: "${id}".`
   );

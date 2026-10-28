@@ -496,7 +496,7 @@ function describe(
         event.source === "interactive" || event.source === "rpc" || event.source === ""
           ? "You asked"
           : event.source === "extension"
-            ? "Loom followed up"
+            ? "Orbit followed up"
             : "A prompt arrived";
       const text = strOf(p.text);
       return { tone: "info", text: text ? `${who}: ${text}` : `${who}, with no text recorded` };

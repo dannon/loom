@@ -10,7 +10,7 @@ function describeTool(
   input: Record<string, unknown>,
   family: GalaxyToolFamily,
 ): string {
-  // Loom's own galaxy_* tools (upload, job/invocation records) count as Galaxy work too.
+  // Orbit's own galaxy_* tools (upload, job/invocation records) count as Galaxy work too.
   const galaxy =
     galaxyCall(name, input, family)?.name ?? (name.startsWith("galaxy_") ? name : undefined);
   if (galaxy) {

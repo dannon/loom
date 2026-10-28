@@ -8,10 +8,10 @@
  * honours -- every other tool_call handler running first, the exec-guard
  * floor, the write landing or not. A replay can't show that. This seam puts a
  * model in the loop that says exactly what a script tells it to, using pi's
- * faux provider, so pi's agent loop, its tools and every Loom hook run as they
+ * faux provider, so pi's agent loop, its tools and every Orbit hook run as they
  * do with a real model.
  *
- * `LOOM_MODEL_SCRIPT` names a JSONL file, one model turn per line, in order:
+ * `ORBIT_MODEL_SCRIPT` names a JSONL file, one model turn per line, in order:
  *
  * ```json
  * {"tool": "galaxy_invocation_check_all", "input": {}, "text": "Checking the run first."}
@@ -169,7 +169,7 @@ export function createScriptedModel(state: ScriptState = { loaded: false, turns:
     models: [
       {
         id: MODEL_SCRIPT_MODEL_ID,
-        name: "Scripted model (LOOM_MODEL_SCRIPT)",
+        name: "Scripted model (ORBIT_MODEL_SCRIPT)",
         reasoning: false,
         input: ["text"],
         contextWindow: 200_000,
@@ -345,7 +345,7 @@ export function registerModelScript(pi: ExtensionAPI): void {
 /** For tools that call a provider directly, outside the session's model. */
 export function modelScriptRefusal(tool: string): string | null {
   return readEnv("MODEL_SCRIPT")?.trim()
-    ? `${tool} is unavailable while LOOM_MODEL_SCRIPT is set: it calls a model directly, ` +
+    ? `${tool} is unavailable while ORBIT_MODEL_SCRIPT is set: it calls a model directly, ` +
         `and the scripted session must never reach a real one.`
     : null;
 }

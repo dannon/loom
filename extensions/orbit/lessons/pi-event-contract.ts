@@ -86,14 +86,14 @@ export function appendHintToContent(
   return [...content, { type: "text", text: hint }];
 }
 
-/** A block Loom itself appended -- not merely one that opens with the marker. */
+/** A block Orbit itself appended -- not merely one that opens with the marker. */
 export function isAppendedLessonHint(
   block: { type: string; text?: string } | null | undefined,
 ): boolean {
   return isLessonHintBlock(block) && appendedHints.has(block!.text as string);
 }
 
-/** The content as the tool produced it: every hint Loom appended removed. */
+/** The content as the tool produced it: every hint Orbit appended removed. */
 export function withoutAppendedLessonHints<T extends { type: string; text?: string }>(
   content: readonly T[],
 ): T[] {

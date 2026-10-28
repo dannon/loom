@@ -1,7 +1,7 @@
 /**
- * Loom <-> Galaxy-flavored-markdown content adapter. notebook.md is canonical.
+ * Orbit <-> Galaxy-flavored-markdown content adapter. notebook.md is canonical.
  *
- * Push replaces each typed notebook fence Loom keeps in the notebook body --
+ * Push replaces each typed notebook fence Orbit keeps in the notebook body --
  * `loom-invocation`, `loom-job`, and `loom-session` -- with a hidden carrier
  * holding the literal block, base64-encoded. Galaxy has no renderer for these
  * fence kinds, so a raw one shows up on the page as a "cell type is not
@@ -18,9 +18,9 @@
  * Invocation and job blocks also get a visible ` ```galaxy ` directive
  * (`invocation_outputs` / `job_parameters`) alongside the carrier when their id
  * validates against the connected server; session blocks are a local ledger
- * and get the carrier only. Pull strips the directives Loom emitted (Loom owns
+ * and get the carrier only. Pull strips the directives Orbit emitted (Orbit owns
  * the projection under the loom-canonical model and regenerates them each
- * push). A Loom directive always sits immediately above a carrier with no blank
+ * push). A Orbit directive always sits immediately above a carrier with no blank
  * line between, so pull strips only ```galaxy blocks in that position -- a
  * ```galaxy fence a human wrote (or a co-author added on the Galaxy side)
  * survives the round trip.
@@ -42,7 +42,7 @@ type CarriedKind = (typeof CARRIED_KINDS)[number];
 
 // Anchored to a whole line (`m` flag): the carrier is always its own line, so
 // this never decodes carrier-like syntax that appears inline in prose (e.g. a
-// notebook documenting Loom's own format). The `g` flag replaces every carrier.
+// notebook documenting Orbit's own format). The `g` flag replaces every carrier.
 // Tolerate trailing horizontal whitespace -- a storage round trip can append a
 // space, and an unmatched carrier silently loses the block on pull.
 // The carrier's label and anchor carry the product prefix too, so a page pushed
@@ -92,7 +92,7 @@ export function orbitToGalaxyMarkdown(body: string): string {
   return out.join("\n");
 }
 
-/** Pull: strip the ```galaxy directives Loom emitted, then carriers -> original
+/** Pull: strip the ```galaxy directives Orbit emitted, then carriers -> original
  *  typed fences. Stripping runs first, while carriers are still single lines,
  *  so the "directive sits directly above a carrier" check is exact. */
 export function galaxyMarkdownToOrbit(body: string): string {
@@ -109,9 +109,9 @@ export function galaxyMarkdownToOrbit(body: string): string {
 const CARRIER_LINE_RE = new RegExp(`^${CARRIER_BODY}$`);
 
 /**
- * Remove only the ```galaxy directive blocks Loom itself emitted.
+ * Remove only the ```galaxy directive blocks Orbit itself emitted.
  * orbitToGalaxyMarkdownRich always writes the directive immediately above the
- * block's carrier with no blank line between, so a ```galaxy block is Loom's
+ * block's carrier with no blank line between, so a ```galaxy block is Orbit's
  * iff the line right after its closing fence is a carrier. Every other
  * ```galaxy block was authored by a human and is preserved verbatim -- stripping
  * those unconditionally was silent data loss on pull.
@@ -124,7 +124,7 @@ function stripOrbitGalaxyDirectiveBlocks(body: string): string {
     if (lines[i].trim() === GALAXY_FENCE_OPEN) {
       let end = i + 1;
       while (end < lines.length && lines[end].trim() !== FENCE_CLOSE) end++;
-      // `end` is the closing fence (or EOF). Drop the block only when Loom's
+      // `end` is the closing fence (or EOF). Drop the block only when Orbit's
       // carrier immediately follows it; otherwise fall through and keep it.
       if (end + 1 < lines.length && CARRIER_LINE_RE.test(lines[end + 1])) {
         i = end + 1;

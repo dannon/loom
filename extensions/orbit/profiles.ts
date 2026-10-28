@@ -1,7 +1,7 @@
 /**
  * Galaxy server profile management
  *
- * Stores named profiles in the `galaxy` section of ~/.loom/config.json.
+ * Stores named profiles in the `galaxy` section of ~/.orbit/config.json.
  * Each profile holds a URL + API key. The active profile reaches the Galaxy
  * MCP server through GALAXY_URL/GALAXY_API_KEY in the process env, which
  * mcp-servers.ts references when it registers the server.
@@ -150,7 +150,7 @@ export function validateGalaxyUrl(url: string): { ok: true } | { ok: false; reas
  *
  * The brain process can't encrypt (no Electron safeStorage), so the
  * plaintext key lands on disk briefly. Orbit's main process watches
- * `~/.loom/config.json` and re-encrypts on change, closing the plaintext
+ * `~/.orbit/config.json` and re-encrypts on change, closing the plaintext
  * window to milliseconds. CLI users without safeStorage get plaintext
  * persistence -- there's no other option, but they're warned at load time.
  */

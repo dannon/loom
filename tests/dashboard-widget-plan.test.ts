@@ -125,7 +125,7 @@ describe("plan widget -- empty and odd notebooks", () => {
   it("asks for a plan when there is none", () => {
     const h = harness();
     planWidget.mount(h.el, h.ctx);
-    expect(h.text()).toContain("No plan yet -- ask Loom to draft one.");
+    expect(h.text()).toContain("No plan yet -- ask Orbit to draft one.");
   });
 
   it("stays on the empty state for a notebook with no plan heading", () => {
@@ -847,7 +847,7 @@ describe("plan widget -- lifecycle", () => {
     // here -- app.ts only calls setNotebook when a load returns content -- so
     // the widget must not invent a loading state it could never leave.
     expect(h.sources.sources.plan.get().updatedAt).toBe(0);
-    expect(h.text()).toBe("No plan yet -- ask Loom to draft one.");
+    expect(h.text()).toBe("No plan yet -- ask Orbit to draft one.");
   });
 
   it("empties its element and drops its class on dispose", () => {

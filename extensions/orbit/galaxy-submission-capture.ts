@@ -224,7 +224,7 @@ export function safeProvenanceFilename(toolId: string): string | null {
  * with `true`, which it has earned, having read the id out of Galaxy's answer
  * to this very submission.
  *
- * A replayed submission claims neither. `submitted_by: harness` means Loom
+ * A replayed submission claims neither. `submitted_by: harness` means Orbit
  * watched the submission happen and `server_verified: true` means it read the
  * id out of the server's own answer, and under `LOOM_SUBMISSION_REPLAY` both
  * came out of a file on disk -- no tool ran and no server was asked. The
@@ -388,7 +388,7 @@ async function writeBlocks(
   await withNotebookLock(notebookPath, async () => {
     // Compare-and-swap, retried, rather than a blind write. The lock only
     // serialises writers inside THIS process; the agent's own edit/write
-    // tools, a user's editor, and a second Loom process on the same notebook
+    // tools, a user's editor, and a second Orbit process on the same notebook
     // are all outside it, and a submission lands at an arbitrary moment
     // relative to them. Without the stamp, capture renames content it read
     // before someone else's edit straight over that edit (#391).
@@ -668,7 +668,7 @@ async function recordAttempt(
 
 /**
  * The tool name when it is a submission this shell offers, else undefined: a
- * Galaxy tool the family names, or Loom's own galaxy_upload_local_file, which is
+ * Galaxy tool the family names, or Orbit's own galaxy_upload_local_file, which is
  * outside the family. A name the family does not claim is not this shell's tool,
  * so it is not a submission either.
  */

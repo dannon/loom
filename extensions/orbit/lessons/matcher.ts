@@ -254,7 +254,7 @@ function rank(matches: Match[]): Match[] {
 
 export interface ToolEventInput {
   /**
-   * pi's tool name: the Galaxy tools by their bare names, Loom's own as
+   * pi's tool name: the Galaxy tools by their bare names, Orbit's own as
    * `galaxy_<name>`. mcpToolMatches strips the `galaxy_` prefix, so a lesson can
    * name the tool either way.
    */

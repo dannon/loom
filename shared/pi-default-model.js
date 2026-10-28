@@ -1,5 +1,5 @@
 // pi 1.0 exits on `--provider` without `--model`; pi 0.85 accepted a bare
-// --provider and picked a model on its own. Loom passes a provider with no model
+// --provider and picked a model on its own. Orbit passes a provider with no model
 // whenever nothing names one -- a provider saved with a key but no model, or the
 // web shell's bring-your-own-key path, which only knows the provider -- so those
 // launches need the model pi itself defaults to for that provider.

@@ -10,7 +10,7 @@
  *
  * Three triggers, all deterministic, none of them a model judgement:
  *   - a Galaxy tool result with isError (one the shell's Galaxy tool family
- *     names, or one of Loom's own `galaxy_*` tools)
+ *     names, or one of Orbit's own `galaxy_*` tools)
  *   - the same tool and the same normalized signature RETRY_LOOP_THRESHOLD times
  *   - the evidence gate blocking a plan-step completion
  * A fourth, the user's own `/observe`, lives in observations-command.ts and
@@ -428,7 +428,7 @@ function errorTag(err: unknown): string {
 /** What to tell the user when a delivery's local write failed, if anything. */
 export function localWriteWarning(outcome: DeliveryOutcome): string | undefined {
   if (outcome === "unsaved") {
-    return "An observation couldn't be sent right now, and it couldn't be saved locally to retry either (check that the Loom state directory is writable). Nothing was kept.";
+    return "An observation couldn't be sent right now, and it couldn't be saved locally to retry either (check that the Orbit state directory is writable). Nothing was kept.";
   }
   if (outcome === "sent-unretractable") {
     return "An observation was sent, but its retract token couldn't be saved locally, so /observations retract won't be able to delete it.";
@@ -469,7 +469,7 @@ export function liveDeliverDeps(
 }
 
 function errorTextOf(content: ReadonlyArray<{ type: string; text?: string }>): string {
-  // A hint Loom appended is Loom's prose, not the tool's error, wherever it
+  // A hint Orbit appended is Orbit's prose, not the tool's error, wherever it
   // sits. A block the TOOL opened with the marker is still the tool's error.
   return withoutAppendedLessonHints(content)
     .filter((c) => c.type === "text" && typeof c.text === "string")

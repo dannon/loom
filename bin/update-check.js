@@ -26,7 +26,7 @@ const FETCH_TIMEOUT_MS = 5000;
 // This file lives at <pkg>/bin/update-check.js, so the package root is one up.
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-/** @returns {string} the installed Loom version, from this package's package.json. */
+/** @returns {string} the installed Orbit version, from this package's package.json. */
 export function getOrbitVersion() {
   const pkg = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, "package.json"), "utf-8"));
   return pkg.version;
@@ -64,7 +64,7 @@ export function noticeFor(current, cache) {
     return `Loom is now Orbit -- \`npm i -g ${ORBIT_PKG}\``;
   }
   if (!isNewer(current, cache.latest)) return null;
-  return `loom ${cache.latest} is available (you have ${current}) -- run: npm i -g ${PKG}@${cache.channel}`;
+  return `orbit ${cache.latest} is available (you have ${current}) -- run: npm i -g ${PKG}@${cache.channel}`;
 }
 
 /** Read + validate the cache from disk. @returns {Cache | null} */
@@ -133,7 +133,7 @@ export async function refreshCache() {
   }
 }
 
-/** Resolve how Loom was installed, for `loom update`.
+/** Resolve how Orbit was installed, for `orbit update`.
  * @param {string} channel @returns {{ kind: "global" | "local" | "unknown", cmd: string | null }} */
 export function detectInstall(channel) {
   // A git checkout run via tsx isn't an npm install -- don't try to npm-update it.

@@ -3,7 +3,7 @@
  * the template frozen at approval gets fetched.
  *
  * The registry core never talks to Galaxy itself, so it stays free of the
- * harness and of any one client. Inside Loom the adapter is galaxy-ops running
+ * harness and of any one client. Inside Orbit the adapter is galaxy-ops running
  * in process -- the same operations galaxy-mcp exposes, so the gated path uses
  * the tools we recommend rather than a private copy of how to call Galaxy. A
  * standalone process can supply its own adapter over the same contract.

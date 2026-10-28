@@ -1,5 +1,5 @@
 /**
- * Loom-extension-specific tool registrations.
+ * Orbit-extension-specific tool registrations.
  *
  * Plans, steps, and decisions live as markdown sections inside the project
  * notebook (`notebook.md`) — the agent maintains them via the generic
@@ -296,7 +296,7 @@ is fetched and cached locally for 24h. If \`repo\` is omitted, the first enabled
 repo is used (typically \`galaxy-skills\`).
 
 \`repo: "${VENDOR_REPO_NAME}"\` reads Galaxy workflow reference material bundled
-with Loom, always offline. It is deliberately absent from the router, so its
+with Orbit, always offline. It is deliberately absent from the router, so its
 paths are not listed there: a hint names the exact file when it becomes
 relevant, and a wrong path answers with the entry points that do exist.`,
     parameters: Type.Object({
@@ -465,10 +465,10 @@ relevant, and a wrong path answers with the entry points that do exist.`,
     name: "galaxy_invocation_record",
     label: "Record Galaxy Invocation",
     description: `Name the plan step a Galaxy workflow invocation belongs to. The harness
-records the run; you name the step it belongs to. Loom already wrote a \`loom-invocation\`
+records the run; you name the step it belongs to. Orbit already wrote a \`loom-invocation\`
 block the moment ${family.tool("invoke_workflow")} returned, so this normally just sets \`label\` and
 \`notebook_anchor\` on the block already carrying that id -- the run is pollable either way.
-If no block carries the id (a submission Loom could not see, such as one made from inside
+If no block carries the id (a submission Orbit could not see, such as one made from inside
 code mode), this creates one. Both arguments are checked before anything is written: the
 anchor must resolve in notebook.md, and the invocation id must exist on the Galaxy server.`,
     parameters: Type.Object({
@@ -596,7 +596,7 @@ anchor must resolve in notebook.md, and the invocation id must exist on the Gala
                   serverVerified: inv.serverVerified,
                   ...(proposal ? { proposal } : {}),
                   message: annotated
-                    ? `Bound invocation ${where}. Loom had already recorded the run; this ` +
+                    ? `Bound invocation ${where}. Orbit had already recorded the run; this ` +
                       `named the step it belongs to.`
                     : serverVerified
                       ? `Recorded invocation ${where}.`
@@ -647,7 +647,7 @@ anchor must resolve in notebook.md, and the invocation id must exist on the Gala
     label: "Record Galaxy Job",
     description: `Name the plan step a Galaxy TOOL run belongs to, the same way
 galaxy_invocation_record does for a workflow. The harness records the run; you name the step
-it belongs to. Loom already wrote a \`loom-job\` block the moment ${family.tool("run_tool")} returned, so
+it belongs to. Orbit already wrote a \`loom-job\` block the moment ${family.tool("run_tool")} returned, so
 this normally just sets \`label\` and \`notebook_anchor\` on the block already carrying that
 job id -- the poller is watching it either way. If no block carries the id, this creates one.
 Both arguments are checked before anything is written: the anchor must resolve in notebook.md,
@@ -758,7 +758,7 @@ and the job id must exist on the Galaxy server. \`toolId\` is used only when cre
                   serverVerified: job.serverVerified,
                   ...(proposal ? { proposal } : {}),
                   message: annotated
-                    ? `Bound job ${where}. Loom had already recorded the run; this named the ` +
+                    ? `Bound job ${where}. Orbit had already recorded the run; this named the ` +
                       `step it belongs to.`
                     : serverVerified
                       ? `Recorded job ${where}. The background poller will advance it and notify on completion.`
@@ -977,7 +977,7 @@ export async function checkInvocations(
     };
   }
 
-  // Phase 1 — decide what to poll. Read under the lock so we see any Loom
+  // Phase 1 — decide what to poll. Read under the lock so we see any Orbit
   // write (a just-finished invocation_record) whole, but hold it only for the
   // read: there is no network I/O in here.
   const blocks = await withNotebookLock(notebookPath, async () =>
@@ -1179,7 +1179,7 @@ export async function checkInvocations(
     }
   }
 
-  // Phase 3 — persist. The lock still keeps two Loom writers from losing each
+  // Phase 3 — persist. The lock still keeps two Orbit writers from losing each
   // other's updates, but the guarantee now comes from re-reading inside it
   // rather than from having held it across the poll: whoever gets the lock
   // second folds their blocks into content that already contains the first

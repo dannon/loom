@@ -77,7 +77,7 @@ describe("Loom is now Orbit notice", () => {
   it("stays quiet for the 0.0.0 placeholder or no orbit release", () => {
     expect(noticeFor("0.8.0", { ...base, orbitLatest: "0.0.0" })).toBeNull();
     expect(noticeFor("0.8.0", base)).toBeNull();
-    expect(noticeFor("0.7.0", { ...base, orbitLatest: "0.0.0" })).toContain("loom 0.8.0");
+    expect(noticeFor("0.7.0", { ...base, orbitLatest: "0.0.0" })).toContain("orbit 0.8.0");
   });
 
   it("round-trips orbitLatest through the cache and drops a non-string one", () => {

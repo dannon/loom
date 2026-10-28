@@ -3,7 +3,7 @@ import { openMicrophone, type DictationRecorder } from "./dictation-recorder.js"
 
 type State = "idle" | "starting" | "recording" | "transcribing";
 
-/** Dictation edits the draft; it never submits a prompt or touches Loom. */
+/** Dictation edits the draft; it never submits a prompt or touches the agent. */
 export class DictationController {
   private state: State = "idle";
   private available = false;

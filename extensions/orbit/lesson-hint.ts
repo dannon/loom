@@ -98,9 +98,9 @@ export function decideToolResultHint(
   lessons: readonly Lesson[],
   armed: ReadonlySet<string>,
 ): HintDecision | null {
-  // A hint Loom already appended wins, including a different lesson's: this is
+  // A hint Orbit already appended wins, including a different lesson's: this is
   // the idempotency guard for a re-delivered result, and the one-per-result
-  // rule. Only Loom's own blocks count -- a tool that opens a block with the
+  // rule. Only Orbit's own blocks count -- a tool that opens a block with the
   // marker is quoting it, and that block is read as the tool's text.
   if (ev.content.some(isAppendedLessonHint)) return null;
   const resultText = resultTextOf(withoutAppendedLessonHints(ev.content));
@@ -167,7 +167,7 @@ export function registerLessonHint(pi: ExtensionAPI): void {
 /**
  * The /execute note: lessons whose keywords match the wording of the next plan
  * step, as title + "Check first" only. Wrapped, because it is spliced into a
- * prompt Loom sends as the user, and recorded prose must not inherit that
+ * prompt Orbit sends as the user, and recorded prose must not inherit that
  * authority.
  *
  * Records a surfacing per /execute rather than once per session: the counter
@@ -219,7 +219,7 @@ export function renderFullLesson(lesson: Lesson): string {
       `stale after: ${lesson.stale_after ?? "unstated"}`,
       lesson.origin === "user"
         ? "source: your own local lessons (not reviewed)"
-        : "source: the lesson corpus shipped with Loom",
+        : "source: the lesson corpus shipped with Orbit",
     ].join(" | "),
   );
   return rows.join("\n\n");

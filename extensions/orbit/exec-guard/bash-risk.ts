@@ -17,10 +17,10 @@ export interface BashClass {
   /** `.loom/`/`.orbit/` write targets this classifier judged to be ordinary work
    *  product in an Orbit analysis workspace. It only sees the command string, so the policy
    *  layer realpaths each one and re-applies isOrbitStatePath -- a symlink under
-   *  the analyses tree pointing at Loom's own state is still Loom's own state.
+   *  the analyses tree pointing at Orbit's own state is still Orbit's own state.
    *  Empty unless a write verb aimed at a state dir was carved out. */
   stateDirWriteTargets: string[];
-  /** A command runs after a `cd`/`pushd` into Loom's own state or a credential
+  /** A command runs after a `cd`/`pushd` into Orbit's own state or a credential
    *  store. The classifier cannot tell what an unrecognized command does there,
    *  so the policy layer must not auto-allow it. */
   guardedCwd: boolean;
@@ -50,7 +50,7 @@ const CATASTROPHIC: Array<[RegExp, string]> = [
   [/>\s*\/dev\/(sd|nvme|disk)/, "redirect to a raw device"],
   // Self-disabling: editing the gate's own config is how an agent would try to
   // flip bypass on. The bypass key with an assignment is one signal; a write verb
-  // aimed at Loom's own state is the other, and it needs a per-target decision, so
+  // aimed at Orbit's own state is the other, and it needs a per-target decision, so
   // it lives in isCatastrophicLoomWrite below rather than in this table. Reads of
   // the config stay an `ask` via the sensitive-read floor (not caught here).
   [/dangerouslyBypassPermissions['"\]\s]*[:=]/, "attempt to enable the permissions bypass"],
@@ -61,7 +61,7 @@ const CATASTROPHIC: Array<[RegExp, string]> = [
 const STATE_DIR_ALT = WORKSPACE_STATE_DIR_NAMES.map((n) => n.slice(1)).join("|");
 
 // A write verb aimed at something under a `.loom/` or `.orbit/` directory. Only
-// the trigger: whether it is really Loom state is decided per target below,
+// the trigger: whether it is really Orbit state is decided per target below,
 // because Orbit's own workspaces live under $HOME/.loom/analyses/<name>/.
 const STATE_DIR_WRITE = new RegExp(
   String.raw`(?:>>?|\btee\b|\bsed\b[^\n]*-i|\bcp\b|\bmv\b|\bdd\b)[^\n]*\.(?:${STATE_DIR_ALT})\/`,
@@ -445,12 +445,12 @@ function resolveStateDirWord(word: WordFragment[], home: string): string | null 
   return path.normalize(text);
 }
 
-// Editing Loom's own state from the shell is how an agent would disable the gate
+// Editing Orbit's own state from the shell is how an agent would disable the gate
 // (the write TOOL into .loom is gated by isProtectedWritePath). The rule used to
 // be a single regex, which also caught every ordinary write into an Orbit
-// analysis workspace -- Orbit's DEFAULT_CWD is ~/.loom/analyses -- and denied it
+// analysis workspace -- Orbit's DEFAULT_CWD is ~/.orbit/analyses -- and denied it
 // outright while the same write through the file tool was allowed. Now a matched
-// line is catastrophic only if some `.loom/` target on it is really Loom state;
+// line is catastrophic only if some `.loom/` target on it is really Orbit state;
 // the rest are handed to the policy layer, which can realpath them.
 function scanStateDirWrite(
   command: string,
@@ -587,14 +587,14 @@ export function scanRecordWrite(command: string): { targets: string[]; uncertain
 // tracks the working directory across one command line -- `cd`, `pushd`,
 // `popd`, `cd -`, subshells, command substitutions, heredocs fed to a shell,
 // `sh -c` wherever it appears in the argv, and `eval` -- and resolves relative
-// operands against it, so a hop into Loom's own state or a credential store gets
+// operands against it, so a hop into Orbit's own state or a credential store gets
 // the verdict the direct path would.
 //
 // It is a model of the shell, not the shell. Loops, functions, aliases,
 // variables it cannot expand and `env -C`/`git -C` are out of reach. Where that
 // matters it errs toward asking: a cd target it cannot resolve keeps the
 // protection of the directory it left, a cd may always have failed, and any
-// `cd`/`pushd` whose target visibly names Loom state (even inside a python -c
+// `cd`/`pushd` whose target visibly names Orbit state (even inside a python -c
 // string) is never auto-allowed.
 
 // Everything below models bash, so its paths are POSIX strings whatever the
@@ -620,12 +620,12 @@ function toHostPath(p: string): string {
 interface CwdState {
   /** Absolute directory, or null once a `cd` target could not be resolved. */
   dir: string | null;
-  /** Writes here land in Loom's own state. */
+  /** Writes here land in Orbit's own state. */
   state: boolean;
   /** Under a state-dir segment at all, the analyses carve-out included: a target
    *  we cannot resolve from here may well land in real state. */
   nearState: boolean;
-  /** Loom state or a credential store: no unrecognized command runs here
+  /** Orbit state or a credential store: no unrecognized command runs here
    *  silently. */
   guarded: boolean;
 }
@@ -646,7 +646,7 @@ function hasStateSegment(p: string): boolean {
   return p.split("/").some((s) => STATE_DIR_SET.has(s.toLowerCase()));
 }
 
-// An unexpandable `cd` target that still visibly points at Loom state: a
+// An unexpandable `cd` target that still visibly points at Orbit state: a
 // state-dir name, a LOOM_/ORBIT_ variable, a glob or brace inside a dot-dir
 // segment (`~/.l*`), or $OLDPWD from a shell we never saw.
 const SUSPECT_CD = new RegExp(
@@ -794,7 +794,7 @@ interface Shell {
   moved: boolean;
   /** HOME or CDPATH was reassigned, so a bare or relative cd lands who knows where. */
   steered: boolean;
-  /** The code being walked names Loom state (or a credential store) outright,
+  /** The code being walked names Orbit state (or a credential store) outright,
    *  so a cd target it cannot expand is presumed to be it. */
   presumeState: boolean;
   presumeGuarded: boolean;
@@ -1039,7 +1039,7 @@ function scanCdContext(command: string, hostHome: string, hostCwd: string): CdSc
       if (abs) {
         out.readPaths.push(toHostPath(abs));
       } else if (base === null && where.state && home) {
-        // Somewhere in Loom state we could not pin down: judge a relative read
+        // Somewhere in Orbit state we could not pin down: judge a relative read
         // as if it were in either config dir, so `config.json` still denies.
         const rel = wordText(w);
         if (!P.isAbsolute(rel) && !rel.split("/").includes("..")) {
@@ -1317,10 +1317,10 @@ export function classifyBash(commandRaw: string, home = "", cwd = ""): BashClass
   // Computed for every kind (incl. compound/unknown) so the policy layer's
   // sensitive-read floor fires through a pipe; see BashClass.sensitiveReadPaths.
   const sensitiveReadPaths = extractReadTargets(command);
-  const loom = scanStateDirWrite(command, home);
+  const stateDir = scanStateDirWrite(command, home);
   const base = {
     sensitiveReadPaths,
-    stateDirWriteTargets: [...loom.targets, ...cd.writeTargets],
+    stateDirWriteTargets: [...stateDir.targets, ...cd.writeTargets],
     guardedCwd: cd.guarded,
     cdReadPaths: cd.readPaths,
     namesRecord: NAMES_RECORD.test(command.replace(/\\/g, "")),
@@ -1339,10 +1339,10 @@ export function classifyBash(commandRaw: string, home = "", cwd = ""): BashClass
       ...base,
     };
   }
-  if (loom.catastrophic || cd.catastrophic) {
+  if (stateDir.catastrophic || cd.catastrophic) {
     return {
       kind: "catastrophic",
-      reason: "write to the Loom config directory",
+      reason: "write to the Orbit config directory",
       readPaths: [],
       ...base,
     };
@@ -1358,7 +1358,7 @@ export function classifyBash(commandRaw: string, home = "", cwd = ""): BashClass
   if (cd.guarded) {
     return {
       kind: "unknown",
-      reason: "command may run inside Loom's state or a credential store",
+      reason: "command may run inside Orbit's state or a credential store",
       readPaths: [],
       ...base,
     };

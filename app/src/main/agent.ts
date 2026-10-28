@@ -80,9 +80,9 @@ function buildSecretEnv(): Record<string, string> {
   return env;
 }
 
-// Resolve the loom entry point. In dev (`electron-forge start`), Loom lives at
+// Resolve the Orbit core entry point. In dev (`electron-forge start`), Orbit lives at
 // the repo root next to app/. In packaged builds, the prePackage hook stages
-// Loom into Resources/loom/ via electron-packager's extraResource so the brain
+// the core into Resources/orbit/ via electron-packager's extraResource so the brain
 // runs out of an installed bundle, not a path that walks up out of the .app.
 // `app` is undefined when this module is imported outside an Electron runtime
 // (e.g. vitest), so optional-chain through `app.isPackaged` to fall back to dev.
@@ -94,7 +94,7 @@ function resolveCoreBin(): string {
 }
 
 // Resolve the Node binary the brain runs under. Dev assumes Node 22.19+ on PATH.
-// Packaged Orbit ships its own Node next to Loom (Resources/node/) so users
+// Packaged Orbit ships its own Node next to the core (Resources/node/) so users
 // don't need to have Node installed; this also keeps native module ABI in sync
 // with whatever Node ran `npm ci` during prePackage staging.
 function resolveNodeBin(): string {
@@ -273,7 +273,7 @@ export class AgentManager {
         try {
           JSON.parse(fs.readFileSync(configPath, "utf-8"));
         } catch {
-          log("skipped persisting cwd -- ~/.loom/config.json is unreadable");
+          log("skipped persisting cwd -- ~/.orbit/config.json is unreadable");
           return;
         }
       }
@@ -298,7 +298,7 @@ export class AgentManager {
   /**
    * The session file /chat should replay. Returns the pinned file when set
    * (--continue path), otherwise lazily adopts via cwd/session.jsonl -- the
-   * symlink Loom's session-lifecycle creates on session_start. Returns null
+   * symlink Orbit's session-lifecycle creates on session_start. Returns null
    * if neither applies; /chat then sends an empty history rather than
    * surfacing a stale prior-run session.
    */

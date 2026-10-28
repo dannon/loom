@@ -167,7 +167,7 @@ export async function updatePage(
   params: UpdatePageParams,
   signal?: AbortSignal,
 ): Promise<GalaxyPageSummary> {
-  // Every update flowing through this client is Loom-authored sync, so
+  // Every update flowing through this client is Orbit-authored sync, so
   // default `edit_source` to "agent" rather than making each call site
   // remember to set it. Callers can still pass an explicit value to
   // override (e.g. a future "manual revert" path setting "user").

@@ -1,5 +1,5 @@
 // pi drops providers between releases (1.1.0 removed ollama, #598), and a
-// config saved under an older Loom still names them. pi rejects an unknown
+// config saved under an older Orbit still names them. pi rejects an unknown
 // --provider with a plain exit 1, which a shell reads as a crash and retries --
 // so the brain checks first and exits EX_CONFIG with a message instead.
 
@@ -79,7 +79,7 @@ export function isKnownProvider(provider, builtIn, extra = []) {
  * @param {string} provider
  */
 export function unknownProviderMessage(provider) {
-  return `loom: provider "${provider}" isn't supported by this version of Loom, so the
+  return `orbit: provider "${provider}" isn't supported by this version of Orbit, so the
 agent can't start with it.
 
 Open Preferences and pick another provider. If this was a local server

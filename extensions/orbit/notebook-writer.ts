@@ -273,7 +273,7 @@ export function upsertInvocationBlock(
 /**
  * Whether a block starting here can be replaced in place.
  *
- * Only when no Loom fence before it is still open. Past an unclosed opener the
+ * Only when no Orbit fence before it is still open. Past an unclosed opener the
  * scanners cannot tell whose closing fence is whose: a bare ``` after an
  * unterminated `loom-job` and a `loom-invocation` opener could end either one,
  * and reading it as the invocation's means its "body" runs through whatever
@@ -282,7 +282,7 @@ export function upsertInvocationBlock(
  *
  * Refusing to replace is the answer rather than a stricter body rule, because
  * "every line is a field this version knows" is not a property we can require:
- * a notebook written by a newer Loom carries fields this one has never heard
+ * a notebook written by a newer Orbit carries fields this one has never heard
  * of, and the parsers ignore unknown keys on purpose. So a block in the
  * ambiguous region is left exactly as it is and a clean one is written above
  * the orphan. That costs one duplicate in an already-broken notebook, and the
@@ -347,7 +347,7 @@ export interface InvocationPollUpdate {
  *     talking to Galaxy, and `upsertInvocationBlock` would resurrect it at the
  *     end of the file;
  *   - the block on disk carries a newer `last_polled_at` than ours — a second
- *     poller (another Loom process, or the agent calling check_all while the
+ *     poller (another Orbit process, or the agent calling check_all while the
  *     background timer is mid-tick) already recorded a later reading, and our
  *     counters would walk it backwards;
  *   - the update would reopen a block that is already terminal on disk. A poll

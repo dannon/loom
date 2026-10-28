@@ -84,7 +84,7 @@ export function summarizeResult(result: unknown, secrets: string[] = []): string
 }
 
 // The end event carries the result after the tool_result hooks, so a lesson
-// hint rides along. It is Loom's prose, not the tool's output, and this log
+// hint rides along. It is Orbit's prose, not the tool's output, and this log
 // ships with /feedback; the lesson.surfaced row already says which one fired.
 function withoutHintBlocks(result: unknown): unknown {
   const content = (result as { content?: unknown } | null)?.content;

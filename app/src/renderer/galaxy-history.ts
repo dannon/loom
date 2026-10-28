@@ -23,7 +23,7 @@
  *    to.
  *
  * Hidden when Galaxy is not connected, when no binding exists, or when the URL
- * can't be built. Building the web URL is a shell concern — the Loom brain
+ * can't be built. Building the web URL is a shell concern — the Orbit brain
  * stays shell-neutral.
  */
 

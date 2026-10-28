@@ -41,7 +41,7 @@ const ALLOWED_PREFIXES = ["mcp__brc_analytics__", "galaxy_", "gtn_", "notebook_"
 
 /**
  * The brain's in-process Galaxy tools: galaxy-ops' operations under their wire
- * names, plus the bridges Loom adds. Bare names carry no prefix, so they are
+ * names, plus the bridges Orbit adds. Bare names carry no prefix, so they are
  * listed exactly; a tool galaxy-ops adds later stays closed until it is listed
  * here (the test walks the registered tools to catch one). upload_file is
  * registered but hidden, and is denied below.
@@ -116,7 +116,7 @@ const ALLOWED_EXACT = new Set(["skills_fetch", "mcp_read_output", "loom_propose"
 // Brain tools that share an allowed name but must not run remotely. The
 // local-file uploaders resolve whatever absolute path they are handed and send
 // the bytes to Galaxy, so in the web shell or the interactive tool they would
-// read the container's own files -- the Loom config with the operator's key
+// read the container's own files -- the Orbit config with the operator's key
 // included -- past the notebook-only jail above. Remote users have no local
 // files to upload anyway; the URL upload covers that path. galaxy-ops'
 // upload_file is hidden from the model, which does not stop a call by name.
@@ -141,7 +141,7 @@ const DENIED_EXACT = new Set(["galaxy_upload_local_file", "upload_file"]);
  * for comes with enabling it.
  */
 export const TRUSTED_RECORD_ALLOWED: ReadonlySet<string> = new Set([
-  // Loom-native, reviewed with the registry.
+  // Orbit-native, reviewed with the registry.
   "loom_propose",
   "loom_submit",
   "galaxy_invocation_record",
@@ -207,12 +207,12 @@ export const TRUSTED_RECORD_EXCLUDED: Readonly<Record<string, string>> = {
   run_user_tool: "submits outside the approval; loom_submit is the gated path",
   delete_user_tool: "not reviewed yet",
   cancel_workflow_invocation: "not reviewed yet",
-  upload_file: "reads a file on the Loom host",
+  upload_file: "reads a file on the Orbit host",
   create_page: "Page content carries the registry; notebook_push_to_galaxy is the one writer",
   update_page: "Page content carries the registry; notebook_push_to_galaxy is the one writer",
   revert_page_revision:
     "Page content carries the registry; notebook_push_to_galaxy is the one writer",
-  galaxy_upload_local_file: "reads a file on the Loom host",
+  galaxy_upload_local_file: "reads a file on the Orbit host",
   lesson_propose: "writes the local lesson bank, which the registry profile doesn't review",
   dashboard_read: "dashboards are not part of the guaranteed surface",
   dashboard_update: "dashboards are not part of the guaranteed surface",
@@ -329,7 +329,7 @@ export function shouldBlockTool(
   if (DENIED_EXACT.has(toolName)) {
     return {
       block: true,
-      reason: `${toolName} reads files on the Loom host; not available in remote mode (use the URL upload)`,
+      reason: `${toolName} reads files on the Orbit host; not available in remote mode (use the URL upload)`,
     };
   }
   // Curated remote surface -> allowed.

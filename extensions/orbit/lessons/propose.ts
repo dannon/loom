@@ -458,7 +458,7 @@ export async function commitDraft(rawId: string, ctx: ProposeUiContext): Promise
     return reject(
       id,
       "validator",
-      "A local lesson keeps the fields Loom set when it was drafted: status: draft, no verified " +
+      "A local lesson keeps the fields Orbit set when it was drafted: status: draft, no verified " +
         "entries, generated.by as written, and empty graduated_to, upstream and supersedes. " +
         "Those are decided in review, not by editing the file. Put them back and run /lesson save again.",
       ["0: brain-owned fields were edited"],

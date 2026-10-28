@@ -34,13 +34,13 @@ import { isDesktopShell, mirrorToLegacyEnv, readEnv, writeEnv } from "../shared/
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Loom is a standalone product — suppress Pi's branding and update checks.
+// Orbit is a standalone product — suppress Pi's branding and update checks.
 // quietStartup hides the keybinding banner + resource listing on launch.
 process.env.PI_SKIP_VERSION_CHECK = "1";
 
 // Resolve extension paths relative to this script
 const extensionPath = resolve(__dirname, "../extensions/orbit");
-// CLI-shell hand-off glue (the /orbit command). Kept out of the loom brain so
+// CLI-shell hand-off glue (the /desktop command). Kept out of the Orbit core so
 // the brain stays shell-neutral; the command no-ops when embedded in Orbit.
 const orbitHandoffPath = resolve(__dirname, "../extensions/orbit-handoff");
 const cliUpdatePath = resolve(__dirname, "../extensions/cli-update");
@@ -119,7 +119,7 @@ if (
   readEnv("SAFE") !== "1"
 ) {
   console.error(
-    "\n  \x1b[1;31m⚠  PERMISSIONS BYPASSED\x1b[0m -- Loom will run any command without asking.\n",
+    "\n  \x1b[1;31m⚠  PERMISSIONS BYPASSED\x1b[0m -- Orbit will run any command without asking.\n",
   );
 }
 
@@ -142,7 +142,7 @@ async function handleInformationalCommand() {
 
   if (hasArg("--version")) {
     const { VERSION } = await import(pathToFileURL(piConfigModulePath).href);
-    console.log(`loom ${getOrbitVersion()} (pi-coding-agent ${VERSION})`);
+    console.log(`orbit ${getOrbitVersion()} (pi-coding-agent ${VERSION})`);
     return true;
   }
 
@@ -162,9 +162,9 @@ async function handleInformationalCommand() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Loom brain-level config (<state dir>/config.json, see shared/state-dir.js)
+// Orbit brain-level config (<state dir>/config.json, see shared/state-dir.js)
 //
-// Shared by every consumer (loom CLI, Orbit, future shells). The CLI only
+// Shared by every consumer (Orbit CLI, Orbit, future shells). The CLI only
 // reads/writes it; it doesn't own the schema. Shell-specific state lives in
 // each shell's own dir.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -222,7 +222,7 @@ function activeProviderUsable(provider, entry, auth) {
   });
 }
 
-// Pi's `/login` writes credentials to auth.json but never touches Loom's
+// Pi's `/login` writes credentials to auth.json but never touches Orbit's
 // llm.active, so signing into a new provider mid-session has no effect on the
 // next launch. Bridge that gap for the standalone CLI: if the configured active
 // provider has no credential we can use, fall back to one that's signed in.
@@ -247,7 +247,7 @@ function reconcileActiveProviderWithAuth() {
   llm.providers = llm.providers || {};
   if (!llm.providers[candidate]) llm.providers[candidate] = {};
   console.error(
-    `loom: active provider "${from}" has no usable credential here; using "${candidate}" for this run (signed in via ~/.pi/agent/auth.json). Set it permanently in Orbit's Preferences, or add a key for "${from}".`,
+    `orbit: active provider "${from}" has no usable credential here; using "${candidate}" for this run (signed in via ~/.pi/agent/auth.json). Set it permanently in Orbit's Preferences, or add a key for "${from}".`,
   );
 }
 reconcileActiveProviderWithAuth();
@@ -283,14 +283,14 @@ if (!isInformationalCommand && activeLlmProvider && isCustomProvider(activeLlmCo
     // as an unexplained "--provider/--model failed to resolve" from pi. Exit
     // EX_CONFIG so a shell shows this message instead of retrying (#439).
     if (err instanceof Error && err.message.startsWith("unsupported endpoint api")) {
-      console.error(`loom: provider "${activeLlmProvider}" -- ${err.message}.
+      console.error(`orbit: provider "${activeLlmProvider}" -- ${err.message}.
 
-  Set "llm.providers.${activeLlmProvider}.api" in ~/.loom/config.json to one of
+  Set "llm.providers.${activeLlmProvider}.api" in ~/.orbit/config.json to one of
   ${ENDPOINT_APIS.join(" / ")}, or remove it to use ${DEFAULT_ENDPOINT_API}.
 `);
       process.exit(EX_CONFIG);
     }
-    console.error(`loom: failed to sync custom provider into models.json: ${err}`);
+    console.error(`orbit: failed to sync custom provider into models.json: ${err}`);
   }
 }
 
@@ -315,7 +315,7 @@ if (activeLlmProvider && OAUTH_ONLY_PROVIDERS.has(activeLlmProvider)) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Galaxy credentials
 //
-// Credentials come from ~/.loom/config.json (written by /connect) or env
+// Credentials come from ~/.orbit/config.json (written by /connect) or env
 // vars (CI/testing). The in-process Galaxy tools are always registered;
 // the agent decides per-plan whether to use Galaxy. The `executionMode`
 // field affects prompt guidance, not which tools are registered.
@@ -344,13 +344,13 @@ if (galaxyUrl && galaxyApiKey) {
   delete process.env.GALAXY_API_KEY;
 }
 
-// The brain registers Loom's MCP servers itself (extensions/orbit/mcp-servers.ts);
+// The brain registers Orbit's MCP servers itself (extensions/orbit/mcp-servers.ts);
 // clear out what earlier versions left in mcp.json.
 // A copy of the old file lands beside it first, and a file that cannot be
 // updated is reported rather than fatal (bin/legacy-mcp-config.js says why).
 if (!isInformationalCommand) {
   const { notices } = migrateLegacyMcpConfig(join(agentDir, "mcp.json"));
-  for (const notice of notices) console.error(`[loom] ${notice}`);
+  for (const notice of notices) console.error(`[orbit] ${notice}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -445,7 +445,7 @@ then start a new session.`
   }
   if (!canUseApiKey) {
     return `Launch via Orbit (\`cd app && npm start\`) and sign in from Preferences,
-or unset "llm.active" in ~/.loom/config.json.`;
+or unset "llm.active" in ~/.orbit/config.json.`;
   }
   const envVar = PROVIDER_ENV_MAP[provider] || "AI_GATEWAY_API_KEY";
   return `Do one of the following:
@@ -456,7 +456,7 @@ or unset "llm.active" in ~/.loom/config.json.`;
   * Launch via Orbit (\`cd app && npm start\`), which decrypts the stored key
     and injects ${envVar} into the brain.
 
-  * Unset "llm.active" in ~/.loom/config.json.`;
+  * Unset "llm.active" in ~/.orbit/config.json.`;
 }
 
 /**
@@ -508,7 +508,7 @@ function checkLLMProvider() {
   // entry are ignored entirely so they can't mask the missing sign-in or
   // falsely trigger the encrypted-key exit below.
   if (activeLlmProvider && OAUTH_ONLY_PROVIDERS.has(activeLlmProvider)) {
-    console.error(`loom: provider "${activeLlmProvider}" requires a sign-in.
+    console.error(`orbit: provider "${activeLlmProvider}" requires a sign-in.
 
 ${credentialFixHint(activeLlmProvider, { canUseApiKey: false })}
 `);
@@ -552,9 +552,9 @@ ${credentialFixHint(activeLlmProvider, { canUseApiKey: false })}
   // safeStorage lives in the Orbit main process. Say so instead of falling
   // through to the generic error.
   if (activeLlmConfig?.apiKeyEncrypted) {
-    console.error(`loom: the API key stored for provider "${activeLlmProvider}" could not be
+    console.error(`orbit: the API key stored for provider "${activeLlmProvider}" could not be
 decrypted here, so no credential reached the agent. (apiKeyEncrypted in
-~/.loom/config.json only decrypts inside Orbit.)
+~/.orbit/config.json only decrypts inside Orbit.)
 
 ${credentialFixHint(activeLlmProvider, { canUseApiKey: true })}
 `);
@@ -575,7 +575,7 @@ ${credentialFixHint(activeLlmProvider, { canUseApiKey: true })}
   }
 
   if (isRpcMode) {
-    console.error(`loom: no LLM provider is configured, so the agent has no credential.
+    console.error(`orbit: no LLM provider is configured, so the agent has no credential.
 
 Open Preferences, pick a provider and add its API key (or sign in to it),
 then start a new session.
@@ -583,12 +583,12 @@ then start a new session.
     process.exit(EX_CONFIG);
   }
 
-  console.error(`loom requires an LLM provider to function.
+  console.error(`orbit requires an LLM provider to function.
 
 Set up one of the following:
 
   1. Config file (recommended):
-     Create ~/.loom/config.json:
+     Create ~/.orbit/config.json:
      {
        "llm": {
          "active": "anthropic",
@@ -685,12 +685,12 @@ if (userArgs[0] === "update") {
   const { kind, cmd } = detectInstall(channel);
   if (!cmd) {
     console.error(
-      `Loom looks like a source checkout, not an npm install -- can't self-update.\n` +
+      `Orbit looks like a source checkout, not an npm install -- can't self-update.\n` +
         `To upgrade an installed copy: npm install -g @galaxyproject/loom@${channel}`,
     );
     process.exit(0);
   }
-  console.error(`Updating Loom (${kind}) -- ${cmd}`);
+  console.error(`Updating Orbit (${kind}) -- ${cmd}`);
   const [bin, ...rest] = cmd.split(" ");
   const child = spawn(bin, rest, { stdio: "inherit" });
   child.on("error", (err) => {
@@ -721,19 +721,19 @@ if (userArgs[0] === "update") {
     return null;
   }
 
-  // Reconcile the Pi settings loom manages. Two concerns share one read/write:
-  //  - Startup quiet (banner, resource listing, "What's New" changelog): loom is
+  // Reconcile the Pi settings Orbit manages. Two concerns share one read/write:
+  //  - Startup quiet (banner, resource listing, "What's New" changelog): Orbit is
   //    the product identity, so users shouldn't see Pi internals unless they
   //    pass --verbose. The changelog is gated on lastChangelogVersion; pinning
   //    it to Pi's current version means getNewEntries() finds nothing newer.
   //  - Thinking visibility (interactive terminal only): Pi streams the model's
-  //    reasoning into the TUI, which is noisy, so loom hides it by default.
+  //    reasoning into the TUI, which is noisy, so Orbit hides it by default.
   //    `hideThinkingBlock` is a persisted global Pi setting that only the
   //    interactive renderer reads, so only reconcile it for an interactive
   //    terminal launch -- never for the non-interactive modes (rpc for Orbit
   //    and the web server, json for evals, headless --print), which would
   //    churn the global file for a setting they never read. Override
-  //    persistently with `ui.showThinking: true` in ~/.loom/config.json, or
+  //    persistently with `ui.showThinking: true` in ~/.orbit/config.json, or
   //    just toggle it live in-session with Ctrl+T.
   //  - TUI mode (interactive terminal only): see below.
   {
@@ -766,7 +766,7 @@ if (userArgs[0] === "update") {
           changed = true;
         }
         // pi 1.0 went fullscreen by default, which takes away the terminal's own
-        // scrollback. Keep Loom's terminal where it was; only fill the gap, so a
+        // scrollback. Keep Orbit's terminal where it was; only fill the gap, so a
         // user who picks fullscreen in /settings keeps it.
         if (piSettings.tuiMode === undefined) {
           piSettings.tuiMode = "regular";

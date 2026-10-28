@@ -58,7 +58,7 @@ describe("/feedback", () => {
     await commands.get("feedback")!.handler(undefined, { hasUI: true, ui });
     expect(submitFeedback).toHaveBeenCalledOnce();
     const payload = submitFeedback.mock.calls[0][0];
-    expect(payload.source).toBe("loom-cli");
+    expect(payload.source).toBe("orbit-cli");
     expect(payload.title).toBe("My title");
     expect(ui.notify).toHaveBeenCalledWith(expect.stringContaining("Thanks"), "info");
     expect(appendToOutbox).not.toHaveBeenCalled();

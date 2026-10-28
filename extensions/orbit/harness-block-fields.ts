@@ -219,7 +219,7 @@ function isOneLine(value: string): boolean {
  * because a colon in a human label is ordinary.
  */
 /**
- * Every fenced block type Loom writes. The append locator needs the whole set:
+ * Every fenced block type Orbit writes. The append locator needs the whole set:
  * an unterminated `loom-job` opener swallows an appended `loom-invocation`
  * just as well as another job block would.
  */
@@ -326,7 +326,7 @@ export function isFoldableDuplicate(
 }
 
 /**
- * Where a new block can be appended without landing after a Loom fence that
+ * Where a new block can be appended without landing after an Orbit fence that
  * never closed.
  *
  * Skipping an unterminated block is not enough on its own. Append after one

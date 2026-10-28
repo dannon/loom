@@ -49,7 +49,7 @@ function stageOrbitBundle(platform: string, arch: string): void {
     fs.cpSync(src, path.join(ORBIT_STAGE_DIR, item), { recursive: true });
   }
 
-  // Loom's root prepare script runs `husky`, which is a devDependency.
+  // Orbit's root prepare script runs `husky`, which is a devDependency.
   // `npm ci --omit=dev` skips installing husky but still fires the prepare
   // lifecycle → `sh -c husky` → exit 127. Strip prepare from the staged
   // copy before installing. Other install/postinstall hooks (native module
@@ -66,7 +66,7 @@ function stageOrbitBundle(platform: string, arch: string): void {
   pruneOrbitNodeModules(platform, arch);
 }
 
-// Trim runtime-irrelevant chunks from the staged Loom node_modules. Targets
+// Trim runtime-irrelevant chunks from the staged Orbit node_modules. Targets
 // only known-safe heavy directories; keeps everything that might be loaded.
 function pruneOrbitNodeModules(platform: string, arch: string): void {
   // koffi ships prebuilt .node binaries for ~18 platforms (darwin/linux/
@@ -86,7 +86,7 @@ function pruneOrbitNodeModules(platform: string, arch: string): void {
   }
 
   // pi-coding-agent bundles an examples/ tree (demo extensions, including a
-  // DOOM WASM overlay) that Loom never loads at runtime -- ~1.2MB of dead
+  // DOOM WASM overlay) that Orbit never loads at runtime -- ~1.2MB of dead
   // weight that also drags out codesign, since notarization gives every file
   // an individual --timestamp round-trip. Drop it. (force: true no-ops if the
   // path is ever absent.)
@@ -375,7 +375,7 @@ const config: ForgeConfig = {
       NSMicrophoneUsageDescription:
         "Orbit uses your microphone to transcribe speech locally into the prompt.",
     },
-    // Copies the staged Loom bundle, Node runtime, and uv binary to
+    // Copies the staged Orbit bundle, Node runtime, and uv binary to
     // Contents/Resources/ in the packaged app. agent.ts resolves
     // process.resourcesPath/{loom,node,uv}/... at brain spawn time.
     extraResource: [ORBIT_STAGE_DIR, NODE_STAGE_DIR, UV_STAGE_DIR, SPEECH_STAGE_DIR],
@@ -432,9 +432,9 @@ const config: ForgeConfig = {
     },
     // The Windows Squirrel installer is deferred. The first real run of the
     // win32 leg (in the 0.5.0 release) showed electron-winstaller's `nuget pack`
-    // tripping the Win32 260-char MAX_PATH on the deeply-nested staged Loom
+    // tripping the Win32 260-char MAX_PATH on the deeply-nested staged Orbit
     // bundle -- @mistralai/mistralai's auto-generated SDK files under
-    // pi-coding-agent. The Loom CLI ships as real (non-asar) files because it's
+    // pi-coding-agent. The Orbit CLI ships as real (non-asar) files because it's
     // spawned as a subprocess, so that depth is unavoidable, and even with the
     // deepest path pruned to 254 chars nuget's internal staging still exceeds
     // 260. Windows ships as the portable maker-zip .zip until the installer's

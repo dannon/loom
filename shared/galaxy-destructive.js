@@ -7,7 +7,7 @@
 // Two confidence levels here:
 //   - RELIABLE: structured JSON we can read exactly -- a direct tool call, the same op
 //     through any MCP server a user configures themselves, or one wrapped in a generic
-//     `mcp({tool, args})` proxy (args is a JSON string) -- Loom ships neither, but
+//     `mcp({tool, args})` proxy (args is a JSON string) -- Orbit ships neither, but
 //     pi-mcp-adapter installed as a pi package brings the proxy back.
 //   - BEST-EFFORT GUARDRAIL: free-form strings we can only pattern-match -- a raw curl/wget
 //     DELETE, or code-mode's run_galaxy_tool(code=<python>) script. Trivially evadable
@@ -43,7 +43,7 @@ const DESTRUCTIVE_OPS = {
  * @type {readonly string[]} */
 export const GALAXY_ARGS_CLASSIFIED_OPS = Object.freeze(Object.keys(DESTRUCTIVE_OPS));
 
-/** Lowercase + drop a leading `mcp__<server>__` and `galaxy_` so the bare op name, Loom's
+/** Lowercase + drop a leading `mcp__<server>__` and `galaxy_` so the bare op name, Orbit's
  *  `galaxy_` spelling and the same op behind an MCP server a user added themselves (and either
  *  gate's casing) resolve the same. Any server counts: a non-Galaxy op that lands on a
  *  destructive name costs an extra confirm, never a missed one. The strip is greedy because a

@@ -13,14 +13,16 @@ export const LEGACY_STATE_DIR_NAME = ".loom";
 
 export type WorkspaceStateDirName = typeof ORBIT_STATE_DIR_NAME | typeof LEGACY_STATE_DIR_NAME;
 
-/** Every spelling the security code treats as Loom state, in resolution order. */
+/** Every spelling the security code treats as Orbit state, in resolution order. */
 export const WORKSPACE_STATE_DIR_NAMES: readonly WorkspaceStateDirName[] = [
   ORBIT_STATE_DIR_NAME,
   LEGACY_STATE_DIR_NAME,
 ];
 
-// What a workspace with neither dir gets. Still `.loom` until the rename
-// release flips it; existing workspaces are unaffected either way.
+// What a workspace with neither dir gets. Deliberately still `.loom` in the
+// rename release: registry.ts, galaxy-provenance and submission capture
+// hardcode `.loom/...` and persist relative paths, so flipping this alone would
+// split a workspace's state in two. Route those through the resolver first.
 export const NEW_WORKSPACE_STATE_DIR_NAME: WorkspaceStateDirName = LEGACY_STATE_DIR_NAME;
 
 function isDir(p: string): boolean {

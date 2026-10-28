@@ -18,7 +18,7 @@ import type { GalaxyDestructiveOp } from "../../../shared/galaxy-destructive.js"
 
 // A dedicated credential store's CONTENTS are never readable by the agent --
 // denied for every tier, not downgraded to an ask. This is the floor that closes
-// #183: a capable model that gets to read ~/.loom/config.json echoes the keys
+// #183: a capable model that gets to read ~/.orbit/config.json echoes the keys
 // straight into the provider's request logs. Approval can't override it.
 function denyCredentialStore(p: string, home: string): PolicyResult {
   return {
@@ -132,13 +132,13 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     }
     // The classifier judges the command string; only this layer has a resolver.
     // A write target that looks like ordinary work product in the analysis
-    // workspace but realpaths into Loom's own state is still Loom's own state.
+    // workspace but realpaths into Orbit's own state is still Orbit's own state.
     for (const p of c.stateDirWriteTargets) {
       if (isOrbitStatePath(deps.resolver.contains(p).resolved, deps.home)) {
         return {
           decision: "deny",
           category: "bash:catastrophic",
-          reason: "write to the Loom config directory",
+          reason: "write to the Orbit config directory",
         };
       }
     }
@@ -188,7 +188,7 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     // Unknown command. A trusted workspace relaxes by one notch only, and only
     // for this category: trusted model ask->allow, weak model deny->ask (the
     // human stays in the loop). It never lifts the catastrophic/jail/sensitive
-    // floor above, and it never covers a command run after a cd into Loom's own
+    // floor above, and it never covers a command run after a cd into Orbit's own
     // state or a credential store -- trusting the workspace says nothing about
     // those directories.
     // Nor a line that names the analysis record or the registry: what an
@@ -265,7 +265,7 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
       }
     }
     // Gated even inside the jail: a script under .git/hooks runs on the next git
-    // operation, and .loom/ is Loom's own state -- these always prompt, regardless
+    // operation, and .loom/ is Orbit's own state -- these always prompt, regardless
     // of being in the workspace. The lone carve-out is the $HOME/.loom/analyses
     // tree (Orbit's default cwd), where the analysis's own files are work product;
     // a .git/.loom/.orbit nested inside an analysis still gates. See
@@ -284,7 +284,7 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
         return {
           decision: "deny",
           category: "write:record-store",
-          reason: `write to Loom's harness-owned record ${t.raw} (approvals, run evaluations, provenance) blocked for all models`,
+          reason: `write to Orbit's harness-owned record ${t.raw} (approvals, run evaluations, provenance) blocked for all models`,
         };
       }
     }

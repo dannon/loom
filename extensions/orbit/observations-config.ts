@@ -107,10 +107,10 @@ function configReadProblem(): string | null {
   try {
     parsed = JSON.parse(fs.readFileSync(configPath, "utf-8"));
   } catch {
-    return "The Loom config couldn't be read, so it wasn't changed -- fix or remove the file and try again.";
+    return "The Orbit config couldn't be read, so it wasn't changed -- fix or remove the file and try again.";
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return "The Loom config isn't a JSON object, so it wasn't changed -- fix or remove the file and try again.";
+    return "The Orbit config isn't a JSON object, so it wasn't changed -- fix or remove the file and try again.";
   }
   return null;
 }
@@ -126,7 +126,7 @@ function persist(
     saveConfig(cfg);
   } catch (err) {
     throw new Error(
-      "Couldn't write the Loom config -- check file permissions and free space, then try again.",
+      "Couldn't write the Orbit config -- check file permissions and free space, then try again.",
       { cause: err },
     );
   }

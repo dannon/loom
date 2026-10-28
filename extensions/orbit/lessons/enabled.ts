@@ -1,5 +1,5 @@
 /**
- * The one switch for the lesson loop: `lessons.enabled` in the Loom config.
+ * The one switch for the lesson loop: `lessons.enabled` in the Orbit config.
  *
  * Off by default. Off means nothing recorded reaches the model on any
  * surface (inline hint, /execute note, reproduction index, lessons_search),
@@ -90,13 +90,13 @@ export function setLessonsEnabled(enabled: boolean): void {
       parsed = JSON.parse(fs.readFileSync(configPath, "utf-8"));
     } catch (err) {
       throw new Error(
-        "The Loom config couldn't be read, so it wasn't changed -- fix or remove the file and try again.",
+        "The Orbit config couldn't be read, so it wasn't changed -- fix or remove the file and try again.",
         { cause: err },
       );
     }
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
       throw new Error(
-        "The Loom config isn't a JSON object, so it wasn't changed -- fix or remove the file and try again.",
+        "The Orbit config isn't a JSON object, so it wasn't changed -- fix or remove the file and try again.",
       );
     }
   }
@@ -109,7 +109,7 @@ export function setLessonsEnabled(enabled: boolean): void {
     saveConfig(cfg);
   } catch (err) {
     throw new Error(
-      "Couldn't write the Loom config -- check file permissions and free space, then try again.",
+      "Couldn't write the Orbit config -- check file permissions and free space, then try again.",
       { cause: err },
     );
   }

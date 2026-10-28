@@ -175,7 +175,7 @@ export function isAdmissibleMcpTool(v: string | undefined): v is string {
 }
 
 /**
- * Loom's bridging job ops, which galaxy-ops does not name yet, so the generated list cannot hold
+ * Orbit's bridging job ops, which galaxy-ops does not name yet, so the generated list cannot hold
  * them. The builder admits them only from an in-process call, which every Galaxy call is now.
  */
 const BRIDGING_GALAXY_TOOLS: ReadonlySet<string> = new Set([
@@ -188,7 +188,7 @@ const BRIDGING_GALAXY_TOOLS: ReadonlySet<string> = new Set([
  * call isn't one. The Galaxy tools reach the model by their bare names
  * (`run_tool`); the wire contract and the allowlist predate that and say
  * `galaxy_<tool>`, and the deployed intake validates that spelling, so the
- * rename stops here rather than reaching the payload. Loom's own `galaxy_*`
+ * rename stops here rather than reaching the payload. Orbit's own `galaxy_*`
  * tools pass through as-is.
  */
 export function observationToolName(
@@ -322,7 +322,7 @@ export interface ObservationFacts {
   /** Overrides the tool-name table when the trigger knows better. */
   stage?: ObservationStage;
   mcpTool?: string;
-  /** The call ran through in-process Galaxy tools, so Loom's bridging ops are admitted too. */
+  /** The call ran through in-process Galaxy tools, so Orbit's bridging ops are admitted too. */
   inProcess?: true;
   toolIds: string[];
   datatypes: string[];
