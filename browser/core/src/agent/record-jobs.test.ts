@@ -194,3 +194,46 @@ describe("anchoring", () => {
     expect(updated).toMatch(/- Galaxy dataset `d1`\n {2}- Status: finished \(ok\)/);
   });
 });
+
+describe("records an earlier build wrote", () => {
+  // Before the status line moved under the id, the session's entry was one line with a checkbox.
+  const legacy =
+    "## Record\n\nSome prose from the agent.\n\n" +
+    "- [ ] Workflow invocation `417e33144b294c21` — submitted, awaiting completion\n\n" +
+    "*Submitted jobs are currently running.*\n";
+  const settled = (state: string, outcome: "completed" | "failed") => ({
+    id: "417e33144b294c21",
+    kind: "invocation" as const,
+    state,
+    outcome,
+  });
+
+  it("records the outcome on the entry it wrote, not as pending forever", () => {
+    const done = applyJobOutcome(legacy, settled("scheduled", "completed"));
+    expect(done).toContain(
+      "- Workflow invocation `417e33144b294c21`\n" +
+        "  - Status: finished (scheduled) — recorded automatically\n",
+    );
+    expect(done).not.toContain("awaiting completion");
+    expect(done).not.toContain("currently running");
+    expect(applyJobOutcome(done, settled("scheduled", "completed"))).toBe(done);
+  });
+
+  it("counts it as still running while another earlier entry awaits completion", () => {
+    const two = legacy.replace(
+      "\n\n*Submitted",
+      "\n- [ ] Job `9a2f` — submitted, awaiting completion\n\n*Submitted",
+    );
+    const done = applyJobOutcome(two, settled("scheduled", "completed"));
+    expect(done).toContain("*Submitted jobs are currently running.*");
+  });
+
+  it("leaves an entry the earlier build already settled as it is", () => {
+    const old =
+      "- [x] Job `9a2f` — submitted, awaiting completion\n" +
+      "- Status: finished (ok) — recorded automatically\n";
+    const ok = { id: "9a2f", kind: "job" as const, state: "ok", outcome: "completed" as const };
+    expect(applyJobOutcome(old, ok)).toBe(old);
+    expect(noteSubmitted(old, { id: "9a2f", kind: "job" })).toBe(old);
+  });
+});

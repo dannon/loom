@@ -39,6 +39,22 @@ function unfencedLine(lines: string[], id: string): number {
   });
 }
 
+// The entry an earlier build wrote for submitted work: one line, with the pending state at its end.
+const LEGACY = /^(\s*)- \[[ x!]\] (.*`[^`]+`) — submitted, awaiting completion\s*$/;
+
+/**
+ * Bring entries an earlier build left pending into today's shape, an id line with its status
+ * under it, so work that was in flight across the upgrade settles like any other. Its checkbox
+ * goes: the session never claims a step verified. One already settled keeps its status lines.
+ */
+function upgraded(lines: string[]): string[] {
+  return lines.flatMap((line, i) => {
+    const old = LEGACY.exec(line);
+    if (!old || lines[i + 1]?.trimStart().startsWith(STATUS)) return [line];
+    return [`${old[1]}- ${old[2]}`, `${old[1]}  ${SUBMITTED}`];
+  });
+}
+
 /** The line `id`'s pending status follows, else its first mention outside a fenced block, or -1. */
 function lineWithId(lines: string[], id: string): number {
   const own = lines.findIndex((l, i) => l.includes(id) && lines[i + 1]?.trimStart() === SUBMITTED);
@@ -62,7 +78,7 @@ function statusAfter(lines: string[], at: number): number[] {
  */
 export function applyJobOutcome(content: string, outcome: JobOutcome): string {
   if (!content || !content.includes(outcome.id)) return content;
-  const lines = content.split("\n");
+  const lines = upgraded(content.split("\n"));
   const at = lineWithId(lines, outcome.id);
   if (at < 0) return content;
 
@@ -104,10 +120,10 @@ export function noteSubmitted(
   content: string,
   w: { id: string; kind: "job" | "invocation" | "dataset" },
 ): string {
-  const lines = content.split("\n");
+  const lines = upgraded(content.split("\n"));
   const at = unfencedLine(lines, w.id);
   if (at >= 0) {
-    if (statusAfter(lines, at).length) return content;
+    if (statusAfter(lines, at).length) return lines.join("\n");
     lines.splice(at + 1, 0, `${(lines[at].match(/^\s*/) || [""])[0]}${SUBMITTED}`);
     return lines.join("\n");
   }
