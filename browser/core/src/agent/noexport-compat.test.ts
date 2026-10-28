@@ -188,7 +188,7 @@ describe.skipIf(READ)("save then open, on this build", () => {
     expect(after).toEqual(before);
   });
 
-  it("a head on a system entry saves a document this build refuses", async () => {
+  it("a head on a system entry saves as the entry itself, which opens again", async () => {
     const one = await machine();
     const conversation = await one.create({});
     await say(one, conversation, "first", reply("one"));
@@ -202,11 +202,13 @@ describe.skipIf(READ)("save then open, on this build", () => {
         head: system.id,
       });
     }, context);
-    // pi's export, and its port, name the entry itself by position, which isSessionDocument refuses.
+    // pi's export names the entry itself by position here, which isSessionDocument refuses. The
+    // system entries are not saved, so the context starts at the compaction either way.
     const document = JSON.parse(JSON.stringify(await one.export(conversation)));
-    const last = document.entries.length - 1;
-    expect(document.entries[last].head).toEqual({ entry: last });
-    expect(isSessionDocument(document)).toBe(false);
+    expect(document.entries.at(-1).head).toBe("self");
+    expect(isSessionDocument(document)).toBe(true);
+    const reopened = await (await machine()).open(document, "v1");
+    expect(said((await contextOf(reopened)).messages)).toEqual(["<summary>first</summary>"]);
   });
 
   it("a context edit is not saved, as with pi's own export", async () => {

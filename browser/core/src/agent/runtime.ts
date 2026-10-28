@@ -625,14 +625,19 @@ async function exportEntries(conversation: Conversation): Promise<ExportedEntry[
   } while (cursor !== undefined);
   const kept = history.filter((entry) => !SystemEntry.is(entry)).sort((a, b) => a.id - b.id);
   const at = (id: EntryId) => kept.findIndex((entry) => entry.id >= id);
-  return kept.map((entry) => ({
-    kind: entry.kind,
-    ...(entry.model === undefined ? {} : { model: [...entry.model] }),
-    ...(entry.data === undefined ? {} : { data: entry.data }),
-    ...(entry.head === undefined
-      ? {}
-      : { head: entry.head === entry.id ? ("self" as const) : { entry: at(entry.head) } }),
-  }));
+  return kept.map((entry, position) => {
+    // A head on a system entry just before its carrier lands on the carrier itself; by position
+    // that names no earlier entry, and the document would not open again.
+    const head = entry.head === undefined ? undefined : at(entry.head);
+    return {
+      kind: entry.kind,
+      ...(entry.model === undefined ? {} : { model: [...entry.model] }),
+      ...(entry.data === undefined ? {} : { data: entry.data }),
+      ...(head === undefined
+        ? {}
+        : { head: head === position ? ("self" as const) : { entry: head } }),
+    };
+  });
 }
 
 /** The id of the newest entry of the conversation's active context. */
