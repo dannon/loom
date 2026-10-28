@@ -12,7 +12,39 @@ function run(modelId: string, idx: number): ScenarioRun {
     model: { id: modelId, provider: "p", model: "m" },
     runIndex: idx,
     exitCode: 0,
-    events: [{ type: "turn_end", usage: { inputTokens: 10, outputTokens: 5 } }],
+    // pi's real shape: usage rides on the assistant message, one turn_end per model call.
+    events: [
+      {
+        type: "turn_end",
+        message: {
+          role: "assistant",
+          usage: {
+            input: 10,
+            output: 5,
+            cacheRead: 100,
+            cacheWrite: 20,
+            totalTokens: 135,
+            cost: { total: 0.01 },
+          },
+        },
+        toolResults: [],
+      },
+      {
+        type: "turn_end",
+        message: {
+          role: "assistant",
+          usage: {
+            input: 3,
+            output: 7,
+            cacheRead: 120,
+            cacheWrite: 0,
+            totalTokens: 130,
+            cost: { total: 0.02 },
+          },
+        },
+        toolResults: [],
+      },
+    ],
     stdout: "",
     stderr: "",
     notebookContent: null,
@@ -33,5 +65,15 @@ describe("evals persist", () => {
     expect(first.scenario).toBe("s");
     expect(first.failedDimensions).toContain("routing");
     expect(typeof first.durationMs).toBe("number");
+    expect(first.usage).toEqual({
+      calls: 2,
+      errors: 0,
+      input: 13,
+      output: 12,
+      cacheRead: 220,
+      cacheWrite: 20,
+      totalTokens: 265,
+      cost: 0.03,
+    });
   });
 });

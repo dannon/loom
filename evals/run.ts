@@ -25,6 +25,7 @@ import { loadMatrix } from "./lib/matrix.js";
 import { aggregateCells } from "./lib/aggregate.js";
 import { renderLeaderboard, report } from "./lib/report.js";
 import { writeResultsJsonl } from "./lib/persist.js";
+import { renderUsageTable } from "./lib/usage.js";
 import { runScenario } from "./lib/runner.js";
 import { filterScenarioDirs } from "./lib/select.js";
 import { EVAL_HISTORY_PREFIX, purgeEvalHistories } from "./lib/galaxy-teardown.js";
@@ -111,6 +112,12 @@ async function main() {
   if (cells.some((c) => c.modelId !== "(none)")) {
     console.log("");
     console.log(renderLeaderboard(cells));
+  }
+
+  const usageTable = renderUsageTable(runs);
+  if (usageTable) {
+    console.log("");
+    console.log(usageTable);
   }
 
   const resultsDir = path.join(evalsDir, "results");
