@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { collectSecretValues, SECRET_ENV_VARS } from "../extensions/loom/secret-redaction.js";
-import { resolveBypass, resolveSandbox } from "../extensions/loom/exec-guard/guardian-config.js";
-import type { GuardianConfig } from "../shared/loom-config.js";
+import { collectSecretValues, SECRET_ENV_VARS } from "../extensions/orbit/secret-redaction.js";
+import { resolveBypass, resolveSandbox } from "../extensions/orbit/exec-guard/guardian-config.js";
+import type { GuardianConfig } from "../shared/orbit-config.js";
 import { BRAIN_ENV_PREFIXES, buildBrainEnv } from "../shared/brain-env.js";
 import { writeEnv } from "../shared/orbit-env.js";
-import { isLocalExecDisabled } from "../extensions/loom/local-exec.js";
+import { isLocalExecDisabled } from "../extensions/orbit/local-exec.js";
 import gate from "../web/extensions/web-mode-gate.js";
 
 afterEach(() => {

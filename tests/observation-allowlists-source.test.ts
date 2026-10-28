@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { allOperations } from "@galaxyproject/galaxy-ops";
 
-import { GALAXY_MCP_TOOLS } from "../extensions/loom/observation-allowlists";
+import { GALAXY_MCP_TOOLS } from "../extensions/orbit/observation-allowlists";
 import { GALAXY_ALLOWLIST_EXTRA_NAMES } from "../scripts/galaxy-allowlist-extra-names.mjs";
 
 // observation-allowlists.ts is generated, so nothing else notices when the
@@ -31,7 +31,7 @@ describe("the generated Galaxy tool allowlist", () => {
     const { version } = JSON.parse(
       readFileSync(join(ROOT, "node_modules/@galaxyproject/galaxy-ops/package.json"), "utf-8"),
     ) as { version: string };
-    const source = readFileSync(join(ROOT, "extensions/loom/observation-allowlists.ts"), "utf-8");
+    const source = readFileSync(join(ROOT, "extensions/orbit/observation-allowlists.ts"), "utf-8");
     expect(source).toContain(`@galaxyproject/galaxy-ops ${version}, allOperations (Node entry)`);
   });
 });

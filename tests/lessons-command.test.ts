@@ -8,8 +8,8 @@ import {
   LESSONS_USAGE,
   formatLessonsStatus,
   registerLessonsCommand,
-} from "../extensions/loom/lessons-command";
-import { getLessonStore, resetLessonStore } from "../extensions/loom/lessons/store";
+} from "../extensions/orbit/lessons-command";
+import { getLessonStore, resetLessonStore } from "../extensions/orbit/lessons/store";
 import { envNames } from "../shared/orbit-env.js";
 import { lessonFile } from "./lessons-fixture";
 

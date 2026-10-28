@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Measure the fixed context Loom sends on every turn: the assembled system
-// prompt plus every tool schema. Boots `bin/loom.js --mode rpc` against a
+// prompt plus every tool schema. Boots `bin/orbit.js --mode rpc` against a
 // throwaway HOME whose only provider is a local mock Anthropic endpoint,
 // captures the first /v1/messages request, and reports what's in it.
 //
@@ -137,7 +137,7 @@ async function measure(run) {
   for (const k of ["PI_CODING_AGENT_DIR", "XDG_CONFIG_HOME", "GALAXY_URL", "GALAXY_API_KEY"])
     delete env[k];
 
-  const child = spawn(process.execPath, [join(REPO_ROOT, "bin", "loom.js"), "--mode", "rpc"], {
+  const child = spawn(process.execPath, [join(REPO_ROOT, "bin", "orbit.js"), "--mode", "rpc"], {
     cwd: ws,
     env,
     stdio: ["pipe", "pipe", "pipe"],

@@ -4,7 +4,7 @@ import {
   resolveGalaxyServerUrl,
   resolveGalaxyHistoryOpenUrl,
 } from "../app/src/main/galaxy-status.js";
-import type { LoomConfig } from "../shared/loom-config.js";
+import type { LoomConfig } from "../shared/orbit-config.js";
 
 const noConfigKey = () => null;
 

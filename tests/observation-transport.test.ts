@@ -50,7 +50,7 @@ afterEach(() => {
 });
 
 async function load() {
-  return await import("../extensions/loom/observations.js");
+  return await import("../extensions/orbit/observations.js");
 }
 
 /** An outbox line as a hand edit would leave it: `sha256` defaults to the honest digest. */

@@ -7,12 +7,12 @@ import {
   parseReplayFile,
   registerSubmissionReplay,
   resolveReplayPath,
-} from "../extensions/loom/submission-replay";
-import { resetSubmissionCapture } from "../extensions/loom/galaxy-submission-capture";
-import { findInvocationBlocks } from "../extensions/loom/notebook-writer";
-import { findJobBlocks } from "../extensions/loom/galaxy-job-block";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
-import { registerGalaxyTools, setGalaxyToolSource } from "../extensions/loom/galaxy-tool-source";
+} from "../extensions/orbit/submission-replay";
+import { resetSubmissionCapture } from "../extensions/orbit/galaxy-submission-capture";
+import { findInvocationBlocks } from "../extensions/orbit/notebook-writer";
+import { findJobBlocks } from "../extensions/orbit/galaxy-job-block";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
+import { registerGalaxyTools, setGalaxyToolSource } from "../extensions/orbit/galaxy-tool-source";
 
 let tmpDir: string;
 let nbPath: string;

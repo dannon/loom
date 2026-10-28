@@ -18,7 +18,7 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { getConfigDir } from "../../../shared/loom-config.js";
+import { getConfigDir } from "../../../shared/orbit-config.js";
 import { userLessonsDir } from "./user-dir";
 import {
   LESSON_NAMESPACES,

@@ -7,8 +7,8 @@ import {
   buildFetchPayload,
   waitForDataset,
   type DatasetState,
-} from "../extensions/loom/galaxy-upload-tus";
-import { galaxyGet, galaxyPost } from "../extensions/loom/galaxy-api";
+} from "../extensions/orbit/galaxy-upload-tus";
+import { galaxyGet, galaxyPost } from "../extensions/orbit/galaxy-api";
 
 const live =
   process.env.GALAXY_URL && process.env.GALAXY_API_KEY && process.env.GALAXY_TEST_HISTORY_ID;

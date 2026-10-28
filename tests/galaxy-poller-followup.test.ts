@@ -5,26 +5,26 @@ import { join } from "path";
 
 // Exercise real notebook parsing, persistence and invocation transitions.
 // Only Galaxy's API is replaced with deterministic responses.
-vi.mock("../extensions/loom/galaxy-api.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../extensions/loom/galaxy-api.js")>()),
+vi.mock("../extensions/orbit/galaxy-api.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../extensions/orbit/galaxy-api.js")>()),
   getGalaxyConfig: vi.fn(() => ({ url: "https://galaxy.test", apiKey: "k" })),
   galaxyGetInvocation: vi.fn(),
   galaxyGetJobDetails: vi.fn(),
 }));
 
-import { resetState, setNotebookPath } from "../extensions/loom/state";
-import { findInvocationBlocks, renderInvocationYaml } from "../extensions/loom/notebook-writer";
-import { findJobBlocks, renderJobYaml } from "../extensions/loom/galaxy-job-block";
-import { galaxyGetInvocation, galaxyGetJobDetails } from "../extensions/loom/galaxy-api.js";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
+import { findInvocationBlocks, renderInvocationYaml } from "../extensions/orbit/notebook-writer";
+import { findJobBlocks, renderJobYaml } from "../extensions/orbit/galaxy-job-block";
+import { galaxyGetInvocation, galaxyGetJobDetails } from "../extensions/orbit/galaxy-api.js";
 import {
   registerSubmissionCapture,
   resetSubmissionCapture,
-} from "../extensions/loom/galaxy-submission-capture";
+} from "../extensions/orbit/galaxy-submission-capture";
 import {
   pollGalaxyNow,
   startGalaxyPoller,
   stopGalaxyPoller,
-} from "../extensions/loom/galaxy-poller";
+} from "../extensions/orbit/galaxy-poller";
 
 const mockGet = vi.mocked(galaxyGetInvocation);
 const mockJob = vi.mocked(galaxyGetJobDetails);

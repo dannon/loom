@@ -1,5 +1,5 @@
 // Resolve the on-disk directory of a Pi extension package (pi-mcp-adapter,
-// pi-web-access) so bin/loom.js can hand the path to Pi as an extension.
+// pi-web-access) so bin/orbit.js can hand the path to Pi as an extension.
 //
 // Two package shapes are in the wild and neither resolves the other's way:
 //

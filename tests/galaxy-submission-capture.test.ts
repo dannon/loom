@@ -11,25 +11,25 @@ import {
   resetSubmissionCapture,
   safeProvenanceFilename,
   UDT_PROVENANCE_DIR,
-} from "../extensions/loom/galaxy-submission-capture";
-import { findInvocationBlocks } from "../extensions/loom/notebook-writer";
-import { findJobBlocks } from "../extensions/loom/galaxy-job-block";
-import { findUdtBlocks } from "../extensions/loom/galaxy-udt-block";
+} from "../extensions/orbit/galaxy-submission-capture";
+import { findInvocationBlocks } from "../extensions/orbit/notebook-writer";
+import { findJobBlocks } from "../extensions/orbit/galaxy-job-block";
+import { findUdtBlocks } from "../extensions/orbit/galaxy-udt-block";
 import {
   getCurrentStepAnchor,
   resetState,
   setCurrentStepAnchor,
   setNotebookPath,
-} from "../extensions/loom/state";
-import { isUlid } from "../extensions/loom/ulid";
-import { readAttemptRecord } from "../extensions/loom/galaxy-provenance";
+} from "../extensions/orbit/state";
+import { isUlid } from "../extensions/orbit/ulid";
+import { readAttemptRecord } from "../extensions/orbit/galaxy-provenance";
 import { bareFamily } from "../shared/galaxy-tool-family.js";
 import {
   createMemoryOutputStore,
   galaxyOutputStore,
   setGalaxyOutputStore,
-} from "../extensions/loom/galaxy-output-store";
-import { spillPreview } from "../extensions/loom/galaxy-output";
+} from "../extensions/orbit/galaxy-output-store";
+import { spillPreview } from "../extensions/orbit/galaxy-output";
 import { GALAXY } from "./galaxy-family-fixture";
 
 // Hook run right after the notebook writer reads a file, so a test can land a

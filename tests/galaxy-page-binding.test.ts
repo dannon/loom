@@ -5,7 +5,7 @@ import {
   stripGalaxyPageBlocks,
   upsertGalaxyPageBlock,
   type GalaxyPageBindingYaml,
-} from "../extensions/loom/galaxy-page-binding";
+} from "../extensions/orbit/galaxy-page-binding";
 
 function binding(overrides: Partial<GalaxyPageBindingYaml> = {}): GalaxyPageBindingYaml {
   return {

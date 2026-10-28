@@ -9,10 +9,10 @@ import {
   registerSkillTriggers,
   skillTriggers,
   type SkillTrigger,
-} from "../extensions/loom/skill-triggers";
-import { INVOCATION_FAILED_HINT } from "../extensions/loom/invocation-failure-hint";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
-import { resetActivity } from "../extensions/loom/activity";
+} from "../extensions/orbit/skill-triggers";
+import { INVOCATION_FAILED_HINT } from "../extensions/orbit/invocation-failure-hint";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
+import { resetActivity } from "../extensions/orbit/activity";
 import { GALAXY } from "./galaxy-family-fixture";
 
 const TOOLS = ["mcp__brc_analytics__get_organism", "run_tool"];

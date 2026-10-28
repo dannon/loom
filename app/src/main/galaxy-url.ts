@@ -1,6 +1,6 @@
 /**
  * Galaxy URL hygiene for the main process. Mirrors the brain's
- * extensions/loom/profiles.ts validators: the brain guards the `/connect`
+ * extensions/orbit/profiles.ts validators: the brain guards the `/connect`
  * path, this guards Orbit's config:save and the current-user fetch so a
  * compromised renderer (or a hand-edited config) can't repoint the decrypted
  * API key at an attacker URL or downgrade it to cleartext http.

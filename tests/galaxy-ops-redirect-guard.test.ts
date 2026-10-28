@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { galaxyGetInvocation } from "../extensions/loom/galaxy-api";
+import { galaxyGetInvocation } from "../extensions/orbit/galaxy-api";
 
 // galaxy-ops makes its own requests. Every other Galaxy call in the brain goes
 // through fetchSameOriginOnly so the API key can't follow a redirect to another

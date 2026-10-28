@@ -9,42 +9,42 @@ import * as path from "path";
 import { randomBytes } from "crypto";
 import { gzipSync } from "zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as pagesApi from "../extensions/loom/galaxy-pages-api";
-import * as galaxyApi from "../extensions/loom/galaxy-api";
-import * as reconcile from "../extensions/loom/galaxy-reconcile";
-import * as state from "../extensions/loom/state";
+import * as pagesApi from "../extensions/orbit/galaxy-pages-api";
+import * as galaxyApi from "../extensions/orbit/galaxy-api";
+import * as reconcile from "../extensions/orbit/galaxy-reconcile";
+import * as state from "../extensions/orbit/state";
 import {
   MAX_CARRIER_CHARS,
   CarrierTooLargeError,
   encodeRegistryCarrier,
   extractRegistryCarrier,
-} from "../extensions/loom/registry-carrier";
+} from "../extensions/orbit/registry-carrier";
 import {
   pullNotebookFromGalaxy,
   pushNotebookToGalaxy,
   resumeGalaxyPage,
-} from "../extensions/loom/galaxy-pages-sync";
-import { RegistryStore } from "../extensions/loom/registry";
-import { closeSessionRegistry, openSessionRegistry } from "../extensions/loom/registry-runtime";
-import { resetRegistryPageCarrier } from "../extensions/loom/registry-page-carrier";
-import { canonicalJson, type Attempt } from "../extensions/loom/registry-schema";
-import { renderGalaxyPageBlock } from "../extensions/loom/galaxy-page-binding";
+} from "../extensions/orbit/galaxy-pages-sync";
+import { RegistryStore } from "../extensions/orbit/registry";
+import { closeSessionRegistry, openSessionRegistry } from "../extensions/orbit/registry-runtime";
+import { resetRegistryPageCarrier } from "../extensions/orbit/registry-page-carrier";
+import { canonicalJson, type Attempt } from "../extensions/orbit/registry-schema";
+import { renderGalaxyPageBlock } from "../extensions/orbit/galaxy-page-binding";
 import { eligibleAttempt, SERVER, tmpAnalysisDir } from "./registry-fixtures";
-import { renderInvocationYaml } from "../extensions/loom/notebook-writer";
+import { renderInvocationYaml } from "../extensions/orbit/notebook-writer";
 import {
   evidenceOverrides,
   grantEvidenceOverride,
   resetEvidenceOverrides,
-} from "../extensions/loom/evidence-gate";
+} from "../extensions/orbit/evidence-gate";
 
-vi.mock("../extensions/loom/galaxy-pages-api");
-vi.mock("../extensions/loom/galaxy-api", async (importOriginal) => {
+vi.mock("../extensions/orbit/galaxy-pages-api");
+vi.mock("../extensions/orbit/galaxy-api", async (importOriginal) => {
   const actual = await importOriginal<typeof galaxyApi>();
   return { ...actual, getGalaxyConfig: vi.fn() };
 });
-vi.mock("../extensions/loom/galaxy-reconcile", () => ({ followThrough: vi.fn(async () => ({})) }));
-vi.mock("../extensions/loom/state");
-vi.mock("../extensions/loom/config", () => ({ loadConfig: () => ({}) }));
+vi.mock("../extensions/orbit/galaxy-reconcile", () => ({ followThrough: vi.fn(async () => ({})) }));
+vi.mock("../extensions/orbit/state");
+vi.mock("../extensions/orbit/config", () => ({ loadConfig: () => ({}) }));
 
 const gzipBomb = () => {
   // 8 MiB of zeros compresses to a few KB.

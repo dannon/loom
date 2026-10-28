@@ -7,12 +7,12 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { setupContextInjection } from "../extensions/loom/context";
-import { decideToolResultHint } from "../extensions/loom/lesson-hint";
-import { LOOM_LESSONS_CONTEXT_TYPE } from "../extensions/loom/lessons/reproduction-index";
-import { registerLessonsSearchTool } from "../extensions/loom/lessons/search-tool";
-import { getLessonStore, resetLessonStore } from "../extensions/loom/lessons/store";
-import { resetState } from "../extensions/loom/state";
+import { setupContextInjection } from "../extensions/orbit/context";
+import { decideToolResultHint } from "../extensions/orbit/lesson-hint";
+import { LOOM_LESSONS_CONTEXT_TYPE } from "../extensions/orbit/lessons/reproduction-index";
+import { registerLessonsSearchTool } from "../extensions/orbit/lessons/search-tool";
+import { getLessonStore, resetLessonStore } from "../extensions/orbit/lessons/store";
+import { resetState } from "../extensions/orbit/state";
 
 // The lesson switch is off by default; these suites are about what happens
 // once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.

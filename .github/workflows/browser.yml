@@ -80,7 +80,7 @@ jobs:
         run: pip install -r requirements.txt
 
       # pi-coding-agent's types for the pi-host shim's type-only import, and Orbit's runtime
-      # dependencies for the conformance test that boots extensions/loom on it.
+      # dependencies for the conformance test that boots extensions/orbit on it.
       - name: Install root dependencies
         working-directory: .
         run: npm ci

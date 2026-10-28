@@ -7,7 +7,7 @@ import {
   countersPath,
   readCounters,
   syncSuppressedFlags,
-} from "../extensions/loom/lessons/counters";
+} from "../extensions/orbit/lessons/counters";
 
 let dir: string;
 let file: string;

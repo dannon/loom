@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Regenerates extensions/loom/observation-allowlists.ts from the installed
+// Regenerates extensions/orbit/observation-allowlists.ts from the installed
 // @galaxyproject/galaxy-ops and a pinned Galaxy release. The observation
 // collector admits a structured field only when it is on one of these lists,
 // because a shape check lets any identifier-shaped word through -- a patient
@@ -27,7 +27,7 @@ import { textLeaks } from "../shared/observation-contract.js";
 import { GALAXY_ALLOWLIST_EXTRA_NAMES } from "./galaxy-allowlist-extra-names.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const OUT = join(root, "extensions", "loom", "observation-allowlists.ts");
+const OUT = join(root, "extensions", "orbit", "observation-allowlists.ts");
 
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);

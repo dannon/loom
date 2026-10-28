@@ -6,7 +6,7 @@ import {
   proposalSightings,
   renderProposalBlock,
   setProposalSpecRevision,
-} from "../extensions/loom/notebook-writer";
+} from "../extensions/orbit/notebook-writer";
 import { toolProposal } from "./registry-proposal-fixtures";
 
 const NOTEBOOK = "# Analysis\n\n## Plan A: QC [remote]\n\n- [ ] 1. Trim {#plan-a-step-1}\n";

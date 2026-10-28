@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { RegistryLock, STALE_LOCK_MS } from "../extensions/loom/registry-lock";
+import { RegistryLock, STALE_LOCK_MS } from "../extensions/orbit/registry-lock";
 import { T0, tmpAnalysisDir } from "./registry-fixtures";
 
 describe("RegistryLock", () => {

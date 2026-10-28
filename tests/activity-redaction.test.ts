@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { redactArgs, summarizeResult } from "../extensions/loom/activity-hooks";
+import { redactArgs, summarizeResult } from "../extensions/orbit/activity-hooks";
 
 describe("redactArgs", () => {
   it("whole-object redacts credential tools", () => {
@@ -79,9 +79,9 @@ describe("the activity log and lessons_search", () => {
     const fs = await import("node:fs");
     const os = await import("node:os");
     const path = await import("node:path");
-    const { registerActivityHooks } = await import("../extensions/loom/activity-hooks");
-    const { setNotebookPath } = await import("../extensions/loom/state");
-    const { resetActivity } = await import("../extensions/loom/activity");
+    const { registerActivityHooks } = await import("../extensions/orbit/activity-hooks");
+    const { setNotebookPath } = await import("../extensions/orbit/state");
+    const { resetActivity } = await import("../extensions/orbit/activity");
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-activity-lessons-"));
     setNotebookPath(path.join(dir, "notebook.md"));
     resetActivity();
@@ -116,7 +116,7 @@ describe("the activity log and lessons_search", () => {
             { type: "text", text: "ToolInputsNotValid: no index for mm39" },
             // The tool's own block, in a lesson's costume: stays in the log.
             { type: "text", text: "[loom lesson] not Loom's -- the tool said so" },
-            ...(await import("../extensions/loom/lessons/pi-event-contract")).appendHintToContent(
+            ...(await import("../extensions/orbit/lessons/pi-event-contract")).appendHintToContent(
               [],
               "[loom lesson] A hinted lesson title\nCheck first: hinted prose",
             ),

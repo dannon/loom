@@ -4,26 +4,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // an invocation that JUST reached a terminal state (autoAction completed/failed).
 // Mock the poller's four dependencies so we can drive a single tick (kicked off
 // synchronously by startGalaxyPoller) and observe exactly what it notifies.
-vi.mock("../extensions/loom/state.js", () => ({
+vi.mock("../extensions/orbit/state.js", () => ({
   getNotebookPath: vi.fn(() => "/fake/notebook.md"),
 }));
-vi.mock("../extensions/loom/notebook-writer.js", () => ({
+vi.mock("../extensions/orbit/notebook-writer.js", () => ({
   readNotebook: vi.fn(async () => "notebook contents"),
   // Always report one in-flight block so tick() proceeds to checkInvocations.
   findInvocationBlocks: vi.fn(() => [{ status: "in_progress", invocationId: "inv1" }]),
 }));
-vi.mock("../extensions/loom/tools.js", () => ({
+vi.mock("../extensions/orbit/tools.js", () => ({
   checkInvocations: vi.fn(),
 }));
-vi.mock("../extensions/loom/galaxy-api.js", () => ({
+vi.mock("../extensions/orbit/galaxy-api.js", () => ({
   getGalaxyConfig: vi.fn(() => ({ url: "https://galaxy.test", apiKey: "k" })),
 }));
 
-import { startGalaxyPoller, stopGalaxyPoller } from "../extensions/loom/galaxy-poller";
+import { startGalaxyPoller, stopGalaxyPoller } from "../extensions/orbit/galaxy-poller";
 
 /** Matches POLL_INTERVAL_MS in galaxy-poller.ts. */
 const POLL_INTERVAL_MS = 15_000;
-import { checkInvocations } from "../extensions/loom/tools.js";
+import { checkInvocations } from "../extensions/orbit/tools.js";
 
 const mockCheck = vi.mocked(checkInvocations);
 

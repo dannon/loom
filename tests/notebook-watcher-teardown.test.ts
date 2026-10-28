@@ -15,7 +15,7 @@ vi.mock("chokidar", () => ({ default: { watch: watchMock } }));
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { resetState, setNotebookPath, stopWatchingNotebook } from "../extensions/loom/state";
+import { resetState, setNotebookPath, stopWatchingNotebook } from "../extensions/orbit/state";
 
 describe("notebook watcher teardown (#271)", () => {
   const dirs: string[] = [];

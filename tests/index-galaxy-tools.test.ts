@@ -4,15 +4,15 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../extensions/loom/galaxy-version-capture", async (importOriginal) => {
-  const real = await importOriginal<typeof import("../extensions/loom/galaxy-version-capture")>();
+vi.mock("../extensions/orbit/galaxy-version-capture", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../extensions/orbit/galaxy-version-capture")>();
   return { ...real, registerGalaxyVersionCapture: vi.fn(real.registerGalaxyVersionCapture) };
 });
 
 import { allOperations } from "@galaxyproject/galaxy-ops";
 import { installedCapabilityProfile, setCapabilityProfile } from "../shared/capability-profile.js";
-import { registerGalaxyVersionCapture } from "../extensions/loom/galaxy-version-capture";
-import { galaxyToolFamily, setGalaxyToolSource } from "../extensions/loom/galaxy-tool-source";
+import { registerGalaxyVersionCapture } from "../extensions/orbit/galaxy-version-capture";
+import { galaxyToolFamily, setGalaxyToolSource } from "../extensions/orbit/galaxy-tool-source";
 
 interface Loaded {
   tools: string[];
@@ -38,7 +38,7 @@ async function load(env: Record<string, string>): Promise<Loaded> {
     },
   );
   for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v);
-  const mod = await import("../extensions/loom/index");
+  const mod = await import("../extensions/orbit/index");
   mod.default(pi as never);
   return loaded;
 }

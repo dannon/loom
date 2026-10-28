@@ -5,7 +5,7 @@
  * highlights (from the shipped CHANGELOG.md) once via ctx.ui.notify, then stamps
  * a sidecar so it shows once per upgrade. Also registers /whatsnew to re-view on
  * demand. No-ops inside Orbit, which owns its own what's-new banner. Lives here,
- * alongside cli-update, so extensions/loom/ stays shell-neutral.
+ * alongside cli-update, so extensions/orbit/ stays shell-neutral.
  */
 
 import fs from "node:fs";

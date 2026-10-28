@@ -14,10 +14,10 @@ import {
   registerModelScript,
   resetModelScriptState,
   turnToMessage,
-} from "../extensions/loom/model-script";
+} from "../extensions/orbit/model-script";
 import { execFileSync } from "child_process";
-import { resetActivity } from "../extensions/loom/activity";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+import { resetActivity } from "../extensions/orbit/activity";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 
 let dir: string;
 let cwd: string;
@@ -404,7 +404,7 @@ describe("the extension entry", () => {
     const saved = { ...process.env };
     Object.assign(process.env, env);
     try {
-      const mod = await import("../extensions/loom/index");
+      const mod = await import("../extensions/orbit/index");
       mod.default(pi as never);
     } finally {
       process.env = saved;
@@ -430,7 +430,7 @@ describe("team_dispatch under the seam", () => {
         if (def.name === "team_dispatch") execute = def.execute;
       },
     } as unknown as ExtensionAPI;
-    const { registerTeamTools } = await import("../extensions/loom/teams/tool");
+    const { registerTeamTools } = await import("../extensions/orbit/teams/tool");
     registerTeamTools(pi);
     process.env.LOOM_MODEL_SCRIPT = "model-script.jsonl";
     const spec = {

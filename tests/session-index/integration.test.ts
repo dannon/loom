@@ -2,14 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { openIndexDb } from "../../extensions/loom/session-index/db";
-import { scanSessions } from "../../extensions/loom/session-index/indexer";
-import { encodeCwd } from "../../extensions/loom/session-index/cwd";
+import { openIndexDb } from "../../extensions/orbit/session-index/db";
+import { scanSessions } from "../../extensions/orbit/session-index/indexer";
+import { encodeCwd } from "../../extensions/orbit/session-index/cwd";
 import {
   searchChat,
   findToolCalls,
   getSessionContext,
-} from "../../extensions/loom/session-index/query";
+} from "../../extensions/orbit/session-index/query";
 
 const MALARIA = `\
 {"type":"session","version":3,"id":"sess-mal","timestamp":"2026-04-01T10:00:00Z","cwd":"/tmp/malaria-chr6"}

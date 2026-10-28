@@ -7,7 +7,7 @@ const indexPath = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "extensions",
-  "loom",
+  "orbit",
   "index.ts",
 );
 // Comments stripped, so a mention of a register call in prose can't satisfy

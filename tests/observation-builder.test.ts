@@ -14,11 +14,11 @@ import {
   resetGalaxyVersion,
   buildObservation,
   isAdmissibleMcpTool,
-} from "../extensions/loom/observations.js";
+} from "../extensions/orbit/observations.js";
 import { bareFamily } from "../shared/galaxy-tool-family.js";
-import { factsForToolResult } from "../extensions/loom/observation-triggers.js";
+import { factsForToolResult } from "../extensions/orbit/observation-triggers.js";
 import { validateObservation, scanObservationForLeaks } from "../shared/observation-contract.js";
-import type { ObservationEnvelope } from "../extensions/loom/observations.js";
+import type { ObservationEnvelope } from "../extensions/orbit/observations.js";
 
 const envelope: ObservationEnvelope = {
   id: "550e8400-e29b-41d4-a716-446655440000",
@@ -281,7 +281,7 @@ describe("currentGalaxyUrl", () => {
     process.env.USERPROFILE = tmpHome;
     try {
       vi.resetModules();
-      const m = await import("../extensions/loom/observations.js");
+      const m = await import("../extensions/orbit/observations.js");
       expect(m.currentGalaxyUrl({} as NodeJS.ProcessEnv)).toBe("https://usegalaxy.org");
       expect(m.resolveObservationServer(m.currentGalaxyUrl({} as NodeJS.ProcessEnv))).toBe(
         "usegalaxy.org",
@@ -413,8 +413,8 @@ import {
   buildCheckedObservation,
   observationProblems,
   withheldReason,
-} from "../extensions/loom/observations.js";
-import { acceptDescription } from "../extensions/loom/observation-ui.js";
+} from "../extensions/orbit/observations.js";
+import { acceptDescription } from "../extensions/orbit/observation-ui.js";
 
 describe("buildObservation in the structured (auto) shape", () => {
   const hostile = {
@@ -657,7 +657,7 @@ describe("the leak scan runs before normalization and truncation", () => {
 describe("the generated allowlists", () => {
   it("hold nothing the leak scan would refuse, so an admitted field can always be sent", async () => {
     const { GALAXY_MCP_TOOLS, GALAXY_DATATYPES, GALAXY_BUILTIN_TOOL_IDS } =
-      await import("../extensions/loom/observation-allowlists.js");
+      await import("../extensions/orbit/observation-allowlists.js");
     const { textLeaks } = await import("../shared/observation-contract.js");
     for (const set of [GALAXY_MCP_TOOLS, GALAXY_DATATYPES, GALAXY_BUILTIN_TOOL_IDS]) {
       expect(set.size).toBeGreaterThan(40);

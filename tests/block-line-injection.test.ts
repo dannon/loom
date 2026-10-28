@@ -19,20 +19,20 @@ import {
   renderInvocationYaml,
   upsertInvocationBlock,
   type InvocationYaml,
-} from "../extensions/loom/notebook-writer";
+} from "../extensions/orbit/notebook-writer";
 import {
   findJobBlocks,
   renderJobYaml,
   upsertJobBlock,
   type JobYaml,
-} from "../extensions/loom/galaxy-job-block";
-import { UnrenderableBlockValue } from "../extensions/loom/harness-block-fields";
+} from "../extensions/orbit/galaxy-job-block";
+import { UnrenderableBlockValue } from "../extensions/orbit/harness-block-fields";
 import {
   findUdtBlocks,
   renderUdtYaml,
   upsertUdtBlock,
   type UdtYaml,
-} from "../extensions/loom/galaxy-udt-block";
+} from "../extensions/orbit/galaxy-udt-block";
 import { parseInvocationBlocks } from "../app/src/renderer/galaxy-invocations.js";
 
 const INVOCATION: InvocationYaml = {

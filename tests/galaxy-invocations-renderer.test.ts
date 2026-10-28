@@ -11,15 +11,15 @@ import {
   findInvocationBlocks,
   renderInvocationYaml,
   type InvocationYaml,
-} from "../extensions/loom/notebook-writer";
+} from "../extensions/orbit/notebook-writer";
 import {
   describeToolVersions,
   parseInvocationBlocks,
   parseUnattributedJobBlocks,
   refreshGalaxyInvocations,
 } from "../app/src/renderer/galaxy-invocations.js";
-import { upsertJobBlock, type JobYaml } from "../extensions/loom/galaxy-job-block";
-import { upsertInvocationBlock } from "../extensions/loom/notebook-writer";
+import { upsertJobBlock, type JobYaml } from "../extensions/orbit/galaxy-job-block";
+import { upsertInvocationBlock } from "../extensions/orbit/notebook-writer";
 
 function invocation(overrides: Partial<InvocationYaml> = {}): InvocationYaml {
   return {

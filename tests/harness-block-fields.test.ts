@@ -4,19 +4,19 @@ import {
   upsertInvocationBlock,
   applyInvocationUpdates,
   type InvocationYaml,
-} from "../extensions/loom/notebook-writer";
+} from "../extensions/orbit/notebook-writer";
 import {
   findJobBlocks,
   upsertJobBlock,
   applyJobPollUpdate,
   type JobYaml,
-} from "../extensions/loom/galaxy-job-block";
+} from "../extensions/orbit/galaxy-job-block";
 import {
   mergeHarnessFields,
   pickHarnessFields,
   stripHarnessFields,
   type HarnessBlockFields,
-} from "../extensions/loom/harness-block-fields";
+} from "../extensions/orbit/harness-block-fields";
 import { parseInvocationBlocks } from "../app/src/renderer/galaxy-invocations.js";
 
 const AGENT_INVOCATION: InvocationYaml = {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { renderSkillsSection } from "../extensions/loom/context";
-import type { SkillEntry } from "../extensions/loom/skills-discovery";
+import { renderSkillsSection } from "../extensions/orbit/context";
+import type { SkillEntry } from "../extensions/orbit/skills-discovery";
 
 const repos = [
   { name: "galaxy-skills", url: "https://github.com/galaxyproject/galaxy-skills", branch: "main" },

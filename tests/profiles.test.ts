@@ -9,7 +9,7 @@ import {
   switchProfile,
   loadProfiles,
   getActiveGalaxyStatus,
-} from "../extensions/loom/profiles";
+} from "../extensions/orbit/profiles";
 
 // All loom-config / profiles paths derive from os.homedir() at call time.
 // POSIX reads HOME; Windows reads USERPROFILE. Override both so the on-disk
@@ -155,7 +155,7 @@ describe("getActiveGalaxyStatus", () => {
 
   it("is none for a plaintext-key profile not yet wired into env", () => {
     // Has a usable key on disk, so it's not the encrypted-unusable case; env
-    // just isn't set, which bin/loom.js wouldn't allow in practice. Documents
+    // just isn't set, which bin/orbit.js wouldn't allow in practice. Documents
     // the boundary.
     const status = getActiveGalaxyStatus(withDefault({ url: "u", apiKey: "plain" }), {});
     expect(status).toBe("none");

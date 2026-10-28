@@ -9,13 +9,13 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resetState } from "../extensions/loom/state.js";
+import { resetState } from "../extensions/orbit/state.js";
 import {
   getPollTickHook,
   pollGalaxyNow,
   setPollTickHook,
   stopGalaxyPoller,
-} from "../extensions/loom/galaxy-poller.js";
+} from "../extensions/orbit/galaxy-poller.js";
 
 describe("the poll tick hook", () => {
   afterEach(() => {

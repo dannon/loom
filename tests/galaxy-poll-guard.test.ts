@@ -4,11 +4,11 @@ import {
   GALAXY_POLL_INTERVAL_MS,
   galaxyPollGuidance,
   registerGalaxyPollGuard,
-} from "../extensions/loom/galaxy-poll-guard";
+} from "../extensions/orbit/galaxy-poll-guard";
 import {
   createMemoryOutputStore,
   setGalaxyOutputStore,
-} from "../extensions/loom/galaxy-output-store";
+} from "../extensions/orbit/galaxy-output-store";
 import { bareFamily } from "../shared/galaxy-tool-family.js";
 import { GALAXY } from "./galaxy-family-fixture";
 import { guardHooks, SPELLED } from "./galaxy-test-helpers";

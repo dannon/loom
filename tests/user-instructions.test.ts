@@ -14,7 +14,7 @@ import {
   MAX_LINES,
   type FsLike,
   type InstructionFile,
-} from "../extensions/loom/user-instructions";
+} from "../extensions/orbit/user-instructions";
 
 let root: string;
 

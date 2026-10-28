@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { registerExecutionCommands } from "../extensions/loom/execution-commands";
+import { registerExecutionCommands } from "../extensions/orbit/execution-commands";
 import {
   getCurrentStepAnchor,
   resetState,
   setCurrentStepAnchor,
   setNotebookPath,
-} from "../extensions/loom/state";
+} from "../extensions/orbit/state";
 
 let tmpDir: string;
 let nbPath: string;

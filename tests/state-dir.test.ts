@@ -258,7 +258,7 @@ describe("callers follow the resolver", () => {
   it("loadConfig/saveConfig use ~/.orbit when it holds the config", async () => {
     put(path.join(loom, "config.json"), JSON.stringify({ testerId: "old" }));
     put(path.join(orbit, "config.json"), JSON.stringify({ testerId: "new" }));
-    const { loadConfig, saveConfig } = await import("../shared/loom-config.js");
+    const { loadConfig, saveConfig } = await import("../shared/orbit-config.js");
     const cfg = loadConfig();
     expect(cfg.testerId).toBe("new");
     saveConfig({ ...cfg, testerId: "newer" });
@@ -271,7 +271,7 @@ describe("callers follow the resolver", () => {
   });
 
   it("saveConfig writes ~/.loom on a fresh machine in this release", async () => {
-    const { saveConfig } = await import("../shared/loom-config.js");
+    const { saveConfig } = await import("../shared/orbit-config.js");
     saveConfig({ testerId: "x" });
     expect(fs.existsSync(path.join(loom, "config.json"))).toBe(true);
     expect(fs.existsSync(orbit)).toBe(false);

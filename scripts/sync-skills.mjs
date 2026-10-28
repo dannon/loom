@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Vendor skill content into `extensions/loom/vendor/skills/`.
+ * Vendor skill content into `extensions/orbit/vendor/skills/`.
  *
  * The source is `galaxyproject/agentic-plugins`, which mirrors galaxy-skills
  * and the Foundry casts at pins of its own and is what distributes the same
@@ -39,7 +39,7 @@ import { realpathSync } from "node:fs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MANIFEST_PATH = path.join(REPO_ROOT, "scripts", "skills.manifest.json");
-const VENDOR_DIR = path.join(REPO_ROOT, "extensions", "loom", "vendor", "skills");
+const VENDOR_DIR = path.join(REPO_ROOT, "extensions", "orbit", "vendor", "skills");
 const VENDOR_MANIFEST_NAME = "_manifest.json";
 const VENDOR_MANIFEST = path.join(VENDOR_DIR, VENDOR_MANIFEST_NAME);
 const VENDOR_CATALOG_NAME = "_catalog.json";

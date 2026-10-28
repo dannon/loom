@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateGalaxyUrl, normalizeGalaxyUrl } from "../extensions/loom/profiles";
+import { validateGalaxyUrl, normalizeGalaxyUrl } from "../extensions/orbit/profiles";
 
 describe("validateGalaxyUrl", () => {
   it("accepts https://", () => {

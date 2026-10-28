@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   wrapUntrustedRemoteBody,
   stripUntrustedMarkers,
-} from "../extensions/loom/galaxy-pages-sync";
+} from "../extensions/orbit/galaxy-pages-sync";
 
 describe("wrapUntrustedRemoteBody", () => {
   it("brackets remote content with untrusted markers", () => {

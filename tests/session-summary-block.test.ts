@@ -5,7 +5,7 @@ import {
   upsertSessionSummaryBlock,
   findSessionSummaryBlocks,
   type SessionSummaryYaml,
-} from "../extensions/loom/notebook-writer";
+} from "../extensions/orbit/notebook-writer";
 
 const sample: SessionSummaryYaml = {
   id: "sess_abc123",

@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, beforeAll, afterAll } from
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { buildStepLessonNote, decideHintForEvent } from "../extensions/loom/lesson-hint";
-import { renderReproductionIndex } from "../extensions/loom/lessons/reproduction-index";
-import { registerLessonsSearchTool } from "../extensions/loom/lessons/search-tool";
-import { getLessonStore, resetLessonStore } from "../extensions/loom/lessons/store";
-import { resetActivity } from "../extensions/loom/activity";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+import { buildStepLessonNote, decideHintForEvent } from "../extensions/orbit/lesson-hint";
+import { renderReproductionIndex } from "../extensions/orbit/lessons/reproduction-index";
+import { registerLessonsSearchTool } from "../extensions/orbit/lessons/search-tool";
+import { getLessonStore, resetLessonStore } from "../extensions/orbit/lessons/store";
+import { resetActivity } from "../extensions/orbit/activity";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { lessonFile } from "./lessons-fixture";
 

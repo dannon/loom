@@ -2,7 +2,7 @@
  * Orbit Web -- local dev server.
  *
  * Serves the Orbit renderer via Vite and bridges a WebSocket to a
- * loom subprocess (bin/loom.js --mode rpc). Single user, single
+ * loom subprocess (bin/orbit.js --mode rpc). Single user, single
  * subprocess, same ~/.loom/config.json as the CLI and Electron app.
  */
 
@@ -46,7 +46,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // otherwise the bundled server looks one level too deep (web/build/...) and
 // the brain, the lockdown gate, and the static bundle all silently go missing.
 const WEB_ROOT = basename(__dirname) === "build" ? resolve(__dirname, "..") : __dirname;
-const LOOM_BIN = resolve(WEB_ROOT, "../bin/loom.js");
+const LOOM_BIN = resolve(WEB_ROOT, "../bin/orbit.js");
 // pi 1.0 refuses --provider without --model, and a bring-your-own key names
 // only the provider.
 const PI_DEFAULT_MODELS = await loadPiDefaultModels();
@@ -232,14 +232,14 @@ function startLoom(opts: { fresh?: boolean } = {}): void {
     // No local execution surface in the container: the web-mode-gate is the
     // sole tool_call authority, so tell the brain to skip its local-exec guard
     // (whose headless approval prompts would otherwise hang). See
-    // extensions/loom/index.ts.
+    // extensions/orbit/index.ts.
     writeEnv(env, "LOCAL_EXEC", "off");
     // Deterministic notebook -> Galaxy Page persistence: resume on launch,
     // debounce-push on change, flush on shutdown. Brain-side, env-gated.
     writeEnv(env, "GALAXY_PAGE_SYNC", "auto");
   } else {
     // The local dev server DOES have a local execution surface, so pin the
-    // guard on authoritatively (same as agent.ts and bin/loom.js) -- the
+    // guard on authoritatively (same as agent.ts and bin/orbit.js) -- the
     // helper forwards LOOM_* wholesale, so an ambient LOOM_LOCAL_EXEC=off
     // left in the dev's shell would otherwise silently disable exec-guard.
     writeEnv(env, "LOCAL_EXEC", "on");

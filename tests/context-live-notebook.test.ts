@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { setupContextInjection } from "../extensions/loom/context";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+import { setupContextInjection } from "../extensions/orbit/context";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 
 const LOOM_NOTEBOOK_CONTEXT_TYPE = "loom-notebook-context";
 const MARKER = "Some durable notes about variant calling";

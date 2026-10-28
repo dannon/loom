@@ -11,11 +11,11 @@ import {
   decideToolResultObservation,
   factsForToolResult,
   deliverObservation,
-} from "../extensions/loom/observation-triggers.js";
-import type { DeliverDeps } from "../extensions/loom/observation-triggers.js";
+} from "../extensions/orbit/observation-triggers.js";
+import type { DeliverDeps } from "../extensions/orbit/observation-triggers.js";
 import type { Observation } from "../shared/observation-contract.js";
-import type { ObservationFacts } from "../extensions/loom/observations.js";
-import { observationToolName } from "../extensions/loom/observations.js";
+import type { ObservationFacts } from "../extensions/orbit/observations.js";
+import { observationToolName } from "../extensions/orbit/observations.js";
 import { GALAXY } from "./galaxy-family-fixture";
 import { bareFamily } from "../shared/galaxy-tool-family.js";
 
@@ -646,7 +646,7 @@ describe("registerObservationTriggers", () => {
 
   it("only enqueues inside tool_result, and confirms and sends on settle", async () => {
     const { registerObservationTriggers, pendingObservationCount } =
-      await import("../extensions/loom/observation-triggers.js");
+      await import("../extensions/orbit/observation-triggers.js");
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 202,
@@ -684,7 +684,7 @@ describe("registerObservationTriggers", () => {
       JSON.stringify({ lessons: { enabled: true }, ...(config as object) }),
     );
     const { registerObservationTriggers } =
-      await import("../extensions/loom/observation-triggers.js");
+      await import("../extensions/orbit/observation-triggers.js");
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 202,
@@ -722,7 +722,7 @@ describe("registerObservationTriggers", () => {
 
   it("counts a retry loop on a Galaxy tool", async () => {
     const { registerObservationTriggers, pendingObservationCount, lastObservationFacts } =
-      await import("../extensions/loom/observation-triggers.js");
+      await import("../extensions/orbit/observation-triggers.js");
     const pi = fakePi();
     registerObservationTriggers(pi.api as unknown as ExtensionAPI, GALAXY);
     await pi.emit("session_start", {}, {});
@@ -739,8 +739,8 @@ describe("registerObservationTriggers", () => {
 
   it("takes no Galaxy version from a connect-shaped result; galaxy-ops reports it", async () => {
     const { registerObservationTriggers } =
-      await import("../extensions/loom/observation-triggers.js");
-    const { getGalaxyVersion } = await import("../extensions/loom/observations.js");
+      await import("../extensions/orbit/observation-triggers.js");
+    const { getGalaxyVersion } = await import("../extensions/orbit/observations.js");
     const pi = fakePi();
     registerObservationTriggers(pi.api as unknown as ExtensionAPI, GALAXY);
     await pi.emit("session_start", {}, {});
@@ -760,8 +760,8 @@ describe("registerObservationTriggers", () => {
 
   it("raises one assertion-failed report per session however often the gate blocks", async () => {
     const { registerObservationTriggers, pendingObservationCount } =
-      await import("../extensions/loom/observation-triggers.js");
-    const { notifyEvidenceDecision } = await import("../extensions/loom/evidence-gate.js");
+      await import("../extensions/orbit/observation-triggers.js");
+    const { notifyEvidenceDecision } = await import("../extensions/orbit/evidence-gate.js");
     const pi = fakePi();
     registerObservationTriggers(pi.api as unknown as ExtensionAPI, GALAXY);
     await pi.emit("session_start", {}, {});
@@ -785,7 +785,7 @@ describe("registerObservationTriggers", () => {
   it("enqueues nothing while the env hard-disable is set", async () => {
     process.env.LOOM_OBSERVATIONS = "off";
     const { registerObservationTriggers, pendingObservationCount } =
-      await import("../extensions/loom/observation-triggers.js");
+      await import("../extensions/orbit/observation-triggers.js");
     const pi = fakePi();
     registerObservationTriggers(pi.api as unknown as ExtensionAPI, GALAXY);
     await pi.emit("session_start", {}, {});
@@ -795,9 +795,9 @@ describe("registerObservationTriggers", () => {
 
   it("never reads an appended lesson hint as the tool's error", async () => {
     const { registerObservationTriggers, pendingObservationCount } =
-      await import("../extensions/loom/observation-triggers.js");
+      await import("../extensions/orbit/observation-triggers.js");
     const { LESSON_HINT_MARKER } = await import("../shared/lesson-hint-marker.js");
-    const { appendHintToContent } = await import("../extensions/loom/lessons/pi-event-contract");
+    const { appendHintToContent } = await import("../extensions/orbit/lessons/pi-event-contract");
     const pi = fakePi();
     registerObservationTriggers(pi.api as unknown as ExtensionAPI, GALAXY);
     await pi.emit("session_start", {}, {});
@@ -814,7 +814,7 @@ describe("registerObservationTriggers", () => {
     // A hostile output cannot hide its error from the collector by dressing
     // it up as a lesson: only hints Loom itself appended are left out.
     const { registerObservationTriggers, pendingObservationCount } =
-      await import("../extensions/loom/observation-triggers.js");
+      await import("../extensions/orbit/observation-triggers.js");
     const { LESSON_HINT_MARKER } = await import("../shared/lesson-hint-marker.js");
     const pi = fakePi();
     registerObservationTriggers(pi.api as unknown as ExtensionAPI, GALAXY);
@@ -826,7 +826,7 @@ describe("registerObservationTriggers", () => {
 
   it("takes the signature from the tool's text even when a hint block comes first", async () => {
     const { registerObservationTriggers, pendingObservationCount } =
-      await import("../extensions/loom/observation-triggers.js");
+      await import("../extensions/orbit/observation-triggers.js");
     const { LESSON_HINT_MARKER } = await import("../shared/lesson-hint-marker.js");
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -845,7 +845,7 @@ describe("registerObservationTriggers", () => {
     const pi = fakePi();
     registerObservationTriggers(pi.api as unknown as ExtensionAPI, GALAXY);
     await pi.emit("session_start", {}, ctx);
-    const { appendHintToContent } = await import("../extensions/loom/lessons/pi-event-contract");
+    const { appendHintToContent } = await import("../extensions/orbit/lessons/pi-event-contract");
     const [hint] = appendHintToContent(
       [],
       `${LESSON_HINT_MARKER} A lesson title the matcher found`,
@@ -859,7 +859,7 @@ describe("registerObservationTriggers", () => {
 
   it("ignores a successful result and a non-galaxy failure", async () => {
     const { registerObservationTriggers, pendingObservationCount } =
-      await import("../extensions/loom/observation-triggers.js");
+      await import("../extensions/orbit/observation-triggers.js");
     const pi = fakePi();
     registerObservationTriggers(pi.api as unknown as ExtensionAPI, GALAXY);
     await pi.emit("session_start", {}, {});

@@ -18,7 +18,7 @@ describe("loadConfig ui theme defaults", () => {
 
   async function loadFreshConfig() {
     vi.resetModules();
-    return import("../shared/loom-config.js");
+    return import("../shared/orbit-config.js");
   }
 
   it("defaults missing ui.theme to dark for existing and new configs", async () => {

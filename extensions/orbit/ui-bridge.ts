@@ -14,7 +14,7 @@ import {
   getNotebookWidgetMode,
   setNotebookWidgetMode,
 } from "./state.js";
-import { LoomWidgetKey, encodeMarkdownWidget } from "../../shared/loom-shell-contract.js";
+import { LoomWidgetKey, encodeMarkdownWidget } from "../../shared/orbit-shell-contract.js";
 
 export function setupUIBridge(pi: ExtensionAPI): void {
   let latestCtx: ExtensionContext | null = null;

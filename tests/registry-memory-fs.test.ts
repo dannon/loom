@@ -1,9 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import { afterEach, describe, expect, it } from "vitest";
-import { RegistryStore } from "../extensions/loom/registry";
-import { memoryRegistryFs } from "../extensions/loom/registry-memory-fs";
-import { closeSessionRegistry, openSessionRegistry } from "../extensions/loom/registry-runtime";
+import { RegistryStore } from "../extensions/orbit/registry";
+import { memoryRegistryFs } from "../extensions/orbit/registry-memory-fs";
+import { closeSessionRegistry, openSessionRegistry } from "../extensions/orbit/registry-runtime";
 import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 import { eligibleAttempt, SERVER, T0, tmpAnalysisDir } from "./registry-fixtures";
 

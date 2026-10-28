@@ -19,7 +19,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isBundledSkillRepo } from "../../shared/loom-config.js";
+import { isBundledSkillRepo } from "../../shared/orbit-config.js";
 import type { SkillEntry } from "./skills-discovery";
 
 /** Reserved repo name for `skills_fetch({ repo: "foundry" })`. */

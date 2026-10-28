@@ -1,12 +1,12 @@
 import * as path from "node:path";
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { decide } from "../extensions/loom/exec-guard/policy";
+import { decide } from "../extensions/orbit/exec-guard/policy";
 import type {
   GuardianConfig,
   PathResolver,
   PolicyRequest,
-} from "../extensions/loom/exec-guard/types";
-import { WORKSPACE_STATE_DIR_NAMES } from "../extensions/loom/workspace-state-dir";
+} from "../extensions/orbit/exec-guard/types";
+import { WORKSPACE_STATE_DIR_NAMES } from "../extensions/orbit/workspace-state-dir";
 
 // Not /home/alice: on macOS /home is an automount, and the credential-store
 // check realpaths files under HOME, so every lookup there costs ~20ms and the

@@ -2,7 +2,7 @@
  * Deciding whether this process can authenticate a given LLM provider, and
  * which signed-in provider to fall back on when it can't.
  *
- * Split out of bin/loom.js so the decision is testable without spawning the
+ * Split out of bin/orbit.js so the decision is testable without spawning the
  * CLI -- #429 was a wrong answer here that silently rewrote user config.
  */
 

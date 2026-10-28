@@ -10,7 +10,7 @@ import {
   replayTemplateFetcher,
   resetDatatypeCache,
   TemplateUnavailableError,
-} from "../extensions/loom/registry-templates";
+} from "../extensions/orbit/registry-templates";
 import { tmpAnalysisDir } from "./registry-fixtures";
 import {
   CONVERTERS,

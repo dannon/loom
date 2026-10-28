@@ -4,7 +4,7 @@ import {
   findInvocationBlocks,
   upsertInvocationBlock,
   type InvocationYaml,
-} from "../extensions/loom/notebook-writer";
+} from "../extensions/orbit/notebook-writer";
 
 function makeInvocation(overrides: Partial<InvocationYaml> = {}): InvocationYaml {
   return {

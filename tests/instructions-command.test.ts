@@ -9,14 +9,14 @@ import {
   formatInstructionsListing,
   initTargetIn,
   registerInstructionsCommand,
-} from "../extensions/loom/instructions-command";
+} from "../extensions/orbit/instructions-command";
 import {
   buildUserInstructionsBlock,
   buildWorkspaceInstructionsContext,
   discoverInstructionFiles,
   INIT_INSTRUCTIONS_FILENAME,
   type InstructionFile,
-} from "../extensions/loom/user-instructions";
+} from "../extensions/orbit/user-instructions";
 
 let root: string;
 

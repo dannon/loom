@@ -6,9 +6,9 @@ import {
   classifyGalaxyFailure,
   transportCode,
   type GalaxyFailureKind,
-} from "../extensions/loom/galaxy-failure";
-import { runGalaxyCall, wrapGalaxyTool } from "../extensions/loom/galaxy-tool-wrap";
-import type { GalaxyTool } from "../extensions/loom/galaxy-tool-source";
+} from "../extensions/orbit/galaxy-failure";
+import { runGalaxyCall, wrapGalaxyTool } from "../extensions/orbit/galaxy-tool-wrap";
+import type { GalaxyTool } from "../extensions/orbit/galaxy-tool-source";
 import { bareFamily } from "../shared/galaxy-tool-family.js";
 import { GALAXY } from "./galaxy-family-fixture";
 

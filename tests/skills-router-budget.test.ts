@@ -11,9 +11,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { buildSkillsContext, renderSkillsSection } from "../extensions/loom/context";
-import { readVendorManifest } from "../extensions/loom/vendor-skills";
-import { DEFAULT_SKILLS } from "../shared/loom-config.js";
+import { buildSkillsContext, renderSkillsSection } from "../extensions/orbit/context";
+import { readVendorManifest } from "../extensions/orbit/vendor-skills";
+import { DEFAULT_SKILLS } from "../shared/orbit-config.js";
 
 const REPOS = (DEFAULT_SKILLS as ReadonlyArray<{ name: string; url: string; branch: string }>).map(
   (d) => ({ name: d.name, url: d.url, branch: d.branch }),

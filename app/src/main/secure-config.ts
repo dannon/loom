@@ -1,6 +1,6 @@
 import { app, safeStorage } from "electron";
-import type { LlmProviderConfig, LoomConfig } from "../../../shared/loom-config.js";
-import { loadConfig, saveConfig } from "../../../shared/loom-config.js";
+import type { LlmProviderConfig, LoomConfig } from "../../../shared/orbit-config.js";
+import { loadConfig, saveConfig } from "../../../shared/orbit-config.js";
 import { readEnv } from "../../../shared/orbit-env.js";
 
 function log(...args: unknown[]): void {

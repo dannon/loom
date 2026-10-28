@@ -14,8 +14,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadConfig } from "../../shared/loom-config.js";
-import type { LoomConfig } from "../../shared/loom-config.js";
+import { loadConfig } from "../../shared/orbit-config.js";
+import type { LoomConfig } from "../../shared/orbit-config.js";
 import { installedConfigSource } from "../../shared/config-source.js";
 import { piAgentDir } from "./agent-dir";
 import { galaxyCredentials } from "./galaxy-api";

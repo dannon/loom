@@ -3,12 +3,12 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { registerLessonReplay, replayContent } from "../extensions/loom/lessons/replay";
-import { registerLessonHint } from "../extensions/loom/lesson-hint";
-import { resetLessonStore } from "../extensions/loom/lessons/store";
-import { readCounters } from "../extensions/loom/lessons/counters";
-import { resetActivity } from "../extensions/loom/activity";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+import { registerLessonReplay, replayContent } from "../extensions/orbit/lessons/replay";
+import { registerLessonHint } from "../extensions/orbit/lesson-hint";
+import { resetLessonStore } from "../extensions/orbit/lessons/store";
+import { readCounters } from "../extensions/orbit/lessons/counters";
+import { resetActivity } from "../extensions/orbit/activity";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 
 // The lesson switch is off by default; these suites are about what happens
 // once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.

@@ -4,8 +4,8 @@ import {
   isCredentialStore,
   isProtectedWritePath,
   isLoomStatePath,
-} from "../extensions/loom/exec-guard/sensitive-read";
-import { WORKSPACE_STATE_DIR_NAMES } from "../extensions/loom/workspace-state-dir";
+} from "../extensions/orbit/exec-guard/sensitive-read";
+import { WORKSPACE_STATE_DIR_NAMES } from "../extensions/orbit/workspace-state-dir";
 
 // Not /home/alice: on macOS /home is an automount, and the credential-store
 // check realpaths files under HOME, so every lookup there costs ~20ms and the

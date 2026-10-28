@@ -11,10 +11,10 @@ import * as os from "os";
 import * as path from "path";
 import { evaluate } from "../evals/lib/assertions";
 import type { ActivityEvent, Scenario } from "../evals/lib/types";
-import { registerSubmissionReplay } from "../extensions/loom/submission-replay";
-import { resetSubmissionCapture } from "../extensions/loom/galaxy-submission-capture";
-import { registerGalaxyTools, setGalaxyToolSource } from "../extensions/loom/galaxy-tool-source";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+import { registerSubmissionReplay } from "../extensions/orbit/submission-replay";
+import { resetSubmissionCapture } from "../extensions/orbit/galaxy-submission-capture";
+import { registerGalaxyTools, setGalaxyToolSource } from "../extensions/orbit/galaxy-tool-source";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 
 const SCENARIOS = path.resolve(__dirname, "..", "evals", "scenarios");
 

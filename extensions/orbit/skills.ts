@@ -11,7 +11,7 @@
  */
 
 import { loadConfig } from "./config";
-import { isAllowedSkillUrl } from "../../shared/loom-config.js";
+import { isAllowedSkillUrl } from "../../shared/orbit-config.js";
 
 export interface ConfiguredSkillRepo {
   name: string;

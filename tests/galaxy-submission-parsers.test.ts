@@ -4,7 +4,7 @@ import {
   parseSubmission,
   resolveResultPayload,
   SUBMISSION_TOOLS,
-} from "../extensions/loom/galaxy-submission";
+} from "../extensions/orbit/galaxy-submission";
 
 /**
  * Fixtures are the shapes galaxy-mcp 1.9.0 actually returns, per the spike in

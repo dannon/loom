@@ -1,33 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-vi.mock("../extensions/loom/state.js", () => ({
+vi.mock("../extensions/orbit/state.js", () => ({
   resetState: vi.fn(),
   initSessionArtifacts: vi.fn(),
   getNotebookPath: vi.fn(() => null),
   stopWatchingNotebook: vi.fn(),
 }));
-vi.mock("../extensions/loom/galaxy-poller.js", () => ({
+vi.mock("../extensions/orbit/galaxy-poller.js", () => ({
   startGalaxyPoller: vi.fn(),
   stopGalaxyPoller: vi.fn(),
   setPollTickHook: vi.fn(),
 }));
-vi.mock("../extensions/loom/galaxy-page-sync.js", () => ({
+vi.mock("../extensions/orbit/galaxy-page-sync.js", () => ({
   initGalaxyPageSync: vi.fn(),
   flushNotebookToGalaxy: vi.fn(),
 }));
-vi.mock("../extensions/loom/config", () => ({ loadConfig: vi.fn(() => ({})) }));
+vi.mock("../extensions/orbit/config", () => ({ loadConfig: vi.fn(() => ({})) }));
 // Opening the real registry would take a lock under the test runner's cwd.
-vi.mock("../extensions/loom/registry-runtime.js", () => ({
+vi.mock("../extensions/orbit/registry-runtime.js", () => ({
   openSessionRegistry: vi.fn(() => ({ session: { store: { mode: "writer" } }, notice: null })),
   closeSessionRegistry: vi.fn(),
 }));
 
-import { startGalaxyPoller } from "../extensions/loom/galaxy-poller.js";
-import { getNotebookPath } from "../extensions/loom/state.js";
-import { openSessionRegistry } from "../extensions/loom/registry-runtime.js";
-import { registerSessionLifecycle } from "../extensions/loom/session-lifecycle";
-import { registerCommandsAsUserInput } from "../extensions/loom/auto-resume";
+import { startGalaxyPoller } from "../extensions/orbit/galaxy-poller.js";
+import { getNotebookPath } from "../extensions/orbit/state.js";
+import { openSessionRegistry } from "../extensions/orbit/registry-runtime.js";
+import { registerSessionLifecycle } from "../extensions/orbit/session-lifecycle";
+import { registerCommandsAsUserInput } from "../extensions/orbit/auto-resume";
 import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 
 type SessionHandler = (event: unknown, ctx: ExtensionContext) => void | Promise<void>;

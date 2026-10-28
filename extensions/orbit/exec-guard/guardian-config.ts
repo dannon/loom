@@ -1,4 +1,4 @@
-import { loadConfig, saveConfig } from "../../../shared/loom-config.js";
+import { loadConfig, saveConfig } from "../../../shared/orbit-config.js";
 import type { GuardianConfig } from "./types";
 import { readEnv } from "../../../shared/orbit-env.js";
 

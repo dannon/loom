@@ -26,7 +26,7 @@ import { homedir } from "node:os";
 
 import type { FileNode } from "../app/src/preload/preload.js";
 import { isTextLikeForPreview } from "../app/src/main/file-preview-classification.js";
-import { isSensitivePath } from "../extensions/loom/exec-guard/sensitive-read.js";
+import { isSensitivePath } from "../extensions/orbit/exec-guard/sensitive-read.js";
 
 // Mirrors files-handler.ts. Kept in step by hand because that module imports
 // `electron` at the top level, which cannot be loaded from here or from a test.

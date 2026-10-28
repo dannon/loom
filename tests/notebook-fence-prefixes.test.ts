@@ -22,25 +22,25 @@ import {
   upsertSessionSummaryBlock,
   type InvocationYaml,
   type SessionSummaryYaml,
-} from "../extensions/loom/notebook-writer";
+} from "../extensions/orbit/notebook-writer";
 import {
   applyJobPollUpdate,
   findJobBlocks,
   renderJobYaml,
   upsertJobBlock,
   type JobYaml,
-} from "../extensions/loom/galaxy-job-block";
+} from "../extensions/orbit/galaxy-job-block";
 import {
   findGalaxyPageBlocks,
   renderGalaxyPageBlock,
   stripGalaxyPageBlocks,
   upsertGalaxyPageBlock,
   type GalaxyPageBindingYaml,
-} from "../extensions/loom/galaxy-page-binding";
+} from "../extensions/orbit/galaxy-page-binding";
 import {
   galaxyMarkdownToLoom,
   loomToGalaxyMarkdown,
-} from "../extensions/loom/galaxy-markdown-adapter";
+} from "../extensions/orbit/galaxy-markdown-adapter";
 
 const W = NOTEBOOK_FENCE_WRITE_PREFIX;
 

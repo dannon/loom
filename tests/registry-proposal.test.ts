@@ -1,7 +1,12 @@
 import * as fs from "fs";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { RegistryStore, specRevision, canonicalJson, sha256Hex } from "../extensions/loom/registry";
+import {
+  RegistryStore,
+  specRevision,
+  canonicalJson,
+  sha256Hex,
+} from "../extensions/orbit/registry";
 import {
   approveProposal,
   canonicalizeProposal,
@@ -19,9 +24,9 @@ import {
   validateProposal,
   type Proposal,
   type ProposalSighting,
-} from "../extensions/loom/registry-proposal";
+} from "../extensions/orbit/registry-proposal";
 import { SERVER, T0, tmpAnalysisDir } from "./registry-fixtures";
-import { datatypeAccepts } from "../extensions/loom/registry-templates";
+import { datatypeAccepts } from "../extensions/orbit/registry-templates";
 import {
   CONVERTERS,
   DATATYPES,

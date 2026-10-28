@@ -17,7 +17,7 @@ afterEach(() => {
 
 describe("loadConfig updateCheck default", () => {
   it("defaults updateCheck to true when absent", async () => {
-    const { loadConfig } = await import("../shared/loom-config.js");
+    const { loadConfig } = await import("../shared/orbit-config.js");
     expect(loadConfig().updateCheck).toBe(true);
   });
   it("preserves an explicit false", async () => {
@@ -26,7 +26,7 @@ describe("loadConfig updateCheck default", () => {
       path.join(tmp, ".loom", "config.json"),
       JSON.stringify({ updateCheck: false }),
     );
-    const { loadConfig } = await import("../shared/loom-config.js");
+    const { loadConfig } = await import("../shared/orbit-config.js");
     expect(loadConfig().updateCheck).toBe(false);
   });
 });

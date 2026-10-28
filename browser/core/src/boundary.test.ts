@@ -151,13 +151,13 @@ describe("the core", () => {
         join(SHARED, "gtn.js"),
         join(SHARED, "prompt-blocks.js"),
         join(SHARED, "team-dispatch-contract.js"),
-        join(SHARED, "loom-shell-contract.js"),
+        join(SHARED, "orbit-shell-contract.js"),
       ]),
     );
     expect(unloadable(reached)).toEqual([]);
     // The walk itself, started at a shared module that is Node-only.
-    expect(unloadable([join(SHARED, "loom-config.js")])).toContain(
-      "shared/loom-config.js: node:fs (a node builtin)",
+    expect(unloadable([join(SHARED, "orbit-config.js")])).toContain(
+      "shared/orbit-config.js: node:fs (a node builtin)",
     );
   });
 

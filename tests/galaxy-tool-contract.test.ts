@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { allOperations } from "@galaxyproject/galaxy-ops";
 import { format } from "prettier";
-import { createGalaxyOpsToolSource } from "../extensions/loom/galaxy-ops-tools";
+import { createGalaxyOpsToolSource } from "../extensions/orbit/galaxy-ops-tools";
 
 // The browser offers its Galaxy tools from a galaxy-ops fork; Orbit runs the
 // same operations in-process from galaxy-ops itself. Which tools both shells

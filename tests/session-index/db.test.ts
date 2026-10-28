@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { openIndexDb, SCHEMA_VERSION } from "../../extensions/loom/session-index/db";
+import { openIndexDb, SCHEMA_VERSION } from "../../extensions/orbit/session-index/db";
 
 describe("session-index db", () => {
   let dir: string;

@@ -9,7 +9,7 @@ import {
   resetState,
   setNotebookPath,
   stopWatchingNotebook,
-} from "../extensions/loom/state";
+} from "../extensions/orbit/state";
 
 // #253: a bash write to notebook.md is missed by the single-file chokidar
 // watcher -- an atomic temp-and-rename save (`sed -i`, editors) swaps the

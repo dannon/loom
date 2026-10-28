@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { buildSessionIndexContext } from "../../extensions/loom/context";
+import { buildSessionIndexContext } from "../../extensions/orbit/context";
 
 describe("buildSessionIndexContext", () => {
   const original = process.env.LOOM_SESSION_INDEX;

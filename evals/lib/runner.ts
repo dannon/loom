@@ -23,7 +23,7 @@ import type { ActivityEvent, AnyEvent, ModelEntry, Scenario, ScenarioRun } from 
 
 const __filename = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(__filename), "..", "..");
-const loomBin = path.join(repoRoot, "bin", "loom.js");
+const loomBin = path.join(repoRoot, "bin", "orbit.js");
 
 export async function runScenario(
   scenarioDir: string,

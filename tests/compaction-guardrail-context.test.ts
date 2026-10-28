@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { setupContextInjection } from "../extensions/loom/context";
+import { setupContextInjection } from "../extensions/orbit/context";
 
 /**
  * Issue #171: the agent over-claims it compacted the conversation when asked

@@ -1,7 +1,7 @@
 // CLI-owned update-check helper. Queries the npm registry for the newest
 // version on the user's channel, caches the answer in the state dir, and exposes a
 // notice string for the CLI-shell glue extension to surface in-session. The
-// network refresh runs as a detached child (see bin/loom.js) so it never
+// network refresh runs as a detached child (see bin/orbit.js) so it never
 // blocks startup or is killed mid-write. Pure helpers (parseCache, noticeFor)
 // are unit-tested; the I/O wrappers are thin.
 

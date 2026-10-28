@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // context.ts reads identity facts from loadConfig(); control it so the block is
 // deterministic regardless of the dev machine's real ~/.loom/config.json.
 const { loadConfigMock } = vi.hoisted(() => ({ loadConfigMock: vi.fn() }));
-vi.mock("../extensions/loom/config", () => ({ loadConfig: loadConfigMock }));
+vi.mock("../extensions/orbit/config", () => ({ loadConfig: loadConfigMock }));
 
-import { buildTesterIdBlock, setupContextInjection } from "../extensions/loom/context";
+import { buildTesterIdBlock, setupContextInjection } from "../extensions/orbit/context";
 
 describe("buildTesterIdBlock", () => {
   let savedEnv: string | undefined;

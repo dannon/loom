@@ -3,7 +3,7 @@ import {
   foldConfusables,
   hasConfusables,
   findConfusablesMatch,
-} from "../extensions/loom/confusables";
+} from "../extensions/orbit/confusables";
 
 describe("foldConfusables", () => {
   it("leaves pure ASCII unchanged (returns the same reference)", () => {

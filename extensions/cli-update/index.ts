@@ -3,7 +3,7 @@
  *
  * Surfaces the cached "update available" notice (computed by bin/update-check.js)
  * once per session via ctx.ui.notify. Lives here, alongside orbit-handoff, so
- * extensions/loom/ stays shell-neutral. No-ops inside Orbit (which owns its own
+ * extensions/orbit/ stays shell-neutral. No-ops inside Orbit (which owns its own
  * updates) and when update checks are disabled.
  */
 
@@ -18,7 +18,7 @@ export default function cliUpdateExtension(pi: ExtensionAPI): void {
     if (shown) return;
     shown = true;
     // Orbit owns updates for its embedded brain; the bundled CLI copy can't be
-    // npm-updated. LOOM_NO_UPDATE_CHECK is set by bin/loom.js from the config
+    // npm-updated. LOOM_NO_UPDATE_CHECK is set by bin/orbit.js from the config
     // flag / --no-update-check.
     if (isDesktopShell()) return;
     if (readEnv("NO_UPDATE_CHECK") === "1") return;

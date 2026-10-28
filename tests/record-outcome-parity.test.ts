@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { format } from "prettier";
 
-import { applyJobPollUpdate } from "../extensions/loom/galaxy-job-block";
+import { applyJobPollUpdate } from "../extensions/orbit/galaxy-job-block";
 import { applyJobOutcome } from "../browser/core/src/agent/record-jobs";
 
 // Both shells advance the record when a Galaxy job settles, from different data

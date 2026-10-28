@@ -10,9 +10,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // The text itself is pinned by the loom prompt golden and the browser request
 // snapshots.
 const { loadConfigMock } = vi.hoisted(() => ({ loadConfigMock: vi.fn() }));
-vi.mock("../extensions/loom/config", () => ({ loadConfig: loadConfigMock }));
+vi.mock("../extensions/orbit/config", () => ({ loadConfig: loadConfigMock }));
 
-import { DEFAULT_SKILLS } from "../shared/loom-config.js";
+import { DEFAULT_SKILLS } from "../shared/orbit-config.js";
 import * as browser from "../browser/core/src/agent/prompt";
 import {
   buildCurrentDateBlock,
@@ -20,10 +20,10 @@ import {
   buildNoLocalShellBlock,
   buildVerificationDisciplineBlock,
   setupContextInjection,
-} from "../extensions/loom/context";
-import { SRA_IMPORT_GUIDANCE } from "../extensions/loom/sra-import-gate";
-import { galaxyPageMarkdownGuidance } from "../extensions/loom/galaxy-page-markdown-guidance";
-import { GALAXY_ARTIFACT_LINK_GUIDANCE } from "../extensions/loom/galaxy-artifact-link-guidance";
+} from "../extensions/orbit/context";
+import { SRA_IMPORT_GUIDANCE } from "../extensions/orbit/sra-import-gate";
+import { galaxyPageMarkdownGuidance } from "../extensions/orbit/galaxy-page-markdown-guidance";
+import { GALAXY_ARTIFACT_LINK_GUIDANCE } from "../extensions/orbit/galaxy-artifact-link-guidance";
 import { GALAXY } from "./galaxy-family-fixture";
 
 const PROMPT_TS = path.join(__dirname, "..", "browser", "core", "src", "agent", "prompt.ts");

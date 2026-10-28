@@ -22,7 +22,7 @@ import { registerDashboardIpc } from "./dashboard-handler.js";
 import { registerDictationIpc } from "./dictation-handler.js";
 import { ProcMonitor } from "./proc-monitor.js";
 import { migratePlaintextSecrets, isAvailable as safeStorageAvailable } from "./secure-config.js";
-import { getConfigPath } from "../../../shared/loom-config.js";
+import { getConfigPath } from "../../../shared/orbit-config.js";
 import { parseCliArgs, type CliArgs } from "./cli-args.js";
 import { initAutoUpdate } from "./auto-update.js";
 import { resolveStartupCwd } from "./startup-cwd.js";

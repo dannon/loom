@@ -9,8 +9,8 @@ import {
   readEnv,
   writeEnv,
 } from "../shared/orbit-env.js";
-import { isLocalExecDisabled, isLocalShellDisabled } from "../extensions/loom/local-exec.js";
-import { parsePageSyncMode } from "../extensions/loom/galaxy-page-sync.js";
+import { isLocalExecDisabled, isLocalShellDisabled } from "../extensions/orbit/local-exec.js";
+import { parsePageSyncMode } from "../extensions/orbit/galaxy-page-sync.js";
 import { resolveShutdownGraceMs } from "../web/shutdown-grace.js";
 import { findOrbit } from "../extensions/orbit-handoff/orbit-launcher.js";
 import { resolveActiveLlmApiKey } from "../shared/custom-provider.js";
@@ -126,7 +126,7 @@ describe("no raw LOOM_/ORBIT_ env access outside the helper", () => {
       .split("\n")
       .filter((f) => /\.(ts|js|mjs|cjs)$/.test(f))
       .filter((f) => !/\.test\.ts$/.test(f))
-      .filter((f) => !f.startsWith("extensions/loom/vendor/"))
+      .filter((f) => !f.startsWith("extensions/orbit/vendor/"))
       .filter((f) => f !== "shared/orbit-env.js");
     const offenders: string[] = [];
     for (const f of files) {

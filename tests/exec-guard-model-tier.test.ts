@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyModelTier } from "../extensions/loom/exec-guard/model-tier";
+import { classifyModelTier } from "../extensions/orbit/exec-guard/model-tier";
 
 describe("classifyModelTier", () => {
   it("frontier models are trusted", () => {

@@ -86,7 +86,7 @@ describe("buildBrainEnv", () => {
     expect(env.LOOM_X).toBeUndefined();
   });
 
-  // Mirror of the brain's PROVIDER_ENV_MAP values (bin/loom.js:151,
+  // Mirror of the brain's PROVIDER_ENV_MAP values (bin/orbit.js:151,
   // app/src/main/agent.ts:13). In remote mode creds are env-only, so a built-in
   // provider key that this list (and PROVIDER_API_KEY_NAMES) omits gets dropped
   // at the boundary and the brain fails its credential check at boot. If you add

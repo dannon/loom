@@ -72,7 +72,7 @@ describe("custom providers", () => {
     expect(llmKeyEnvVar("myprov", { isCustom: true })).toBe("LOOM_ACTIVE_LLM_API_KEY");
   });
   // Codex #10: a stale LOOM_ACTIVE_LLM_API_KEY must NOT vouch for a built-in
-  // provider. bin/loom.js only reads that var for baseUrl-carrying providers, so
+  // provider. bin/orbit.js only reads that var for baseUrl-carrying providers, so
   // treating it as a key here suppressed the BYO prompt and spawned a brain that
   // couldn't authenticate, with no way back to the prompt.
   it("ignores LOOM_ACTIVE_LLM_API_KEY for a built-in provider", () => {

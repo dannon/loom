@@ -8,7 +8,7 @@ import {
   renderGalaxyHistory,
   summarizeCounts,
 } from "../app/src/renderer/dashboard/widgets/galaxy-history.js";
-import { projectHistory } from "../extensions/loom/galaxy-live-source.js";
+import { projectHistory } from "../extensions/orbit/galaxy-live-source.js";
 import { DashboardSources } from "../app/src/renderer/dashboard/data-sources.js";
 import type { GalaxyLivePayload } from "../shared/galaxy-live-contract.js";
 

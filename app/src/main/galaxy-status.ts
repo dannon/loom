@@ -24,7 +24,7 @@ export function resolveGalaxyServerUrl(cfg: LoomConfig, env: NodeJS.ProcessEnv):
 /**
  * Effective Galaxy connection state as the brain actually sees it. The brain
  * treats Galaxy as connected when `GALAXY_URL` and `GALAXY_API_KEY` are both
- * present in its env (extensions/loom/context.ts), and Orbit builds that env
+ * present in its env (extensions/orbit/context.ts), and Orbit builds that env
  * with the same precedence used here: the active config profile wins, else a
  * value exported into Orbit's own environment (agent.ts `buildSecretEnv`).
  *

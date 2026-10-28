@@ -6,10 +6,10 @@ import {
   galaxyInvocationValidator,
   galaxyJobValidator,
   type DirectiveValidators,
-} from "../extensions/loom/galaxy-markdown-adapter";
-import * as galaxyApi from "../extensions/loom/galaxy-api";
+} from "../extensions/orbit/galaxy-markdown-adapter";
+import * as galaxyApi from "../extensions/orbit/galaxy-api";
 
-vi.mock("../extensions/loom/galaxy-api");
+vi.mock("../extensions/orbit/galaxy-api");
 
 const ALL_VALID: DirectiveValidators = {
   invocation: { isValid: async () => true },

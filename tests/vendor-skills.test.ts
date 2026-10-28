@@ -5,7 +5,7 @@ import { maskCode } from "../scripts/sync-skills.mjs";
 import {
   INVOCATION_FAILURE_REFERENCE,
   JOB_FAILURE_REFERENCE,
-} from "../extensions/loom/invocation-failure-hint";
+} from "../extensions/orbit/invocation-failure-hint";
 import {
   readBundledCatalog,
   readVendorManifest,
@@ -13,7 +13,7 @@ import {
   resolveVendorPath,
   setVendorSkillsSource,
   vendorSkillsDir,
-} from "../extensions/loom/vendor-skills";
+} from "../extensions/orbit/vendor-skills";
 
 describe("vendored skills", () => {
   it("ships every file the manifest declares", () => {

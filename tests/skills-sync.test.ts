@@ -14,8 +14,8 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseFrontmatter as parseFrontmatterTs } from "../extensions/loom/skills-discovery";
-import { readVendorManifest, vendorSkillsDir } from "../extensions/loom/vendor-skills";
+import { parseFrontmatter as parseFrontmatterTs } from "../extensions/orbit/skills-discovery";
+import { readVendorManifest, vendorSkillsDir } from "../extensions/orbit/vendor-skills";
 import {
   REPO_BLOB_BASE,
   applyTransforms,

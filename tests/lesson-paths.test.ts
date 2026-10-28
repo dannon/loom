@@ -14,7 +14,7 @@ import {
   readLessonFile,
   writeNoClobber,
   writeOverwrite,
-} from "../extensions/loom/lessons/paths";
+} from "../extensions/orbit/lessons/paths";
 
 let tmp: string;
 

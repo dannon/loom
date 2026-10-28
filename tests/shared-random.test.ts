@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { randomBytes, randomHex } from "../shared/random.js";
-import { ulid } from "../extensions/loom/ulid";
+import { ulid } from "../extensions/orbit/ulid";
 
 describe("shared/random", () => {
   it("randomHex is 2n lowercase hex characters and does not repeat", () => {

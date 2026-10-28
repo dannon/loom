@@ -5,7 +5,7 @@ import {
   listNotebookAnchors,
   resolveNotebookAnchor,
   unknownAnchorMessage,
-} from "../extensions/loom/notebook-anchors";
+} from "../extensions/orbit/notebook-anchors";
 
 const PLAN = `# Project notebook
 

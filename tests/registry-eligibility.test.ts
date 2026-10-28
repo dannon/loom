@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { computeHandoffEligible } from "../extensions/loom/registry-eligibility";
-import { specRevision, type Attempt } from "../extensions/loom/registry-schema";
+import { computeHandoffEligible } from "../extensions/orbit/registry-eligibility";
+import { specRevision, type Attempt } from "../extensions/orbit/registry-schema";
 import { eligibleAttempt, HEX, makeSpec, userException } from "./registry-fixtures";
 
 describe("computeHandoffEligible (v3 §7)", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { discoverProviderModels } from "../app/src/main/model-discovery.js";
-import type { LoomConfig } from "../shared/loom-config.js";
+import type { LoomConfig } from "../shared/orbit-config.js";
 
 const CONFIG: LoomConfig = {
   llm: {

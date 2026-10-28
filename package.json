@@ -28,11 +28,11 @@
     "LICENSE"
   ],
   "bin": {
-    "loom": "./bin/loom.js"
+    "loom": "./bin/orbit.js"
   },
   "pi": {
     "extensions": [
-      "./extensions/loom"
+      "./extensions/orbit"
     ]
   },
   "dependencies": {

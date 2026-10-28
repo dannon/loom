@@ -7,9 +7,9 @@ import { linkGalaxyArtifacts } from "../app/src/renderer/chat/galaxy-links.js";
 import {
   renderGalaxyPageBlock,
   findGalaxyPageBlocks,
-} from "../extensions/loom/galaxy-page-binding.js";
-import { renderInvocationYaml } from "../extensions/loom/notebook-writer.js";
-import { renderJobYaml } from "../extensions/loom/galaxy-job-block.js";
+} from "../extensions/orbit/galaxy-page-binding.js";
+import { renderInvocationYaml } from "../extensions/orbit/notebook-writer.js";
+import { renderJobYaml } from "../extensions/orbit/galaxy-job-block.js";
 import { refreshGalaxyInvocations } from "../app/src/renderer/galaxy-invocations.js";
 
 vi.hoisted(() => {

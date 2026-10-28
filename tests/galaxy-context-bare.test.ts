@@ -8,14 +8,14 @@ import * as path from "path";
 // context.ts reads identity facts from loadConfig(); control it so the blocks
 // are deterministic regardless of the dev machine's real ~/.loom/config.json.
 const { loadConfigMock } = vi.hoisted(() => ({ loadConfigMock: vi.fn() }));
-vi.mock("../extensions/loom/config", () => ({ loadConfig: loadConfigMock }));
+vi.mock("../extensions/orbit/config", () => ({ loadConfig: loadConfigMock }));
 
-import { setupContextInjection } from "../extensions/loom/context";
+import { setupContextInjection } from "../extensions/orbit/context";
 import {
   registerGalaxyTools,
   setGalaxyToolSource,
   type GalaxyTool,
-} from "../extensions/loom/galaxy-tool-source";
+} from "../extensions/orbit/galaxy-tool-source";
 import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 
 const stub = (name: string): GalaxyTool => ({
@@ -134,7 +134,7 @@ describe("shared prompt prose under in-process Galaxy tools", () => {
 
   it("the local execution-mode block does not say Galaxy MCP", async () => {
     loadConfigMock.mockReturnValue({ executionMode: "local" });
-    const { buildExecutionModeBlock } = await import("../extensions/loom/context");
+    const { buildExecutionModeBlock } = await import("../extensions/orbit/context");
     const block = buildExecutionModeBlock();
     expect(block).toContain("## Execution mode: LOCAL");
     expect(block).not.toMatch(/Galaxy MCP/);

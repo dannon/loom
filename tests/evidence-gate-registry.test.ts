@@ -11,32 +11,32 @@ import os from "node:os";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-vi.mock("../extensions/loom/state");
-vi.mock("../extensions/loom/config", () => ({ loadConfig: () => ({}) }));
+vi.mock("../extensions/orbit/state");
+vi.mock("../extensions/orbit/config", () => ({ loadConfig: () => ({}) }));
 
-import * as state from "../extensions/loom/state";
+import * as state from "../extensions/orbit/state";
 import {
   decideTransition,
   findRegistryContradictions,
   registerEvidenceGate,
   registryHolds,
   resetEvidenceOverrides,
-} from "../extensions/loom/evidence-gate";
+} from "../extensions/orbit/evidence-gate";
 import {
   planOverride,
   registerEvidenceOverrideCommand,
   writeRegistryOverride,
-} from "../extensions/loom/evidence-override-command";
-import { renderInvocationYaml, type InvocationYaml } from "../extensions/loom/notebook-writer";
+} from "../extensions/orbit/evidence-override-command";
+import { renderInvocationYaml, type InvocationYaml } from "../extensions/orbit/notebook-writer";
 import {
   closeSessionRegistry,
   heldRevocations,
   openSessionRegistry,
   sessionView,
-} from "../extensions/loom/registry-runtime";
-import { canonicalJson, type Attempt, type Registry } from "../extensions/loom/registry-schema";
+} from "../extensions/orbit/registry-runtime";
+import { canonicalJson, type Attempt, type Registry } from "../extensions/orbit/registry-schema";
 import { eligibleAttempt, SERVER, T0 } from "./registry-fixtures";
-import { ulid } from "../extensions/loom/ulid";
+import { ulid } from "../extensions/orbit/ulid";
 import { GALAXY } from "./galaxy-family-fixture";
 
 const PLAN = `# Notebook

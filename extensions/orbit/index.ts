@@ -81,7 +81,7 @@ import {
   profileNameFromUrl,
   normalizeGalaxyUrl,
 } from "./profiles";
-import { LoomWidgetKey, encodeMarkdownWidget } from "../../shared/loom-shell-contract.js";
+import { LoomWidgetKey, encodeMarkdownWidget } from "../../shared/orbit-shell-contract.js";
 
 /** Status-bar label for a Galaxy tool -- galaxy-ops' or Loom's own -- else undefined. */
 function galaxyToolLabel(

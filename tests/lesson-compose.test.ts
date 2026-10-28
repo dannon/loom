@@ -7,7 +7,7 @@ import {
   composeLessonMarkdown,
   renderProposalPreview,
   type LessonProposalInput,
-} from "../extensions/loom/lessons/compose";
+} from "../extensions/orbit/lessons/compose";
 import { parseLesson, validateLessonMarkdown } from "../shared/lesson-rules.js";
 import { collectLessonFiles } from "../lessons/validate.mjs";
 

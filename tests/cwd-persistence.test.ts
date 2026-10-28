@@ -45,7 +45,7 @@ describe("switchCwd persists the active analysis directory (#312)", () => {
 
     expect(manager.switchCwd(path.join(tmp, "new"))).toBe(true);
 
-    const { loadConfig } = await import("../shared/loom-config.js");
+    const { loadConfig } = await import("../shared/orbit-config.js");
     expect(loadConfig().defaultCwd).toBe(path.join(tmp, "new"));
   });
 

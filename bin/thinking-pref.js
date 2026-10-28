@@ -3,12 +3,12 @@
 // hides it by default and writes the resolved value to pi's `hideThinkingBlock`
 // setting (the same ~/.pi/agent/settings.json loom already manages for
 // `quietStartup`). That setting is global and only the interactive renderer
-// reads it, so bin/loom.js only reconciles it for interactive terminal launches.
+// reads it, so bin/orbit.js only reconciles it for interactive terminal launches.
 //
 // Override the default persistently with `ui.showThinking: true` in
 // ~/.loom/config.json; for a one-off, pi's built-in Ctrl+T toggles it live.
 //
-// Pure so it can be unit-tested; bin/loom.js supplies the config value.
+// Pure so it can be unit-tested; bin/orbit.js supplies the config value.
 
 /**
  * Resolve whether pi should hide thinking blocks in the terminal.

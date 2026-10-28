@@ -6,8 +6,8 @@ import {
   runWithEnvelope,
   spellParamNames,
 } from "@galaxyproject/galaxy-ops";
-import { galaxyOpsContext, setGalaxyTransport } from "../extensions/loom/galaxy-api";
-import { renderOperation, snake } from "../extensions/loom/galaxy-ops-tools";
+import { galaxyOpsContext, setGalaxyTransport } from "../extensions/orbit/galaxy-api";
+import { renderOperation, snake } from "../extensions/orbit/galaxy-ops-tools";
 import { json, opsTool, recordGalaxy, runOp, type SeenRequest } from "./galaxy-test-helpers";
 
 const JOB = "1cd8e2f6b131e891";

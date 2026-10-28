@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { parseUserLesson } from "../extensions/loom/lessons/user-lesson";
+import { parseUserLesson } from "../extensions/orbit/lessons/user-lesson";
 import { LESSON_NAMESPACES, parseLesson, validateLessonMarkdown } from "../shared/lesson-rules.js";
 import { validateLessonFile } from "../lessons/validate.mjs";
 import { LESSON_BODY, lessonFile } from "./lessons-fixture";

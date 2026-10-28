@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { GALAXY_DEADLINE_TEXT, type GalaxyCallKind } from "../extensions/loom/galaxy-failure";
+import { GALAXY_DEADLINE_TEXT, type GalaxyCallKind } from "../extensions/orbit/galaxy-failure";
 import {
   galaxyCall,
   galaxyRecoveryGuidance,
   galaxyRecoveryHint,
   registerGalaxyRecovery,
-} from "../extensions/loom/galaxy-recovery";
+} from "../extensions/orbit/galaxy-recovery";
 import { GALAXY } from "./galaxy-family-fixture";
 import { guardHooks, SPELLED } from "./galaxy-test-helpers";
 

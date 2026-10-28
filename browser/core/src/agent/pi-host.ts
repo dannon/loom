@@ -1,5 +1,5 @@
 /**
- * pi-coding-agent's ExtensionAPI over pi-durable: the host Orbit's brain (extensions/loom) is
+ * pi-coding-agent's ExtensionAPI over pi-durable: the host Orbit's brain (extensions/orbit) is
  * written against, reproduced on the browser worker's runtime. Registrations become one
  * pi-durable extension; pi's events are emitted from the seams pi-durable has (sections, the
  * generation and tool hooks, the event stream, and the host's own submit/command/shutdown), in

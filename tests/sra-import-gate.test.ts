@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI, MessageEndEvent, ToolCallEvent } from "@earendil-works/pi-coding-agent";
-import { registerSraImportGate } from "../extensions/loom/sra-import-gate";
+import { registerSraImportGate } from "../extensions/orbit/sra-import-gate";
 import { GALAXY } from "./galaxy-family-fixture";
 
-vi.mock("../extensions/loom/state", () => ({ getNotebookPath: () => null }));
+vi.mock("../extensions/orbit/state", () => ({ getNotebookPath: () => null }));
 const TOOL = "toolshed.g2.bx.psu.edu/repos/iuc/sra_tools/fasterq_dump/3.1.1+galaxy1";
 function call(id: string, accession: string, overrides = {}) {
   return {

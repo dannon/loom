@@ -5,7 +5,7 @@ import { resolve, dirname, join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { homedir } from "os";
-import { loadConfig as loadLoomConfig } from "../shared/loom-config.js";
+import { loadConfig as loadLoomConfig } from "../shared/orbit-config.js";
 import { migrateStateDir } from "../shared/state-dir.js";
 import { spawn } from "child_process";
 import { getLoomVersion, detectInstall } from "./update-check.js";
@@ -39,7 +39,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 process.env.PI_SKIP_VERSION_CHECK = "1";
 
 // Resolve extension paths relative to this script
-const extensionPath = resolve(__dirname, "../extensions/loom");
+const extensionPath = resolve(__dirname, "../extensions/orbit");
 // CLI-shell hand-off glue (the /orbit command). Kept out of the loom brain so
 // the brain stays shell-neutral; the command no-ops when embedded in Orbit.
 const orbitHandoffPath = resolve(__dirname, "../extensions/orbit-handoff");
@@ -344,7 +344,7 @@ if (galaxyUrl && galaxyApiKey) {
   delete process.env.GALAXY_API_KEY;
 }
 
-// The brain registers Loom's MCP servers itself (extensions/loom/mcp-servers.ts);
+// The brain registers Loom's MCP servers itself (extensions/orbit/mcp-servers.ts);
 // clear out what earlier versions left in mcp.json.
 // A copy of the old file lands beside it first, and a file that cannot be
 // updated is reported rather than fatal (bin/legacy-mcp-config.js says why).

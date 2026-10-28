@@ -19,8 +19,8 @@ import { allOperations as rootOperations } from "../../../../node_modules/@galax
 import {
   createGalaxyOpsToolSource,
   renderOperation,
-} from "../../../../extensions/loom/galaxy-ops-tools";
-import { updatePageBridge } from "../../../../extensions/loom/galaxy-page-ops";
+} from "../../../../extensions/orbit/galaxy-ops-tools";
+import { updatePageBridge } from "../../../../extensions/orbit/galaxy-page-ops";
 import { applySectionEdit } from "../../../../shared/markdown-sections.js";
 import { malformedObjectIds } from "../../../../shared/malformed-object-ids.js";
 

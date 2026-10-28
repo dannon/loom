@@ -45,12 +45,12 @@ import {
   availabilityUpdate,
   unavailableModelLabel,
 } from "./model-entitlement.js";
-import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
+import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/orbit-shell-contract.js";
 import {
   ALLOWED_SKILLS_PREFIX,
   isAllowedSkillUrl,
   isBundledSkillRepo,
-} from "../../../shared/loom-config.js";
+} from "../../../shared/orbit-config.js";
 import { SKILLS_PIN } from "../../../shared/skills-pin.js";
 import {
   SCHEMA_VERSION,
@@ -807,7 +807,7 @@ galaxyStatus.addEventListener("click", () => {
 // Local sandboxes the project to local-only execution even if Galaxy is
 // configured. Cloud (default) lets the agent decide per-plan whether each
 // step routes locally or to Galaxy. The gate is prompt-level guidance from
-// the brain (see extensions/loom/context.ts), not enforced by
+// the brain (see extensions/orbit/context.ts), not enforced by
 // unregistering the Galaxy tools — flipping the toggle restarts the agent so the
 // new mode reaches the prompt.
 

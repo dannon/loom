@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import * as sync from "../extensions/loom/galaxy-pages-sync";
+import * as sync from "../extensions/orbit/galaxy-pages-sync";
 import { GALAXY } from "./galaxy-family-fixture";
 
-vi.mock("../extensions/loom/galaxy-pages-sync");
+vi.mock("../extensions/orbit/galaxy-pages-sync");
 
 interface ToolDef {
   name: string;
@@ -23,7 +23,7 @@ describe("notebook_resume_from_galaxy tool", () => {
       registerCommand: vi.fn(),
       sendUserMessage: vi.fn(),
     };
-    const { registerNotebookSyncTools } = await import("../extensions/loom/tools-sync");
+    const { registerNotebookSyncTools } = await import("../extensions/orbit/tools-sync");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerNotebookSyncTools(api as any, GALAXY);
     const tool = tools.find((t) => t.name === "notebook_resume_from_galaxy");

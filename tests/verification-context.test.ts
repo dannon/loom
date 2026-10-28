@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildVerificationDisciplineBlock,
   setupContextInjection,
-} from "../extensions/loom/context";
+} from "../extensions/orbit/context";
 
 describe("buildVerificationDisciplineBlock", () => {
   it("requires evidence before done claims for checkable artifacts", () => {

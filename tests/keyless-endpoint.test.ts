@@ -74,7 +74,7 @@ async function startKeylessServer(reply: string) {
 
 function runBrain(args: string[], env: NodeJS.ProcessEnv, cwd: string) {
   return new Promise<{ status: number | null; stdout: string; stderr: string }>((done) => {
-    const child = spawn(process.execPath, [resolve(__dirname, "../bin/loom.js"), ...args], {
+    const child = spawn(process.execPath, [resolve(__dirname, "../bin/orbit.js"), ...args], {
       env,
       cwd,
       stdio: ["ignore", "pipe", "pipe"],

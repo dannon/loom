@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // buildGalaxyContextBlock reads executionMode from loadConfig(); control it so
 // the block is deterministic regardless of the dev machine's ~/.loom/config.json.
 const { loadConfigMock } = vi.hoisted(() => ({ loadConfigMock: vi.fn() }));
-vi.mock("../extensions/loom/config", () => ({ loadConfig: loadConfigMock }));
+vi.mock("../extensions/orbit/config", () => ({ loadConfig: loadConfigMock }));
 
-import { buildGalaxyContextBlock } from "../extensions/loom/context";
+import { buildGalaxyContextBlock } from "../extensions/orbit/context";
 
 const ENV_KEYS = ["LOOM_LOCAL_SHELL", "GALAXY_URL", "GALAXY_API_KEY"] as const;
 

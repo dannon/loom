@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { validateTeamSpec, ValidationError } from "../extensions/loom/teams/validate";
-import type { TeamSpec } from "../extensions/loom/teams/types";
+import { validateTeamSpec, ValidationError } from "../extensions/orbit/teams/validate";
+import type { TeamSpec } from "../extensions/orbit/teams/types";
 
 const ok = (): TeamSpec => ({
   description: "find relevant RNA-seq papers",

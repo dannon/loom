@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
-import { renderInvocationYaml, type InvocationYaml } from "../extensions/loom/notebook-writer";
-import * as galaxyApi from "../extensions/loom/galaxy-api";
-import { checkInvocations } from "../extensions/loom/tools";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
+import { renderInvocationYaml, type InvocationYaml } from "../extensions/orbit/notebook-writer";
+import * as galaxyApi from "../extensions/orbit/galaxy-api";
+import { checkInvocations } from "../extensions/orbit/tools";
 import { foldInvocationState } from "../app/src/renderer/dashboard/widgets/jobs";
 
 function invocation(overrides: Partial<InvocationYaml> = {}): InvocationYaml {

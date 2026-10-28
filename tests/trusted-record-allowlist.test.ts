@@ -37,7 +37,7 @@ async function registeredBrainTools(): Promise<string[]> {
   process.env.LOOM_TEAM_DISPATCH = "1";
   process.env.LOOM_SESSION_INDEX = "1";
   try {
-    const mod = await import("../extensions/loom/index");
+    const mod = await import("../extensions/orbit/index");
     mod.default(pi as never);
   } finally {
     process.env = saved;

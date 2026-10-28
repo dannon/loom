@@ -24,7 +24,7 @@ await import("./exec-guard-policy.test");
 await import("./exec-guard-bash-risk.test");
 
 const { describe, it, expect } = await import("vitest");
-const { decide } = await import("../extensions/loom/exec-guard/policy");
+const { decide } = await import("../extensions/orbit/exec-guard/policy");
 const fs = await import("node:fs");
 
 // A Windows Node host reports home and cwd with a drive and backslashes, while
@@ -83,7 +83,7 @@ describe("decide -- a native Windows home and cwd", () => {
 describe("bash-risk -- the cd tracker uses posix paths only", () => {
   it("has no bare path.resolve/join/normalize/isAbsolute/relative in the tracker", () => {
     const src = fs.readFileSync(
-      new URL("../extensions/loom/exec-guard/bash-risk.ts", import.meta.url),
+      new URL("../extensions/orbit/exec-guard/bash-risk.ts", import.meta.url),
       "utf-8",
     );
     const start = src.indexOf("const P = path.posix;");

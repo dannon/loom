@@ -1,4 +1,4 @@
-import type { LlmProviderConfig } from "./loom-config.js";
+import type { LlmProviderConfig } from "./orbit-config.js";
 
 export interface CustomModelDef {
   id: string;

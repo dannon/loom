@@ -3,7 +3,7 @@ import fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { setConfigSource } from "../shared/config-source.js";
-import { DEFAULT_SKILLS, loadConfig, saveConfig } from "../shared/loom-config.js";
+import { DEFAULT_SKILLS, loadConfig, saveConfig } from "../shared/orbit-config.js";
 
 // HOME at an empty temp dir, so the file path has nothing to read and the two
 // backends start from the same nothing.

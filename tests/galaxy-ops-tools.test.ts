@@ -18,20 +18,20 @@ import {
   renderOperation,
   snake,
   toolFromOperation,
-} from "../extensions/loom/galaxy-ops-tools";
-import { resetGalaxyOpsVersion, setGalaxyTransport } from "../extensions/loom/galaxy-api";
+} from "../extensions/orbit/galaxy-ops-tools";
+import { resetGalaxyOpsVersion, setGalaxyTransport } from "../extensions/orbit/galaxy-api";
 import {
   createMemoryOutputStore,
   galaxyOutputStore,
   setGalaxyOutputStore,
-} from "../extensions/loom/galaxy-output-store";
+} from "../extensions/orbit/galaxy-output-store";
 import {
   galaxyToolFamily,
   registerGalaxyTools,
   registeredGalaxyTools,
   setGalaxyToolSource,
   type GalaxyTool,
-} from "../extensions/loom/galaxy-tool-source";
+} from "../extensions/orbit/galaxy-tool-source";
 import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 import { CREDENTIALS, json, recordGalaxy } from "./galaxy-test-helpers";
 

@@ -11,8 +11,8 @@ import {
   sha256Hex,
   STALE_LOCK_MS,
   type Attempt,
-} from "../extensions/loom/registry";
-import { ulid } from "../extensions/loom/ulid";
+} from "../extensions/orbit/registry";
+import { ulid } from "../extensions/orbit/ulid";
 import {
   eligibleAttempt,
   OTHER_SERVER,

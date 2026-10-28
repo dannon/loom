@@ -20,7 +20,7 @@ import {
 } from "../../../../shared/prompt-blocks.js";
 import { DEFAULT_BRAND } from "./brand";
 
-// System-prompt blocks, adopted from Orbit's `extensions/loom/context.ts`.
+// System-prompt blocks, adopted from Orbit's `extensions/orbit/context.ts`.
 
 // loom: buildNoLocalShellBlock(). Shared text; what this shell has instead of a shell.
 export const NO_LOCAL_SHELL = noLocalShellBlock({

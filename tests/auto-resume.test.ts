@@ -4,10 +4,10 @@ import {
   createFollowUpDelivery,
   isAutoResumeEnabled,
   isResumableOutcome,
-} from "../extensions/loom/auto-resume.js";
-import { loadConfig } from "../extensions/loom/config";
+} from "../extensions/orbit/auto-resume.js";
+import { loadConfig } from "../extensions/orbit/config";
 
-vi.mock("../extensions/loom/config", () => ({ loadConfig: vi.fn(() => ({})) }));
+vi.mock("../extensions/orbit/config", () => ({ loadConfig: vi.fn(() => ({})) }));
 
 beforeEach(() => {
   vi.stubEnv("LOOM_AUTO_RESUME", undefined);

@@ -3,17 +3,17 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { setupContextInjection } from "../extensions/loom/context";
+import { setupContextInjection } from "../extensions/orbit/context";
 import {
   buildReproductionLessonsContext,
   looksLikeReproduction,
   renderReproductionIndex,
   LOOM_LESSONS_CONTEXT_TYPE,
-} from "../extensions/loom/lessons/reproduction-index";
-import { resetLessonStore } from "../extensions/loom/lessons/store";
-import { resetActivity } from "../extensions/loom/activity";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
-import type { Lesson } from "../extensions/loom/lessons/types";
+} from "../extensions/orbit/lessons/reproduction-index";
+import { resetLessonStore } from "../extensions/orbit/lessons/store";
+import { resetActivity } from "../extensions/orbit/activity";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
+import type { Lesson } from "../extensions/orbit/lessons/types";
 import { lessonFile } from "./lessons-fixture";
 
 // The lesson switch is off by default; these suites are about what happens

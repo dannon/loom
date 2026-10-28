@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import * as pagesApi from "../extensions/loom/galaxy-pages-api";
-import * as galaxyApi from "../extensions/loom/galaxy-api";
-import * as notebookWriter from "../extensions/loom/notebook-writer";
-import * as state from "../extensions/loom/state";
+import * as pagesApi from "../extensions/orbit/galaxy-pages-api";
+import * as galaxyApi from "../extensions/orbit/galaxy-api";
+import * as notebookWriter from "../extensions/orbit/notebook-writer";
+import * as state from "../extensions/orbit/state";
 import {
   pushNotebookToGalaxy,
   pullNotebookFromGalaxy,
@@ -10,15 +10,15 @@ import {
   resumeGalaxyPage,
   UNTRUSTED_BEGIN,
   UNTRUSTED_END,
-} from "../extensions/loom/galaxy-pages-sync";
+} from "../extensions/orbit/galaxy-pages-sync";
 import {
   loomToGalaxyMarkdown,
   galaxyMarkdownToLoom,
-} from "../extensions/loom/galaxy-markdown-adapter";
+} from "../extensions/orbit/galaxy-markdown-adapter";
 
-vi.mock("../extensions/loom/galaxy-pages-api");
-vi.mock("../extensions/loom/galaxy-api");
-vi.mock("../extensions/loom/notebook-writer", async (importOriginal) => {
+vi.mock("../extensions/orbit/galaxy-pages-api");
+vi.mock("../extensions/orbit/galaxy-api");
+vi.mock("../extensions/orbit/notebook-writer", async (importOriginal) => {
   const actual = await importOriginal<typeof notebookWriter>();
   return {
     ...actual,
@@ -27,7 +27,7 @@ vi.mock("../extensions/loom/notebook-writer", async (importOriginal) => {
     withNotebookLock: vi.fn(async (_p: string, fn: () => Promise<unknown>) => fn()),
   };
 });
-vi.mock("../extensions/loom/state");
+vi.mock("../extensions/orbit/state");
 
 beforeEach(() => {
   vi.clearAllMocks();

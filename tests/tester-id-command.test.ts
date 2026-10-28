@@ -8,7 +8,7 @@ import {
   setTesterId,
   getCurrentTesterId,
   registerTesterIdCommand,
-} from "../extensions/loom/tester-id-command";
+} from "../extensions/orbit/tester-id-command";
 
 describe("validateTesterId", () => {
   it("accepts a normal tester code", () => {

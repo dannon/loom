@@ -6,15 +6,15 @@ import path from "node:path";
 import {
   isLessonProposalReplayEnabled,
   registerLessonProposalReplay,
-} from "../extensions/loom/lessons/propose-replay";
-import { lessonFilePath } from "../extensions/loom/lessons/paths";
-import { resetActivity } from "../extensions/loom/activity";
+} from "../extensions/orbit/lessons/propose-replay";
+import { lessonFilePath } from "../extensions/orbit/lessons/paths";
+import { resetActivity } from "../extensions/orbit/activity";
 import {
   armLessonProposal,
   peekLessonProposalArming,
   resetLessonProposalArming,
-} from "../extensions/loom/lessons/propose";
-import { setNotebookPath } from "../extensions/loom/state";
+} from "../extensions/orbit/lessons/propose";
+import { setNotebookPath } from "../extensions/orbit/state";
 
 // The lesson switch is off by default; these suites are about what happens
 // once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.

@@ -5,17 +5,17 @@ import { join } from "path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const galaxyStatus = vi.hoisted(() => ({ value: "usable" }));
-vi.mock("../extensions/loom/profiles", () => ({ activeGalaxyStatus: () => galaxyStatus.value }));
+vi.mock("../extensions/orbit/profiles", () => ({ activeGalaxyStatus: () => galaxyStatus.value }));
 
 import {
   draftsPlan,
   iwcPlanNudge,
   isIwcLookup,
   registerIwcPlanCheck,
-} from "../extensions/loom/iwc-plan-check";
-import { setActiveFollowUpDelivery, type FollowUpDelivery } from "../extensions/loom/auto-resume";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
-import { resetActivity } from "../extensions/loom/activity";
+} from "../extensions/orbit/iwc-plan-check";
+import { setActiveFollowUpDelivery, type FollowUpDelivery } from "../extensions/orbit/auto-resume";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
+import { resetActivity } from "../extensions/orbit/activity";
 import { GALAXY } from "./galaxy-family-fixture";
 
 const assistant = (text: string, extra: Record<string, unknown> = {}) => ({

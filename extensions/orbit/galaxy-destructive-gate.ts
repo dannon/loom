@@ -98,7 +98,10 @@ export function registerGalaxyDestructiveGate(
     );
     if (ctx.signal?.aborted) {
       audit(event.toolName, input, "ask", headline, "blocked:destructive-aborted");
-      return { block: true, reason: "Destructive Galaxy operation not run: the turn was interrupted." };
+      return {
+        block: true,
+        reason: "Destructive Galaxy operation not run: the turn was interrupted.",
+      };
     }
     if (proceed) {
       audit(event.toolName, input, "ask", headline, "allowed:destructive-confirm");

@@ -14,22 +14,22 @@ import {
   revokeCommand,
   type ProposalDeps,
   type ProposeParams,
-} from "../extensions/loom/proposal-commands";
+} from "../extensions/orbit/proposal-commands";
 import {
   findProposalBlocks,
   renderProposalBlock,
   withNotebookLock,
-} from "../extensions/loom/notebook-writer";
-import { liveApproval } from "../extensions/loom/registry-proposal";
+} from "../extensions/orbit/notebook-writer";
+import { liveApproval } from "../extensions/orbit/registry-proposal";
 import {
   closeSessionRegistry,
   openSessionRegistry,
   type SessionRegistry,
-} from "../extensions/loom/registry-runtime";
-import { RegistryStore } from "../extensions/loom/registry";
-import type { TemplateSnapshot } from "../extensions/loom/registry-submitter";
+} from "../extensions/orbit/registry-runtime";
+import { RegistryStore } from "../extensions/orbit/registry";
+import type { TemplateSnapshot } from "../extensions/orbit/registry-submitter";
 import { SERVER, tmpAnalysisDir } from "./registry-fixtures";
-import { datatypeAccepts, TemplateUnavailableError } from "../extensions/loom/registry-templates";
+import { datatypeAccepts, TemplateUnavailableError } from "../extensions/orbit/registry-templates";
 import {
   CONVERTERS,
   DATATYPES,
@@ -423,7 +423,7 @@ describe("edit after approve revokes, on the next read", () => {
   });
 
   it("the drift check runs on every notebook change once registered", async () => {
-    const state = await import("../extensions/loom/state");
+    const state = await import("../extensions/orbit/state");
     const pi = { registerTool: () => {}, registerCommand: () => {}, on: () => {} } as never;
     registerProposalCommands(pi, deps());
     const id = await proposed();

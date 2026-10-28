@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { setupContextInjection } from "../extensions/loom/context";
+import { setupContextInjection } from "../extensions/orbit/context";
 
 /**
  * Issue #320 (angle 2): asked to "save the chat history to a file", the agent

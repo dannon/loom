@@ -8,7 +8,7 @@ import {
   RegistryFormatError,
   specRevision,
   type Registry,
-} from "../extensions/loom/registry-schema";
+} from "../extensions/orbit/registry-schema";
 import { eligibleAttempt, HEX, makeSpec, SERVER } from "./registry-fixtures";
 
 function registryWith(over: Partial<Registry> = {}): Record<string, unknown> {

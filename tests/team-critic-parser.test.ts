@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseCriticResponse } from "../extensions/loom/teams/critic-parser";
+import { parseCriticResponse } from "../extensions/orbit/teams/critic-parser";
 
 describe("parseCriticResponse", () => {
   it("parses bare JSON on one line", () => {

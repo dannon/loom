@@ -10,7 +10,7 @@ import {
   serializeDashboardDocument,
 } from "../../../../shared/dashboard-contract.js";
 import type { DashboardDocument } from "../../../../shared/dashboard-contract.js";
-import { LoomWidgetKey, decodeJsonWidget } from "../../../../shared/loom-shell-contract.js";
+import { LoomWidgetKey, decodeJsonWidget } from "../../../../shared/orbit-shell-contract.js";
 import { normalizeGalaxyLivePayload } from "../../../../shared/galaxy-live-contract.js";
 import type { FileNode } from "../../preload/preload.js";
 import { DashboardHost } from "./host.js";

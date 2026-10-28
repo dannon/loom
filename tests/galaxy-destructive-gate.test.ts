@@ -3,32 +3,32 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 import { GALAXY_ARGS_CLASSIFIED_OPS } from "../shared/galaxy-destructive.js";
 import type { GalaxyToolFamily } from "../shared/galaxy-tool-family.js";
-import { appendActivityEvent } from "../extensions/loom/activity";
-import { registerGalaxyDestructiveGate } from "../extensions/loom/galaxy-destructive-gate";
-import { registerGalaxyOpPolicy } from "../extensions/loom/galaxy-op-policy";
+import { appendActivityEvent } from "../extensions/orbit/activity";
+import { registerGalaxyDestructiveGate } from "../extensions/orbit/galaxy-destructive-gate";
+import { registerGalaxyOpPolicy } from "../extensions/orbit/galaxy-op-policy";
 import {
   registerGalaxyTools,
   registeredGalaxyTools,
   setGalaxyToolSource,
-} from "../extensions/loom/galaxy-tool-source";
+} from "../extensions/orbit/galaxy-tool-source";
 
 const NB = "/session/notebook.md";
 
-vi.mock("../extensions/loom/state", async (actual) => ({
-  ...(await actual<typeof import("../extensions/loom/state")>()),
+vi.mock("../extensions/orbit/state", async (actual) => ({
+  ...(await actual<typeof import("../extensions/orbit/state")>()),
   getNotebookPath: () => NB,
 }));
-vi.mock("../extensions/loom/activity", async (actual) => ({
-  ...(await actual<typeof import("../extensions/loom/activity")>()),
+vi.mock("../extensions/orbit/activity", async (actual) => ({
+  ...(await actual<typeof import("../extensions/orbit/activity")>()),
   appendActivityEvent: vi.fn(),
 }));
 // Pass-throughs, so index.ts's calls to them can be counted.
-vi.mock("../extensions/loom/galaxy-destructive-gate", async (actual) => {
-  const real = await actual<typeof import("../extensions/loom/galaxy-destructive-gate")>();
+vi.mock("../extensions/orbit/galaxy-destructive-gate", async (actual) => {
+  const real = await actual<typeof import("../extensions/orbit/galaxy-destructive-gate")>();
   return { ...real, registerGalaxyDestructiveGate: vi.fn(real.registerGalaxyDestructiveGate) };
 });
-vi.mock("../extensions/loom/galaxy-op-policy", async (actual) => {
-  const real = await actual<typeof import("../extensions/loom/galaxy-op-policy")>();
+vi.mock("../extensions/orbit/galaxy-op-policy", async (actual) => {
+  const real = await actual<typeof import("../extensions/orbit/galaxy-op-policy")>();
   return { ...real, registerGalaxyOpPolicy: vi.fn(real.registerGalaxyOpPolicy) };
 });
 
@@ -219,7 +219,7 @@ describe("index.ts registers the gate and the page policy", () => {
         },
       },
     );
-    const mod = await import("../extensions/loom/index");
+    const mod = await import("../extensions/orbit/index");
     mod.default(pi as never);
   }
 

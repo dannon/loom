@@ -11,8 +11,8 @@ import {
   type Attempt,
   type Exception,
   type Spec,
-} from "../extensions/loom/registry-schema";
-import { ulid } from "../extensions/loom/ulid";
+} from "../extensions/orbit/registry-schema";
+import { ulid } from "../extensions/orbit/ulid";
 
 export const SERVER = "https://usegalaxy.example";
 export const OTHER_SERVER = "https://elsewhere.example";

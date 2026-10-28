@@ -268,7 +268,7 @@ function unquote(value: string): string {
 
 /**
  * Single Galaxy tool runs recorded as `loom-job` blocks. The brain writes and
- * updates them (extensions/loom/galaxy-job-block.ts); this reads them, the same
+ * updates them (extensions/orbit/galaxy-job-block.ts); this reads them, the same
  * way galaxy-invocations.ts reads `loom-invocation` blocks rather than importing
  * the brain's writer. Two readers of one on-disk format is a real cost -- if a
  * third appears, move the rest of the grammar into shared/ next to the fence

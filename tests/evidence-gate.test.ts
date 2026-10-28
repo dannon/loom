@@ -5,8 +5,8 @@ import {
   detectCompletions,
   findContradictions,
   parsePlanSteps,
-} from "../extensions/loom/evidence-gate";
-import { renderInvocationYaml, type InvocationYaml } from "../extensions/loom/notebook-writer";
+} from "../extensions/orbit/evidence-gate";
+import { renderInvocationYaml, type InvocationYaml } from "../extensions/orbit/notebook-writer";
 
 const PLAN = `# Notebook
 
@@ -429,7 +429,7 @@ describe("decideNotebookWrite modes", () => {
   });
 });
 
-import { onEvidenceDecision, notifyEvidenceDecision } from "../extensions/loom/evidence-gate";
+import { onEvidenceDecision, notifyEvidenceDecision } from "../extensions/orbit/evidence-gate";
 
 describe("evidence decision listeners", () => {
   it("delivers a decision to every listener and unsubscribes cleanly", () => {

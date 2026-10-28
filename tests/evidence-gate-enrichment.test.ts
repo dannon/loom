@@ -4,21 +4,21 @@ import os from "node:os";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-vi.mock("../extensions/loom/state");
-vi.mock("../extensions/loom/config", () => ({ loadConfig: () => ({}) }));
+vi.mock("../extensions/orbit/state");
+vi.mock("../extensions/orbit/config", () => ({ loadConfig: () => ({}) }));
 
-import * as state from "../extensions/loom/state";
+import * as state from "../extensions/orbit/state";
 import {
   findEnrichmentWarnings,
   parsePlanSteps,
   registerEvidenceGate,
   resetEvidenceOverrides,
-} from "../extensions/loom/evidence-gate";
-import { upsertJobBlock, type JobYaml } from "../extensions/loom/galaxy-job-block";
-import { ensureAttemptRecord, writeEnrichment } from "../extensions/loom/galaxy-provenance";
-import { buildJobRecord } from "../extensions/loom/galaxy-enrich";
-import type { HarnessBlockFields } from "../extensions/loom/harness-block-fields";
-import { ulid } from "../extensions/loom/ulid";
+} from "../extensions/orbit/evidence-gate";
+import { upsertJobBlock, type JobYaml } from "../extensions/orbit/galaxy-job-block";
+import { ensureAttemptRecord, writeEnrichment } from "../extensions/orbit/galaxy-provenance";
+import { buildJobRecord } from "../extensions/orbit/galaxy-enrich";
+import type { HarnessBlockFields } from "../extensions/orbit/harness-block-fields";
+import { ulid } from "../extensions/orbit/ulid";
 import { GALAXY } from "./galaxy-family-fixture";
 
 const PLAN = `# Notebook

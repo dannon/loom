@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
-import { isCredentialStore } from "../extensions/loom/exec-guard/sensitive-read";
-import { decide } from "../extensions/loom/exec-guard/policy";
-import { buildSandboxConfig } from "../extensions/loom/sandbox/sandbox-config";
+import { isCredentialStore } from "../extensions/orbit/exec-guard/sensitive-read";
+import { decide } from "../extensions/orbit/exec-guard/policy";
+import { buildSandboxConfig } from "../extensions/orbit/sandbox/sandbox-config";
 import type {
   GuardianConfig,
   PathResolver,
   PolicyRequest,
-} from "../extensions/loom/exec-guard/types";
+} from "../extensions/orbit/exec-guard/types";
 
 // The brain config lives at ~/.loom/config.json, or ~/.orbit/config.json once a
 // newer release has put one there. Both hold the same keys, so every gate that

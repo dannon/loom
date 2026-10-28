@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { loadGuardianConfig, resolveBypass } from "../extensions/loom/exec-guard/guardian-config";
+import { loadGuardianConfig, resolveBypass } from "../extensions/orbit/exec-guard/guardian-config";
 
 let prevHome: string | undefined, sandbox: string;
 beforeEach(() => {

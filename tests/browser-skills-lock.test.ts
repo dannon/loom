@@ -9,7 +9,7 @@ const read = (p: string) => JSON.parse(readFileSync(join(ROOT, p), "utf8"));
 // manifest and Orbit's vendor tree would leave the browser's committed lock behind unnoticed.
 describe("browser skills lock", () => {
   it("pins the galaxy-skills commit Orbit vendors as skills", () => {
-    const manifest = read("extensions/loom/vendor/skills/_manifest.json");
+    const manifest = read("extensions/orbit/vendor/skills/_manifest.json");
     const plugin = manifest.plugins.find((p: { as?: string }) => p.as === "skills");
     const repo = plugin.upstream.repository
       .replace(/^https:\/\/github\.com\//, "")

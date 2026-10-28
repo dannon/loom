@@ -6,7 +6,7 @@ import {
   buildExecutionModeBlock,
   buildLocalEnvContext,
   buildNoLocalShellBlock,
-} from "../extensions/loom/context.js";
+} from "../extensions/orbit/context.js";
 
 describe("context blocks under LOOM_LOCAL_SHELL", () => {
   let saved: string | undefined;

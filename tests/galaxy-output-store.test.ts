@@ -4,8 +4,8 @@ import {
   galaxyOutputStore,
   setGalaxyOutputStore,
   type GalaxyOutputStore,
-} from "../extensions/loom/galaxy-output-store";
-import { isUlid } from "../extensions/loom/ulid";
+} from "../extensions/orbit/galaxy-output-store";
+import { isUlid } from "../extensions/orbit/ulid";
 
 afterEach(() => setGalaxyOutputStore(null));
 

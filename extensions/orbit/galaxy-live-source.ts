@@ -43,7 +43,7 @@ import type {
   GalaxyLivePayload,
   GalaxyLiveState,
 } from "../../shared/galaxy-live-contract.js";
-import { LoomWidgetKey, encodeJsonWidget } from "../../shared/loom-shell-contract.js";
+import { LoomWidgetKey, encodeJsonWidget } from "../../shared/orbit-shell-contract.js";
 import {
   GalaxyApiError,
   galaxyGet,

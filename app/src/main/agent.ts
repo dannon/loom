@@ -88,9 +88,9 @@ function buildSecretEnv(): Record<string, string> {
 // (e.g. vitest), so optional-chain through `app.isPackaged` to fall back to dev.
 function resolveLoomBin(): string {
   if (app?.isPackaged) {
-    return path.join(process.resourcesPath, "loom", "bin", "loom.js");
+    return path.join(process.resourcesPath, "loom", "bin", "orbit.js");
   }
-  return path.resolve(__dirname, "../../../bin/loom.js");
+  return path.resolve(__dirname, "../../../bin/orbit.js");
 }
 
 // Resolve the Node binary the brain runs under. Dev assumes Node 22.19+ on PATH.
@@ -128,7 +128,7 @@ function buildBrainEnv(fresh: boolean): NodeJS.ProcessEnv {
   writeEnv(env, "SHELL_KIND", DESKTOP_SHELL_KIND);
   // The desktop always has a local *file* surface, so exec-guard stays on
   // everywhere. LOOM_LOCAL_EXEC is the shell->brain capability signal
-  // (extensions/loom/local-exec.ts); set it authoritatively so an ambient
+  // (extensions/orbit/local-exec.ts); set it authoritatively so an ambient
   // LOOM_LOCAL_EXEC=off in the launching environment can't silently disable the
   // guard. Windows remote-only does NOT flip this: it keeps the file write-jail
   // and instead removes the bash *tool* (see noLocalShellSpawnExtras / the args
@@ -264,7 +264,7 @@ export class AgentManager {
    * Fails closed when config.json exists but won't parse: loadConfig() silently
    * returns {} on a read/parse error, so writing that back would wipe stored
    * credentials. Refuse rather than clobber -- a genuinely absent file is still
-   * fine to create. Mirrors setTesterId() in extensions/loom/tester-id-command.ts.
+   * fine to create. Mirrors setTesterId() in extensions/orbit/tester-id-command.ts.
    */
   private persistCwd(cwd: string): void {
     try {

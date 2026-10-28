@@ -10,9 +10,9 @@ import {
   redactContent,
   registerSecretRedaction,
   REDACTED,
-} from "../extensions/loom/secret-redaction";
+} from "../extensions/orbit/secret-redaction";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { setGalaxyTransport } from "../extensions/loom/galaxy-api";
+import { setGalaxyTransport } from "../extensions/orbit/galaxy-api";
 import { setConfigSource } from "../shared/config-source.js";
 
 describe("collectSecretValues", () => {

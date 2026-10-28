@@ -45,7 +45,7 @@ function unescape(value: string): string {
 /**
  * Parse `loom-galaxy-page` blocks from notebook.md, keeping the history id the
  * link needs. Mirrors the brain-side findGalaxyPageBlocks() grammar
- * (extensions/loom/galaxy-page-binding.ts).
+ * (extensions/orbit/galaxy-page-binding.ts).
  */
 export function parseGalaxyHistoryBindings(content: string): GalaxyHistoryBinding[] {
   const out: GalaxyHistoryBinding[] = [];

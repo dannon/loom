@@ -1,4 +1,4 @@
-import type { LlmProviderConfig, LoomConfig } from "../../../shared/loom-config.js";
+import type { LlmProviderConfig, LoomConfig } from "../../../shared/orbit-config.js";
 
 export type DiscoverModelsResult = { ok: true; models: string[] } | { ok: false; error: string };
 

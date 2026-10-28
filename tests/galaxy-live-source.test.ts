@@ -14,16 +14,16 @@ import {
   type GalaxyLiveDeps,
   type GalaxyLiveTickerDeps,
   type SnapshotResult,
-} from "../extensions/loom/galaxy-live-source.js";
-import { GalaxyApiError, type GalaxyHistorySummary } from "../extensions/loom/galaxy-api.js";
+} from "../extensions/orbit/galaxy-live-source.js";
+import { GalaxyApiError, type GalaxyHistorySummary } from "../extensions/orbit/galaxy-api.js";
 import {
   armGalaxyLivePanel,
   disarmGalaxyLivePanel,
   layoutWantsGalaxyLive,
   resetGalaxyLiveWantedCache,
-} from "../extensions/loom/galaxy-live-source.js";
-import { getPollTickHook } from "../extensions/loom/galaxy-poller.js";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+} from "../extensions/orbit/galaxy-live-source.js";
+import { getPollTickHook } from "../extensions/orbit/galaxy-poller.js";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 import {
   createDefaultDashboardDocument,

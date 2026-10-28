@@ -2,11 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const loadConfigMock = vi.fn();
 
-vi.mock("../../extensions/loom/config", () => ({
+vi.mock("../../extensions/orbit/config", () => ({
   loadConfig: () => loadConfigMock(),
 }));
 
-import { isSessionIndexEnabled } from "../../extensions/loom/session-index/is-enabled";
+import { isSessionIndexEnabled } from "../../extensions/orbit/session-index/is-enabled";
 
 describe("isSessionIndexEnabled", () => {
   const originalEnv = process.env.LOOM_SESSION_INDEX;

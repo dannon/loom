@@ -11,17 +11,17 @@ import {
   registerLessonCommand,
   registerLessonProposals,
   removeSuppression,
-} from "../extensions/loom/lesson-command";
-import { resetLessonNudge } from "../extensions/loom/lesson-nudge";
+} from "../extensions/orbit/lesson-command";
+import { resetLessonNudge } from "../extensions/orbit/lesson-nudge";
 import {
   peekLessonProposalArming,
   resetLessonProposalArming,
-} from "../extensions/loom/lessons/propose";
-import { composeLessonMarkdown } from "../extensions/loom/lessons/compose";
-import { draftFilePath, lessonFilePath } from "../extensions/loom/lessons/paths";
-import { getLessonStore, resetLessonStore } from "../extensions/loom/lessons/store";
-import { resetActivity } from "../extensions/loom/activity";
-import { setNotebookPath } from "../extensions/loom/state";
+} from "../extensions/orbit/lessons/propose";
+import { composeLessonMarkdown } from "../extensions/orbit/lessons/compose";
+import { draftFilePath, lessonFilePath } from "../extensions/orbit/lessons/paths";
+import { getLessonStore, resetLessonStore } from "../extensions/orbit/lessons/store";
+import { resetActivity } from "../extensions/orbit/activity";
+import { setNotebookPath } from "../extensions/orbit/state";
 
 // The lesson switch is off by default; these suites are about what happens
 // once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.

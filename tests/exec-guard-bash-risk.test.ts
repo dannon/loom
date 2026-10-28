@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import { describe, it, expect } from "vitest";
-import { classifyBash } from "../extensions/loom/exec-guard/bash-risk";
-import { WORKSPACE_STATE_DIR_NAMES } from "../extensions/loom/workspace-state-dir";
+import { classifyBash } from "../extensions/orbit/exec-guard/bash-risk";
+import { WORKSPACE_STATE_DIR_NAMES } from "../extensions/orbit/workspace-state-dir";
 
 describe("classifyBash", () => {
   it("catastrophic patterns -> catastrophic", () => {

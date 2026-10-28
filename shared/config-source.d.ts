@@ -1,4 +1,4 @@
-import type { LoomConfig } from "./loom-config.js";
+import type { LoomConfig } from "./orbit-config.js";
 
 export interface ConfigSource {
   /** The raw config object; loadConfig() clones it and applies the same migrations and defaults as the file. */

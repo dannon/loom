@@ -8,21 +8,21 @@ import {
   isLessonsEnabled,
   isLessonsHardDisabled,
   setLessonsEnabled,
-} from "../extensions/loom/lessons/enabled";
-import { getLessonStore, resetLessonStore } from "../extensions/loom/lessons/store";
-import { buildStepLessonNote, decideHintForEvent } from "../extensions/loom/lesson-hint";
-import { buildReproductionLessonsContext } from "../extensions/loom/lessons/reproduction-index";
+} from "../extensions/orbit/lessons/enabled";
+import { getLessonStore, resetLessonStore } from "../extensions/orbit/lessons/store";
+import { buildStepLessonNote, decideHintForEvent } from "../extensions/orbit/lesson-hint";
+import { buildReproductionLessonsContext } from "../extensions/orbit/lessons/reproduction-index";
 import {
   armLessonProposal,
   proposeLesson,
   resetLessonProposalArming,
-} from "../extensions/loom/lessons/propose";
-import { registerLessonCommand } from "../extensions/loom/lesson-command";
-import { registerLessonNudge, resetLessonNudge } from "../extensions/loom/lesson-nudge";
-import { registerLessonReplay } from "../extensions/loom/lessons/replay";
-import { registerLessonProposalReplay } from "../extensions/loom/lessons/propose-replay";
-import { appendActivityEvent, resetActivity } from "../extensions/loom/activity";
-import { setNotebookPath } from "../extensions/loom/state";
+} from "../extensions/orbit/lessons/propose";
+import { registerLessonCommand } from "../extensions/orbit/lesson-command";
+import { registerLessonNudge, resetLessonNudge } from "../extensions/orbit/lesson-nudge";
+import { registerLessonReplay } from "../extensions/orbit/lessons/replay";
+import { registerLessonProposalReplay } from "../extensions/orbit/lessons/propose-replay";
+import { appendActivityEvent, resetActivity } from "../extensions/orbit/activity";
+import { setNotebookPath } from "../extensions/orbit/state";
 import { envNames } from "../shared/orbit-env.js";
 import { lessonFile } from "./lessons-fixture";
 
@@ -293,7 +293,7 @@ describe("every surface is silent while the switch is off", () => {
     };
     for (const h of handlers) await h({}, ctx);
     expect(fs.existsSync(path.join(dir, "activity.jsonl"))).toBe(false);
-    const { peekLessonProposalArming } = await import("../extensions/loom/lessons/propose");
+    const { peekLessonProposalArming } = await import("../extensions/orbit/lessons/propose");
     expect(peekLessonProposalArming()).toBeNull();
   });
 
@@ -315,7 +315,7 @@ describe("every surface is silent while the switch is off", () => {
     });
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(sentMessages).toEqual([]);
-    const { peekLessonProposalArming } = await import("../extensions/loom/lessons/propose");
+    const { peekLessonProposalArming } = await import("../extensions/orbit/lessons/propose");
     expect(peekLessonProposalArming()).toBeNull();
   });
 });

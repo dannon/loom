@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   describeSandboxInitFailure,
   LINUX_SANDBOX_APT_PACKAGES,
-} from "../extensions/loom/sandbox/sandbox-init-message";
+} from "../extensions/orbit/sandbox/sandbox-init-message";
 
 // ASRT's SandboxManager.initialize() throws this on Linux when the runtime
 // binaries it shells out to (rg/socat/bwrap) aren't on PATH. See issue #305.

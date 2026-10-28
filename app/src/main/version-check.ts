@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { isNewer } from "../../../shared/version-compare.js";
-import { loadConfig } from "../../../shared/loom-config.js";
+import { loadConfig } from "../../../shared/orbit-config.js";
 import { readEnv } from "../../../shared/orbit-env.js";
 import { detectRepoMoved, forcedRepoMoved, type RepoMovedInfo } from "./repo-moved.js";
 

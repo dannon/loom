@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { resolveSandbox } from "../extensions/loom/exec-guard/guardian-config";
-import type { GuardianConfig } from "../extensions/loom/exec-guard/types";
+import { resolveSandbox } from "../extensions/orbit/exec-guard/guardian-config";
+import type { GuardianConfig } from "../extensions/orbit/exec-guard/types";
 
 function cfg(sandbox: boolean): GuardianConfig {
   return {

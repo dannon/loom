@@ -13,8 +13,8 @@ import {
   resetLessonStore,
   snapshotEntryToLesson,
   userLessonsDir,
-} from "../extensions/loom/lessons/store";
-import { readCounters } from "../extensions/loom/lessons/counters";
+} from "../extensions/orbit/lessons/store";
+import { readCounters } from "../extensions/orbit/lessons/counters";
 import { lessonFile } from "./lessons-fixture";
 
 // The lesson switch is off by default; these suites are about what happens
@@ -505,9 +505,9 @@ describe("getLessonStore", () => {
     fs.writeFileSync(path.join(home, ".loom", "config.json"), JSON.stringify(obj));
 
   it("has one userLessonsDir, importable without the store, for the /lesson writer", async () => {
-    const dirModule = await import("../extensions/loom/lessons/user-dir");
+    const dirModule = await import("../extensions/orbit/lessons/user-dir");
     expect(dirModule.userLessonsDir).toBe(userLessonsDir);
-    const src = fs.readFileSync("extensions/loom/lessons/user-dir.ts", "utf-8");
+    const src = fs.readFileSync("extensions/orbit/lessons/user-dir.ts", "utf-8");
     expect(src).not.toMatch(/from "\.\/store"/);
   });
 

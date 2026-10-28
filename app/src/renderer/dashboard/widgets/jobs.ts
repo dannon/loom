@@ -120,7 +120,7 @@ export const STALE_AFTER_MS = 300_000;
 
 /**
  * Galaxy's job states, folded to what the panel draws. Mirrors
- * `JOB_STATE_OUTCOME` in `extensions/loom/galaxy-job-block.ts` and adds the
+ * `JOB_STATE_OUTCOME` in `extensions/orbit/galaxy-job-block.ts` and adds the
  * non-terminal states that table deliberately omits.
  *
  * `deleting` and `stop` are the two that cost the brain a bug and would cost

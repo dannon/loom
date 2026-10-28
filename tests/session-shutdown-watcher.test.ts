@@ -4,13 +4,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // stopWatchingNotebook) so the dangling watcher stops holding the event loop
 // open and --print can exit. Mock state + poller so we observe the wiring
 // without touching real fs/git/timers.
-vi.mock("../extensions/loom/state.js", () => ({
+vi.mock("../extensions/orbit/state.js", () => ({
   resetState: vi.fn(),
   initSessionArtifacts: vi.fn(),
   getNotebookPath: vi.fn(() => null),
   stopWatchingNotebook: vi.fn(),
 }));
-vi.mock("../extensions/loom/galaxy-poller.js", () => ({
+vi.mock("../extensions/orbit/galaxy-poller.js", () => ({
   startGalaxyPoller: vi.fn(),
   stopGalaxyPoller: vi.fn(),
   // The live Galaxy panel registers and clears its tick hook here; shutdown
@@ -18,9 +18,9 @@ vi.mock("../extensions/loom/galaxy-poller.js", () => ({
   setPollTickHook: vi.fn(),
 }));
 
-import * as poller from "../extensions/loom/galaxy-poller.js";
-import * as state from "../extensions/loom/state.js";
-import { registerSessionLifecycle } from "../extensions/loom/session-lifecycle";
+import * as poller from "../extensions/orbit/galaxy-poller.js";
+import * as state from "../extensions/orbit/state.js";
+import { registerSessionLifecycle } from "../extensions/orbit/session-lifecycle";
 
 function fakePi() {
   const handlers: Record<string, (...args: any[]) => any> = {};

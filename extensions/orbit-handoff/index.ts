@@ -3,9 +3,9 @@
  * brain.
  *
  * All Orbit-specific knowledge (install paths, bundle layout, the `--cwd`
- * launch protocol, the release URL) lives here so `extensions/loom/` stays
- * shell-neutral. bin/loom.js loads this extension alongside the brain; because
- * the same bin/loom.js also runs as Orbit's embedded brain, the handler no-ops
+ * launch protocol, the release URL) lives here so `extensions/orbit/` stays
+ * shell-neutral. bin/orbit.js loads this extension alongside the brain; because
+ * the same bin/orbit.js also runs as Orbit's embedded brain, the handler no-ops
  * when it's already inside Orbit rather than handing the session off to itself.
  */
 

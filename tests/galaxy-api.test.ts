@@ -12,7 +12,7 @@ import {
   isGalaxyFetchOverridden,
   setGalaxyFetchOverride,
   setGalaxyTransport,
-} from "../extensions/loom/galaxy-api";
+} from "../extensions/orbit/galaxy-api";
 
 describe("getGalaxyConfig", () => {
   const origUrl = process.env.GALAXY_URL;

@@ -10,7 +10,7 @@ const { captured, setNotebookWidgetMode } = vi.hoisted(() => ({
   setNotebookWidgetMode: vi.fn(),
 }));
 
-vi.mock("../extensions/loom/state.js", () => ({
+vi.mock("../extensions/orbit/state.js", () => ({
   onNotebookChange: (listener: (content: string) => void) => {
     captured.listener = listener;
     return () => {};
@@ -20,7 +20,7 @@ vi.mock("../extensions/loom/state.js", () => ({
   setNotebookWidgetMode,
 }));
 
-import { setupUIBridge } from "../extensions/loom/ui-bridge";
+import { setupUIBridge } from "../extensions/orbit/ui-bridge";
 
 function fakePi() {
   const handlers: Record<string, (...args: any[]) => any> = {};

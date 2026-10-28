@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as path from "node:path";
-import { buildSandboxConfig, hostFromUrl } from "../extensions/loom/sandbox/sandbox-config";
+import { buildSandboxConfig, hostFromUrl } from "../extensions/orbit/sandbox/sandbox-config";
 
 describe("hostFromUrl", () => {
   it("extracts the host and tolerates junk", () => {

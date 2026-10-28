@@ -17,8 +17,8 @@ import {
   refreshCatalog,
   skillsCacheDir,
   refreshAllCatalogs,
-} from "../extensions/loom/skills-discovery";
-import { listEnabledSkillRepos } from "../extensions/loom/skills";
+} from "../extensions/orbit/skills-discovery";
+import { listEnabledSkillRepos } from "../extensions/orbit/skills";
 
 describe("parseFrontmatter", () => {
   it("reads name, description, when_to_use, and a surfaces list", () => {
