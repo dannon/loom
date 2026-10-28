@@ -5,7 +5,9 @@ import { RegistryStore, specRevision, canonicalJson, sha256Hex } from "../extens
 import {
   approveProposal,
   canonicalizeProposal,
+  checkInputFormats,
   findDrift,
+  mappedOverSlots,
   newProposalId,
   parseProposalFields,
   pendingProposals,
@@ -19,11 +21,17 @@ import {
   type ProposalSighting,
 } from "../extensions/loom/registry-proposal";
 import { SERVER, T0, tmpAnalysisDir } from "./registry-fixtures";
+import { datatypeAccepts } from "../extensions/loom/registry-templates";
 import {
+  CONVERTERS,
+  DATATYPES,
+  MANIFEST_ID,
+  NANOPLOT_SNAPSHOT,
   TOOL_SNAPSHOT,
   UDT_SNAPSHOT,
   UDT_UUID,
   WORKFLOW_SNAPSHOT,
+  nanoplotProposal,
   toolProposal,
 } from "./registry-proposal-fixtures";
 
@@ -109,20 +117,125 @@ describe("proposal validated against the template (v3 §13)", () => {
     expect(s.slots.get("reads")?.required).toBe(true);
   });
 
-  it("refuses a collection given to a dataset slot, and the reverse", () => {
+  it("refuses a dataset given to a collection slot", () => {
+    const problems = validateProposal(
+      toolProposal({ inputs: [...toolProposal().inputs, { slot: "pool", src: "hda", id: "d1" }] }),
+      shape,
+    );
+    expect(problems).toEqual([expect.stringMatching(/"pool" takes a collection/)]);
+  });
+
+  describe("a collection on a tool's one-dataset slot maps over it (#615)", () => {
+    const nanoplot = templateShape("tool", NANOPLOT_SNAPSHOT);
+
+    it("accepts Scott's NanoPlot proposal over a 62-element list", () => {
+      expect(validateProposal(nanoplotProposal(), nanoplot)).toEqual([]);
+      expect(mappedOverSlots(nanoplotProposal(), nanoplot)).toEqual(["mode|reads|files"]);
+    });
+
+    it("says in the table it runs once per element", () => {
+      const table = renderProposalTable(nanoplotProposal(), { shape: nanoplot, plain: true });
+      expect(table).toMatch(
+        /input mode\|reads\|files +hdca a1c62e0f5b3d7790 -- runs once per element, one job each/,
+      );
+    });
+
+    it("reads the branch the proposal picks: combined mode takes the list in one job", () => {
+      const combined = nanoplotProposal({
+        overrides: [{ param: "mode|choice", value: "combined", rationale: "one report" }],
+      });
+      expect(validateProposal(combined, nanoplot)).toEqual([]);
+      expect(mappedOverSlots(combined, nanoplot)).toEqual([]);
+      expect(renderProposalTable(combined, { shape: nanoplot })).not.toMatch(/once per element/);
+    });
+
+    it("refuses a selector value no branch names, so it can't hide a map-over", () => {
+      for (const value of ["bogus", null]) {
+        const p = nanoplotProposal({
+          overrides: [{ param: "mode|choice", value, rationale: "x" }],
+        });
+        expect(validateProposal(p, nanoplot)).toEqual([
+          '"mode|choice" chooses a branch; it takes batch or combined',
+        ]);
+      }
+    });
+
+    it("says it may run per element when the branch can't be pinned down", () => {
+      const body = structuredClone(NANOPLOT_SNAPSHOT.body) as {
+        inputs: Array<{ test_param: { value?: string } }>;
+      };
+      delete body.inputs[0].test_param.value;
+      const undecided = templateShape("tool", { ...NANOPLOT_SNAPSHOT, body });
+      expect(mappedOverSlots(nanoplotProposal(), undecided)).toEqual(["mode|reads|files"]);
+    });
+
+    it("counts datasets against the branch picked, not any branch", () => {
+      const two = (choice: string) =>
+        nanoplotProposal({
+          inputs: [
+            { slot: "mode|reads|files", src: "hda", id: "d1" },
+            { slot: "mode|reads|files", src: "hda", id: "d2" },
+          ],
+          overrides: [{ param: "mode|choice", value: choice, rationale: "x" }],
+        });
+      expect(validateProposal(two("batch"), nanoplot)).toEqual([
+        'input slot "mode|reads|files" takes one dataset but is given 2',
+      ]);
+      expect(validateProposal(two("combined"), nanoplot)).toEqual([]);
+    });
+
+    it("refuses datasets and collections mixed on one slot, as Galaxy does", () => {
+      const given = (srcs: Array<"hda" | "hdca">) =>
+        nanoplotProposal({
+          inputs: srcs.map((src, n) => ({ slot: "mode|reads|files", src, id: `x${n}` })),
+          overrides: [{ param: "mode|choice", value: "combined", rationale: "x" }],
+        });
+      expect(validateProposal(given(["hda", "hdca"]), nanoplot)).toEqual([
+        expect.stringMatching(/"mode\|reads\|files" is given both datasets and collections/),
+      ]);
+      expect(validateProposal(given(["hdca", "hdca"]), nanoplot)).toEqual([]);
+      expect(validateProposal(given(["hda", "hda"]), nanoplot)).toEqual([]);
+    });
+
+    it("maps over a tool's plain one-dataset slot too", () => {
+      const p = toolProposal({ inputs: [{ slot: "reads", src: "hdca", id: "c1" }] });
+      expect(validateProposal(p, shape)).toEqual([]);
+      expect(mappedOverSlots(p, shape)).toEqual(["reads"]);
+    });
+  });
+
+  it("says what would work when a collection lands on a one-dataset slot (#615)", () => {
+    const [problem] = validateProposal(
+      canonicalizeProposal(
+        {
+          ...toolProposal(),
+          target: { kind: "workflow", workflow_id: "f2db41e1fa331b3e", version: "unpinned" },
+          inputs: [
+            { slot: "forward", src: "hdca", id: "c62" },
+            { slot: "samples", src: "hdca", id: "c1" },
+          ],
+          overrides: [],
+        },
+        templateShape("workflow", WORKFLOW_SNAPSHOT),
+      ),
+      templateShape("workflow", WORKFLOW_SNAPSHOT),
+    );
+    expect(problem).toMatch(/"0" takes one dataset/);
+    expect(problem).toMatch(/id of one dataset \(src hda\)/);
+    expect(problem).toMatch(/to a slot that takes one: 1$/);
+  });
+
+  it("takes a collection on a multiple-dataset slot, flattened into one job (#615)", () => {
     const problems = validateProposal(
       toolProposal({
         inputs: [
-          { slot: "reads", src: "hdca", id: "c1" },
-          { slot: "pool", src: "hda", id: "d1" },
+          { slot: "reads", src: "hda", id: "4b6e2f1a9c3d5e70" },
+          { slot: "bundle", src: "hdca", id: "c62" },
         ],
       }),
       shape,
     );
-    expect(problems).toEqual([
-      expect.stringMatching(/"reads" takes a dataset/),
-      expect.stringMatching(/"pool" takes a collection/),
-    ]);
+    expect(problems).toEqual([]);
   });
 
   it("refuses a dataset input passed as an override, and a duplicate override", () => {
@@ -174,6 +287,309 @@ describe("proposal validated against the template (v3 §13)", () => {
     const udt = templateShape("udt", UDT_SNAPSHOT);
     expect([...udt.slots.keys()]).toEqual(["table"]);
     expect(udt.params.has("skip")).toBe(true);
+  });
+});
+
+describe("dataset formats checked against the slot (#618)", () => {
+  const nanoplot = templateShape("tool", NANOPLOT_SNAPSHOT);
+  const accepts = datatypeAccepts(DATATYPES, CONVERTERS);
+  const formats = (exts: Record<string, string[] | null>) => ({
+    extensions: new Map(Object.entries(exts)),
+    accepts,
+  });
+  const manifest = nanoplotProposal({
+    inputs: [{ slot: "mode|reads|files", src: "hda", id: MANIFEST_ID }],
+  });
+
+  it("reads each branch's formats from the template", () => {
+    const files = nanoplot.slots.get("mode|reads|files")!;
+    expect(files.variants).toHaveLength(6);
+    expect(files.variants[0]).toEqual({
+      when: [
+        { param: "mode|choice", value: "batch", default: "batch" },
+        { param: "mode|reads|type", value: "fastq", default: "fastq" },
+      ],
+      collection: false,
+      multiple: false,
+      accepts: ["fastq", "fastq.gz", "fastq.bz2", "vcf_bgzip"],
+    });
+    expect(templateShape("udt", UDT_SNAPSHOT).slots.get("table")?.variants[0].accepts).toEqual([
+      "tabular",
+    ]);
+  });
+
+  it("refuses Scott's TSV manifest in NanoPlot's FASTQ slot, naming both formats", () => {
+    const { problems } = checkInputFormats(
+      manifest,
+      nanoplot,
+      formats({ [`hda:${MANIFEST_ID}`]: ["tsv"] }),
+    );
+    expect(problems).toEqual([
+      `input slot "mode|reads|files" takes fastq, fastq.gz, fastq.bz2 or vcf_bgzip (or a subtype), ` +
+        `but dataset ${MANIFEST_ID} is tsv. Give it one in a format the slot takes; if the data ` +
+        `is right but mislabeled, change its datatype in Galaxy first`,
+    ]);
+  });
+
+  it("takes the 62 runs as fastqsanger.gz, and a collection with one bad element is named", () => {
+    const ok = checkInputFormats(
+      nanoplotProposal(),
+      nanoplot,
+      formats({ "hdca:a1c62e0f5b3d7790": ["fastqsanger.gz"] }),
+    );
+    expect(ok).toEqual({ problems: [], unchecked: [] });
+    const mixed = checkInputFormats(
+      nanoplotProposal(),
+      nanoplot,
+      formats({ "hdca:a1c62e0f5b3d7790": ["fastqsanger.gz", "tsv"] }),
+    );
+    expect(mixed.problems).toEqual([
+      expect.stringMatching(/but collection a1c62e0f5b3d7790 holds tsv\./),
+    ]);
+  });
+
+  it("checks against the branch the proposal picks", () => {
+    const summary = {
+      ...manifest,
+      overrides: [{ param: "mode|reads|type", value: "summary", rationale: "a summary file" }],
+    };
+    const r = checkInputFormats(summary, nanoplot, formats({ [`hda:${MANIFEST_ID}`]: ["tsv"] }));
+    expect(r.problems).toEqual([]);
+  });
+
+  it("lets through, and lists, what it can't judge", () => {
+    expect(
+      checkInputFormats(manifest, nanoplot, formats({ [`hda:${MANIFEST_ID}`]: null })),
+    ).toEqual({ problems: [], unchecked: [expect.stringMatching(/didn't say what format/)] });
+    expect(
+      checkInputFormats(manifest, nanoplot, {
+        extensions: new Map([[`hda:${MANIFEST_ID}`, ["tsv"]]]),
+        accepts: null,
+      }),
+    ).toEqual({ problems: [], unchecked: [expect.stringMatching(/hierarchy couldn't be read/)] });
+    expect(
+      checkInputFormats(manifest, nanoplot, formats({ [`hda:${MANIFEST_ID}`]: ["fast5_tar"] })),
+    ).toEqual({ problems: [], unchecked: [expect.stringMatching(/can't tell whether fast5_tar/)] });
+  });
+
+  it("skips a slot that names no formats", () => {
+    const shape = templateShape("tool", TOOL_SNAPSHOT);
+    expect(
+      checkInputFormats(toolProposal(), shape, formats({ "hda:4b6e2f1a9c3d5e70": ["tsv"] })),
+    ).toEqual({ problems: [], unchecked: [] });
+  });
+
+  it("checks a workflow input against its accepted formats", () => {
+    const body = structuredClone(WORKFLOW_SNAPSHOT.body) as { slots: Record<string, unknown>[] };
+    body.slots[0].accepted_formats = ["fastqsanger"];
+    const wf = templateShape("workflow", { ...WORKFLOW_SNAPSHOT, body });
+    const p = {
+      ...toolProposal(),
+      target: { kind: "workflow" as const, workflow_id: "f2db41e1fa331b3e", version: "unpinned" },
+      inputs: [
+        { slot: "0", src: "hda" as const, id: "d1" },
+        { slot: "1", src: "hdca" as const, id: "c1" },
+      ],
+      overrides: [],
+    };
+    const r = checkInputFormats(p, wf, formats({ "hda:d1": ["tabular"], "hdca:c1": ["tabular"] }));
+    expect(r.problems).toEqual([expect.stringMatching(/"0" takes fastqsanger .* is tabular/)]);
+  });
+});
+
+describe("branch resolution follows Galaxy's conditionals (review follow-ups)", () => {
+  const accepts = datatypeAccepts(DATATYPES, CONVERTERS);
+  const tool = (inputs: unknown[]) =>
+    templateShape("tool", { version: "1", body: { id: "t", version: "1", inputs } });
+  const proposal = (inputs: Proposal["inputs"], choices: Record<string, unknown>) =>
+    toolProposal({
+      target: { kind: "tool", tool_id: "t", version: "unpinned" },
+      inputs,
+      overrides: Object.entries(choices).map(([param, value]) => ({
+        param,
+        value,
+        rationale: "x",
+      })),
+    });
+  const branchy = (name: string, test: Record<string, unknown>, cases: unknown[]) => ({
+    name,
+    type: "conditional",
+    test_param: test,
+    cases,
+  });
+
+  it("reads each repeat instance's selector from that instance", () => {
+    const shape = tool([
+      {
+        name: "rows",
+        type: "repeat",
+        inputs: [
+          branchy("mode", { name: "choice", type: "select", value: "one" }, [
+            { value: "one", inputs: [{ name: "reads", type: "data", extensions: ["fastq"] }] },
+            {
+              value: "many",
+              inputs: [{ name: "reads", type: "data", multiple: true, extensions: ["tabular"] }],
+            },
+          ]),
+        ],
+      },
+    ]);
+    const p = proposal(
+      [
+        { slot: "rows_0|mode|reads", src: "hda", id: "fq" },
+        { slot: "rows_1|mode|reads", src: "hdca", id: "tabs" },
+      ],
+      { "rows_0|mode|choice": "one", "rows_1|mode|choice": "many" },
+    );
+    expect(validateProposal(p, shape)).toEqual([]);
+    expect(mappedOverSlots(p, shape)).toEqual([]);
+    expect(
+      checkInputFormats(p, shape, {
+        extensions: new Map([
+          ["hda:fq", ["fastqsanger"]],
+          ["hdca:tabs", ["tabular"]],
+        ]),
+        accepts,
+      }),
+    ).toEqual({ problems: [], unchecked: [] });
+  });
+
+  it("names a boolean selector's branches by its truevalue and falsevalue", () => {
+    const shape = tool([
+      branchy(
+        "paired",
+        { name: "on", type: "boolean", truevalue: "yes", falsevalue: "no", value: false },
+        [
+          { value: "yes", inputs: [{ name: "r2", type: "data", extensions: ["tabular"] }] },
+          { value: "no", inputs: [{ name: "r2", type: "data", extensions: ["fastq"] }] },
+        ],
+      ),
+    ]);
+    const formats = { extensions: new Map([["hda:d", ["tabular"]]]), accepts };
+    const on = proposal([{ slot: "paired|r2", src: "hda", id: "d" }], { "paired|on": true });
+    expect(validateProposal(on, shape)).toEqual([]);
+    expect(checkInputFormats(on, shape, formats).problems).toEqual([]);
+    const byDefault = proposal([{ slot: "paired|r2", src: "hda", id: "d" }], {});
+    expect(checkInputFormats(byDefault, shape, formats).problems).toHaveLength(1);
+  });
+
+  it("reads a boolean selector's value the way Galaxy's boolean parameter does", () => {
+    const shape = tool([
+      branchy(
+        "paired",
+        { name: "on", type: "boolean", truevalue: "enabled", falsevalue: "disabled" },
+        [
+          { value: "enabled", inputs: [{ name: "r2", type: "data", extensions: ["tabular"] }] },
+          { value: "disabled", inputs: [{ name: "r2", type: "data", extensions: ["fastq"] }] },
+        ],
+      ),
+    ]);
+    const formats = { extensions: new Map([["hda:d", ["tabular"]]]), accepts };
+    const with_ = (v: unknown) =>
+      proposal([{ slot: "paired|r2", src: "hda", id: "d" }], { "paired|on": v });
+    for (const v of [true, "true", "True", "yes", "on", 1, "1"]) {
+      expect(validateProposal(with_(v), shape)).toEqual([]);
+      expect(checkInputFormats(with_(v), shape, formats).problems).toEqual([]);
+    }
+    for (const v of [false, "false", "no", 0, "disabled"]) {
+      expect(validateProposal(with_(v), shape)).toEqual([]);
+      expect(checkInputFormats(with_(v), shape, formats).problems).toHaveLength(1);
+    }
+    // Galaxy reads any other string as false, so its truevalue would pick the false branch.
+    expect(validateProposal(with_("enabled"), shape)).toEqual([
+      expect.stringMatching(/"paired\|on" is a boolean; give true or false/),
+    ]);
+  });
+
+  it("takes a select option no case names, which Galaxy runs with no extra inputs", () => {
+    const shape = tool([
+      branchy(
+        "trim",
+        {
+          name: "how",
+          type: "select",
+          value: "none",
+          options: [
+            ["None", "none", true],
+            ["Adapters", "adapters", false],
+          ],
+        },
+        [{ value: "adapters", inputs: [{ name: "adapters", type: "data", optional: true }] }],
+      ),
+    ]);
+    expect(validateProposal(proposal([], { "trim|how": "none" }), shape)).toEqual([]);
+    expect(validateProposal(proposal([], { "trim|how": "other" }), shape)).toEqual([
+      '"trim|how" chooses a branch; it takes adapters or none',
+    ]);
+  });
+
+  it("keeps every value a selector path takes under any parent branch", () => {
+    const inner = (v: string) =>
+      branchy("inner", { name: "choice", type: "select" }, [{ value: v, inputs: [] }]);
+    const shape = tool([
+      branchy("outer", { name: "sel", type: "select" }, [
+        { value: "A", inputs: [inner("a")] },
+        { value: "B", inputs: [inner("b")] },
+      ]),
+    ]);
+    expect(
+      validateProposal(proposal([], { "outer|sel": "A", "outer|inner|choice": "a" }), shape),
+    ).toEqual([]);
+  });
+
+  it("refuses an input the chosen branch doesn't declare, chosen or by default", () => {
+    const shape = tool([
+      branchy("sel", { name: "choice", type: "select", value: "b" }, [
+        { value: "a", inputs: [{ name: "x", type: "data", extensions: ["fastqsanger"] }] },
+        { value: "b", inputs: [{ name: "n", type: "integer" }] },
+      ]),
+    ]);
+    const given = [{ slot: "sel|x", src: "hda" as const, id: "d1" }];
+    const unused = [expect.stringMatching(/"sel\|x" isn't used.*sel\|choice is a/)];
+    expect(validateProposal(proposal(given, { "sel|choice": "b" }), shape)).toEqual(unused);
+    expect(validateProposal(proposal(given, {}), shape)).toEqual(unused);
+    expect(validateProposal(proposal(given, { "sel|choice": "a" }), shape)).toEqual([]);
+  });
+
+  it("refuses an inner choice that only another outer branch offers, when it hides the input", () => {
+    const inner = (v: string, reads: Record<string, unknown>) =>
+      branchy("inner", { name: "choice", type: "select" }, [
+        { value: v, inputs: [{ name: "reads", type: "data", ...reads }] },
+      ]);
+    const shape = tool([
+      branchy("outer", { name: "sel", type: "select" }, [
+        { value: "A", inputs: [inner("a", { extensions: ["fastqsanger"] })] },
+        { value: "B", inputs: [inner("b", { multiple: true, extensions: ["tabular"] })] },
+      ]),
+    ]);
+    const p = proposal(
+      [
+        { slot: "outer|inner|reads", src: "hda", id: "t1" },
+        { slot: "outer|inner|reads", src: "hda", id: "t2" },
+      ],
+      { "outer|sel": "A", "outer|inner|choice": "b" },
+    );
+    expect(validateProposal(p, shape)).toEqual([
+      expect.stringMatching(/"outer\|inner\|reads" isn't used/),
+    ]);
+  });
+
+  it("reads dataset-or-collection per branch, in either declaration order", () => {
+    for (const order of [
+      ["c", "d"],
+      ["d", "c"],
+    ]) {
+      const cases = order.map((v) => ({
+        value: v,
+        inputs: [{ name: "x", type: v === "c" ? "data_collection" : "data" }],
+      }));
+      const shape = tool([branchy("k", { name: "sel", type: "select", value: "c" }, cases)]);
+      const hda = [{ slot: "k|x", src: "hda" as const, id: "d1" }];
+      expect(validateProposal(proposal(hda, { "k|sel": "d" }), shape)).toEqual([]);
+      expect(validateProposal(proposal(hda, { "k|sel": "c" }), shape)).toEqual([
+        expect.stringMatching(/"k\|x" takes a collection/),
+      ]);
+    }
   });
 });
 

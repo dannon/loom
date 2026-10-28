@@ -45,6 +45,18 @@ describe("galaxy-ops requests keep the redirect guard", () => {
       headers: { "content-type": "application/json" },
     });
 
+  it("names undici's cause code when a direct call never connects", async () => {
+    const undici = Object.assign(new Error("Connect Timeout Error"), {
+      code: "UND_ERR_CONNECT_TIMEOUT",
+    });
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new TypeError("fetch failed", { cause: undici }),
+    );
+    const err = await galaxyGetInvocation("inv-1").catch((e: unknown) => e);
+    expect((err as Error).message).toMatch(/fetch failed \(UND_ERR_CONNECT_TIMEOUT\)/);
+    expect((err as Error).cause).toBe(undici);
+  });
+
   it("refuses a redirect to another host without sending the key there", async () => {
     // The other host answers like a real server would, so an unguarded client
     // gets a plausible invocation back and the only evidence is where the key went.

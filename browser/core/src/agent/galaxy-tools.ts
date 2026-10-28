@@ -10,7 +10,12 @@ import { fetchFailureHint, invocationOutcomeHint, iwcCandidatesHint } from "./hi
 import { ELIDED } from "./notebook";
 import { pageBody, pageContentProblem } from "./page-edit";
 import { type Annotate, type OpPolicy } from "./ops";
-import { remember, sectionsHeaded, serialized, shownAs } from "./record-write";
+import { remember, serialized, shownAs } from "./record-write";
+import {
+  applySectionEdit,
+  repeatedHeadingRefusal,
+  sectionsHeaded,
+} from "../../../../shared/markdown-sections.js";
 import { fail, Outcome, rendered, type Capability, type Context, type AgentTool } from "./tool";
 
 export const DATA_DIR = "/data";
@@ -29,34 +34,59 @@ function shownPage<T>(envelope: T, args: Record<string, unknown>, ctx: Context):
 }
 
 /**
- * A section edit's arguments against the page as it is now. The session writes its own lines
- * into the record, so a hash read before one of them no longer matches; when the agent's read
- * is known and the sections it replaces are unchanged since, the edit is checked against the
- * current hash instead. Anything else is sent as given, and galaxy-ops refuses a stale hash.
+ * A section edit's arguments as a whole-page write of Orbit's cut against the page as it is now,
+ * so the browser writes what Orbit writes and what its refusals and the evidence gate judged: the
+ * fork cuts flat at every heading and reads fenced code as headings.
+ *
+ * The session writes its own lines into the record, so a hash read before one of them no longer
+ * matches; when the agent's read is known and the sections it replaces are unchanged since, the
+ * edit goes ahead against the current page. A stale hash otherwise goes to galaxy-ops as given,
+ * and galaxy-ops refuses it. The write carries the current page's hash, so a write that lands
+ * between this read and the fork's is refused rather than overwritten.
  */
-async function againstCurrent(
+async function asPageWrite(
   args: Record<string, unknown>,
   ctx: Context,
-): Promise<Record<string, unknown>> {
-  const { expect_hash: read, section_heading: heading, page_id: pageId } = args;
-  if (typeof read !== "string" || typeof heading !== "string" || args.content != null) {
+): Promise<Record<string, unknown> | string> {
+  const {
+    expect_hash: read,
+    section_heading: heading,
+    section_content: section,
+    page_id: pageId,
+    ...rest
+  } = args;
+  if (typeof heading !== "string" || typeof section !== "string" || args.content != null) {
     return args;
   }
-  const base = shownAs(ctx.binding.sessionId, String(pageId), read);
-  if (base === undefined) {
-    return args;
-  }
-  let current: string;
+  let page: { content_format?: string; content_editor?: string; content?: string };
   try {
-    current = pageBody((await ctx.galaxy.get(`api/pages/${segment(String(pageId))}`)) || {});
+    page = (await ctx.galaxy.get(`api/pages/${segment(String(pageId))}`)) || {};
   } catch {
     return args;
   }
+  const current = pageBody(page);
+  // The fork refuses a section edit to a non-markdown page itself. A page that already holds a
+  // malformed id would have the fork refuse the whole-page write for ids the agent never sent.
+  if (page.content_format !== "markdown" || malformedObjectIds(current).length) {
+    return args;
+  }
   const now = contentHash({ content_editor: current });
-  const same =
-    JSON.stringify(sectionsHeaded(base, heading)) ===
-    JSON.stringify(sectionsHeaded(current, heading));
-  return now !== read && same ? { ...args, expect_hash: now } : args;
+  if (typeof read === "string" && read !== now) {
+    const base = shownAs(ctx.binding.sessionId, String(pageId), read);
+    const same =
+      base !== undefined &&
+      JSON.stringify(sectionsHeaded(base, heading)) ===
+        JSON.stringify(sectionsHeaded(current, heading));
+    if (!same) return args;
+  }
+  const repeated = repeatedHeadingRefusal(current, heading);
+  if (repeated) return `Refused: ${repeated}`;
+  return {
+    ...rest,
+    page_id: pageId,
+    content: applySectionEdit(current, heading, section),
+    expect_hash: now,
+  };
 }
 
 /** A refusal for a section edit that would leave its text without a heading in the record. */
@@ -81,6 +111,26 @@ function headingless(args: Record<string, unknown>) {
         "Refused: section_content replaces the whole section, heading line included, so it " +
           `starts with ${quote(heading)}; without it the record loses the heading.`,
       );
+}
+
+/**
+ * Orbit's refusal of a heading the page repeats, before the call, so the refusal reaches the
+ * agent the way Orbit's does. asPageWrite refuses again against the page it writes.
+ */
+async function repeatedHeading(args: Record<string, unknown>, ctx: Context) {
+  const { section_heading: heading, page_id: pageId } = args;
+  if (typeof heading !== "string" || args.content != null) {
+    return undefined;
+  }
+  let current: string;
+  try {
+    current = pageBody((await ctx.galaxy.get(`api/pages/${segment(String(pageId))}`)) || {});
+  } catch {
+    // The fork's own read reports a page it cannot get.
+    return undefined;
+  }
+  const refusal = repeatedHeadingRefusal(current, heading);
+  return refusal ? fail(`Refused: ${refusal}`) : undefined;
 }
 
 /** A refusal for page content Galaxy would not render, before it is sent. */
@@ -131,14 +181,22 @@ export const OPS_POLICY: Record<string, OpPolicy> = {
   // between its read and its write is kept; a directive id galaxy-ops refuses is answered with
   // where the id the agent wanted comes from.
   update_page: {
-    check: async (args) =>
+    check: async (args, ctx) =>
       String(args.content ?? "").includes(ELIDED)
         ? fail(
             "Refused: this content still holds the record excerpt's elision marker, so it would delete the elided middle. Edit a section instead.",
           )
-        : (headingless(args) ?? invalidPage(args.section_content ?? args.content)),
+        : (headingless(args) ??
+          (await invalidPage(args.section_content ?? args.content)) ??
+          repeatedHeading(args, ctx)),
     around: (call, args, ctx) =>
-      serialized(async () => shownPage(await call(await againstCurrent(args, ctx)), args, ctx)),
+      serialized(async () => {
+        const sent = await asPageWrite(args, ctx);
+        if (typeof sent === "string") {
+          return { success: false, message: sent } as never;
+        }
+        return shownPage(await call(sent), args, ctx);
+      }),
     refused: (message, args) =>
       malformedObjectIds(String(args.section_content ?? args.content ?? "")).length
         ? new Outcome(

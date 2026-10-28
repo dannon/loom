@@ -3,6 +3,7 @@
  */
 
 import type { Cell, Dimension, ScenarioRun } from "./types.js";
+import { formatUsageShort, runUsage } from "./usage.js";
 
 const DIMENSION_ORDER: Dimension[] = ["validity", "routing", "tools", "behavior", "other"];
 
@@ -62,6 +63,8 @@ export function report(runs: ScenarioRun[]): { passed: number; failed: number } 
     const ms = `${DIM}(${run.durationMs}ms)${RESET}`;
     const modelTag = run.model ? ` ${DIM}[${run.model.id}]${RESET}` : "";
     console.log(`${tag} ${run.scenario.name}${modelTag} ${ms}`);
+    const usage = runUsage(run);
+    if (usage) console.log(`  ${DIM}tokens: ${formatUsageShort(usage)}${RESET}`);
     if (!ok) {
       for (const f of run.failures) {
         console.log(`  - ${f.assertion}: ${f.detail}`);

@@ -9,12 +9,13 @@ import {
   extractDatatypes,
   resolveObservationServer,
   currentGalaxyUrl,
-  recordGalaxyVersionFromConnect,
+  recordGalaxyVersion,
   getGalaxyVersion,
   resetGalaxyVersion,
   buildObservation,
   isAdmissibleMcpTool,
 } from "../extensions/loom/observations.js";
+import { bareFamily } from "../shared/galaxy-tool-family.js";
 import { factsForToolResult } from "../extensions/loom/observation-triggers.js";
 import { validateObservation, scanObservationForLeaks } from "../shared/observation-contract.js";
 import type { ObservationEnvelope } from "../extensions/loom/observations.js";
@@ -136,9 +137,10 @@ describe("structured fields are admitted from allowlists, not shapes", () => {
 
   it("sends none of the reviewer's identifying words as structure", () => {
     const facts = factsForToolResult(
-      "mcp__galaxy__alice_smith",
+      "alice_smith",
       { tool_id: "Alice_Smith", file_type: "patient_17.fastq" },
       "Unknown tool",
+      bareFamily(["alice_smith"]),
     )!;
     expect(facts.mcpTool).toBe("galaxy_alice_smith");
     const obs = buildObservation(facts, envelope, "structured");
@@ -175,8 +177,7 @@ describe("structured fields are admitted from allowlists, not shapes", () => {
     expect(isAdmissibleMcpTool("galaxy_get_job_details")).toBe(true);
     expect(isAdmissibleMcpTool("galaxy_alice_smith")).toBe(false);
     // Admission takes the wire spelling only; the pi spelling is normalised first.
-    expect(isAdmissibleMcpTool("mcp__galaxy__run_tool")).toBe(false);
-    expect(isAdmissibleMcpTool("mcp__galaxy__alice_smith")).toBe(false);
+    expect(isAdmissibleMcpTool("run_tool")).toBe(false);
     expect(extractDatatypes({ file_type: "BAM" })).toEqual(["bam"]);
     expect(extractDatatypes({ file_type: "fastqsanger.bz2" })).toEqual(["fastqsanger.bz2"]);
     expect(extractToolIds({ tool_id: "__MERGE_COLLECTION__" })).toEqual(["__MERGE_COLLECTION__"]);
@@ -297,26 +298,26 @@ describe("currentGalaxyUrl", () => {
   });
 });
 
-describe("recordGalaxyVersionFromConnect", () => {
+describe("recordGalaxyVersion", () => {
   beforeEach(() => resetGalaxyVersion());
 
   it("captures a version-shaped value", () => {
-    recordGalaxyVersionFromConnect('{"success": true, "version": "24.2.1"}');
+    recordGalaxyVersion("24.2.1");
     expect(getGalaxyVersion()).toBe("24.2.1");
   });
 
   it("ignores anything that is not version-shaped", () => {
-    recordGalaxyVersionFromConnect('{"version": "/Users/alice"}');
+    recordGalaxyVersion("/Users/alice");
     expect(getGalaxyVersion()).toBeUndefined();
-    recordGalaxyVersionFromConnect('{"version": "dev"}');
+    recordGalaxyVersion("dev");
     expect(getGalaxyVersion()).toBeUndefined();
-    recordGalaxyVersionFromConnect(undefined);
+    recordGalaxyVersion(undefined);
     expect(getGalaxyVersion()).toBeUndefined();
   });
 
-  it("caps a hostile long value", () => {
-    recordGalaxyVersionFromConnect(`{"version": "24.2.1${"9".repeat(200)}"}`);
-    expect((getGalaxyVersion() ?? "").length).toBeLessThanOrEqual(40);
+  it("refuses a hostile long value", () => {
+    recordGalaxyVersion(`24.2.1${"9".repeat(200)}`);
+    expect(getGalaxyVersion()).toBeUndefined();
   });
 });
 
@@ -531,9 +532,9 @@ describe("shape checks on model-authored fields", () => {
 
   it("keeps a free-form site suffix out of the galaxy version", () => {
     resetGalaxyVersion();
-    recordGalaxyVersionFromConnect('{"version": "24.1.2+cancer.ctr"}');
+    recordGalaxyVersion("24.1.2+cancer.ctr");
     expect(getGalaxyVersion()).toBeUndefined();
-    recordGalaxyVersionFromConnect('{"version": "26.1.rc1"}');
+    recordGalaxyVersion("26.1.rc1");
     expect(getGalaxyVersion()).toBe("26.1.rc1");
     resetGalaxyVersion();
   });
@@ -662,5 +663,30 @@ describe("the generated allowlists", () => {
       expect(set.size).toBeGreaterThan(40);
       for (const v of set) expect(textLeaks(v), v).toEqual([]);
     }
+  });
+});
+
+describe("Loom's bridging job ops under in-process Galaxy tools", () => {
+  const BARE = bareFamily(["list_jobs", "get_job_logs", "run_tool"]);
+
+  it.each([
+    ["list_jobs", "galaxy_list_jobs", "result-interpretation"],
+    ["get_job_logs", "galaxy_get_job_logs", "job-execution"],
+  ])("names %s and stages it, and the outbox re-check admits it", (tool, wire, stage) => {
+    const facts = factsForToolResult(tool, { history_id: "abc" }, "HTTP 500", BARE);
+    const obs = buildObservation(facts!, envelope, "structured");
+    expect(obs.mcpTool).toBe(wire);
+    expect(obs.stage).toBe(stage);
+    expect(observationProblems(obs).errors).toEqual([]);
+  });
+
+  it("admits them only from an in-process call, not from the allowlist alone", () => {
+    expect(isAdmissibleMcpTool("galaxy_list_jobs")).toBe(false);
+    expect(isAdmissibleMcpTool("galaxy_get_job_logs")).toBe(false);
+  });
+
+  it("does not name galaxy_read_output, Orbit's own reader", () => {
+    const facts = factsForToolResult("galaxy_read_output", {}, "no longer available", BARE);
+    expect(buildObservation(facts!, envelope, "structured").mcpTool).toBeUndefined();
   });
 });

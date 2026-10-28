@@ -7,6 +7,8 @@
  * The I/O stays in the caller.
  */
 
+import { NO_AUTH_API_KEY } from "../../../shared/custom-provider.js";
+
 export type ProbeOutcome = { valid: boolean; error?: string; models?: string[] };
 
 /** The dated version header every Anthropic Messages endpoint requires. */
@@ -36,13 +38,16 @@ export function modelsProbeRequest(
   baseUrl: string,
   key: string,
 ): ModelsProbeRequest {
+  // An empty key means a keyless endpoint (#600). Send the same placeholder
+  // the brain will, so the probe answers for what the first chat sends.
+  const sent = key || NO_AUTH_API_KEY;
   if (api === "anthropic-messages") {
     return {
       url: `${baseUrl}/v1/models`,
-      headers: { "x-api-key": key, "anthropic-version": ANTHROPIC_VERSION },
+      headers: { "x-api-key": sent, "anthropic-version": ANTHROPIC_VERSION },
     };
   }
-  return { url: `${baseUrl}/models`, headers: { authorization: `Bearer ${key}` } };
+  return { url: `${baseUrl}/models`, headers: { authorization: `Bearer ${sent}` } };
 }
 
 /**
@@ -201,7 +206,14 @@ function extractModelIds(parsed: unknown): string[] {
  * we verified nothing, and the server's own sentence is usually the most
  * useful thing we can put on screen.
  */
-export function interpretModelsResponse(status: number, body: string): ProbeOutcome {
+export function interpretModelsResponse(
+  status: number,
+  body: string,
+  { keyless = false }: { keyless?: boolean } = {},
+): ProbeOutcome {
+  if (keyless && (status === 401 || status === 403)) {
+    return { valid: false, error: `This endpoint needs an API key (${status})` };
+  }
   if (status === 401) return { valid: false, error: "Invalid API key (401)" };
   if (status === 403) return { valid: false, error: "Endpoint rejected the key (403)" };
   if (status < 200 || status >= 300) {

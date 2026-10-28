@@ -1,6 +1,6 @@
 ---
 title: Galaxy MCP
-description: Connect Claude Desktop, Orbit, or any MCP client to a Galaxy instance for real, reproducible compute.
+description: Connect Claude Desktop or any MCP client to a Galaxy instance for real, reproducible compute.
 group: Guides
 order: 3
 ---
@@ -8,8 +8,8 @@ order: 3
 # Galaxy MCP
 
 Galaxy MCP is a [Model Context Protocol](https://modelcontextprotocol.io) server
-that connects any MCP-capable AI assistant — Claude Desktop, Orbit/Loom, and
-others — to a Galaxy bioinformatics instance. Point it at any Galaxy server with a
+that connects any MCP-capable AI assistant -- Claude Desktop and others -- to a
+Galaxy bioinformatics instance. Point it at any Galaxy server with a
 URL and API key, and the agent can search and run tools, drive workflows, and
 manage histories and datasets through Galaxy's API (via
 [BioBlend](https://bioblend.readthedocs.io)).
@@ -61,9 +61,10 @@ Restart Claude Desktop and the Galaxy tools become available in the conversation
 
 ## With Orbit and Loom
 
-Orbit and the Loom CLI use Galaxy MCP under the hood — when you connect Galaxy in
-Orbit, or set `GALAXY_URL` / `GALAXY_API_KEY` for the CLI, the agent routes work
-through `uvx galaxy-mcp` automatically. See [Getting started](/loom/docs/getting-started).
+Orbit and the Loom CLI don't run this server. They call the same Galaxy operations
+in-process, through the galaxy-ops package from the galaxy-mcp repository: when you
+connect Galaxy in Orbit, or set `GALAXY_URL` / `GALAXY_API_KEY` for the CLI, the
+tools are ready with nothing else to install. See [Getting started](/loom/docs/getting-started).
 
 The source lives at
 [`galaxyproject/galaxy-mcp`](https://github.com/galaxyproject/galaxy-mcp).

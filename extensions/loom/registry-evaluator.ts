@@ -5,7 +5,7 @@
  * changed something.
  *
  * It runs from the capture queue (`galaxy-reconcile.ts` `followThrough`), so on
- * session start, after `galaxy_connect`, on every poller tick (which is where
+ * session start, on every poller tick (which is where
  * terminal transitions and enrichment completions land), every Nth tick's
  * reconcile, `/reconcile`, and after a Page pull or resume. A tick only
  * re-asks about attempts whose evaluation isn't settled yet; everything else
@@ -71,7 +71,7 @@ import {
 import { getSessionRegistry, sessionView, type SessionRegistry } from "./registry-runtime";
 
 export type EvaluationTrigger =
-  "session_start" | "galaxy_connect" | "tick" | "enrich" | "command" | "page_pull" | "page_resume";
+  "session_start" | "tick" | "enrich" | "command" | "page_pull" | "page_resume";
 
 export interface EvaluatorDeps {
   getJob: (jobId: string) => Promise<GalaxyJobDetailsResponse>;

@@ -9,13 +9,14 @@ vi.mock("../extensions/loom/profiles", () => ({ activeGalaxyStatus: () => galaxy
 
 import {
   draftsPlan,
-  IWC_PLAN_NUDGE,
+  iwcPlanNudge,
   isIwcLookup,
   registerIwcPlanCheck,
 } from "../extensions/loom/iwc-plan-check";
 import { setActiveFollowUpDelivery, type FollowUpDelivery } from "../extensions/loom/auto-resume";
 import { resetState, setNotebookPath } from "../extensions/loom/state";
 import { resetActivity } from "../extensions/loom/activity";
+import { GALAXY } from "./galaxy-family-fixture";
 
 const assistant = (text: string, extra: Record<string, unknown> = {}) => ({
   role: "assistant",
@@ -24,7 +25,7 @@ const assistant = (text: string, extra: Record<string, unknown> = {}) => ({
 });
 const PLAN =
   "Here's a draft:\n```plan\n## Plan A: QC [local]\n- [ ] 1. **FastQC** -- raw reads\n```";
-const TOOLS = ["read", "mcp__galaxy__recommend_iwc_workflows", "mcp__galaxy__run_tool"];
+const TOOLS = ["read", "recommend_iwc_workflows", "run_tool"];
 
 describe("draftsPlan", () => {
   it("sees a plan fence or a bare plan heading in assistant text", () => {
@@ -40,13 +41,19 @@ describe("draftsPlan", () => {
 
 describe("isIwcLookup", () => {
   it("counts the IWC tools", () => {
-    expect(isIwcLookup("mcp__galaxy__recommend_iwc_workflows")).toBe(true);
-    expect(isIwcLookup("mcp__galaxy__search_iwc_workflows")).toBe(true);
+    expect(isIwcLookup("recommend_iwc_workflows", GALAXY)).toBe(true);
+    expect(isIwcLookup("search_iwc_workflows", GALAXY)).toBe(true);
   });
 
   it("doesn't count other Galaxy tools", () => {
-    expect(isIwcLookup("mcp__galaxy__search_tools_by_name")).toBe(false);
-    expect(isIwcLookup("mcp__galaxy__run_tool")).toBe(false);
+    expect(isIwcLookup("search_tools_by_name", GALAXY)).toBe(false);
+    expect(isIwcLookup("run_tool", GALAXY)).toBe(false);
+  });
+});
+
+describe("iwcPlanNudge", () => {
+  it("names the family's recommend tool", () => {
+    expect(iwcPlanNudge(GALAXY)).toContain("`recommend_iwc_workflows`");
   });
 });
 
@@ -57,7 +64,10 @@ describe("registerIwcPlanCheck", () => {
 
   function hooks() {
     const on = vi.fn();
-    registerIwcPlanCheck({ on, getActiveTools: () => activeTools } as unknown as ExtensionAPI);
+    registerIwcPlanCheck(
+      { on, getActiveTools: () => activeTools } as unknown as ExtensionAPI,
+      GALAXY,
+    );
     const get = (name: string) => on.mock.calls.find(([n]) => n === name)![1];
     return {
       sessionStart: () => get("session_start")({}),
@@ -99,9 +109,9 @@ describe("registerIwcPlanCheck", () => {
 
   it("sends one follow-up when a plan is drafted without an IWC lookup", async () => {
     const h = hooks();
-    await h.toolStart("mcp__galaxy__search_tools_by_name");
+    await h.toolStart("search_tools_by_name");
     await h.agentEnd([assistant(PLAN)]);
-    expect(delivered).toEqual([IWC_PLAN_NUDGE]);
+    expect(delivered).toEqual([iwcPlanNudge(GALAXY)]);
     expect(activityKinds()).toEqual(["plan.iwc_check"]);
   });
 
@@ -117,7 +127,7 @@ describe("registerIwcPlanCheck", () => {
 
   it("stays quiet once IWC has been consulted this session", async () => {
     const h = hooks();
-    await h.toolStart("mcp__galaxy__recommend_iwc_workflows", {});
+    await h.toolStart("recommend_iwc_workflows", {});
     await h.agentEnd([assistant("some answer")]);
     await h.agentEnd([assistant(PLAN)]);
     expect(delivered).toEqual([]);

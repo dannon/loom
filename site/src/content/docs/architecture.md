@@ -45,15 +45,15 @@ substrate, Page is the shareable artifact, and Loom is one live authoring shell.
 
 ## Galaxy integration
 
-Galaxy work runs through [Galaxy MCP](/loom/docs/galaxy-mcp) (`uvx galaxy-mcp`)
-when credentials are available. During planning the agent surveys the workflow
-registry and tool catalog, then routes each step to Galaxy or local execution as
-appropriate.
+Galaxy work runs through in-process Galaxy tools (galaxy-ops, the operations
+[Galaxy MCP](/loom/docs/galaxy-mcp) serves) when credentials are available. During
+planning the agent surveys the workflow registry and tool catalog, then routes each
+step to Galaxy or local execution as appropriate.
 
 ## Tech stack
 
 Built in strict **TypeScript** on the **Pi.dev** agent runtime
-(`@earendil-works/pi-coding-agent`), bridged to Galaxy through `uvx galaxy-mcp`.
+(`@earendil-works/pi-coding-agent`), calling Galaxy in-process through `@galaxyproject/galaxy-ops`.
 The Orbit desktop shell is **Electron** (Vite + electron-forge), rendered with
 `marked`, in a Galaxy-brand dark theme. Tested with Vitest.
 

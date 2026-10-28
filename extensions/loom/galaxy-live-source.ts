@@ -57,7 +57,7 @@ import { findJobBlocks } from "./galaxy-job-block.js";
 import { findInvocationBlocks } from "./notebook-writer.js";
 import { setPollTickHook } from "./galaxy-poller.js";
 import { getDashboardPath, readDashboardDocument } from "./dashboard-store.js";
-import { isDesktopShell } from "../../shared/orbit-env.js";
+import { capabilityProfile } from "../../shared/capability-profile.js";
 
 /** The only Galaxy reads this source is allowed to make. Anything not built by
  *  these two functions never leaves the module, so there is no path from a
@@ -477,8 +477,8 @@ export async function fetchGalaxyLiveSnapshot(
  * Galaxy would otherwise have us probe a stranger's id and render "this history
  * belongs to another account" forever.
  *
- * `getCurrentHistoryId()` from state.ts is deliberately not used: nothing in
- * production calls `setGalaxyConnection`, so it is null in a real session.
+ * `getCurrentHistoryId()` from state.ts is deliberately not used: it follows
+ * the last create_history, not the history the notebook is bound to.
  */
 export function historyIdFromNotebook(content: string | null, serverUrl: string): string | null {
   if (!content) return null;
@@ -864,7 +864,7 @@ let armGeneration = 0;
  * registering the hook at all.
  */
 function shellDrawsDashboard(): boolean {
-  return isDesktopShell();
+  return capabilityProfile().ui === "desktop";
 }
 
 /**

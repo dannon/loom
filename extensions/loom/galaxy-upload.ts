@@ -8,6 +8,7 @@ import { getGalaxyConfig, galaxyGet, galaxyPost } from "./galaxy-api";
 import { getCurrentHistoryId } from "./state";
 import { isSensitivePath } from "./exec-guard/sensitive-read";
 import { resolveStateDir } from "../../shared/state-dir.js";
+import type { GalaxyToolFamily } from "../../shared/galaxy-tool-family.js";
 import {
   tusUpload,
   buildFetchPayload,
@@ -73,14 +74,14 @@ export function ingestFailureMessage(state: string, fileName: string): string {
   return `"${fileName}" transferred, but Galaxy's ingest failed (state "error"). Inspect the dataset's job for details before retrying.`;
 }
 
-export function registerGalaxyUploadTool(pi: ExtensionAPI): void {
+export function registerGalaxyUploadTool(pi: ExtensionAPI, family: GalaxyToolFamily): void {
   pi.registerTool({
     name: "galaxy_upload_local_file",
     label: "Upload local file to Galaxy",
     description:
       "Upload a LOCAL file from the user's machine to a Galaxy history using a resumable " +
       "(TUS) upload, then waits for Galaxy to finish ingesting the dataset before returning. " +
-      "For a file already at a public URL, use mcp__galaxy__upload_file_from_url instead.",
+      `For a file already at a public URL, use ${family.tool("upload_file_from_url")} instead.`,
     parameters: Type.Object({
       path: Type.String({ description: "Path to the local file to upload" }),
       history_id: Type.Optional(

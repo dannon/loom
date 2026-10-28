@@ -352,7 +352,31 @@ export interface TemplateSlot {
   label?: string;
   collection: boolean;
   required: boolean;
+  /** True when any variant takes several datasets. */
   multiple: boolean;
+  /**
+   * The slot as each conditional branch declares it. A tool can name the same
+   * input in several branches with different settings -- NanoPlot's
+   * `mode|reads|files` takes one dataset under `mode|choice=batch` and several
+   * under `combined` -- so which one applies depends on what the proposal picks.
+   */
+  variants: SlotVariant[];
+}
+
+/** One branch's declaration of a slot, and the selector values that pick it. */
+export interface SlotVariant {
+  when: BranchChoice[];
+  collection: boolean;
+  multiple: boolean;
+  /** Datatype extensions this branch takes; empty when the template doesn't say. */
+  accepts: string[];
+}
+
+/** A conditional's selector, the value that picks this branch, and its default. */
+export interface BranchChoice {
+  param: string;
+  value: string;
+  default?: string;
 }
 
 /** What a frozen template body says a proposal may name. */
@@ -365,6 +389,10 @@ export interface TemplateShape {
   repeats: Set<string>;
   /** Labels that name exactly one slot or parameter, for canonicalizing. */
   aliases: Map<string, string>;
+  /** Each conditional selector's values, where the template lists them. */
+  choices: Map<string, Set<string>>;
+  /** Boolean selectors' true and false values, which branches are named by. */
+  booleans: Map<string, { t: string; f: string }>;
 }
 
 function emptyShape(version: string): TemplateShape {
@@ -374,6 +402,8 @@ function emptyShape(version: string): TemplateShape {
     params: new Set(),
     repeats: new Set(),
     aliases: new Map(),
+    choices: new Map(),
+    booleans: new Map(),
   };
 }
 
@@ -395,11 +425,43 @@ function children(group: Record<string, unknown>): unknown {
   return group.inputs ?? group.parameters;
 }
 
+/** A selector or case value as text; Galaxy gives booleans for a boolean selector. */
+/** A template's accepted formats: a list, or a comma-separated string (a user-defined tool's `format`). */
+function formatList(...vs: unknown[]): string[] {
+  const out = new Set<string>();
+  for (const v of vs) {
+    const items = typeof v === "string" ? v.split(",") : Array.isArray(v) ? v : [];
+    for (const x of items) if (typeof x === "string" && x.trim() !== "") out.add(x.trim());
+  }
+  return [...out];
+}
+
+function choiceText(v: unknown): string | undefined {
+  if (typeof v === "string") return v;
+  if (typeof v === "boolean" || typeof v === "number") return String(v);
+  return undefined;
+}
+
+/** Galaxy's `string_as_bool`: these spellings are true and anything else is false. */
+const galaxyTrue = (v: unknown) => ["true", "yes", "on", "1"].includes(String(v).toLowerCase());
+
+/**
+ * A selector's value as its branches name it. A boolean's value becomes its
+ * truevalue or falsevalue the way Galaxy reads it, so `"True"` is true and
+ * any string it doesn't know, its own truevalue included, is false.
+ */
+function selectorText(shape: TemplateShape, selector: string, v: unknown): string | undefined {
+  const b = shape.booleans.get(selector);
+  if (b && v !== undefined) return galaxyTrue(v) ? b.t : b.f;
+  return choiceText(v);
+}
+
 function walkToolInputs(
   inputs: unknown,
   shape: TemplateShape,
   prefix: string,
   conditional: boolean,
+  branch: BranchChoice[] = [],
 ): void {
   if (!Array.isArray(inputs)) return;
   for (const raw of inputs) {
@@ -407,27 +469,79 @@ function walkToolInputs(
     const name = `${prefix}${raw.name}`;
     const type = raw.type;
     if (type === "data" || type === "data_collection") {
+      const variant: SlotVariant = {
+        when: branch,
+        collection: type === "data_collection",
+        multiple: raw.multiple === true,
+        accepts: formatList(raw.extensions, raw.format),
+      };
+      const seen = shape.slots.get(name);
+      if (seen) {
+        seen.variants.push(variant);
+        seen.multiple ||= variant.multiple;
+        continue;
+      }
       shape.slots.set(name, {
         name,
         ...(typeof raw.label === "string" && raw.label !== "" ? { label: raw.label } : {}),
         collection: type === "data_collection",
         required: !conditional && raw.optional !== true,
-        multiple: raw.multiple === true,
+        multiple: variant.multiple,
+        variants: [variant],
       });
     } else if (type === "conditional") {
       const testRaw = raw.test_param ?? raw.test_parameter;
       const test = isRecord(testRaw) ? testRaw : null;
-      if (test && typeof test.name === "string") shape.params.add(`${name}|${test.name}`);
+      const selector = test && typeof test.name === "string" ? `${name}|${test.name}` : null;
+      if (selector) shape.params.add(selector);
+      if (selector && test?.type === "boolean") {
+        shape.booleans.set(selector, {
+          t: choiceText(test.truevalue) ?? "true",
+          f: choiceText(test.falsevalue) ?? "false",
+        });
+      }
+      const byDefault = selector
+        ? selectorText(shape, selector, test?.value ?? test?.default)
+        : undefined;
       const casesRaw = raw.cases ?? raw.whens;
       const cases = Array.isArray(casesRaw) ? casesRaw : [];
+      // A select can offer values no case names (Galaxy runs those with no
+      // extra inputs), so the options count too.
+      const values = new Set<string>();
       for (const c of cases) {
-        if (isRecord(c)) walkToolInputs(children(c), shape, `${name}|`, true);
+        const v = isRecord(c) ? choiceText(c.value ?? c.discriminator) : undefined;
+        if (v !== undefined) values.add(v);
+      }
+      for (const o of Array.isArray(test?.options) ? test.options : []) {
+        const v = choiceText(Array.isArray(o) ? o[1] : isRecord(o) ? o.value : undefined);
+        if (v !== undefined) values.add(v);
+      }
+      // The same selector path can sit under several parent branches.
+      if (selector && values.size > 0) {
+        const all = shape.choices.get(selector) ?? new Set<string>();
+        for (const v of values) all.add(v);
+        shape.choices.set(selector, all);
+      }
+      for (const c of cases) {
+        if (!isRecord(c)) continue;
+        const value = choiceText(c.value ?? c.discriminator);
+        const choice: BranchChoice[] =
+          selector && value !== undefined
+            ? [
+                {
+                  param: selector,
+                  value,
+                  ...(byDefault !== undefined ? { default: byDefault } : {}),
+                },
+              ]
+            : [];
+        walkToolInputs(children(c), shape, `${name}|`, true, [...branch, ...choice]);
       }
     } else if (type === "repeat") {
       shape.repeats.add(name);
-      walkToolInputs(children(raw), shape, `${name}_#|`, true);
+      walkToolInputs(children(raw), shape, `${name}_#|`, true, branch);
     } else if (type === "section") {
-      walkToolInputs(children(raw), shape, `${name}|`, conditional);
+      walkToolInputs(children(raw), shape, `${name}|`, conditional, branch);
     } else if (type === "upload_dataset") {
       continue;
     } else {
@@ -452,6 +566,14 @@ function workflowShape(body: Record<string, unknown>, version: string): Template
         collection: s.input_type === "data_collection",
         required: s.optional !== true,
         multiple: false,
+        variants: [
+          {
+            when: [],
+            collection: s.input_type === "data_collection",
+            multiple: false,
+            accepts: formatList(s.accepted_formats, s.acceptable_extensions),
+          },
+        ],
       });
     } else if (s.input_type === "parameter") {
       shape.params.add(name);
@@ -534,6 +656,156 @@ function describeSlots(shape: TemplateShape): string {
 }
 
 /**
+ * A collection on a slot that takes one dataset. Says what would be accepted,
+ * so a model can change its call instead of resending the same one.
+ */
+function collectionOnDatasetSlot(slotName: string, shape: TemplateShape): string {
+  const takers = [...shape.slots.values()]
+    .filter((s) => s.collection || s.multiple)
+    .map((s) => s.name);
+  return (
+    `input slot "${slotName}" takes one dataset, not a collection, and a workflow ` +
+    `input doesn't map over one here. ` +
+    `Give it the id of one dataset (src hda)` +
+    (takers.length > 0
+      ? `, or give the collection (src hdca) to a slot that takes one: ${takers.join(", ")}`
+      : "; nothing in this template takes a collection")
+  );
+}
+
+/**
+ * The variants of a slot this proposal's selector choices pick: a branch
+ * applies when each selector on its path is overridden to its value or, left
+ * alone, defaults to it. Empty when the choices pick a branch that doesn't
+ * declare the slot, which Galaxy would drop.
+ */
+export function variantsFor(
+  proposal: Proposal,
+  shape: TemplateShape,
+  slot: TemplateSlot,
+  /** The input's name as given, so a selector is read from its own repeat instance. */
+  inputName: string = slot.name,
+): SlotVariant[] {
+  const given = new Map<string, unknown>(proposal.overrides.map((o) => [o.param, o.value]));
+  const inputParts = inputName.split("|");
+  // `rows_#|mode|choice` for the input `rows_1|mode|reads` is `rows_1|mode|choice`.
+  const instance = (param: string) =>
+    param
+      .split("|")
+      .map((part, i) => {
+        const m = inputParts[i]?.match(/^(.+)_(\d+)$/);
+        return part.endsWith("_#") && m && `${m[1]}_#` === part ? inputParts[i] : part;
+      })
+      .join("|");
+  const picked = slot.variants.filter((v) =>
+    v.when.every((c) => {
+      const param = instance(c.param);
+      const value = given.has(param) ? selectorText(shape, c.param, given.get(param)) : c.default;
+      return value === undefined || value === c.value;
+    }),
+  );
+  return picked;
+}
+
+/** The selector choices under which a slot is used, for a refusal. */
+function slotBranches(slot: TemplateSlot): string {
+  const each = [
+    ...new Set(
+      slot.variants.map((v) => v.when.map((c) => `${c.param} is ${c.value}`).join(" and ")),
+    ),
+  ];
+  if (each.length <= 3) return `it's used when ${each.join("; or when ")}`;
+  const selectors = [...new Set(slot.variants.flatMap((v) => v.when.map((c) => c.param)))];
+  return `it's used only under other values of ${orList(selectors)}`;
+}
+
+/** What Galaxy says about the datasets a proposal names, for the format check. */
+export interface InputFormats {
+  /**
+   * Each input's datatype extensions by `src:id`: one for a dataset, the
+   * element datatypes for a collection. Null when Galaxy couldn't say.
+   */
+  extensions: Map<string, string[] | null>;
+  /**
+   * Whether Galaxy takes a dataset of `ext` where `accepted` are asked for, as
+   * a subtype of one or by converting it. Undefined when that can't be told
+   * (a datatype the server didn't describe); null when the datatype hierarchy
+   * couldn't be read at all.
+   */
+  accepts: ((ext: string, accepted: string[]) => boolean | undefined) | null;
+}
+
+export const inputKey = (i: { src: string; id: string }) => `${i.src}:${i.id}`;
+
+function orList(xs: string[]): string {
+  return xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} or ${xs.at(-1)}`;
+}
+
+/**
+ * Each input whose datatype its slot can't take (#618). Only a provable
+ * mismatch is refused: a slot that names no formats, a dataset Galaxy didn't
+ * describe, or a datatype pairing the hierarchy can't settle is let through
+ * and listed in `unchecked` instead.
+ */
+export function checkInputFormats(
+  proposal: Proposal,
+  shape: TemplateShape,
+  formats: InputFormats,
+): { problems: string[]; unchecked: string[] } {
+  const problems: string[] = [];
+  const unchecked: string[] = [];
+  for (const input of proposal.inputs) {
+    const slot = slotFor(shape, input.slot);
+    if (!slot) continue;
+    const variants = variantsFor(proposal, shape, slot, input.slot);
+    if (variants.length === 0 || variants.some((v) => v.accepts.length === 0)) continue;
+    const accepted = [...new Set(variants.flatMap((v) => v.accepts))];
+    if (accepted.includes("data")) continue;
+    const exts = formats.extensions.get(inputKey(input));
+    const what = input.src === "hdca" ? `collection ${input.id}` : `dataset ${input.id}`;
+    if (!exts || exts.length === 0) {
+      unchecked.push(`${input.slot}: Galaxy didn't say what format ${what} is`);
+      continue;
+    }
+    if (!formats.accepts) {
+      unchecked.push(`${input.slot}: Galaxy's datatype hierarchy couldn't be read`);
+      continue;
+    }
+    const verdicts = exts.map((ext) => ({ ext, ok: formats.accepts!(ext, accepted) }));
+    const wrong = verdicts.filter((v) => v.ok === false).map((v) => v.ext);
+    if (wrong.length > 0) {
+      problems.push(
+        `input slot "${input.slot}" takes ${orList(accepted)} (or a subtype), but ${what} ` +
+          `${input.src === "hdca" ? "holds" : "is"} ${orList(wrong)}. Give it one in a format ` +
+          `the slot takes; if the data is right but mislabeled, change its datatype in Galaxy first`,
+      );
+    } else if (verdicts.some((v) => v.ok === undefined)) {
+      const unsure = verdicts.filter((v) => v.ok === undefined).map((v) => v.ext);
+      unchecked.push(
+        `${input.slot}: can't tell whether ${orList(unsure)} fits ${orList(accepted)}`,
+      );
+    }
+  }
+  return { problems, unchecked };
+}
+
+/**
+ * The slots a proposal maps over: a collection on a tool's one-dataset slot,
+ * which Galaxy runs once per element.
+ */
+export function mappedOverSlots(proposal: Proposal, shape: TemplateShape): string[] {
+  if (proposal.target.kind === "workflow") return [];
+  return proposal.inputs
+    .filter((i) => {
+      const slot = slotFor(shape, i.slot);
+      if (i.src !== "hdca" || !slot) return false;
+      // When the branch can't be pinned down, say it may run per element.
+      return variantsFor(proposal, shape, slot, i.slot).some((v) => !v.multiple && !v.collection);
+    })
+    .map((i) => i.slot);
+}
+
+/**
  * Every way the proposal disagrees with the template, or an empty list.
  * Checked: each input names a dataset slot the template has, with a src that
  * slot takes, at most once unless it takes several; every required slot is
@@ -553,6 +825,10 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
   // separately, by the template slot they fill, for the required check.
   const filled = new Map<string, number>();
   const covered = new Set<string>();
+  // Inputs Galaxy would drop, reported last: a selector value no branch names
+  // already explains why nothing applies.
+  const unused = new Map<string, string>();
+  const srcs = new Map<string, Set<string>>();
   for (const input of proposal.inputs) {
     const slot = slotFor(shape, input.slot);
     if (!slot) {
@@ -561,18 +837,48 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
       );
       continue;
     }
-    if (slot.collection && input.src !== "hdca") {
-      problems.push(`input slot "${input.slot}" takes a collection (src hdca), not ${input.src}`);
-    } else if (!slot.collection && input.src === "hdca") {
-      problems.push(
-        `input slot "${input.slot}" takes a dataset (src hda or ldda), not a collection`,
+    // Branches can disagree; only what every applicable one refuses is refused.
+    const variants = variantsFor(proposal, shape, slot, input.slot);
+    if (variants.length === 0) {
+      unused.set(
+        input.slot,
+        `input slot "${input.slot}" isn't used with the branch these choices pick ` +
+          `(overrides, or the selectors' defaults); ${slotBranches(slot)}`,
       );
+      continue;
+    }
+    if (variants.every((v) => v.collection) && input.src !== "hdca") {
+      problems.push(
+        `input slot "${input.slot}" takes a collection (src hdca), not ${input.src}; ` +
+          `give a collection id with src hdca`,
+      );
+    } else if (
+      !variants.some((v) => v.collection || v.multiple) &&
+      input.src === "hdca" &&
+      proposal.target.kind === "workflow"
+    ) {
+      // A tool maps over a collection on a one-dataset slot (one job per
+      // element) and a `multiple` slot takes it whole; a workflow input does
+      // neither without a batch request the proposal can't express.
+      problems.push(collectionOnDatasetSlot(input.slot, shape));
     }
     filled.set(input.slot, (filled.get(input.slot) ?? 0) + 1);
+    srcs.set(input.slot, (srcs.get(input.slot) ?? new Set()).add(input.src));
     covered.add(slot.name);
   }
+  for (const [name, given] of srcs) {
+    // Galaxy refuses a collection beside anything else on one input.
+    if (given.size > 1 && given.has("hdca")) {
+      problems.push(
+        `input slot "${name}" is given both datasets and collections; Galaxy takes only ` +
+          `collections once one is given, so give all collections or all datasets`,
+      );
+    }
+  }
   for (const [name, n] of filled) {
-    if (n > 1 && !slotFor(shape, name)?.multiple) {
+    const slot = slotFor(shape, name);
+    const variants = slot ? variantsFor(proposal, shape, slot, name) : [];
+    if (n > 1 && variants.length > 0 && !variants.some((v) => v.multiple)) {
       problems.push(`input slot "${name}" takes one dataset but is given ${n}`);
     }
   }
@@ -594,8 +900,26 @@ export function validateProposal(proposal: Proposal, shape: TemplateShape): stri
     }
     if (o.param.includes("_#") || !shape.params.has(foldRepeats(o.param, shape.repeats))) {
       problems.push(`"${o.param}" is not a parameter of this ${proposalNoun(proposal)}`);
+      continue;
+    }
+    // A selector set to something no branch names would leave which inputs
+    // and formats apply unknown, so it is refused rather than guessed at.
+    const selector = foldRepeats(o.param, shape.repeats);
+    const b = shape.booleans.get(selector);
+    if (b && typeof o.value === "string" && o.value === b.t && !galaxyTrue(o.value)) {
+      problems.push(
+        `"${o.param}" is a boolean; give true or false (Galaxy reads "${o.value}" as false)`,
+      );
+      continue;
+    }
+    const values = shape.choices.get(selector);
+    const value = selectorText(shape, selector, o.value);
+    if (values && (value === undefined || !values.has(value))) {
+      problems.push(`"${o.param}" chooses a branch; it takes ${orList([...values])}`);
+      unused.clear();
     }
   }
+  problems.push(...unused.values());
   return problems;
 }
 
@@ -985,6 +1309,8 @@ export function renderProposalTable(
     specRevision?: string;
     compact?: boolean;
     plain?: boolean;
+    /** The template, so a map-over can say it runs once per element. */
+    shape?: TemplateShape;
   } = {},
 ): string {
   const t = proposal.target;
@@ -999,7 +1325,11 @@ export function renderProposalTable(
     ["History", proposal.historyId],
   ];
   if (proposal.label) rows.splice(1, 0, ["Label", proposal.label]);
-  for (const i of proposal.inputs) rows.push([`input ${i.slot}`, `${i.src} ${i.id}`]);
+  const mapped = new Set(opts.shape ? mappedOverSlots(proposal, opts.shape) : []);
+  for (const i of proposal.inputs) {
+    const each = mapped.has(i.slot) ? " -- runs once per element, one job each" : "";
+    rows.push([`input ${i.slot}`, `${i.src} ${i.id}${each}`]);
+  }
   for (const o of proposal.overrides) {
     rows.push([
       `param ${o.param}`,

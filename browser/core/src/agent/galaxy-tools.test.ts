@@ -600,6 +600,18 @@ describe("update_page policy", () => {
     expect(await section("## Results", "## Results\n\nCounted 3 teams.")).toBeUndefined();
     expect(await section("## Results", "## Findings\n\nRenamed.")).toBeUndefined();
   });
+
+  it("refuses a heading the page repeats, as Orbit's bridge does", async () => {
+    const check = OPS_POLICY.update_page.check!;
+    const page = "## Plan A\n### Steps\n1\n## Plan B\n### Steps\n2";
+    const ctx = { galaxy: { get: async () => ({ content_editor: page }) } } as never;
+    const section = (section_heading: string) =>
+      check({ page_id: "p1", section_heading, section_content: `${section_heading}\nx` }, ctx);
+    const refused = await section("### Steps");
+    expect(refused?.isError).toBe(true);
+    expect(refused?.text).toContain('"## Plan A", "## Plan B"');
+    expect(await section("## Plan B")).toBeUndefined();
+  });
 });
 
 describe("a galaxy-ops failure, as the model reads it", () => {

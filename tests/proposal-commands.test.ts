@@ -3,7 +3,9 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   approveCommand,
+  approvedRunPrompt,
   checkProposalDrift,
+  checkProposalDriftNow,
   noteProposalBinding,
   sessionView,
   pendingCommand,
@@ -13,7 +15,11 @@ import {
   type ProposalDeps,
   type ProposeParams,
 } from "../extensions/loom/proposal-commands";
-import { findProposalBlocks, renderProposalBlock } from "../extensions/loom/notebook-writer";
+import {
+  findProposalBlocks,
+  renderProposalBlock,
+  withNotebookLock,
+} from "../extensions/loom/notebook-writer";
 import { liveApproval } from "../extensions/loom/registry-proposal";
 import {
   closeSessionRegistry,
@@ -22,9 +28,18 @@ import {
 } from "../extensions/loom/registry-runtime";
 import { RegistryStore } from "../extensions/loom/registry";
 import type { TemplateSnapshot } from "../extensions/loom/registry-submitter";
-import { TemplateUnavailableError } from "../extensions/loom/registry-templates";
 import { SERVER, tmpAnalysisDir } from "./registry-fixtures";
-import { TOOL_ID, TOOL_SNAPSHOT, toolProposal } from "./registry-proposal-fixtures";
+import { datatypeAccepts, TemplateUnavailableError } from "../extensions/loom/registry-templates";
+import {
+  CONVERTERS,
+  DATATYPES,
+  MANIFEST_ID,
+  NANOPLOT_ID,
+  NANOPLOT_SNAPSHOT,
+  TOOL_ID,
+  TOOL_SNAPSHOT,
+  toolProposal,
+} from "./registry-proposal-fixtures";
 
 const NOTEBOOK =
   "# Analysis\n\n## Plan A: QC [remote]\n\n- [ ] 1. **Trim** {#plan-a-step-1} -- fastp\n- [ ] 2. **Align** {#plan-a-step-2}\n";
@@ -99,8 +114,11 @@ beforeEach(() => {
     heartbeatMs: null,
   }).session;
 });
-afterEach(() => {
+afterEach(async () => {
   closeSessionRegistry();
+  // /revoke clears the notebook's echo without awaiting it; queue behind it on the
+  // record lock so it has finished writing before the directory goes.
+  await withNotebookLock(nb, async () => {});
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -247,7 +265,7 @@ describe("/approve", () => {
       NOTEBOOK + "\n" + renderProposalBlock(toolProposal(), { specRevision: "f".repeat(64) }),
     );
     expect(liveApproval(session!.store.snapshot(), "prop-abc123")).toBeUndefined();
-    expect(pendingCommand(deps()).message).toMatch(/prop-abc123 -- not approved/);
+    expect((await pendingCommand(deps())).message).toMatch(/prop-abc123 -- not approved/);
   });
 
   it("refuses an unknown id, a duplicated id, and an unreadable block", async () => {
@@ -370,7 +388,29 @@ describe("edit after approve revokes, on the next read", () => {
       source: "harness",
       payload: { proposal_id: id, attempt_id: attempt, reason: "edited" },
     });
-    expect(pendingCommand(deps()).message).toMatch(new RegExp(`${id} -- approval revoked`));
+    expect((await pendingCommand(deps())).message).toMatch(new RegExp(`${id} -- approval revoked`));
+  });
+
+  it("starts a turn to submit the run once approved, and only then", async () => {
+    const sent: string[] = [];
+    let handler: ((args: string, ctx: unknown) => Promise<void>) | undefined;
+    const pi = {
+      registerTool: () => {},
+      registerCommand: (name: string, c: { handler: typeof handler }) => {
+        if (name === "approve") handler = c.handler;
+      },
+      on: () => {},
+      sendUserMessage: (text: string) => sent.push(text),
+    } as never;
+    registerProposalCommands(pi, deps());
+    const id = await proposed();
+    const ctx = { hasUI: false, ui: { notify: () => {} } };
+    await handler!(`${id} --yes`, ctx);
+    expect(sent).toEqual([approvedRunPrompt(id)]);
+    expect(sent[0]).toContain(`proposalId: "${id}"`);
+    await handler!(`${id} --yes`, ctx); // already approved: nothing new to submit
+    await handler!("prop-nope --yes", ctx);
+    expect(sent).toHaveLength(1);
   });
 
   it("an edit to the label alone leaves the approval live", async () => {
@@ -390,14 +430,14 @@ describe("edit after approve revokes, on the next read", () => {
     await approveCommand(deps(), `${id} --yes`);
     state.setNotebookPath(nb);
     try {
-      state.reemitNotebookIfChanged();
+      await state.reemitNotebookIfChanged();
       expect(liveApproval(session!.store.snapshot(), id)).toBeDefined();
       // A hand edit the watcher (or the after-tool re-sync) notices.
       fs.writeFileSync(
         nb,
         notebook().replace("step_anchor: plan-a-step-1", "step_anchor: plan-a-step-2"),
       );
-      expect(state.reemitNotebookIfChanged()).toBe(true);
+      expect(await state.reemitNotebookIfChanged()).toBe(true);
       expect(liveApproval(session!.store.snapshot(), id)).toBeUndefined();
     } finally {
       state.setNotebookPath(null);
@@ -405,20 +445,158 @@ describe("edit after approve revokes, on the next read", () => {
   });
 });
 
+describe("map-over through loom_propose and /approve (#615)", () => {
+  it("proposes NanoPlot over a collection, says it runs per element, and approves it", async () => {
+    snapshot = NANOPLOT_SNAPSHOT;
+    let text = "";
+    const pi = {
+      registerTool: (t: { name: string; execute: (...a: unknown[]) => Promise<unknown> }) => {
+        if (t.name === "loom_propose") {
+          void t
+            .execute("call-1", {
+              ...params({
+                target: { kind: "tool", id: NANOPLOT_ID },
+                inputs: [{ slot: "mode|reads|files", src: "hdca", id: "a1c62e0f5b3d7790" }],
+                overrides: [],
+              }),
+            })
+            .then((r) => {
+              text = (r as { content: Array<{ text: string }> }).content[0].text;
+            });
+        }
+      },
+      registerCommand: () => {},
+      on: () => {},
+    } as never;
+    registerProposalCommands(pi, deps());
+    await vi.waitFor(() => expect(text).not.toBe(""));
+    expect(text).toMatch(/^Proposed prop-/);
+    expect(text).toMatch(/maps over the collection given to mode\|reads\|files/);
+    expect(text).toMatch(/runs once per element, one job each/);
+
+    const id = text.match(/^Proposed (\S+)\./)![1];
+    const r = await approveCommand(deps(), `${id} --yes`);
+    expect(r.message).toMatch(/^Approved /);
+    expect(r.message).toMatch(/runs once per element/);
+  });
+});
+
+describe("format check through loom_propose and /approve (#618)", () => {
+  const formats =
+    (exts: Record<string, string[]>): ProposalDeps["formats"] =>
+    () =>
+    async () => ({
+      extensions: new Map(Object.entries(exts)),
+      accepts: datatypeAccepts(DATATYPES, CONVERTERS),
+    });
+  const nanoplot = (id: string, src: "hda" | "hdca" = "hda") =>
+    params({
+      target: { kind: "tool", id: NANOPLOT_ID },
+      inputs: [{ slot: "mode|reads|files", src, id }],
+      overrides: [],
+    });
+
+  beforeEach(() => {
+    snapshot = NANOPLOT_SNAPSHOT;
+  });
+
+  it("refuses Scott's manifest at proposal time and writes nothing", async () => {
+    const r = await propose(
+      deps({ formats: formats({ [`hda:${MANIFEST_ID}`]: ["tsv"] }) }),
+      nanoplot(MANIFEST_ID),
+    );
+    expect(r).toEqual({
+      ok: false,
+      problems: [expect.stringMatching(/takes fastq, .* but dataset \S+ is tsv\./)],
+    });
+    expect(findProposalBlocks(notebook())).toEqual([]);
+  });
+
+  it("re-checks at /approve, so a dataset relabeled since then is refused", async () => {
+    const r = await propose(
+      deps({ formats: formats({ "hda:d1": ["fastqsanger"] }) }),
+      nanoplot("d1"),
+    );
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.formatsUnchecked).toEqual([]);
+    const reply = await approveCommand(
+      deps({ formats: formats({ "hda:d1": ["tabular"] }) }),
+      `${r.proposal.proposalId} --yes`,
+    );
+    expect(reply.message).toMatch(/^Not approved -- .*\n- input slot "mode\|reads\|files" takes/);
+    expect(liveApproval(session!.store.snapshot(), r.proposal.proposalId)).toBeUndefined();
+  });
+
+  it("shows the person approving what it couldn't check", async () => {
+    const r = await propose(deps({ formats: formats({}) }), nanoplot("d3"));
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    let shown = "";
+    await approveCommand(deps({ formats: formats({}) }), r.proposal.proposalId, {
+      confirm: async (_t, message) => {
+        shown = message;
+        return false;
+      },
+    });
+    expect(shown).toMatch(/Formats not checked:\n- mode\|reads\|files: Galaxy didn't say/);
+  });
+
+  it("puts what it couldn't check on the approval's record", async () => {
+    const r = await propose(deps({ formats: formats({}) }), nanoplot("d4"));
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    const unchecked = [expect.stringMatching(/didn't say what format dataset d4/)];
+    await approveCommand(deps({ formats: formats({}) }), r.proposal.proposalId);
+    expect(activity().at(-1)).toMatchObject({
+      kind: "proposal.approval_unconfirmed",
+      payload: { formats_unchecked: unchecked },
+    });
+    await approveCommand(deps({ formats: formats({}) }), `${r.proposal.proposalId} --yes`);
+    expect(activity().at(-1)).toMatchObject({
+      kind: "proposal.approved",
+      payload: { formats_unchecked: unchecked },
+    });
+  });
+
+  it("lists what it couldn't check in the tool's reply", async () => {
+    let tool: { execute: (...a: unknown[]) => Promise<unknown> } | undefined;
+    const pi = {
+      registerTool: (t: { name: string; execute: (...a: unknown[]) => Promise<unknown> }) => {
+        if (t.name === "loom_propose") tool = t;
+      },
+      registerCommand: () => {},
+      on: () => {},
+    } as never;
+    registerProposalCommands(pi, deps({ formats: formats({}) }));
+    const r = (await tool!.execute("call-1", nanoplot("d2"))) as {
+      content: Array<{ text: string }>;
+    };
+    expect(r.content[0].text).toMatch(
+      /Formats not checked \(Galaxy will say at submission if they're wrong\):\n- mode\|reads\|files: Galaxy didn't say what format dataset d2/,
+    );
+  });
+
+  it("lists what it couldn't check when there's no dialog to approve in", async () => {
+    const r = await propose(deps({ formats: formats({}) }), nanoplot("d5"));
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    const reply = await approveCommand(deps({ formats: formats({}) }), r.proposal.proposalId);
+    expect(reply.message).toMatch(/^Not approved: there's no dialog/);
+    expect(reply.message).toMatch(/Formats not checked:\n- mode\|reads\|files: Galaxy didn't say/);
+  });
+});
+
 describe("/revoke and /pending", () => {
   it("revokes a live approval, then has nothing to revoke", async () => {
     const id = await proposed();
     await approveCommand(deps(), `${id} --yes`);
-    expect(revokeCommand(deps(), id).message).toMatch(/Revoked the approval/);
-    expect(revokeCommand(deps(), id).message).toMatch(/no live approval/);
+    expect((await revokeCommand(deps(), id)).message).toMatch(/Revoked the approval/);
+    expect((await revokeCommand(deps(), id)).message).toMatch(/no live approval/);
     expect(activity().at(-1)).toMatchObject({ kind: "proposal.revoked", source: "user" });
   });
 
   it("says when nothing is pending", async () => {
-    expect(pendingCommand(deps()).message).toBe("No proposals in the notebook.");
+    expect((await pendingCommand(deps())).message).toBe("No proposals in the notebook.");
     const id = await proposed();
     await approveCommand(deps(), `${id} --yes`);
-    expect(pendingCommand(deps()).message).toBe("Nothing pending; 1 proposal(s) approved.");
+    expect((await pendingCommand(deps())).message).toBe("Nothing pending; 1 proposal(s) approved.");
   });
 });
 
@@ -447,7 +625,11 @@ describe("record tools binding a run to its proposal", () => {
     await approveCommand(deps(), `${id} --yes`);
     const before = JSON.stringify(session!.store.snapshot());
     const nbBefore = notebook();
-    const r = noteProposalBinding(deps(), { proposalId: id, notebookAnchor: "plan-a-step-1", run });
+    const r = await noteProposalBinding(deps(), {
+      proposalId: id,
+      notebookAnchor: "plan-a-step-1",
+      run,
+    });
     const attempt = liveApproval(session!.store.snapshot(), id)!.attempt_id;
     expect(r).toEqual({ bound: true, attemptId: attempt });
     expect(activity().at(-1)).toMatchObject({
@@ -462,14 +644,14 @@ describe("record tools binding a run to its proposal", () => {
   it("won't bind to a proposal that isn't approved, or to another step", async () => {
     const id = await proposed();
     expect(
-      noteProposalBinding(deps(), { proposalId: id, notebookAnchor: "plan-a-step-1", run }),
+      await noteProposalBinding(deps(), { proposalId: id, notebookAnchor: "plan-a-step-1", run }),
     ).toEqual({
       bound: false,
       reason: `${id} has no live approval in this session`,
     });
     await approveCommand(deps(), `${id} --yes`);
     expect(
-      noteProposalBinding(deps(), { proposalId: id, notebookAnchor: "plan-a-step-2", run }),
+      await noteProposalBinding(deps(), { proposalId: id, notebookAnchor: "plan-a-step-2", run }),
     ).toMatchObject({ bound: false, reason: expect.stringMatching(/approved for plan-a-step-1/) });
     expect(activity().some((e) => e.kind === "proposal.bound")).toBe(false);
   });
@@ -485,7 +667,7 @@ describe("review follow-ups", () => {
         .replace("## Plan A: QC [remote]", "## Notes")
         .replace(/^- \[ \] 1\. \*\*Trim\*\*.*$/m, ""),
     );
-    expect(checkProposalDrift(deps())).toEqual([
+    expect(await checkProposalDriftNow(deps())).toEqual([
       expect.objectContaining({ proposalId: id, reason: "step_removed" }),
     ]);
     expect(liveApproval(session!.store.snapshot(), id)).toBeUndefined();
@@ -495,7 +677,7 @@ describe("review follow-ups", () => {
     const id = await proposed();
     await approveCommand(deps(), `${id} --yes`);
     fs.rmSync(nb);
-    expect(checkProposalDrift(deps())).toEqual([
+    expect(await checkProposalDriftNow(deps())).toEqual([
       expect.objectContaining({ proposalId: id, reason: "removed" }),
     ]);
     expect(liveApproval(session!.store.snapshot(), id)).toBeUndefined();
@@ -504,7 +686,7 @@ describe("review follow-ups", () => {
   it("an unreadable-but-present notebook revokes nothing", async () => {
     const id = await proposed();
     await approveCommand(deps(), `${id} --yes`);
-    expect(checkProposalDrift(deps({ notebookPath: () => dir }))).toEqual([]);
+    expect(await checkProposalDriftNow(deps({ notebookPath: () => dir }))).toEqual([]);
     expect(liveApproval(session!.store.snapshot(), id)).toBeDefined();
   });
 
@@ -558,13 +740,13 @@ describe("drift when the registry can't be written", () => {
     });
     expect(liveApproval(sessionView(session!), id)).toBeUndefined();
     expect(
-      noteProposalBinding(deps(), {
+      await noteProposalBinding(deps(), {
         proposalId: id,
         notebookAnchor: "plan-a-step-1",
         run: { kind: "job", id: "j1" },
       }),
     ).toMatchObject({ bound: false });
-    expect(pendingCommand(deps()).message).toMatch(new RegExp(`${id} -- approval revoked`));
+    expect((await pendingCommand(deps())).message).toMatch(new RegExp(`${id} -- approval revoked`));
     // Reported once, not on every later look.
     expect(checkProposalDrift(deps(), edited)).toEqual([]);
   });

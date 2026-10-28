@@ -21,6 +21,7 @@ import {
   registerEvidenceOverrideCommand,
 } from "../extensions/loom/evidence-override-command";
 import { renderInvocationYaml, type InvocationYaml } from "../extensions/loom/notebook-writer";
+import { GALAXY } from "./galaxy-family-fixture";
 
 const PLAN = `# Notebook
 
@@ -164,7 +165,7 @@ describe("the deny persists while the contradiction does", () => {
     // The escape this replaces: a `denied` set that let attempt two through, so
     // any model that disagreed with the gate only had to repeat itself.
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
 
     const first = await pi.write(flipEdit(STEP2));
     const second = await pi.write(flipEdit(STEP2));
@@ -175,7 +176,7 @@ describe("the deny persists while the contradiction does", () => {
 
   it("tells decision listeners about the block, with the step keys", async () => {
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     const seen: Array<{ outcome: string; steps: string[]; toolName: string; mode: string }> = [];
     const off = onEvidenceDecision((i) => seen.push(i));
     try {
@@ -190,7 +191,7 @@ describe("the deny persists while the contradiction does", () => {
 
   it("keeps denying across a third and fourth attempt", async () => {
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     for (let i = 0; i < 4; i++) {
       expect((await pi.write(flipEdit(STEP2)))?.block).toBe(true);
     }
@@ -199,7 +200,7 @@ describe("the deny persists while the contradiction does", () => {
 
   it("points the agent at the user's override rather than at a retry", async () => {
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     const blocked = await pi.write(flipEdit(STEP2));
     expect(blocked?.reason).toMatch(/\/override plan-a-step-2/);
     expect(blocked?.reason).toMatch(/Do not retry this write unchanged/);
@@ -226,7 +227,7 @@ describe("/override -- the user-originated exception", () => {
   it("allows exactly one write, then denies the next contradiction on that step", async () => {
     process.env.LOOM_EVIDENCE_GATE = "deny";
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     registerEvidenceOverrideCommand(pi.api);
 
     expect((await pi.write(flipEdit(STEP2)))?.block).toBe(true);
@@ -250,7 +251,7 @@ describe("/override -- the user-originated exception", () => {
 
   it("records the invocation id, so a warn-mode row can be adjudicated later", async () => {
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     await pi.write(flipEdit(STEP2));
     expect(payloads("evidence.decision")[0].contradictions).toEqual([
       {
@@ -265,7 +266,7 @@ describe("/override -- the user-originated exception", () => {
   it("names the overridden step in the decision it let through", async () => {
     process.env.LOOM_EVIDENCE_GATE = "deny";
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     registerEvidenceOverrideCommand(pi.api);
     await pi.runCommand("override", "plan-a-step-2 checked by hand");
     await pi.write(flipEdit(STEP2));
@@ -287,7 +288,7 @@ describe("/override -- the user-originated exception", () => {
       ),
     );
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     registerEvidenceOverrideCommand(pi.api);
     await pi.runCommand("override", "plan-a-step-2 checked by hand");
 
@@ -312,7 +313,7 @@ describe("/override -- the user-originated exception", () => {
       ),
     );
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     registerEvidenceOverrideCommand(pi.api);
     await pi.runCommand("override", "plan-a-step-2 checked by hand");
     expect((await pi.write(flipEdit(STEP1)))?.block).toBe(true);
@@ -367,7 +368,7 @@ describe("/override -- the user-originated exception", () => {
     for (const spelling of ["@notebook.md", "./notebook.md", nbPath]) {
       resetEvidenceOverrides();
       const pi = fakePi();
-      registerEvidenceGate(pi.api);
+      registerEvidenceGate(pi.api, GALAXY);
       const blocked = await pi.write({
         path: spelling,
         edits: [{ oldText: `- [ ] ${STEP2}`, newText: `- [x] ${STEP2}` }],
@@ -379,7 +380,7 @@ describe("/override -- the user-originated exception", () => {
   it("gates a write that names the notebook only under file_path", async () => {
     process.env.LOOM_EVIDENCE_GATE = "deny";
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     const blocked = await pi.write({
       file_path: "notebook.md",
       edits: [{ oldText: `- [ ] ${STEP2}`, newText: `- [x] ${STEP2}` }],
@@ -434,7 +435,7 @@ describe("/override -- the user-originated exception", () => {
     // starts. The user approved that run being ahead of its checkbox.
     process.env.LOOM_EVIDENCE_GATE = "deny";
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     registerEvidenceOverrideCommand(pi.api);
     await pi.runCommand("override", "plan-a-step-2 the first run is basically done");
 
@@ -464,7 +465,7 @@ describe("/override -- the user-originated exception", () => {
   it("does not survive a session boundary", async () => {
     process.env.LOOM_EVIDENCE_GATE = "deny";
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     registerEvidenceOverrideCommand(pi.api);
     await pi.runCommand("override", "plan-a-step-2 checked by hand");
     await pi.sessionStart();
@@ -485,7 +486,7 @@ describe("the pinned in_progress case (#475)", () => {
 
   it("is denied, and /override with a reason lets the completion through", async () => {
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     registerEvidenceOverrideCommand(pi.api);
     expect((await pi.write(flipEdit(STEP2)))?.block).toBe(true);
     await pi.runCommand("override", "plan-a-step-2 lost credentials; outputs checked in Galaxy");
@@ -504,7 +505,7 @@ describe("warn mode is untouched by any of this", () => {
 
   it("records `warned` on every attempt and blocks none of them", async () => {
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     for (let i = 0; i < 3; i++) {
       expect(await pi.write(flipEdit(STEP2))).toBeUndefined();
     }
@@ -517,7 +518,7 @@ describe("warn mode is untouched by any of this", () => {
 
   it("does not spend an override, because there was nothing to clear", async () => {
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     registerEvidenceOverrideCommand(pi.api);
     await pi.runCommand("override", "plan-a-step-2 checked by hand");
     await pi.write(flipEdit(STEP2));
@@ -531,7 +532,7 @@ describe("warn mode is untouched by any of this", () => {
   it("an uncontradicted flip is recorded, not warned", async () => {
     setNotebook(withInvocation(invocation({ status: "completed" })));
     const pi = fakePi();
-    registerEvidenceGate(pi.api);
+    registerEvidenceGate(pi.api, GALAXY);
     await pi.write(flipEdit(STEP2));
     expect(payloads("evidence.decision")[0].outcome).toBe("recorded");
   });

@@ -5,9 +5,10 @@
 // must be confirmed (or, where no confirm UI exists, blocked) regardless of model tier.
 //
 // Two confidence levels here:
-//   - RELIABLE: structured JSON we can read exactly -- a direct tool call, or one wrapped
-//     in a generic `mcp({tool, args})` proxy (args is a JSON string) -- Loom no
-//     longer ships one, but pi-mcp-adapter installed as a pi package brings it back.
+//   - RELIABLE: structured JSON we can read exactly -- a direct tool call, the same op
+//     through any MCP server a user configures themselves, or one wrapped in a generic
+//     `mcp({tool, args})` proxy (args is a JSON string) -- Loom ships neither, but
+//     pi-mcp-adapter installed as a pi package brings the proxy back.
 //   - BEST-EFFORT GUARDRAIL: free-form strings we can only pattern-match -- a raw curl/wget
 //     DELETE, or code-mode's run_galaxy_tool(code=<python>) script. Trivially evadable
 //     (obfuscation, a different client, method override); the goal is to catch the obvious
@@ -22,9 +23,9 @@
  */
 
 // Op-name -> predicate over its input args, returning the destructive shape or null.
-// NOTE: the pinned Galaxy MCP `update_history` tool exposes only `deleted` (a soft,
-// recoverable delete) -- there is no `purged` param there, so an MCP-path history delete is
-// always presented as recoverable. `purged` is still checked defensively (a future tool
+// NOTE: galaxy-ops' `update_history` exposes only `deleted` (a soft, recoverable delete) --
+// there is no `purged` param there, so a tool-path history delete is always presented as
+// recoverable. `purged` is still checked defensively (a future tool
 // version or a direct API caller could supply it); irreversible purge in practice comes via
 // the raw curl/code paths below, which carry the purge flag in the query or request body.
 const DESTRUCTIVE_OPS = {
@@ -36,14 +37,24 @@ const DESTRUCTIVE_OPS = {
   },
 };
 
-/** Lowercase + drop a leading `mcp__galaxy__` or `galaxy_` so the pi tool name, the bare op name
- *  (and either gate's casing) resolve the same.
+/** The ops whose arguments decide whether a call is destructive. A gate reading galaxy-ops'
+ *  `destructiveHint` leaves these to the classifier: the hint marks the op, not the call, and
+ *  would ask about a rename as if it were a delete.
+ * @type {readonly string[]} */
+export const GALAXY_ARGS_CLASSIFIED_OPS = Object.freeze(Object.keys(DESTRUCTIVE_OPS));
+
+/** Lowercase + drop a leading `mcp__<server>__` and `galaxy_` so the bare op name, Loom's
+ *  `galaxy_` spelling and the same op behind an MCP server a user added themselves (and either
+ *  gate's casing) resolve the same. Any server counts: a non-Galaxy op that lands on a
+ *  destructive name costs an extra confirm, never a missed one. The strip is greedy because a
+ *  server name may itself contain `__` (`galaxy__prod`) while op names never do.
  * @param {unknown} toolName @returns {string} */
 function normalize(toolName) {
   return String(toolName == null ? "" : toolName)
     .trim()
     .toLowerCase()
-    .replace(/^(?:mcp__galaxy__|galaxy_)/, "");
+    .replace(/^mcp__[a-z0-9_-]+__/, "")
+    .replace(/^galaxy_/, "");
 }
 
 /** @param {unknown} v @returns {Record<string, unknown>} */
@@ -85,7 +96,7 @@ function classifyNamed(name, args) {
 }
 
 /**
- * Classify an MCP tool call. Handles three shapes:
+ * Classify a Galaxy tool call. Handles three shapes:
  *  - direct:     update_history({ deleted, history_id })
  *  - mcp proxy:  mcp({ tool: "galaxy_update_history", args: "<json string>" }) --
  *                pi-mcp-adapter's gateway tool, a bypass if left unhandled (#338 F1)
@@ -242,9 +253,9 @@ export function isGalaxyDestructiveCurl(command) {
  */
 function classifyCode(code) {
   const s = String(code == null ? "" : code);
-  // Tolerate the tool name appearing as a positional or kwarg, with or without the
-  // galaxy_ prefix: call_tool('update_history', ...) / call_tool(name="mcp__galaxy__update_history", ...).
-  if (!/call_tool\([^)]*["'](?:galaxy_|mcp__galaxy__)?update_history["']/.test(s)) return null;
+  // Tolerate the tool name appearing as a positional or kwarg, with or without a
+  // prefix: call_tool('update_history', ...) / call_tool(name="galaxy_update_history", ...).
+  if (!/call_tool\([^)]*["'](?:galaxy_|mcp__\w+?__)?update_history["']/.test(s)) return null;
   const purge = hasPurge(s);
   if (!purge && !/["']?deleted["']?\s*[:=]\s*["']?true\b/i.test(s)) return null;
   /** @type {GalaxyDestructiveOp} */

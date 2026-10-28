@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       pull-requests: read
@@ -37,12 +37,14 @@ jobs:
               - "browser/**"
               - "app/src/renderer/**"
               - "shared/**"
+              # The conformance test (core/src/agent/pi-host.orbit.test.ts) boots Orbit's brain.
+              - "extensions/**"
               - ".github/workflows/browser.yml"
 
   test:
     needs: changes
     if: needs.changes.outputs.browser == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
       run:
@@ -54,7 +56,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: browser/package-lock.json
+          cache-dependency-path: |
+            browser/package-lock.json
+            package-lock.json
 
       # Node 22 ships npm 10.9, whose peer resolution crashes with
       # "Cannot read properties of null (reading 'edgesOut')" on a cold install.
@@ -71,6 +75,12 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
+      # pi-coding-agent's types for the pi-host shim's type-only import, and Orbit's runtime
+      # dependencies for the conformance test that boots extensions/loom on it.
+      - name: Install root dependencies
+        working-directory: .
+        run: npm ci
+
       - name: Install Node dependencies
         run: npm ci
 
@@ -82,7 +92,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
+          key: ${{ runner.os }}-${{ env.ImageOS }}-playwright-${{ steps.pw.outputs.version }}
 
       # Firefox and WebKit too: e2e/run-all.sh drives python-isolation in both.
       - name: Install Playwright browsers
@@ -116,7 +126,7 @@ jobs:
   browser:
     needs: [changes, test]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Browser suite
         run: |

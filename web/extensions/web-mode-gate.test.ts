@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, symlinkSync, rmSync, realpathSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import gate, { isPathAllowed, shouldBlockTool, dropSymlinkedEntries } from "./web-mode-gate.js";
+import gate, {
+  GALAXY_TOOLS,
+  isPathAllowed,
+  shouldBlockTool,
+  dropSymlinkedEntries,
+} from "./web-mode-gate.js";
+import { createGalaxyOpsToolSource } from "../../extensions/loom/galaxy-ops-tools.js";
 
 describe("isPathAllowed", () => {
   const allowlist = ["/tmp/loom-session/notebook.md"];
@@ -185,8 +191,9 @@ describe("shouldBlockTool", () => {
 
   // Default-DENY allowlist: the curated remote surface passes through.
   it.each([
-    "mcp__galaxy__run_tool",
-    "mcp__galaxy__connect",
+    "run_tool",
+    "get_histories",
+    "galaxy_read_output",
     "mcp__brc_analytics__get_genome",
     "gtn_search",
     "gtn_fetch",
@@ -208,11 +215,13 @@ describe("shouldBlockTool", () => {
     "chat_search",
     "some_future_tool",
     "glob",
-    // A server named "galaxy_" or "galaxy-" shares the mcp__galaxy__ prefix.
+    // No galaxy MCP server runs any more, so its spellings name nothing.
+    "mcp__galaxy__run_tool",
+    "mcp__galaxy__connect",
     "mcp__galaxy___run_tool",
+    // A server named "brc_analytics_" shares the curated prefix...
     "mcp__brc_analytics___get_genome",
-    // ...and so does one named galaxy__<x>, whose tools read mcp__galaxy__<x>__<tool>.
-    "mcp__galaxy__x__run_shell",
+    // ...and so does one named brc_analytics__<x>, whose tools read mcp__brc_analytics__<x>__<tool>.
     "mcp__brc_analytics__x__run",
   ])("denies non-surface tool %s by default", (toolName) => {
     const result = shouldBlockTool(toolName, { url: "http://169.254.169.254/" }, allowlist, cwd);
@@ -248,7 +257,7 @@ describe("shouldBlockTool", () => {
     const result = shouldBlockTool(
       "mcp",
       {
-        tool: "mcp__galaxy__update_history",
+        tool: "update_history",
         args: '{"purged":true,"history_id":"abc"}',
         server: "galaxy",
       },
@@ -262,7 +271,7 @@ describe("shouldBlockTool", () => {
     const result = shouldBlockTool(
       "mcp",
       {
-        tool: "mcp__galaxy__update_history",
+        tool: "update_history",
         args: '{"deleted":true,"history_id":"abc"}',
         server: "galaxy",
       },
@@ -272,10 +281,23 @@ describe("shouldBlockTool", () => {
     expect(result).toMatchObject({ block: true, reason: expect.stringContaining("destructive") });
   });
 
-  it("still allows a non-destructive Galaxy MCP call", () => {
+  it("still allows a non-destructive Galaxy call", () => {
+    expect(shouldBlockTool("run_tool", { tool_id: "cat1" }, allowlist, cwd)).toBeUndefined();
+  });
+
+  it("denies galaxy-ops' hidden upload_file, which reads a path on the host", () => {
     expect(
-      shouldBlockTool("mcp__galaxy__run_tool", { tool_id: "cat1" }, allowlist, cwd),
-    ).toBeUndefined();
+      shouldBlockTool("upload_file", { path: "/root/.loom/config.json" }, allowlist, cwd),
+    ).toEqual({ block: true, reason: expect.stringContaining("reads files on the Loom host") });
+  });
+
+  it("decides every in-process Galaxy tool the brain registers", () => {
+    const source = createGalaxyOpsToolSource();
+    const names = [...source.tools(), ...(source.companions?.() ?? [])].map((t) => t.name);
+    expect(names.length).toBeGreaterThan(40);
+    const blocked = names.filter((name) => shouldBlockTool(name, {}, allowlist, cwd));
+    expect(blocked).toEqual(["upload_file"]);
+    for (const name of GALAXY_TOOLS) expect(names, name).toContain(name);
   });
 });
 
@@ -346,7 +368,7 @@ describe("web-mode-gate registration (default export)", () => {
       await handler({ toolName: "write", input: { path: "/tmp/loom-session/secret.txt" } }),
     ).toMatchObject({ block: true });
     // curated remote surface passes through
-    expect(await handler({ toolName: "mcp__galaxy__run_tool", input: {} })).toBeUndefined();
+    expect(await handler({ toolName: "run_tool", input: {} })).toBeUndefined();
   });
 });
 
@@ -354,24 +376,18 @@ describe("shouldBlockTool -- destructive Galaxy ops (#338)", () => {
   const allowlist = ["/tmp/loom-session/notebook.md"];
   const cwd = "/tmp/loom-session";
 
-  it("blocks a whole-history delete (remote mode has no confirmation UI)", () => {
-    const r = shouldBlockTool(
-      "mcp__galaxy__update_history",
-      { deleted: true, history_id: "h" },
-      allowlist,
-      cwd,
-    );
+  it("blocks a whole-history delete", () => {
+    const r = shouldBlockTool("update_history", { deleted: true, history_id: "h" }, allowlist, cwd);
     expect(r?.block).toBe(true);
+    // The container does have a confirm (the brain's destructive gate asks through it), so the
+    // refusal must not tell the model there is none.
+    expect(r?.reason).not.toMatch(/confirmation UI/);
+    expect(r?.reason).toContain("blocked in remote mode");
   });
 
   it("blocks a history purge", () => {
     expect(
-      shouldBlockTool(
-        "mcp__galaxy__update_history",
-        { purged: true, history_id: "h" },
-        allowlist,
-        cwd,
-      )?.block,
+      shouldBlockTool("update_history", { purged: true, history_id: "h" }, allowlist, cwd)?.block,
     ).toBe(true);
   });
 
@@ -386,9 +402,7 @@ describe("shouldBlockTool -- destructive Galaxy ops (#338)", () => {
   });
 
   it("still permits a non-destructive update_history (rename) and reads", () => {
-    expect(
-      shouldBlockTool("mcp__galaxy__update_history", { name: "renamed" }, allowlist, cwd),
-    ).toBeUndefined();
-    expect(shouldBlockTool("mcp__galaxy__get_histories", {}, allowlist, cwd)).toBeUndefined();
+    expect(shouldBlockTool("update_history", { name: "renamed" }, allowlist, cwd)).toBeUndefined();
+    expect(shouldBlockTool("get_histories", {}, allowlist, cwd)).toBeUndefined();
   });
 });

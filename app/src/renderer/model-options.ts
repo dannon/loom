@@ -62,3 +62,47 @@ export function pickOfferedProvider(
   if (match) return match;
   return offered.includes(fallback) || offered.length === 0 ? fallback : offered[0];
 }
+
+/**
+ * What a custom endpoint's typed model field should hold once the endpoint has
+ * listed its models.
+ *
+ * The field is backed by a <datalist>, and Chromium only suggests entries that
+ * match what's already typed, so a stale id from a previous endpoint hid the
+ * one model the new endpoint serves (#601). With a single model listed there's
+ * nothing else it could mean. With several, an unlisted id stays: plenty of
+ * gateways list only part of what they serve.
+ */
+export function reconcileTypedModel(
+  current: string,
+  discovered: readonly string[],
+  { replaceStale = true }: { replaceStale?: boolean } = {},
+): string {
+  const first = discovered[0];
+  if (first === undefined) return current;
+  const typed = current.trim();
+  if (discovered.includes(typed)) return typed;
+  if (!typed || (replaceStale && discovered.length === 1)) return first;
+  return current;
+}
+
+/**
+ * The status line after a fetch. It says when the field hides the list, and
+ * when `previous` -- what the field held before -- was swapped out, so a
+ * replaced id never changes silently.
+ */
+export function discoveredModelsStatus(
+  current: string,
+  discovered: readonly string[],
+  previous = "",
+): string {
+  const typed = current.trim();
+  const was = previous.trim();
+  if (was && was !== typed && discovered.length === 1 && discovered[0] === typed) {
+    return `✓ Using "${typed}", the only model the endpoint lists (was "${was}")`;
+  }
+  const n = discovered.length;
+  const count = `✓ ${n} model${n === 1 ? "" : "s"} available`;
+  if (!typed || discovered.includes(typed)) return count;
+  return `${count} -- "${typed}" isn't one of them; clear the Model field to see the list`;
+}

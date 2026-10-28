@@ -56,6 +56,8 @@ export interface OrbitAPI {
   getState(): Promise<unknown>;
   getCwd(): Promise<string>;
   openFile(filePath: string): Promise<{ opened: boolean; error?: string }>;
+  /** Desktop only: open a workspace file in its system default app, without reading it. */
+  openFileInSystemViewer?(relPath: string): Promise<{ opened: boolean; error?: string }>;
   listFiles(opts?: {
     includeHidden?: boolean;
   }): Promise<{ ok: true; root: FileNode; cwd: string } | { ok: false; error: string }>;
@@ -224,6 +226,7 @@ const api: OrbitAPI = {
   getState: () => ipcRenderer.invoke("agent:get-state"),
   getCwd: () => ipcRenderer.invoke("agent:get-cwd"),
   openFile: (filePath) => ipcRenderer.invoke("file:open", filePath),
+  openFileInSystemViewer: (relPath) => ipcRenderer.invoke("files:open-system-viewer", relPath),
   listFiles: (opts) => ipcRenderer.invoke("files:list", opts),
   readFile: (relPath, opts) => ipcRenderer.invoke("files:read", relPath, opts),
   writeFile: (relPath, content) => ipcRenderer.invoke("files:write", relPath, content),

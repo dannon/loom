@@ -96,10 +96,13 @@ import { tusUpload, waitForDataset } from "../extensions/loom/galaxy-upload-tus"
 import { galaxyGet, galaxyPost, getGalaxyConfig } from "../extensions/loom/galaxy-api";
 import { getCurrentHistoryId } from "../extensions/loom/state";
 import { registerGalaxyUploadTool } from "../extensions/loom/galaxy-upload";
+import type { GalaxyToolFamily } from "../shared/galaxy-tool-family.js";
+import { GALAXY } from "./galaxy-family-fixture";
 
 interface ToolDef {
   name: string;
   label?: string;
+  description?: string;
   execute: (
     callId: string,
     params: Record<string, unknown>,
@@ -114,9 +117,9 @@ function makeFakeApi() {
   return { api: { registerTool: (d: ToolDef) => tools.push(d) } as any, tools };
 }
 
-function getTool() {
+function getTool(family: GalaxyToolFamily = GALAXY) {
   const { api, tools } = makeFakeApi();
-  registerGalaxyUploadTool(api);
+  registerGalaxyUploadTool(api, family);
   const tool = tools.find((t) => t.name === "galaxy_upload_local_file")!;
   expect(tool).toBeDefined();
   return tool;
@@ -155,6 +158,12 @@ beforeEach(() => {
 afterEach(() => {
   process.env.HOME = prevHome;
   vi.clearAllMocks();
+});
+
+describe("galaxy_upload_local_file description", () => {
+  it("names the family's URL-upload tool", () => {
+    expect(getTool().description).toContain("use upload_file_from_url instead");
+  });
 });
 
 describe("galaxy_upload_local_file handler", () => {

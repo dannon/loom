@@ -23,16 +23,16 @@ When the user describes an analysis they want run on their data -- as a
 question or as a plan request -- check the IWC registry before
 assembling tools by hand:
 
-1. `mcp__galaxy__recommend_iwc_workflows({ intent, limit: 5 })` with the goal in
+1. `recommend_iwc_workflows({ intent, limit: 5 })` with the goal in
    plain words. It ranks by word overlap (BM25) with no relevance floor,
    so a ranked hit is a candidate, not a match.
-2. `mcp__galaxy__get_iwc_workflow_details({ trs_id })` on the plausible ones, to
+2. `get_iwc_workflow_details({ trs_id })` on the plausible ones, to
    compare their **inputs** with the data the user has. For "which genes
    changed in my paired-end RNA-seq", the top hit is a DE workflow that
    starts from count tables; the reads-to-counts workflow ranks lower and
    has to run first.
 3. Offer the one or two that fit in plain language, or say none do.
-4. `mcp__galaxy__import_workflow_from_iwc({ trs_id })`, then invoke as below.
+4. `import_workflow_from_iwc({ trs_id })`, then invoke as below.
 
 Loom's `iwc-candidates` skill trigger appends a reminder of steps 2-3 to
 every recommend/search result.
@@ -43,7 +43,7 @@ Before drafting a plan, consult Galaxy resources:
    them) covers the analysis, propose running it on Galaxy -- the steps
    are those invocations.
 2. **Search the Galaxy tool catalog** per step
-   (`mcp__galaxy__search_tools_by_name`). For each step:
+   (`search_tools_by_name`). For each step:
    - Heavy compute (alignment, large variant calling, big assemblies,
      long-running BLAST) — if the Galaxy server has the tool, mark it
      Galaxy.
@@ -62,8 +62,8 @@ the user's upstream bandwidth, fills local disk, and blocks the turn (a
 2.3 GB local→Galaxy upload took 8+ minutes on a normal connection, where a
 server-side fetch runs at datacenter bandwidth).
 
-- Preferred: the Galaxy MCP fetch-by-URL tool
-  `mcp__galaxy__upload_file_from_url({ url, history_id })` (optional `file_name`,
+- Preferred: the Galaxy fetch-by-URL tool
+  `upload_file_from_url({ url, history_id })` (optional `file_name`,
   `file_type`, `dbkey`).
 - Scripting bioblend instead: use `gi.tools.put_url(url, history_id)` (one
   URL per line for several), which Galaxy fetches server-side. Don't call
@@ -236,8 +236,8 @@ entire group before dispatch, gives the model a combined accession list, and
 keeps the rejected batch together during tool-error recovery. It also blocks
 explicit Galaxy mapping/batch expansion and repeated accessions within one
 literal list. The gate does not ask the user for approval or silently rewrite
-parameters. Its scope is structured `mcp__galaxy__run_tool` calls (including the MCP
-proxy), not opaque scripts, workflow internals, or unknown custom wrappers.
+parameters. Its scope is structured `run_tool` calls, not opaque scripts, workflow
+internals, or unknown custom wrappers.
 Single-accession requests and later targeted retries remain available. Accessions
 introduced one at a time without an observed sibling group and cross-session
 history reuse rely on the always-loaded guidance; this is an efficiency guard,

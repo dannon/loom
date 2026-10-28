@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { GALAXY } from "./galaxy-family-fixture";
 
 interface ToolDef {
   name: string;
@@ -43,7 +44,7 @@ async function skillsFetch(): Promise<ToolDef> {
   };
   const { registerPlanTools } = await import("../extensions/loom/tools");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registerPlanTools(api as any);
+  registerPlanTools(api as any, GALAXY);
   return tools.find((t) => t.name === "skills_fetch")!;
 }
 

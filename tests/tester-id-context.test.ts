@@ -29,8 +29,9 @@ describe("buildTesterIdBlock", () => {
 
     expect(block).toContain("## Orbit tester ID");
     expect(block).toContain("orbit-007");
-    // The bug was routing this to mcp__galaxy__get_user -- the prompt must say not to.
-    expect(block).toContain("mcp__galaxy__get_user");
+    // The bug was routing this to get_user -- the prompt must say not to.
+    expect(block).toContain("`get_user`");
+    expect(block).not.toContain("mcp__galaxy__");
   });
 
   it("falls back to LOOM_TESTER_ID when config has none", () => {

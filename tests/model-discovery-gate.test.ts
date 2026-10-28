@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { planModelDiscovery } from "../app/src/renderer/model-discovery-gate.js";
+import {
+  planLiveValidation,
+  planModelDiscovery,
+} from "../app/src/renderer/model-discovery-gate.js";
 
 const SAVED = {
   savedBaseUrl: "https://openrouter.ai/api/v1",
   typedBaseUrl: "https://openrouter.ai/api/v1",
   typedKey: "",
-  hadKey: true,
   alreadyDiscovered: false,
 };
 
 describe("planModelDiscovery -- opening Preferences / switching provider", () => {
-  it("probes for a saved custom endpoint with a stored key", () => {
+  it("probes for a saved custom endpoint", () => {
     expect(planModelDiscovery({ ...SAVED, manual: false })).toEqual({ action: "probe" });
   });
 
@@ -18,12 +20,6 @@ describe("planModelDiscovery -- opening Preferences / switching provider", () =>
     expect(
       planModelDiscovery({ ...SAVED, manual: false, savedBaseUrl: "", typedBaseUrl: "" }),
     ).toEqual({ action: "skip" });
-  });
-
-  it("skips when no key is stored -- there is nothing to probe with", () => {
-    expect(planModelDiscovery({ ...SAVED, manual: false, hadKey: false })).toEqual({
-      action: "skip",
-    });
   });
 
   // The saved URL is what main probes; the field is what the user is looking
@@ -51,12 +47,6 @@ describe("planModelDiscovery -- opening Preferences / switching provider", () =>
 describe("planModelDiscovery -- the Fetch models button", () => {
   it("re-probes even when a list was already fetched this session", () => {
     expect(planModelDiscovery({ ...SAVED, manual: true, alreadyDiscovered: true })).toEqual({
-      action: "probe",
-    });
-  });
-
-  it("probes without a stored key so main can explain what's missing", () => {
-    expect(planModelDiscovery({ ...SAVED, manual: true, hadKey: false })).toEqual({
       action: "probe",
     });
   });
@@ -98,5 +88,27 @@ describe("planModelDiscovery -- the Fetch models button", () => {
     expect(planModelDiscovery({ ...SAVED, manual: true, typedKey: "sk-typed" })).toEqual({
       action: "validate-typed-key",
     });
+  });
+});
+
+describe("planLiveValidation", () => {
+  const base = { key: "", baseUrl: "http://127.0.0.1:8080/v1", custom: true, storedKey: false };
+
+  it("probes a typed key", () => {
+    expect(planLiveValidation({ ...base, key: "sk-typed" })).toBe("probe");
+    expect(planLiveValidation({ ...base, key: "sk-typed", custom: false })).toBe("probe");
+  });
+
+  it("probes a custom endpoint bare when no key is typed or stored (#600)", () => {
+    expect(planLiveValidation(base)).toBe("probe-keyless");
+  });
+
+  it("leaves a blank field alone when it means 'keep the stored key'", () => {
+    expect(planLiveValidation({ ...base, storedKey: true })).toBe("clear");
+  });
+
+  it("has nothing to check for a built-in provider or a missing base URL", () => {
+    expect(planLiveValidation({ ...base, custom: false })).toBe("clear");
+    expect(planLiveValidation({ ...base, baseUrl: " " })).toBe("clear");
   });
 });

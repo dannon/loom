@@ -24,6 +24,7 @@ import {
 } from "../extensions/loom/galaxy-live-source.js";
 import { getPollTickHook } from "../extensions/loom/galaxy-poller.js";
 import { resetState, setNotebookPath } from "../extensions/loom/state";
+import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 import {
   createDefaultDashboardDocument,
   serializeDashboardDocument,
@@ -1179,6 +1180,18 @@ describe("armGalaxyLivePanel", () => {
     expect(getPollTickHook()).toBeNull();
   });
 
+  it("costs the browser worker nothing either: the installed profile says there is no pane", () => {
+    process.env.LOOM_SHELL_KIND = "orbit";
+    setCapabilityProfile({ ...profileFromEnv({}), ui: "worker" });
+    try {
+      const { ctx } = fakeCtx();
+      armGalaxyLivePanel(ctx as never);
+      expect(getPollTickHook()).toBeNull();
+    } finally {
+      setCapabilityProfile(null);
+    }
+  });
+
   it("registers one hook in a shell that draws a dashboard, and clears it on shutdown", () => {
     process.env.LOOM_SHELL_KIND = "orbit";
     const { ctx } = fakeCtx();
@@ -1330,6 +1343,12 @@ describe("normalizeGalaxyLivePayload", () => {
   });
 
   it("clamps a payload built to be enormous", () => {
+    // One shared item: 5000 fresh copies of 300 KB timed out on slow CI runners.
+    const item = {
+      id: "x".repeat(100_000),
+      name: "y".repeat(100_000),
+      extension: "z".repeat(100_000),
+    };
     const p = normalizeGalaxyLivePayload({
       version: 1,
       serverHost: "h".repeat(100_000),
@@ -1337,11 +1356,7 @@ describe("normalizeGalaxyLivePayload", () => {
         id: "i".repeat(100_000),
         name: "n".repeat(100_000),
         updateTime: "u".repeat(100_000),
-        items: Array.from({ length: 5000 }, () => ({
-          id: "x".repeat(100_000),
-          name: "y".repeat(100_000),
-          extension: "z".repeat(100_000),
-        })),
+        items: Array.from({ length: 5000 }, () => item),
       },
       updatedAt: "d".repeat(100_000),
     });

@@ -12,15 +12,21 @@ import { ORBIT_FILE_PATH_TYPE, absoluteFilePath } from "../file-drop.js";
 export class FilesPanel {
   private readonly container: HTMLElement;
   private readonly onFileOpen: (relPath: string) => void;
+  private readonly onOpenInSystemViewer?: (relPath: string) => Promise<void>;
   private expanded = new Set<string>();
   private selectedPath: string | null = null;
   private showHidden = false;
   private loading = false;
   private cwd = "";
 
-  constructor(container: HTMLElement, onFileOpen: (relPath: string) => void) {
+  constructor(
+    container: HTMLElement,
+    onFileOpen: (relPath: string) => void,
+    onOpenInSystemViewer?: (relPath: string) => Promise<void>,
+  ) {
     this.container = container;
     this.onFileOpen = onFileOpen;
+    this.onOpenInSystemViewer = onOpenInSystemViewer;
   }
 
   setShowHidden(value: boolean): void {
@@ -103,7 +109,12 @@ export class FilesPanel {
       // editor file tree. Directories have no selection visual (setSelected
       // only applies the class to type=file rows), so they're a no-op.
       if (node.type === "file") this.setSelected(node.relPath);
-      showFilePathContextMenu(e.clientX, e.clientY, node.relPath);
+      showFilePathContextMenu(
+        e.clientX,
+        e.clientY,
+        node.relPath,
+        node.type === "file" ? this.onOpenInSystemViewer : undefined,
+      );
     });
 
     const icon = document.createElement("span");
@@ -186,9 +197,13 @@ export class FilesPanel {
 /**
  * Lightweight right-click menu for a file/folder row in the files panel.
  * Floats at the cursor; click anywhere outside (or Escape) closes it.
- * One submenu only — keep it short until users tell us they want more.
  */
-function showFilePathContextMenu(x: number, y: number, relPath: string): void {
+function showFilePathContextMenu(
+  x: number,
+  y: number,
+  relPath: string,
+  onOpenInSystemViewer?: (relPath: string) => Promise<void>,
+): void {
   // Tear down any prior menu first so a fast double-right-click doesn't
   // leave orphans.
   document.getElementById("files-tree-ctx-menu")?.remove();
@@ -229,6 +244,9 @@ function showFilePathContextMenu(x: number, y: number, relPath: string): void {
     if (e.key === "Escape") close();
   };
 
+  if (onOpenInSystemViewer) {
+    addItem("Open in system viewer", () => onOpenInSystemViewer(relPath));
+  }
   addItem("Copy relative path", async () => {
     await navigator.clipboard.writeText(relPath);
   });
