@@ -8,7 +8,7 @@ Repo-local orientation for Claude Code and similar agents.
    Primary repo behavior and domain guidance. `AGENTS.md` is the slim router (hard constraints + pointers); topic docs under `docs/agent/` cover role, notebook schema, Galaxy routing, commands, and gotchas. This is the main instruction source for how to operate in this codebase.
 
 2. [`docs/architecture.md`](docs/architecture.md)
-   Canonical architecture reference for Loom, Orbit, shared contracts, session lifecycle, and future shell direction.
+   Canonical architecture reference for the Orbit core, its shells, shared contracts, session lifecycle, and future shell direction.
 
 3. [`README.md`](README.md)
    Product/runtime overview, install/usage notes, and current-state summary.
@@ -38,27 +38,27 @@ cd app && npm start
 
 ## Repo-local conventions
 
-- Keep the Loom brain shell-neutral. Orbit/web-specific behavior belongs in shells, not in `extensions/loom/`.
+- Keep the Orbit core shell-neutral. Desktop/web-specific behavior belongs in shells, not in `extensions/orbit/`.
 - Shared cross-boundary contracts belong in `shared/`, not in duplicated ad hoc payload logic.
 - Galaxy is the primary execution path. Local mode is an exception path, not the main runtime model.
-- Startup/shutdown/restore behavior belongs in `extensions/loom/session-lifecycle.ts`.
-- `/execute` and `/run` are brain-owned command semantics in `extensions/loom/execution-commands.ts`.
-- Orbit should stay a shell, not a second brain.
+- Startup/shutdown/restore behavior belongs in `extensions/orbit/session-lifecycle.ts`.
+- `/execute` and `/run` are brain-owned command semantics in `extensions/orbit/execution-commands.ts`.
+- The desktop app should stay a shell, not a second brain.
 - One brain, many shells applies to the browser shell (`browser/`) too, and that is where it is
   most at risk right now. `browser/core/src/agent/` is the browser's own agent on pi-durable, with
   its own prompt, tools and guards: an interim copy of the brain that Orbit's brain is replacing.
   Once the worker boots Orbit's brain, the duplicated brain modules there are deleted; the worker,
   `pi-host.ts`, storage and the other shell support stay. Fix bugs there when you have to, but
   put new brain behavior (prompt text, guards, Galaxy tool handling, notebook and record semantics)
-  in `extensions/loom/` and `shared/`. If the browser needs something Orbit lacks, add it to Orbit
+  in `extensions/orbit/` and `shared/`. If the browser needs something Orbit lacks, add it to Orbit
   and let the browser pick it up; browser-only behavior goes on top of Orbit's, not in place of it.
 - A shell says what it can do through the capability profile (`shared/capability-profile.js`),
   and swaps storage or tools through the brain's seams (`galaxy-tool-source.ts`,
   `record-store-seam.ts`, `provenance-fs.ts`), not by forking brain code. `pi-host.orbit.test.ts`
-  boots `extensions/loom` on the browser's host under Node and pins, in `pi-host.orbit.golden.json`,
+  boots `extensions/orbit` on the browser's host under Node and pins, in `pi-host.orbit.golden.json`,
   the Node reaches it observes and the import edges it scans for; a brain change that adds one of
   those shows up there.
-- `extensions/loom/vendor/` is generated from `galaxyproject/agentic-plugins` at the commit pinned
+- `extensions/orbit/vendor/` is generated from `galaxyproject/agentic-plugins` at the commit pinned
   in `scripts/skills.manifest.json`. Change the manifest and run `npm run sync:skills`; never
   hand-edit the vendored files. `npm run check:skills` is the CI drift gate. The browser shell
   copies its galaxy-skills corpus from the same tree (`browser/core/scripts/install_skills.js`), so

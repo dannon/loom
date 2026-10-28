@@ -17,7 +17,7 @@ for the preload bridge). Anything the renderer draws -- chat cards, the footer
 status pill, the activity pane, notebook rendering -- is the real thing, and a
 browser is scriptable.
 
-**What it proves:** renderer behavior, `shared/` modules, `bin/loom.js`, and the
+**What it proves:** renderer behavior, `shared/` modules, `bin/orbit.js`, and the
 shape of the events a shell sends.
 
 **What it does not prove:** Electron main-process code (`app/src/main/`) and the
@@ -46,7 +46,7 @@ ln -s /path/to/loom/web/node_modules  web/node_modules
 
 ## Isolate the config
 
-The web server reads the same `~/.loom/config.json` as Orbit and the CLI, so
+The web server reads the same `~/.orbit/config.json` as Orbit and the CLI, so
 point `HOME` somewhere disposable rather than editing your own:
 
 ```bash

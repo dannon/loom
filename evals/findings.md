@@ -1,4 +1,4 @@
-# Loom evals -- harness findings log
+# Orbit evals -- harness findings log
 
 What we learned by iterating on the eval suite against the TACC SambaNova
 matrix. Started as the 3-model lineup (Llama-3.3-70B, Llama-4-Maverick,
@@ -7,17 +7,17 @@ gemma-4-31B). Useful both as a record of why the suite is shaped the way it
 is, and as a starter list for future runs. Entries are roughly chronological;
 the newest section is at the bottom.
 
-## Loom-side bugs surfaced by the matrix
+## Orbit-side bugs surfaced by the matrix
 
 These are real product bugs the eval suite caught. Each shipped to the
 branch as its own atomic commit.
 
 ### Routing-tag enum was missing `[galaxy]`
 
-`extensions/loom/context.ts` -- the worked example showed
+`extensions/orbit/context.ts` -- the worked example showed
 `## Plan A: <Title> [local|hybrid|remote]` and the conventions list said
 "Routing tag: `[local]`, `[hybrid]`, or `[remote]`." But every other
-piece of Loom (init-gate parser, AGENTS.md hard constraints, the
+piece of Orbit (init-gate parser, AGENTS.md hard constraints, the
 routing dispatch in execution-commands.ts) treats `galaxy` as a
 first-class routing tag _and_ the primary execution path. Models trying
 to follow the literal template had no syntactically valid way to say
@@ -86,12 +86,12 @@ occurrences in Llama-3.3 + Qwen3 output, pass rate stable.
 Initial scenarios had `loomArgs: ["--tools", "read,write,edit",
 "--no-skills", "--no-context-files"]` in the name of "isolating the
 variable being tested." The flags were stripping Pi's AGENTS.md / skills
-discovery, but Loom's hard-constraint guidance is injected via a
-`before_agent_start` extension hook (`extensions/loom/context.ts`) --
-not through Pi's discovery -- so most of the Loom system prompt was
+discovery, but Orbit's hard-constraint guidance is injected via a
+`before_agent_start` extension hook (`extensions/orbit/context.ts`) --
+not through Pi's discovery -- so most of the Orbit system prompt was
 always in play regardless. Even so, the framing was wrong: the eval
 suite exists to measure how the harness _as it ships_ behaves on each
-model and to iterate on Loom's prompts/skills based on what we learn.
+model and to iterate on Orbit's prompts/skills based on what we learn.
 Stripping context defeats that.
 
 Fix: drop the strip flags and trim prompts to a naturalistic ask
@@ -100,7 +100,7 @@ hand-spelling the notebook conventions inside each prompt.
 
 ### chatPlan vs notebook.plan: protocol gate is too strict for the matrix
 
-Loom's plan-convention block documents a four-stage approval gate
+Orbit's plan-convention block documents a four-stage approval gate
 (chat draft -> approve -> param table -> approve -> notebook write).
 Adding `chatPlan` (looking for the formal `## Plan A:` block in chat
 text) plus `notebook.plan.exists: false` to enforce "no notebook write
@@ -155,7 +155,7 @@ what lets the pass/fail track capability cleanly.
 
 **Good at:**
 
-- Catching Loom-side prompt regressions (any of the three above bugs would have shown up immediately).
+- Catching Orbit-side prompt regressions (any of the three above bugs would have shown up immediately).
 - Per-model leaderboard for _shell contract compliance_ -- "did the agent honor our notebook conventions when asked for a plan."
 - Spotting upstream proxy/model issues (the litellm Llama-4 adapter bug surfaced cleanly).
 
@@ -164,7 +164,7 @@ what lets the pass/fail track capability cleanly.
 - Content quality scoring. No LLMJudge. The galaxy harness handles that
   (`/Users/dannon/work/galaxy__worktrees/agent-evals-harness/`); duplicating
   it here would mean re-implementing pydantic-evals in TypeScript.
-- Catching subtle regressions in Loom's _non-prompt_ code paths (init-gate,
+- Catching subtle regressions in Orbit's _non-prompt_ code paths (init-gate,
   notebook-writer, session-lifecycle). Those need their own scenarios that
   exercise the slash commands and the lifecycle hooks directly.
 - Single-run reliability. Real comparison needs n>=3 runs per (scenario,
@@ -180,11 +180,11 @@ what lets the pass/fail track capability cleanly.
 2. **Shell-contract scenarios that don't ride the matrix.** Init-gate
    variants (no plan, weak step), confusables hint (#102), notebook
    discipline (does the agent flip `- [ ]` to `- [x]` after completion).
-   These exercise Loom-the-shell rather than model behavior, complement
+   These exercise Orbit-the-shell rather than model behavior, complement
    the model leaderboard.
 3. **Markdown report with per-(scenario, model) detail.** Today's stdout
    tells you pass/fail counts but burying the comparative content in
-   `LOOM_EVALS_VERBOSE` is fragile. A report file written under
+   `ORBIT_EVALS_VERBOSE` is fragile. A report file written under
    `evals/results/` (gitignored, with a committed `baseline.md`) gives a
    real artifact to diff between runs.
 4. **Once init-gate.ts (#104) is on main, replace the stub
@@ -223,10 +223,10 @@ leaderboard's green cells need the same scrutiny as its red ones.
 gpt-oss-120b fails `smoke-echo` 3/3 -- it never emits the echo token -- and
 produces no plan on `plan-creation-rnaseq`. Its chain-of-thought lands in
 `reasoning_content`; Pi (or the litellm adapter under it) doesn't surface a
-usable assistant `content`, so from Loom's side the model says nothing. The
+usable assistant `content`, so from Orbit's side the model says nothing. The
 matrix entry is flagged `reasoningModel: true` and given `maxTokens: 8192`,
-but that alone doesn't fix it -- this needs Loom/Pi to read `reasoning_content`
-(or strip-and-promote it) before gpt-oss-120b is usable as a Loom driver. Left
+but that alone doesn't fix it -- this needs Orbit/Pi to read `reasoning_content`
+(or strip-and-promote it) before gpt-oss-120b is usable as a Orbit driver. Left
 in the matrix so the regression is visible; it shows red until handled.
 
 ### Live leaderboard (plan-creation-rnaseq, n=3, post-fix)
@@ -298,7 +298,7 @@ identical in the report -- `evaluate` now emits a `run.noModelOutput` failure
 when a tier-2 run produces no assistant text at all, so the next drift of this
 shape names itself. And the same bare-name assumption is written into
 `shared/custom-provider.js`'s docblock for the Orbit custom-provider path; that
-one is masked in practice because `bin/loom.js` passes `--api-key` at runtime,
+one is masked in practice because `bin/orbit.js` passes `--api-key` at runtime,
 which takes precedence, but the comment is wrong about pi and the file is one
 character from not needing the flag.
 

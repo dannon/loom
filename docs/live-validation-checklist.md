@@ -1,6 +1,6 @@
 # Live Validation Checklist
 
-This checklist matches the notebook-only Loom runtime: `notebook.md` is the durable project record, Galaxy invocations are tracked with `loom-invocation` fenced blocks, and the old `analysis_*`, `data_*`, `research_*`, `publication_*`, and `workflow_*` plan-state tools are not present.
+This checklist matches the notebook-only Orbit runtime: `notebook.md` is the durable project record, Galaxy invocations are tracked with `orbit-invocation` fenced blocks, and the old `analysis_*`, `data_*`, `research_*`, `publication_*`, and `workflow_*` plan-state tools are not present.
 
 ## Preconditions
 
@@ -31,7 +31,7 @@ Expected:
 ```bash
 mkdir -p /tmp/loom-validation
 cd /tmp/loom-validation
-pi --no-extensions -e /Users/dannon/work/loom/extensions/loom
+pi --no-extensions -e /Users/dannon/work/loom/extensions/orbit
 ```
 
 Check:
@@ -42,7 +42,7 @@ Check:
 - `/notebook` opens the current notebook content
 - `/connect` and `/profiles` are available
 
-If the runtime exposes a tool listing, the Loom-owned tool surface should be small: GTN fetch/search, skills fetch, Galaxy invocation record/check tools, and any explicitly enabled experimental tools such as `team_dispatch` or session-index recall.
+If the runtime exposes a tool listing, the Orbit-owned tool surface should be small: GTN fetch/search, skills fetch, Galaxy invocation record/check tools, and any explicitly enabled experimental tools such as `team_dispatch` or session-index recall.
 
 ## 3. Validate notebook-first plan drafting
 
@@ -75,7 +75,7 @@ Inside the same session:
 
 Expected:
 
-- `notebook.md` contains a fenced `loom-invocation` block with `invocation_id`, `galaxy_server_url`, `notebook_anchor`, `label`, `submitted_at`, `status`, and `summary`
+- `notebook.md` contains a fenced `orbit-invocation` block with `invocation_id`, `galaxy_server_url`, `notebook_anchor`, `label`, `submitted_at`, `status`, and `summary`
 - polling transitions the block from `in_progress` to `completed` or `failed`
 - the related markdown checklist item is updated after the status transition
 - the URL-backed file is fetched server-side (via `upload_file_from_url`, or a bioblend `put_url` call), not downloaded locally and re-uploaded
@@ -86,7 +86,7 @@ Exit and restart in the same directory:
 
 ```bash
 cd /tmp/loom-validation
-pi --no-extensions -e /Users/dannon/work/loom/extensions/loom
+pi --no-extensions -e /Users/dannon/work/loom/extensions/orbit
 ```
 
 Expected:
@@ -94,16 +94,16 @@ Expected:
 - the agent reads the existing `notebook.md`
 - `/notebook` shows the prior content
 - recent activity is available from `activity.jsonl`
-- `session.jsonl` is a symlink only when Loom can create it without replacing a user-owned file
+- `session.jsonl` is a symlink only when Orbit can create it without replacing a user-owned file
 
 ## 6. Inspect the analysis directory
 
 Check:
 
 - `notebook.md` is readable markdown
-- `activity.jsonl` and `session.jsonl` are not committed by Loom-generated `.gitignore`
-- in a directory where Loom initialized git, notebook edits are committed
-- in an existing user repo, Loom does not auto-commit `notebook.md` onto the current branch
+- `activity.jsonl` and `session.jsonl` are not committed by Orbit-generated `.gitignore`
+- in a directory where Orbit initialized git, notebook edits are committed
+- in an existing user repo, Orbit does not auto-commit `notebook.md` onto the current branch
 
 ## 7. Record the validation result
 

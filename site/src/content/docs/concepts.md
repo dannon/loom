@@ -9,7 +9,7 @@ order: 2
 
 Agentic bioinformatics can produce useful work, but the familiar failure mode is
 that decisions happen in chat, parameters drift, provenance is reconstructed after
-the fact, and a plausible final answer hides weak intermediate validation. Loom's
+the fact, and a plausible final answer hides weak intermediate validation. Orbit's
 answer is to make the working record explicit _while_ the analysis is happening.
 
 ## The notebook is the project
@@ -71,13 +71,13 @@ markdown, and manual override is allowed when you explicitly ask for it.
 
 ## Live invocation tracking
 
-When the agent invokes a Galaxy workflow it records a `loom-invocation` fenced
+When the agent invokes a Galaxy workflow it records a `orbit-invocation` fenced
 block in the notebook and hands control back immediately — the job runs on
 Galaxy's infrastructure in the background. A polling tool reads those blocks,
 queries Galaxy, and updates them in place as jobs finish or fail, notifying you
 when the invocation reaches a terminal state.
 
-```loom-invocation
+```orbit-invocation
 invocation_id: f2db4a1c9e8b7654
 galaxy_server_url: https://usegalaxy.org
 notebook_anchor: plan-a-step-3
@@ -97,12 +97,12 @@ plain, readable markdown.
 
 ## Git-tracked notebooks
 
-When Loom starts in a directory that isn't already a git repo, it runs `git init`,
+When Orbit starts in a directory that isn't already a git repo, it runs `git init`,
 drops a bioinformatics-friendly `.gitignore` (large FASTQ/BAM/VCF files and the
 per-session activity logs stay out of history), and auto-commits every notebook
 change. That gives you a full undo history, timestamped reproducibility evidence,
 branchable exploration, and a notebook you can share on GitHub — for free. (If you
-start Loom inside a repo you already manage, auto-commit is opt-in, so it never
+start Orbit inside a repo you already manage, auto-commit is opt-in, so it never
 touches your history without asking.)
 
 ## Skills

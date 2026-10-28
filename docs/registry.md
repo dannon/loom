@@ -1,7 +1,7 @@
 # Approval and attempt registry
 
 Engineer-facing design reference for the registry behind #476. The code lives in
-`extensions/loom/registry*.ts` (the trusted core), `proposal-commands.ts` (the tool and
+`extensions/orbit/registry*.ts` (the trusted core), `proposal-commands.ts` (the tool and
 commands that drive it), `registry-evaluator.ts` (the evaluation writer) and
 `registry-page-carrier.ts` (the Page carrier); where this document and the code disagree,
 the code is right and this document is stale. Proposing, approving, evaluating and the
@@ -62,7 +62,7 @@ Everything lives under `<analysis>/.loom/state/`:
 
 ## Schema
 
-`extensions/loom/registry-schema.ts` holds the types (`Registry`, `Attempt`, `Spec`,
+`extensions/orbit/registry-schema.ts` holds the types (`Registry`, `Attempt`, `Spec`,
 `Exception`, `Predicate`) and is the reference. In outline:
 
 - A **Registry** has a `version` (3), a monotonic `revision`, the `writer_token` of the lock
@@ -238,7 +238,7 @@ can't be shown. The facts behind an evaluation are stored content-addressed besi
 frozen templates and the provenance names them. Answers from the Tier-1 fixture seam are
 never `established`, so an eval run can exercise the path but never grant the flag.
 
-The verdict is also rendered onto the run's `loom-invocation` or `loom-job` block
+The verdict is also rendered onto the run's `orbit-invocation` or `orbit-job` block
 (`evaluation`, `handoff_eligible`, `registry_revision`). Those are harness fields, stripped
 from agent writes, and a projection: nothing reads them back for a decision, so an edited
 block is rendered again with a `state.repaired` row.
@@ -263,7 +263,7 @@ edit. See `evidence-gate.ts` for the rest, and `docs/evidence-gate-audit.md` for
 ## The Page carrier
 
 Every push appends the registry file -- exactly what the store last signed -- to the Page as
-one line, `[loom-registry:v3]: #loom "<base64 gzip>"`, a link-reference definition that
+one line, `[orbit-registry:v3]: #loom "<base64 gzip>"`, a link-reference definition that
 renders to nothing. Pull and resume take it out of the body before the notebook is written
 and hand it to `ingestText`, so the import rule above decides what it is worth: this
 session's own carrier is a continuation, anything else an import (or ignored while the
@@ -291,7 +291,7 @@ names any of them is also never auto-allowed in a trusted workspace, since an in
 writable through the file tools, whose hooks the evidence gate sees. `activity.jsonl` is
 not floored for the file tools: no verdict reads it.
 
-In the web shell and the interactive tool, `LOOM_TRUSTED_RECORD=1` replaces the web-mode
+In the web shell and the interactive tool, `ORBIT_TRUSTED_RECORD=1` replaces the web-mode
 gate's prefix allowlist with an exact list of reviewed tools (`TRUSTED_RECORD_ALLOWED` in
 `web/extensions/web-mode-gate.ts`), with the raw submission tools, code mode and host-file
 readers excluded, the direct Page writers excluded (Page content carries the registry, so
@@ -315,7 +315,7 @@ can't be opened or locked comes up read-only with one notice and never blocks th
   template has with a `src` that slot takes, every required slot outside a conditional or
   repeat is filled, every override names a real parameter (Galaxy's flat `a|b` form, repeat
   indices allowed), and a pinned version is the one Galaxy has. Problems come back as a list
-  and nothing is written. Otherwise it appends a `loom-proposal` block and records
+  and nothing is written. Otherwise it appends a `orbit-proposal` block and records
   `proposal.created`. Assertion ids are refused until assertions exist.
 - **`/approve <proposal-id>`** is the consent. It re-fetches the template and re-validates
   (a hand-written block is held to the same rules), shows the table it is about to freeze
@@ -351,14 +351,14 @@ those requests are refused rather than guessed at.
 ## Submitting through galaxy-ops
 
 The registry does not talk to Galaxy. It defines a `Submitter` port
-(`extensions/loom/registry-submitter.ts`): fetch a target's template at a version, and submit
+(`extensions/orbit/registry-submitter.ts`): fetch a target's template at a version, and submit
 a Spec, reporting one of three outcomes -- accepted (with the run ids and the version Galaxy
 reports actually ran), refused (Galaxy answered and nothing ran, so the reservation is
 released), or no answer (the run may exist; the attempt becomes `submission_unknown` and only
 the user can attribute it). An adapter never retries a submission on its own.
 
-Inside Loom the adapter will be `@galaxyproject/galaxy-ops` in process -- the same operations
-galaxy-mcp exposes -- so the gated path uses the tools Loom recommends rather than a private
+Inside Orbit the adapter will be `@galaxyproject/galaxy-ops` in process -- the same operations
+galaxy-mcp exposes -- so the gated path uses the tools Orbit recommends rather than a private
 copy of the Galaxy API calls. Asking Galaxy for a version is not proof of getting it (the
 toolbox hands back the newest installed version when the requested one is missing), which is
 why the accepted outcome carries the version that ran.
@@ -381,7 +381,7 @@ real import graph to hold that line.
 | Import rule, server quarantine                                                            | built (#548)                                                                |
 | `computeHandoffEligible`                                                                  | built (#548, rules settled in #558; `conformant_by_reconcile` in slice 4)   |
 | `Submitter` port                                                                          | built (#548); galaxy-ops adapter not yet                                    |
-| `loom_propose`, `loom-proposal` block, `/approve`, `/revoke`, `/pending`                  | built (#561); Orbit proposal card not yet                                   |
+| `loom_propose`, `orbit-proposal` block, `/approve`, `/revoke`, `/pending`                 | built (#561); Orbit proposal card not yet                                   |
 | `loom_submit`, reservation, `submission_unknown`, `/attribute`, ungated auto-registration | next (slice 3)                                                              |
 | Evaluation writer, block rendering, `active_at_shutdown`                                  | built (slice 4)                                                             |
 | `conformant_by_reconcile` for imported attempts                                           | built for tools (slice 4); workflows, collections, UDTs stay `unverified`   |

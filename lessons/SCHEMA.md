@@ -9,7 +9,7 @@ path minus `.md`, e.g. `stats/na-coerced-to-zero-in-filters`. The slug is
 lowercase words joined by hyphens, at most 80 characters.
 
 The format is Google Cloud's Open Knowledge Format: a directory of markdown with
-YAML frontmatter, distributed as a git repository. OKF fields come first; Loom's
+YAML frontmatter, distributed as a git repository. OKF fields come first; Orbit's
 extension fields come after.
 
 ## Frontmatter

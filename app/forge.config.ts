@@ -25,7 +25,7 @@ const UV_TARGETS: Record<string, string> = {
   "win32-x64": "x86_64-pc-windows-msvc",
 };
 
-// Files copied verbatim from the Loom repo root into the staged bundle.
+// Files copied verbatim from the repo root into the staged bundle.
 // Mirrors the npm `files` allowlist plus package-lock.json (used by npm ci).
 const ORBIT_BUNDLE_FILES = [
   "bin",

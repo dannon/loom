@@ -11,10 +11,10 @@ default is `deny` since 2026-10-10; that section says what it rests on.
 
 `scripts/evidence-gate-audit.mjs` was run over two corpora:
 
-| Corpus                                                                                                                                                                                               | Activity logs | `evidence.decision` rows | Completions | Would deny | Overrides |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------: | -----------------------: | ----------: | ---------: | --------: |
-| Tier-1 eval runs: all 22 Tier-1 scenarios, run dumps kept (`LOOM_EVAL_DUMP_DIR`)                                                                                                                     |            66 |                        0 |           0 |          0 |         6 |
-| Every `activity.jsonl` on the development machine: live analyses under `~/.loom/analyses`, earlier eval and web-shell dumps from the capture, observations and registry sessions, the paper-run logs |           101 |                        0 |           0 |          0 |         7 |
+| Corpus                                                                                                                                                                                                | Activity logs | `evidence.decision` rows | Completions | Would deny | Overrides |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------: | -----------------------: | ----------: | ---------: | --------: |
+| Tier-1 eval runs: all 22 Tier-1 scenarios, run dumps kept (`ORBIT_EVAL_DUMP_DIR`)                                                                                                                     |            66 |                        0 |           0 |          0 |         6 |
+| Every `activity.jsonl` on the development machine: live analyses under `~/.orbit/analyses`, earlier eval and web-shell dumps from the capture, observations and registry sessions, the paper-run logs |           101 |                        0 |           0 |          0 |         7 |
 
 No recorded session has a checkbox flipped to `- [x]` through a file tool
 while the gate was on, so there is no row to call a false or a true deny.
@@ -60,8 +60,8 @@ audit can tell the two paths apart.
 ### Rerunning it
 
 ```bash
-LOOM_EVAL_DUMP_DIR=/tmp/loom-dumps npm run evals -- <tier-1 prefix>   # once per prefix
-node scripts/evidence-gate-audit.mjs /tmp/loom-dumps ~/.loom/analyses
+ORBIT_EVAL_DUMP_DIR=/tmp/loom-dumps npm run evals -- <tier-1 prefix>   # once per prefix
+node scripts/evidence-gate-audit.mjs /tmp/loom-dumps ~/.orbit/analyses
 node scripts/evidence-gate-audit.mjs <dirs...> --json                # for adjudicating rows
 ```
 
@@ -76,9 +76,9 @@ is the shape a false deny on the legacy path would take.
 allowed -- but the rows are scripted, not observed.**
 
 The 2026-10-08 audit had nothing to adjudicate because no Tier-1 scenario
-had a model to make the edit. `LOOM_MODEL_SCRIPT` (see `evals/README.md`)
+had a model to make the edit. `ORBIT_MODEL_SCRIPT` (see `evals/README.md`)
 fixes that: pi's faux provider plays the model from a script, so the
-notebook edits go through pi's real `tool_call` path, every Loom hook runs
+notebook edits go through pi's real `tool_call` path, every Orbit hook runs
 first, and the gate's verdict is the one pi acts on. The `gate-scripted-*`
 scenarios use it with a replayed workflow submission and a recorded Galaxy
 fixture (legacy path) or the imported-run registry fixture from slice 4
@@ -86,7 +86,7 @@ fixture (legacy path) or the imported-run registry fixture from slice 4
 
 `scripts/evidence-gate-audit.mjs` over three runs of all twelve scenarios
 (36 activity logs) found 30 `evidence.decision` rows, the same ten on each
-run. Over `~/.loom/analyses` it found 3 activity logs and still no rows, so
+run. Over `~/.orbit/analyses` it found 3 activity logs and still no rows, so
 there is nothing observed to add.
 
 | Scenario                                | Path     | Mode | Outcome    | Contradiction       | Adjudication                                    |
@@ -115,7 +115,7 @@ every mode.
 
 ### What the honest scenarios model
 
-The sequence Loom's prompt teaches (`context.ts`, "Verification before
+The sequence Orbit's prompt teaches (`context.ts`, "Verification before
 completion", and `/execute` steps 5 and 6): check the run, write the
 verification evidence under the step in one edit, then flip `- [ ]` to
 `- [x]` in a second. The check is `galaxy_invocation_check_all`, which is
@@ -158,10 +158,10 @@ running, so every answer the fixture gives agrees. The rows came out the same.
 
 The default moves to `deny`. On this corpus every deny is a true positive
 and both honest completions go through, and the honest sequence they model
-is the one Loom's prompt teaches, which is the standard set for the legacy
+is the one Orbit's prompt teaches, which is the standard set for the legacy
 path. The two things to weigh before merging are the ones above: the rows
 are scripted, and on the registry path an imported run that can't be
 re-verified (one from another machine, or any workflow) is now refused
 until the user runs `/override`, where before it was a warning. Anyone who
 wants the old behavior sets `evidenceGate.mode: "warn"` or
-`LOOM_EVIDENCE_GATE=warn`.
+`ORBIT_EVIDENCE_GATE=warn`.

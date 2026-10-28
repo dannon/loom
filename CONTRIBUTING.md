@@ -1,25 +1,25 @@
-# Contributing to Loom & Orbit
+# Contributing to Orbit
 
-**Loom** is the agent brain -- a [Pi.dev](https://pi.dev) extension in
-[`extensions/loom/`](extensions/loom/). **Orbit** ([`app/`](app/)) is an
+**Orbit** is the agent brain -- a [Pi.dev](https://pi.dev) extension in
+[`extensions/orbit/`](extensions/orbit/). **Orbit** ([`app/`](app/)) is an
 Electron desktop shell around it. There is also a browser shell
-([`web/`](web/)) and a plain CLI (`bin/loom.js`). All four run the _same_
-brain, so a change to `extensions/loom/` shows up everywhere at once.
+([`web/`](web/)) and a plain CLI (`bin/orbit.js`). All four run the _same_
+brain, so a change to `extensions/orbit/` shows up everywhere at once.
 
 ## Just want to try it?
 
 You don't need any of this. Download an installer from the
-[Releases page](https://github.com/galaxyproject/loom/releases) --
+[Releases page](https://github.com/galaxyproject/orbit/releases) --
 [`INSTALL.md`](INSTALL.md) has per-platform steps -- or install the CLI:
 
 ```bash
-npm install -g @galaxyproject/loom
-loom
+npm install -g @galaxyproject/orbit
+orbit
 ```
 
 Then tell us what broke. There's a **Feedback** button inside Orbit, or file an
-[issue](https://github.com/galaxyproject/loom/issues). Useful bug reports
-include your OS and version, the Orbit/Loom version, which LLM provider and
+[issue](https://github.com/galaxyproject/orbit/issues). Useful bug reports
+include your OS and version, the Orbit version, which LLM provider and
 model you were on, and what you expected instead. If the agent did something
 odd, paste the relevant chunk of the conversation -- the `notebook.md` section
 it wrote is often more informative than a screenshot.
@@ -44,8 +44,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh   # optional, for the planemo sk
 Then:
 
 ```bash
-git clone https://github.com/galaxyproject/loom.git
-cd loom
+git clone https://github.com/galaxyproject/orbit.git
+cd orbit
 npm install
 cd app && npm install      # needed even if you never touch Orbit -- see below
 ```
@@ -58,20 +58,20 @@ the resulting runtime and model; users do not need these build tools or a
 model download. The pinned versions and checksums live in
 `app/scripts/speech-assets.json`.
 
-**There is no build step.** `extensions/loom/` is TypeScript that Pi loads
+**There is no build step.** `extensions/orbit/` is TypeScript that Pi loads
 directly, and `shared/` is hand-written JS with checked-in `.d.ts` files.
 `tsc` is configured `noEmit` -- it only typechecks. Edit a file, restart, done.
 
 Windows: Orbit ships native but remote-only (no local bash). For local
 execution, develop inside WSL2 --
-`curl -fsSL https://raw.githubusercontent.com/galaxyproject/loom/main/scripts/setup-wsl.sh | bash`.
+`curl -fsSL https://raw.githubusercontent.com/galaxyproject/orbit/main/scripts/setup-wsl.sh | bash`.
 
 ## Run it
 
 Three shells, one brain. Pick whichever matches what you're changing:
 
 ```bash
-node bin/loom.js           # CLI, from the repo root
+node bin/orbit.js           # CLI, from the repo root
 cd app && npm start        # Orbit desktop
 cd web && npm install && npm run dev   # browser at localhost:3000
 ```
@@ -83,7 +83,7 @@ hot reload against the _same_ brain. It's a single-user dev convenience with no
 authentication -- keep it on a network you trust.
 
 First run needs an LLM API key. Orbit's welcome screen will ask; the CLI reads
-`~/.loom/config.json`. Anthropic, OpenAI, Google, or a local Ollama/LiteLLM
+`~/.orbit/config.json`. Anthropic, OpenAI, Google, or a local Ollama/LiteLLM
 endpoint all work. Galaxy is optional -- plenty of the codebase is reachable
 without a server configured.
 
@@ -117,7 +117,7 @@ Linux, macOS, and Windows):
 ```bash
 npm run check:versions        # root and app/ must resolve the same pi version
 npm run typecheck
-npm run check:skills          # extensions/loom/vendor/ is generated -- this catches hand-edits
+npm run check:skills          # extensions/orbit/vendor/ is generated -- this catches hand-edits
 cd app && npx tsc --noEmit && cd ..
 npm test
 npm run smoke:pack            # packs the tarball and installs it WITHOUT the lockfile
@@ -142,36 +142,36 @@ notebook round-tripped. Three runbooks cover the gap:
 
 There are also end-to-end Playwright tests (`cd app && npm run test:e2e`) and
 model-in-the-loop scenario evals (`npm run evals`, see
-[`evals/README.md`](evals/README.md)) that spawn a real Loom against fixture
+[`evals/README.md`](evals/README.md)) that spawn a real Orbit against fixture
 directories and assert on the JSON event stream.
 
 ## Where things live
 
-| Path               | What it is                                                                                                |
-| ------------------ | --------------------------------------------------------------------------------------------------------- |
-| `extensions/loom/` | The brain -- system-prompt context, Galaxy invocation tracking, skills, slash commands, session lifecycle |
-| `app/`             | Orbit, the Electron shell (`src/main/`, `src/renderer/`)                                                  |
-| `web/`             | Browser shell and dev server with HMR                                                                     |
-| `bin/loom.js`      | CLI entry point                                                                                           |
-| `shared/`          | Contracts crossing the brain/shell boundary -- committed JS + `.d.ts`                                     |
-| `tests/`           | Vitest suite for brain, shell, and shared code                                                            |
-| `evals/`           | Scenario evals that run a real model                                                                      |
-| `docs/`            | Architecture, validation runbooks, agent guidance                                                         |
+| Path                | What it is                                                                                                |
+| ------------------- | --------------------------------------------------------------------------------------------------------- |
+| `extensions/orbit/` | The brain -- system-prompt context, Galaxy invocation tracking, skills, slash commands, session lifecycle |
+| `app/`              | Orbit, the Electron shell (`src/main/`, `src/renderer/`)                                                  |
+| `web/`              | Browser shell and dev server with HMR                                                                     |
+| `bin/orbit.js`      | CLI entry point                                                                                           |
+| `shared/`           | Contracts crossing the brain/shell boundary -- committed JS + `.d.ts`                                     |
+| `tests/`            | Vitest suite for brain, shell, and shared code                                                            |
+| `evals/`            | Scenario evals that run a real model                                                                      |
+| `docs/`             | Architecture, validation runbooks, agent guidance                                                         |
 
 Four conventions worth knowing before you move code around:
 
 - **The brain stays shell-neutral.** Orbit- or web-specific behavior belongs in
-  the shell, not in `extensions/loom/`.
+  the shell, not in `extensions/orbit/`.
 - **Orbit stays a shell**, not a second brain.
 - **Cross-boundary contracts go in `shared/`**, not duplicated payload logic on
   each side.
-- **`extensions/loom/vendor/` is generated.** Edit
+- **`extensions/orbit/vendor/` is generated.** Edit
   `scripts/skills.manifest.json` and run `npm run sync:skills`.
 
 ## Sending a pull request
 
 Fork, branch, and open a PR against `main` on
-[`galaxyproject/loom`](https://github.com/galaxyproject/loom). Keep commits
+[`galaxyproject/orbit`](https://github.com/galaxyproject/orbit). Keep commits
 focused -- one logical change each. CI runs the full check sequence on all three
 platforms and packages the Electron app; a red run there is usually something
 real, with the occasional exception of `smoke:pack` going red because a
@@ -185,11 +185,11 @@ genuinely useful sentence and saves a reviewer the guess.
 
 - [`README.md`](README.md) -- product and runtime overview, configuration,
   commands, tool reference
-- [`docs/architecture.md`](docs/architecture.md) -- Loom, Orbit, shared
+- [`docs/architecture.md`](docs/architecture.md) -- the Orbit core, its shells, shared
   contracts, session lifecycle
 - [`AGENTS.md`](AGENTS.md) and [`docs/agent/`](docs/agent/) -- how the agent is
   instructed to behave: notebook schema, Galaxy routing, gotchas
 - [`RELEASING.md`](RELEASING.md) -- how a release gets cut
 
-Loom is MIT licensed. By contributing, you agree your work ships under the
+Orbit is MIT licensed. By contributing, you agree your work ships under the
 same terms.

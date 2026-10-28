@@ -1,6 +1,6 @@
-# Loom evals
+# Orbit evals
 
-Scenario-driven integration tests for Loom. Spawns `loom --mode json`
+Scenario-driven integration tests for Orbit. Spawns `orbit --mode json`
 non-interactively against a fixture cwd, parses the JSON event stream,
 asserts on tool calls / chat text / final notebook state.
 
@@ -13,7 +13,7 @@ npm run evals -- <scenario> --model <id>
 
 Scenarios live under `evals/scenarios/<name>/`. The model matrix lives in
 `evals/models.json`. `evals/findings.md` records what the suite has
-turned up so far -- both Loom-side bugs the matrix surfaced and
+turned up so far -- both Orbit-side bugs the matrix surfaced and
 per-model behavioral observations.
 
 ## Models
@@ -21,7 +21,7 @@ per-model behavioral observations.
 Tier 2 scenarios (those with `requiresModel: true`) run against every model
 in `evals/models.json` whose required env vars are set; the rest are skipped
 with a warning. Missing env vars don't fail the run -- they just shrink the
-matrix. Tier 1 scenarios that exercise synchronous Loom paths (slash-command
+matrix. Tier 1 scenarios that exercise synchronous Orbit paths (slash-command
 preflight, etc.) run once with no model.
 
 Drop credentials in `evals/.env` (gitignored). Example contents:
@@ -44,10 +44,10 @@ them with a warning rather than grading a Galaxy that was never configured.
 The `galaxy-tools-*` scenarios drive a real model against a real Galaxy
 (test.galaxyproject.org is the intended target) to check the in-process tool
 plumbing rather than model judgment: that galaxy-ops' operations resolve under
-their bare names, that `upload_file` stays hidden in favor of Loom's
+their bare names, that `upload_file` stays hidden in favor of Orbit's
 uploader, that an oversized result is saved and readable with
 `galaxy_read_output`, that the destructive-delete and SRA fan-out gates fire on
-the bare calls, and that a real tool run lands as a `loom-job` block the
+the bare calls, and that a real tool run lands as a `orbit-job` block the
 poller follows to completion. They are slow (minutes per run), depend on a
 shared public server and its queue, and need both model and Galaxy
 credentials -- run them by hand when touching the Galaxy tool layer, not as a
@@ -74,7 +74,7 @@ rather than what was called: `mustSucceed` (optionally matching
 `details`/text), `mustNotSucceed`, and `echoedInChat`, which pulls a value out
 of a result with a regex and requires the chat to repeat it -- grading an
 answer against the live server without committing an account-specific value.
-Set `LOOM_EVAL_DUMP_DIR` to keep each run's raw event stream, stderr,
+Set `ORBIT_EVAL_DUMP_DIR` to keep each run's raw event stream, stderr,
 notebook and activity log for diagnosis (they include tool results verbatim,
 so point it outside the repo).
 
@@ -94,13 +94,13 @@ hybrid]`, consumer pharmacogenomics -> `[local, hybrid]`), so an incorrect
 - **tools** -- did the plan name a sane analysis tool? `plan.mentionsOneOf`
   is a curated, generous allow-set per assay (a coarse heuristic, not an
   oracle; nuance is left to a future judge layer).
-- **behavior** -- Loom-contract checks that need no Galaxy. Today:
+- **behavior** -- Orbit-contract checks that need no Galaxy. Today:
   `behavior.asksClarifyingQuestion` -- an underspecified prompt should make
   the agent ask, not fabricate a plan.
 
 Plans are read from wherever they land (`plan.source` defaults to `"any"` =
 notebook if it has a plan, else chat), because the matrix models don't
-reliably follow Loom's draft-in-chat-then-write gate.
+reliably follow Orbit's draft-in-chat-then-write gate.
 
 ## Asserting on the activity log
 
@@ -118,7 +118,7 @@ overrides; Tier 1 runs once). A dimension's cell verdict is a majority of the
 runs (`pass >= ceil(total/2)`), so a flaky model shows as a pass-rate rather
 than a coin-flip. The runner prints a `model x dimension` leaderboard grid
 and writes one JSON line per run to `evals/results/<date>-<sha>.jsonl`
-(gitignored) for diffing models over time and across Loom prompt changes.
+(gitignored) for diffing models over time and across Orbit prompt changes.
 
 Each run's `usage` is summed over every model call it made (pi emits one
 `turn_end` per call, with the usage on `turn_end.message.usage`): `calls`,
@@ -144,7 +144,7 @@ findings log for the live caveat). To add a paid reference baseline
 
 The submission-capture hook fires on `tool_execution_end`, which needs a real
 tool call, which needs a model turn -- and the Tier 1 scenarios are
-deliberately model-free. `LOOM_SUBMISSION_REPLAY` bridges that: it names a
+deliberately model-free. `ORBIT_SUBMISSION_REPLAY` bridges that: it names a
 JSONL file, relative to the scenario's cwd, whose lines are recorded Galaxy
 tool results, and each is fed through the same dispatch path a live submission
 takes. One line per submission:
@@ -172,16 +172,16 @@ produced by real submissions.
 
 ## Replaying tool results into the lesson matcher (Tier 1, no model)
 
-`LOOM_LESSON_REPLAY` is the same seam for the lesson hint, which fires on
+`ORBIT_LESSON_REPLAY` is the same seam for the lesson hint, which fires on
 `tool_result` and so has the same model-turn problem. It reads the same JSONL
 format, resolves inside the session directory the same way, writes a
 `lesson.replay` activity row before anything else, and prints the hint each
 replayed result would have carried to stderr.
 
 The scenario also has to plant the lesson it expects to fire, and the runner
-points `HOME` at a temp dir fixtures cannot reach, so `LOOM_LESSONS_DIR`
+points `HOME` at a temp dir fixtures cannot reach, so `ORBIT_LESSONS_DIR`
 replaces the user-local lessons directory with one inside the scenario's `cwd/`.
-Lessons read from it are validated and wrapped exactly like `~/.loom/lessons`.
+Lessons read from it are validated and wrapped exactly like `~/.orbit/lessons`.
 
 ## A scripted model (Tier 1, no real model)
 
@@ -189,7 +189,7 @@ The replay seams hand one hook a recorded result. Some things can only be
 seen with a model in the loop -- the evidence gate judges a model's edit to
 the notebook, and the deny that counts is the one pi's own `tool_call` path
 honours, after every other handler and the exec-guard have had their say.
-`LOOM_MODEL_SCRIPT` puts pi's faux provider in for the model and tells it
+`ORBIT_MODEL_SCRIPT` puts pi's faux provider in for the model and tells it
 exactly what to say. It names a JSONL file, one model turn per line, in the
 order the model would make them:
 
@@ -219,7 +219,7 @@ provider is aborted and logged (`model.script.blocked`). `team_dispatch`,
 which calls a model directly, refuses to run.
 
 Nothing in the script is trusted: it is the model. Combine it with
-`LOOM_SUBMISSION_REPLAY` and `LOOM_GALAXY_FIXTURE` to give the scripted model a
+`ORBIT_SUBMISSION_REPLAY` and `ORBIT_GALAXY_FIXTURE` to give the scripted model a
 recorded run to verify; the `gate-scripted-*` scenarios do that to produce the
 `evidence.decision` rows `docs/evidence-gate-audit.md` adjudicates.
 

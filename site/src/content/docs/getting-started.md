@@ -1,13 +1,13 @@
 ---
 title: Getting started
-description: Install Orbit or the Loom CLI, connect Galaxy, and run your first agentic analysis.
+description: Install Orbit or the Orbit CLI, connect Galaxy, and run your first agentic analysis.
 group: Guides
 order: 1
 ---
 
 # Getting started
 
-Orbit and Loom turn a working directory into a co-scientist project. You chat with
+Orbit turns a working directory into a co-scientist project. You chat with
 an agent; it plans, runs work on Galaxy or locally, and records everything in a
 durable `notebook.md`. This page gets you from zero to your first analysis.
 
@@ -18,27 +18,27 @@ Pick whichever shell you prefer — they run the same brain.
 ### Orbit (desktop app)
 
 Download an installer from the
-[Releases page](https://github.com/galaxyproject/loom/releases). Each build
-bundles its own Node, `uv`, and Loom, so there is nothing else to set up. The
+[Releases page](https://github.com/galaxyproject/orbit/releases). Each build
+bundles its own Node, `uv`, and Orbit, so there is nothing else to set up. The
 macOS build is signed and notarized.
 
 - **macOS** — open the `.dmg` and drag Orbit to Applications.
-- **Linux** — install the `.deb` (`sudo dpkg -i orbit_*_amd64.deb && sudo apt-get install -f`) or `.rpm`, then run `orbit`.
+- **Linux** — install the `.deb` (`sudo dpkg -i orbit-desktop_*_amd64.deb && sudo apt-get install -f`) or `.rpm`, then run `orbit-desktop`.
 - **Windows** — remote-only (no local shell). Currently ships as an unsigned `.zip` — unzip and run `orbit`; a signed installer is on the way.
 
-### Loom (CLI)
+### Orbit (CLI)
 
 The CLI needs Node 22.19+.
 
 ```bash
-npm install -g @galaxyproject/loom
+npm install -g @galaxyproject/orbit
 loom
 ```
 
 Or run it once without installing:
 
 ```bash
-npx @galaxyproject/loom
+npx @galaxyproject/orbit
 ```
 
 ## 2. Connect Galaxy
@@ -52,19 +52,19 @@ Galaxy access runs through in-process Galaxy tools to search and run tools, driv
 workflows, and manage histories. They are the same operations
 [Galaxy MCP](/orbit/docs/galaxy-mcp) offers any MCP client.
 
-> Galaxy work is optional. Loom is useful for local exploration and planning even
+> Galaxy work is optional. Orbit is useful for local exploration and planning even
 > before you connect a server.
 
 ## 3. Run your first analysis
 
-1. **Open a directory.** Start Orbit (or run `loom`) in an analysis folder. A
+1. **Open a directory.** Start Orbit (or run `orbit`) in an analysis folder. A
    `notebook.md` is created on first launch and committed to git.
 2. **Chat.** Ask questions, drop file paths, request data lookups. None of this
    requires a "plan" — the conversation is just a conversation.
 3. **Ask for a plan.** The agent drafts it _in chat_ as a markdown section and
    waits for your approval. Then it shows you the parameters and waits again.
 4. **Watch it run.** Once approved, the plan is written into `notebook.md` and
-   executed. Galaxy steps are tracked with live `loom-invocation` blocks; the
+   executed. Galaxy steps are tracked with live `orbit-invocation` blocks; the
    Activity tab streams tool calls and job status.
 5. **Come back tomorrow.** Open the same directory and the notebook is the
    project. Sessions resume automatically.

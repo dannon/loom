@@ -25,15 +25,34 @@ x64, Linux x64 + arm64, Windows x64) and attaches every installer (DMGs, `.zip`
 archives, `.deb`, `.rpm`, Squirrel `Setup.exe`) to a **draft** GitHub Release.
 Review the draft and publish manually when ready.
 
+## The repo used to be galaxyproject/loom
+
+Until 0.9 this repo, the npm package and the CLI were all called Loom. GitHub
+redirects clones, web links, API calls and release-asset downloads from
+`galaxyproject/loom` to `galaxyproject/orbit` -- installed copies of Orbit 0.8
+and older depend on that redirect for their update checks.
+
+**Never create a repository named `galaxyproject/loom`.** The moment one
+exists, the redirect stops for everyone, every old clone and every 0.8 install
+goes dark, and the links already printed in changelogs and what's-new pages
+break. Leave the name free, forever.
+
+Two things did not follow the rename and were set up by hand: the npm trusted
+publisher for `@galaxyproject/orbit` (npmjs.com -> package Settings -> Trusted
+Publisher, pointing at this repo + `release.yml`), and the GitHub Pages site,
+which moved to `galaxyproject.github.io/orbit/` with a redirect stub left at
+the old path in `galaxyproject/galaxyproject.github.io`. `@galaxyproject/loom`
+stays published as a deprecated shim that installs Orbit and forwards to it.
+
 ## What gets built
 
-| Runner           | Arch  | Artifacts                                                                                       |
-| ---------------- | ----- | ----------------------------------------------------------------------------------------------- |
-| macos-latest     | arm64 | `Orbit-<version>-arm64.dmg`, `Orbit-darwin-arm64-<version>.zip`                                 |
-| macos-26-intel   | x64   | `Orbit-<version>-x64.dmg`, `Orbit-darwin-x64-<version>.zip`                                     |
-| ubuntu-24.04     | x64   | `orbit_<version>_amd64.deb`, `orbit-<version>-1.x86_64.rpm`, `Orbit-linux-x64-<version>.zip`    |
-| ubuntu-24.04-arm | arm64 | `orbit_<version>_arm64.deb`, `orbit-<version>-1.aarch64.rpm`, `Orbit-linux-arm64-<version>.zip` |
-| windows-latest   | x64   | `Orbit-<version> Setup.exe`                                                                     |
+| Runner           | Arch  | Artifacts                                                                                                       |
+| ---------------- | ----- | --------------------------------------------------------------------------------------------------------------- |
+| macos-latest     | arm64 | `Orbit-<version>-arm64.dmg`, `Orbit-darwin-arm64-<version>.zip`                                                 |
+| macos-26-intel   | x64   | `Orbit-<version>-x64.dmg`, `Orbit-darwin-x64-<version>.zip`                                                     |
+| ubuntu-24.04     | x64   | `orbit-desktop_<version>_amd64.deb`, `orbit-desktop-<version>-1.x86_64.rpm`, `Orbit-linux-x64-<version>.zip`    |
+| ubuntu-24.04-arm | arm64 | `orbit-desktop_<version>_arm64.deb`, `orbit-desktop-<version>-1.aarch64.rpm`, `Orbit-linux-arm64-<version>.zip` |
+| windows-latest   | x64   | `Orbit-<version> Setup.exe`                                                                                     |
 
 The macOS builds run on native GitHub runners — no cross-compilation, no universal binary.
 The Linux builds run on `ubuntu-24.04` (x64) and `ubuntu-24.04-arm` (arm64); each
@@ -83,11 +102,11 @@ npx electron-forge make --arch=arm64    # or --arch=x64; needs `fakeroot` + `rpm
 
 Output lands in `app/out/make/`. macOS installers built this way are
 unsigned. The bundled per-arch Node + `uv` (see `forge.config.ts`) are pulled
-on first run and cached in `.loom-stage/cache/`.
+on first run and cached in `.orbit-stage/cache/`.
 
 ## Version-check banner
 
-Orbit reads `https://api.github.com/repos/galaxyproject/loom/releases/latest`
+Orbit reads `https://api.github.com/repos/galaxyproject/orbit/releases/latest`
 on startup, caches the result for 24h in `~/.orbit/version-check.json`, and
 shows a non-blocking banner if the latest tag is newer than
 `app.getVersion()`. The banner has a per-version dismiss that clears once a

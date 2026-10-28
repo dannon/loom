@@ -4,9 +4,9 @@
   "commit": "aa4da4bd68eb00e360dfd5aa6e998feb5de0ac49",
   "commitDate": "2026-09-17",
   "tag": null,
-  "manifestSha256": "09c4fc9a348447835ef83ee73810f8e5e29a272f49aaf3129a8e71e76ad0a719",
+  "manifestSha256": "fc42374a22154aba6f0b00b4b627586b79d5a7ca979920d7cc45dc37236e67e2",
   "catalogSha256": "f1c6b85851ca03a868168e41cac949c307abf65f7b27e11b79136813cb0c5def",
-  "syncSha256": "81dabab7985a698066df0616b6feb703e7bbf257cb1f32bd06e150ade865de6b",
+  "syncSha256": "a9bc041ba5b5ebc6209c671c9fb350468cc232b3fbe41f7d9d328eca2c375f92",
   "plugins": [
     {
       "plugin": "galaxy-skills",

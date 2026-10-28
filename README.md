@@ -1,34 +1,34 @@
-# Loom & Orbit
+# Orbit
 
 > [!TIP]
-> **📖 See the docs & live demos → [galaxyproject.github.io/loom](https://galaxyproject.github.io/loom/)**
-> — _Agentic Science with Galaxy_: an overview of Orbit, Loom, and Galaxy MCP, an animated walkthrough of real analyses, and getting-started guides.
+> **📖 See the docs & live demos → [galaxyproject.github.io/orbit](https://galaxyproject.github.io/orbit/)**
+> — _Agentic Science with Galaxy_: an overview of Orbit and Galaxy MCP, an animated walkthrough of real analyses, and getting-started guides.
 
 > [!TIP]
-> **🛠️ Want to test or develop Loom? → [CONTRIBUTING.md](CONTRIBUTING.md)**
+> **🛠️ Want to test or develop Orbit? → [CONTRIBUTING.md](CONTRIBUTING.md)**
 > — setup, how to run each shell, the check loop, and how to validate a change for real.
 
 An AI research harness for [Galaxy](https://galaxyproject.org) bioinformatics, built on [Pi.dev](https://pi.dev).
 
-Loom turns a working directory into a co-scientist project: ad-hoc exploration, plans, executed steps, interpretations, and follow-up plans all accumulate as markdown in a single, durable, git-tracked `notebook.md`. The agent reads and writes that notebook directly; there is no parallel structured-state store. When Galaxy is configured the agent surveys the workflow registry and tool catalog while drafting plans and routes individual steps to Galaxy or local execution as appropriate.
+Orbit turns a working directory into a co-scientist project: ad-hoc exploration, plans, executed steps, interpretations, and follow-up plans all accumulate as markdown in a single, durable, git-tracked `notebook.md`. The agent reads and writes that notebook directly; there is no parallel structured-state store. When Galaxy is configured the agent surveys the workflow registry and tool catalog while drafting plans and routes individual steps to Galaxy or local execution as appropriate.
 
-**Loom** is the agent brain — the Pi.dev runtime in [`extensions/loom/`](extensions/loom/), the system-prompt context, Galaxy invocation tracking, the skills system, and the RPC contract. Run it directly from the terminal with `loom` (`npm install -g @galaxyproject/loom`) or through **Orbit** (in [`app/`](app/)), the Electron desktop shell with a chat + tabbed-artifact layout.
+**The Orbit core** is the agent brain — the Pi.dev runtime in [`extensions/orbit/`](extensions/orbit/), the system-prompt context, Galaxy invocation tracking, the skills system, and the RPC contract. Run it directly from the terminal with `orbit` (`npm install -g @galaxyproject/orbit`) or through **Orbit desktop** (in [`app/`](app/)), the Electron shell with a chat + tabbed-artifact layout.
 
-The names trace real cosmology. The universe's large-scale structure is the _cosmic web_ -- galaxies strung along filaments of dark matter, woven into sheets and voids. Loom weaves your research record the way the cosmic web weaves galaxies; Orbit is the electron shell you observe it from.
+The name is a cosmology nod: the universe's large-scale structure is the _cosmic web_ -- galaxies strung along filaments of dark matter, woven into sheets and voids -- and Orbit is the electron shell you observe it from. Until 0.9 the agent core was called Loom, after the weaving, so older notebooks, notes and talks still carry that name.
 
 Future shells — a Galaxy-embedded web UI, a hosted server mode, anything else — talk to the same brain over RPC.
 
 That web shell already has a working seed today: a browser-served build of the Orbit renderer, running the same brain over RPC, reachable from another device on your LAN -- handy for chatting from a phone, and a natural home for Galaxy interactive tools later on. It's an unauthenticated single-user dev tool for now, so keep it on a trusted network; setup and the security caveats are in [`web/README.md`](web/README.md).
 
-A second web shell lives in [`browser/`](browser/): Orbit's chat UI with the agent running in a browser worker, shipped as the Olit Galaxy visualization plugin. For now that worker carries its own copy of the agent; it is moving onto the same Loom brain, so new brain behavior belongs in `extensions/loom/`, not in `browser/` (see [`docs/architecture.md`](docs/architecture.md#browser-shell-browser)).
+A second web shell lives in [`browser/`](browser/): Orbit's chat UI with the agent running in a browser worker, shipped as the Olit Galaxy visualization plugin. For now that worker carries its own copy of the agent; it is moving onto the same Orbit core, so new brain behavior belongs in `extensions/orbit/`, not in `browser/` (see [`docs/architecture.md`](docs/architecture.md#browser-shell-browser)).
 
 ## How it works
 
-1. You open Orbit (or run `loom`) in an analysis directory. A `notebook.md` is created on first launch and committed to git.
+1. You open Orbit (or run `orbit`) in an analysis directory. A `notebook.md` is created on first launch and committed to git.
 2. You chat with the agent: ask questions, drop file paths, request data lookups. None of this requires a "plan" — the conversation is just a conversation.
 3. When you ask for a plan, the agent drafts it **in chat** as a markdown section, then waits for you to approve. Once you approve, it asks you to review parameters; once you approve those too, it writes the plan section into `notebook.md` and starts executing.
 4. If Galaxy is connected, the agent considers per-step routing during drafting (does an IWC workflow match? does Galaxy have the heavy tool installed?) and tags each step `[galaxy]`, `[local]`, `[hybrid]`, or `[remote]` in the markdown.
-5. While a Galaxy step runs, a `loom-invocation` YAML block in the notebook tracks the invocation. The polling tool reads those blocks, queries Galaxy, and updates them in place when jobs finish or fail.
+5. While a Galaxy step runs, a `orbit-invocation` YAML block in the notebook tracks the invocation. The polling tool reads those blocks, queries Galaxy, and updates them in place when jobs finish or fail.
 6. Multiple plans coexist in the notebook. After interpreting one analysis, ask for another — the new plan section appends below the previous one.
 7. Come back the next day, open the same directory, the notebook is the project. Sessions resume automatically.
 
@@ -38,9 +38,9 @@ Engineer-facing architecture reference: [docs/architecture.md](docs/architecture
 Repo conventions and developer workflow: [CLAUDE.md](CLAUDE.md)
 
 ```
-Brain (Loom)                                  Shells
+Core (Orbit)                                  Shells
 ────────────                                  ──────
-extensions/loom/                              bin/loom.js              terminal CLI
+extensions/orbit/                              bin/orbit.js              terminal CLI
   index.ts      extension entry               app/                     Orbit Electron shell
   state.ts      session state (no plan)         src/main/              Node.js main process
   tools.ts      LLM-callable tools              src/preload/           window.orbit bridge
@@ -50,12 +50,12 @@ extensions/loom/                              bin/loom.js              terminal 
     writer.ts   notebook I/O + invocation YAML    files/               file tree + viewer
   profiles.ts   Galaxy server profiles
   teams/        team_dispatch (experimental)
-~/.loom/config.json    shared brain config
-~/.loom/cache/skills/  fetched skill repos (24h TTL; bundled repos are not cached here)
+~/.orbit/config.json    shared brain config
+~/.orbit/cache/skills/  fetched skill repos (24h TTL; bundled repos are not cached here)
 ~/.orbit/              Orbit-specific state (window geometry, etc.)
 ```
 
-The notebook is the durable state. Plans, decisions, results, and interpretation all live as markdown sections inside `notebook.md` — the agent maintains them via the standard `Edit`/`Write` tools. The only structured side-records are `loom-invocation` YAML blocks for in-flight Galaxy work.
+The notebook is the durable state. Plans, decisions, results, and interpretation all live as markdown sections inside `notebook.md` — the agent maintains them via the standard `Edit`/`Write` tools. The only structured side-records are `orbit-invocation` YAML blocks for in-flight Galaxy work.
 
 ## Current state
 
@@ -79,7 +79,7 @@ Implemented and locally tested.
 - **Chat**: streaming responses with thinking indicator; markdown-rendered with proper tables; `team_dispatch` rich card; queue-while-streaming; numbered prompt turns (`/summarize 3 5` works against those numbers).
 - **Slash-command popup** appears as you type `/`. Tab to autocomplete; Enter still submits past it; Esc dismisses.
 - **Prompt history**: ↑ / ↓ in the input recalls previously-submitted prompts (per-cwd, persistent).
-- **Batched SRA imports**: Loom catches compatible per-accession `fastq_dump`/`fasterq_dump` calls before submission and directs the agent to one collection-producing run. Always-loaded guidance covers accession deduplication, history reuse, and output verification.
+- **Batched SRA imports**: Orbit catches compatible per-accession `fastq_dump`/`fasterq_dump` calls before submission and directs the agent to one collection-producing run. Always-loaded guidance covers accession deduplication, history reuse, and output verification.
 - **Galaxy connection indicator** in the footer (RED dot if no API key, GREEN dot if connected). Click to open Preferences.
 - **Cost / token header**: live in-flight cost (computed from Pi-reported `usage.cost`) and token totals.
 - **Preferences dialog** (`Cmd/Ctrl+,`): provider / model / API key, Galaxy credentials, default working directory, package manager, and a configurable list of **skill repositories** (galaxy-skills shipped as default).
@@ -87,12 +87,12 @@ Implemented and locally tested.
 - **Responsive layout**: at narrow widths the file tree (<900 px) and artifact pane (<700 px) auto-collapse so the chat stays usable. Toolbar buttons re-expand them.
 - **Keyboard accessibility**: `Cmd/Ctrl+\` toggles the artifact pane; `Cmd/Ctrl+B` toggles the file tree; `Cmd/Ctrl+,` opens Preferences; `Cmd/Ctrl+O` switches working directory; `Esc` dismisses modals; gold focus-ring on every Tab-reachable control.
 - **Galaxy brand dark theme** with Inter (body) + JetBrains Mono (code) bundled locally.
-- **Automatic Galaxy follow-up**: Loom queues output verification for completed jobs and workflows, and investigates failures without waiting for another prompt. Changes from one poll are batched; a busy agent finishes its current turn first. Verification evidence goes in the notebook, then already-authorized work can continue. Follow-ups pause after 3 automatic turns in a row without user input (`experiments.autoResumeMaxTurns`) or when you stop a turn, until you next say something. Set `LOOM_AUTO_RESUME=0` or `experiments.autoResume: false` in `~/.loom/config.json` to disable automatic follow-up.
+- **Automatic Galaxy follow-up**: Orbit queues output verification for completed jobs and workflows, and investigates failures without waiting for another prompt. Changes from one poll are batched; a busy agent finishes its current turn first. Verification evidence goes in the notebook, then already-authorized work can continue. Follow-ups pause after 3 automatic turns in a row without user input (`experiments.autoResumeMaxTurns`) or when you stop a turn, until you next say something. Set `ORBIT_AUTO_RESUME=0` or `experiments.autoResume: false` in `~/.orbit/config.json` to disable automatic follow-up.
 - **Session continuity**: `--continue` on restart preserves chat history; `/new` starts a clean slate; first launch in a directory with an existing Pi session auto-resumes.
 
-### What the Loom CLI ships today
+### What the Orbit CLI ships today
 
-Everything brain-side works through the CLI. The display is a terminal UI instead of a tabbed artifact pane; structured widget events collapse down to text summaries. Slash commands behave the same. You can use `loom` without ever launching Orbit.
+Everything brain-side works through the CLI. The display is a terminal UI instead of a tabbed artifact pane; structured widget events collapse down to text summaries. Slash commands behave the same. You can use `orbit` without ever launching Orbit.
 
 ## Project model
 
@@ -164,7 +164,7 @@ The three operating modes (**local** / **hybrid** / **remote**) are an _outcome_
 
 When an agent invokes a Galaxy workflow it embeds a fenced YAML block in the notebook:
 
-```loom-invocation
+```orbit-invocation
 invocation_id: abc123
 galaxy_server_url: https://usegalaxy.org
 notebook_anchor: plan-a-step-3
@@ -178,23 +178,23 @@ The polling tool `galaxy_invocation_check_all` scans the notebook for in-flight 
 
 ### The evidence gate
 
-Most of what Loom enforces mechanically is about safety -- don't shell out, don't leak the key, don't delete the history. The epistemic discipline the product actually exists for ("evidence comes before assertion") was prose in the system prompt, and nothing checked it.
+Most of what Orbit enforces mechanically is about safety -- don't shell out, don't leak the key, don't delete the history. The epistemic discipline the product actually exists for ("evidence comes before assertion") was prose in the system prompt, and nothing checked it.
 
 The evidence gate is the first check on that. It watches `Edit`/`Write` calls against `notebook.md` (and Page pulls, which replace it), and judges a plan step arriving at `- [x]` against a record the model can't author. There are two such records.
 
-For a step whose run the approval registry knows about ([`docs/registry.md`](docs/registry.md)), the verdict is the registry's `handoff_eligible`, which Loom writes from Galaxy's own answers into a store signed by the session. The step is held until that run is eligible: completing it is refused whatever its block's `status:` says, and so is removing or renaming its checkbox, since steps are found by anchor anywhere in the file. Marking it `- [!]` is always fine.
+For a step whose run the approval registry knows about ([`docs/registry.md`](docs/registry.md)), the verdict is the registry's `handoff_eligible`, which Orbit writes from Galaxy's own answers into a store signed by the session. The step is held until that run is eligible: completing it is refused whatever its block's `status:` says, and so is removing or renaming its checkbox, since steps are found by anchor anywhere in the file. Marking it `- [!]` is always fine.
 
-For a run the registry doesn't know -- today, any raw submission -- it falls back to the block: a step going `- [ ]` → `- [x]` while the `loom-invocation` block bound to its anchor still reads `status: in_progress` is a contradiction. That status comes from the poller, and the check reads the file as it stood _before_ the write, so rewriting `status:` in the same edit doesn't clear it.
+For a run the registry doesn't know -- today, any raw submission -- it falls back to the block: a step going `- [ ]` → `- [x]` while the `orbit-invocation` block bound to its anchor still reads `status: in_progress` is a contradiction. That status comes from the poller, and the check reads the file as it stood _before_ the write, so rewriting `status:` in the same edit doesn't clear it.
 
-It's deliberately narrow. Absence of evidence isn't decidable from a single write (the honest sequence Loom teaches spans two edits), so absence is never gated -- only contradiction is. A flip with no bound run gets no opinion, a `failed` block is never gated because it's sticky and can't be re-polled, and a rerun that leaves a stale block beside a `completed` one for the same anchor reads as fine.
+It's deliberately narrow. Absence of evidence isn't decidable from a single write (the honest sequence Orbit teaches spans two edits), so absence is never gated -- only contradiction is. A flip with no bound run gets no opinion, a `failed` block is never gated because it's sticky and can't be re-polled, and a rerun that leaves a stale block beside a `completed` one for the same anchor reads as fine.
 
-Modes are `off | warn | deny`, default **deny**: a contradicted write is refused, and the user can clear one step with `/override <step> <reason>`. In `warn` the write goes through. Either way the decision lands in `activity.jsonl` as an `evidence.decision` event. [`docs/evidence-gate-audit.md`](docs/evidence-gate-audit.md) has the audit the default rests on, and what it doesn't cover. Set it in `~/.loom/config.json`:
+Modes are `off | warn | deny`, default **deny**: a contradicted write is refused, and the user can clear one step with `/override <step> <reason>`. In `warn` the write goes through. Either way the decision lands in `activity.jsonl` as an `evidence.decision` event. [`docs/evidence-gate-audit.md`](docs/evidence-gate-audit.md) has the audit the default rests on, and what it doesn't cover. Set it in `~/.orbit/config.json`:
 
 ```json
 { "evidenceGate": { "mode": "warn" } }
 ```
 
-or per session with `LOOM_EVIDENCE_GATE=warn`.
+or per session with `ORBIT_EVIDENCE_GATE=warn`.
 
 In `deny` the refusal stands for as long as the contradiction does. An earlier cut let the model's second attempt through, but that made the decision advisory, since a model that disagrees only has to ask twice. The exception is yours instead: `/override <step-anchor> <reason>`. On a step the registry holds, it records your exception in the registry for the runs it was held for, so a new run on the step is held again. On the block path it clears one named step for one write and the run in flight when you granted it, held in memory for the session. Either way the step, what held it and your reason go to `activity.jsonl` as an `evidence.override` event. Bare `/override` lists what the gate is currently holding; if a key you type could name two steps, the command asks you to quote the one you mean.
 
@@ -202,14 +202,14 @@ What's left is pinned by tests. On the block path, step identity and status are 
 
 ### Git-tracked notebooks
 
-When Loom starts in a directory that isn't already a git repo, it runs `git init`, drops a bioinformatics-friendly `.gitignore`, and marks the repo with `git config loom.managed true`. From then on every notebook write triggers an auto-commit, giving you:
+When Orbit starts in a directory that isn't already a git repo, it runs `git init`, drops a bioinformatics-friendly `.gitignore`, and marks the repo with `git config loom.managed true`. From then on every notebook write triggers an auto-commit, giving you:
 
 - **Full undo history.** `git log` shows what changed and when.
 - **Reproducibility evidence.** Timestamped, immutable record of every decision.
 - **Branch-based exploration.** Try an alternative on a branch; compare with `git diff`.
 - **Collaboration.** Push the repo to GitHub; collaborators pull, review, and continue.
 
-If you start Loom in an **existing** git repo, auto-commit stays off by default -- Loom won't write commits into a project it didn't create. Opt in with:
+If you start Orbit in an **existing** git repo, auto-commit stays off by default -- Orbit won't write commits into a project it didn't create. Opt in with:
 
 ```bash
 git config loom.managed true
@@ -219,11 +219,11 @@ The auto-created `.gitignore` excludes large bioinformatics files (FASTQ, BAM, V
 
 ## Skills system
 
-Loom loads operational know-how from repos of `SKILL.md` files, through `skills_fetch({ repo, path })`. Most of it ships inside the package: the content is vendored from [`galaxyproject/agentic-plugins`](https://github.com/galaxyproject/agentic-plugins) — the same source that distributes it to every other agent — at a commit pinned in `scripts/skills.manifest.json`, so a first run works offline and at a version that went through review. Preferences → Skills shows which repos are bundled and at which commit.
+Orbit loads operational know-how from repos of `SKILL.md` files, through `skills_fetch({ repo, path })`. Most of it ships inside the package: the content is vendored from [`galaxyproject/agentic-plugins`](https://github.com/galaxyproject/agentic-plugins) — the same source that distributes it to every other agent — at a commit pinned in `scripts/skills.manifest.json`, so a first run works offline and at a version that went through review. Preferences → Skills shows which repos are bundled and at which commit.
 
 Point a repo at a different branch or URL and it goes back to being fetched from GitHub and cached for 24h, which is how a skill author evaluates a change before it is merged. Repos are restricted to `github.com/galaxyproject/*` either way.
 
-**`galaxyproject/galaxy-skills` is the default** — when no skills are configured, Loom seeds it on first read. It covers:
+**`galaxyproject/galaxy-skills` is the default** — when no skills are configured, Orbit seeds it on first read. It covers:
 
 - **Collection manipulation** (paired collections from PE FASTQ, mapping a tool over a collection, Apply Rules DSL, Galaxy Tools API patterns)
 - **Galaxy MCP usage and gotchas**
@@ -254,9 +254,9 @@ Add your own repos in **Preferences → Skills**. Each entry is `{ name, url, br
 }
 ```
 
-Loosening the allowlist means editing `ALLOWED_SKILLS_PREFIX` in `shared/loom-config.js`. Plan: a per-repo signing / pinning model before opening this up.
+Loosening the allowlist means editing `ALLOWED_SKILLS_PREFIX` in `shared/orbit-config.js`. Plan: a per-repo signing / pinning model before opening this up.
 
-Fetched files cache to `~/.loom/cache/skills/<repo-name>/<path>` with a 24-hour TTL -- covers offline use and reduces network round-trips on repeated reads.
+Fetched files cache to `~/.orbit/cache/skills/<repo-name>/<path>` with a 24-hour TTL -- covers offline use and reduces network round-trips on repeated reads.
 
 ## Install
 
@@ -264,28 +264,28 @@ Three paths, depending on what you want.
 
 ### Desktop app (Orbit)
 
-Orbit ships as a native build that bundles its own Node runtime, `uv`, and Loom -- no separate prerequisites. The macOS builds are Developer ID signed + notarized for both Apple Silicon and Intel, so they open with a normal double-click; Linux ships `.deb`/`.rpm`/`.zip` for x64 and arm64; Windows ships a portable `Orbit-win32-x64-<version>.zip` (remote-only -- no local bash shell, and no installer yet). All builds are attached to each [release](https://github.com/galaxyproject/loom/releases). See [INSTALL.md](INSTALL.md) for per-platform steps and [RELEASING.md](RELEASING.md) for how a release is cut. Targets we don't package can use the developer install below.
+Orbit ships as a native build that bundles its own Node runtime, `uv`, and the Orbit core -- no separate prerequisites. The macOS builds are Developer ID signed + notarized for both Apple Silicon and Intel, so they open with a normal double-click; Linux ships `.deb`/`.rpm`/`.zip` for x64 and arm64; Windows ships a portable `Orbit-win32-x64-<version>.zip` (remote-only -- no local bash shell, and no installer yet). All builds are attached to each [release](https://github.com/galaxyproject/orbit/releases). See [INSTALL.md](INSTALL.md) for per-platform steps and [RELEASING.md](RELEASING.md) for how a release is cut. Targets we don't package can use the developer install below.
 
-### Loom CLI from npm
+### Orbit CLI from npm
 
 Run the brain on the command line without Orbit. Requires Node 22.19+. The Galaxy tools run in-process, so Galaxy needs nothing else; [uv](https://docs.astral.sh/uv/) is optional: only the vendored planemo skills' `uvx` route uses it.
 
 ```bash
-npm install -g @galaxyproject/loom
-loom
+npm install -g @galaxyproject/orbit
+orbit
 ```
 
 Or run without installing:
 
 ```bash
-npx @galaxyproject/loom
+npx @galaxyproject/orbit
 ```
 
-**Pop into Orbit any time.** Once Orbit is installed, type `/orbit` inside
-the Loom CLI to open the current analysis in the desktop app -- same analysis
+**Pop into Orbit any time.** Once Orbit is installed, type `/desktop` inside
+the Orbit CLI to open the current analysis in the desktop app -- same analysis
 directory, same notebook, just a richer view. Orbit opens on that directory;
 close the CLI (Ctrl-D or `/exit`) once it's up so the two don't both write the
-same notebook. If Orbit isn't installed, `/orbit` will point you at the release
+same notebook. If Orbit isn't installed, `/desktop` will point you at the release
 page.
 
 If you'll use the vendored planemo skills, they can run planemo through `uv`
@@ -301,33 +301,33 @@ Clone the repo and install both workspaces -- there is no build step, so this is
 the whole setup:
 
 ```bash
-git clone https://github.com/galaxyproject/loom.git
-cd loom
+git clone https://github.com/galaxyproject/orbit.git
+cd orbit
 npm install
 cd app && npm install
 ```
 
-Then `npm start` from `app/` for Orbit, or `node bin/loom.js` from the repo root
+Then `npm start` from `app/` for Orbit, or `node bin/orbit.js` from the repo root
 for the CLI. Needs Node 22.19+ (matching [`.nvmrc`](.nvmrc)); `uv` on `PATH` only for the planemo skills' `uvx` route.
 
 [**CONTRIBUTING.md**](CONTRIBUTING.md) has the rest: per-OS bootstrap, the
 browser dev shell with hot reload, the test/typecheck loop, repo layout, and how
 to validate a change beyond "the tests pass". Windows developers wanting local
 execution should work inside WSL2 -- `curl -fsSL
-https://raw.githubusercontent.com/galaxyproject/loom/main/scripts/setup-wsl.sh | bash`.
+https://raw.githubusercontent.com/galaxyproject/orbit/main/scripts/setup-wsl.sh | bash`.
 
 ### After installation
 
 In Orbit, on first launch, the welcome screen asks for an LLM provider + key and (optionally) a Galaxy server. You can also click **Skip — set up later** and configure things from Preferences when you're ready. You need at least one of: [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/), or [Google AI](https://aistudio.google.com/). Local providers like [Ollama](https://ollama.com/) and LiteLLM work too.
 
-In `loom`, the equivalent is editing `~/.loom/config.json` (see [Configuration](#configuration)) or running `loom --provider anthropic` and following the OAuth prompts.
+In `orbit`, the equivalent is editing `~/.orbit/config.json` (see [Configuration](#configuration)) or running `orbit --provider anthropic` and following the OAuth prompts.
 
 ## Usage
 
-### CLI (`loom`)
+### CLI (`orbit`)
 
 ```bash
-loom
+orbit
 ```
 
 ```
@@ -366,7 +366,7 @@ Pi:  [shows parameter table per tool]
 Come back the next day to the same directory and everything resumes:
 
 ```
-$ loom
+$ orbit
 
 Pi:  Loaded notebook: HeLa Drug Treatment RNA-seq DE
      Plan A is in progress (1 of 4 steps complete).
@@ -378,7 +378,7 @@ Pi:  Loaded notebook: HeLa Drug Treatment RNA-seq DE
 You can also load just the extension into Pi directly:
 
 ```bash
-pi --no-extensions -e ./extensions/loom
+pi --no-extensions -e ./extensions/orbit
 ```
 
 If you're debugging the terminal path, prefer these commands before using Orbit.
@@ -411,7 +411,7 @@ Keyboard shortcuts:
 
 ## Configuration
 
-Loom uses a single brain-level config at `~/.loom/config.json`. Every consumer (the `loom` CLI, Orbit, any future shell) reads and writes it:
+Orbit uses a single brain-level config at `~/.orbit/config.json`. Every consumer (the `orbit` CLI, the desktop app, any future shell) reads and writes it:
 
 ```json
 {
@@ -448,7 +448,7 @@ All sections are optional. If `llm` is missing, consumers fall back to environme
 
 #### Galaxy credential storage
 
-Galaxy profiles are stored in `~/.loom/config.json` under `galaxy.profiles.<name>`. The exact field depends on which shell wrote them:
+Galaxy profiles are stored in `~/.orbit/config.json` under `galaxy.profiles.<name>`. The exact field depends on which shell wrote them:
 
 - **Orbit** -- writes `apiKeyEncrypted` (base64 ciphertext from Electron `safeStorage`). The decrypted key is injected into the brain process as `GALAXY_API_KEY` at spawn time. If a brain-side `/connect` writes a plaintext `apiKey`, Orbit's config watcher re-encrypts it within milliseconds.
 - **CLI** (no `safeStorage` available) -- writes `apiKey` in plaintext. The file mode is tightened to `0600`, but the key sits at rest. Acceptable for a workstation; not appropriate for shared hosts.
@@ -465,7 +465,7 @@ export GALAXY_URL="https://usegalaxy.org"
 export GALAXY_API_KEY="your-api-key"
 ```
 
-Galaxy credentials can also be provided via environment variables (`GALAXY_URL`, `GALAXY_API_KEY`) for CI or testing, but `~/.loom/config.json` is the primary source.
+Galaxy credentials can also be provided via environment variables (`GALAXY_URL`, `GALAXY_API_KEY`) for CI or testing, but `~/.orbit/config.json` is the primary source.
 
 #### Beta tester ID
 
@@ -475,13 +475,13 @@ If you have a tester ID, you can set it like this:
 /tester-id orbit-007
 ```
 
-Run `/tester-id` with no argument to see the current value. It writes only the `testerId` key to `~/.loom/config.json` (the rest of the file is left untouched), and Orbit attaches it to any feedback you send so reports can be traced back to your session. It can also be supplied via the `LOOM_TESTER_ID` environment variable.
+Run `/tester-id` with no argument to see the current value. It writes only the `testerId` key to `~/.orbit/config.json` (the rest of the file is left untouched), and Orbit attaches it to any feedback you send so reports can be traced back to your session. It can also be supplied via the `ORBIT_TESTER_ID` environment variable.
 
 #### Lessons
 
 Lessons are short recorded notes on situations that go wrong -- a filter that
 counts NA as zero, a reference index that was never registered -- shipped with
-Loom and added to locally. The whole loop is off until you turn it on. On, a
+Orbit and added to locally. The whole loop is off until you turn it on. On, a
 lesson is surfaced in chat when a tool result or plan step matches it, the
 agent can search them, `/lesson` lets you record one from the session (it stays
 on this machine until you say otherwise), and failure reports follow the
@@ -494,16 +494,16 @@ on this machine until you say otherwise), and failure reports follow the
 /lessons off      # turns the whole loop off
 ```
 
-`LOOM_LESSONS=off` in the environment keeps it off for a managed install and
+`ORBIT_LESSONS=off` in the environment keeps it off for a managed install and
 cannot be overridden from the app.
 
 #### Sharing Galaxy failure patterns
 
-When a Galaxy tool fails, or the same step fails three times in a row, Loom
+When a Galaxy tool fails, or the same step fails three times in a row, Orbit
 can report the _shape_ of it -- which tool, which stage, which datatypes, and,
 in `ask` mode, a normalized one-line signature -- to the Galaxy team's private
 intake queue. Those reports are how a problem one person hits becomes a lesson
-Loom surfaces for the next person who hits it (you included), and how the team
+Orbit surfaces for the next person who hits it (you included), and how the team
 finds what to fix upstream. Nothing goes without your say-so: reporting is off
 until lessons are on and you pick a mode, and `ask` shows you the exact payload
 after a turn that hit a Galaxy error and sends only if you confirm.
@@ -542,7 +542,7 @@ Switching to `auto` shows you a real sample payload first, and `auto` only
 takes effect once you have confirmed that sample: a config that says `auto`
 without the recorded confirmation (hand-edited, say) runs as `ask`, and
 `/observations status` says so. For a managed
-deployment, `ORBIT_OBSERVATIONS=off` (or `LOOM_OBSERVATIONS=off`) disables the
+deployment, `ORBIT_OBSERVATIONS=off` (or `ORBIT_OBSERVATIONS=off`) disables the
 whole thing and cannot be overridden from the app. For local development,
 `ORBIT_OBSERVATIONS_URL` points the client at another intake; it is honoured
 only as `http://localhost[:port]`, `http://127.0.0.1[:port]` or an `https://`
@@ -550,11 +550,11 @@ URL, and ignored with a warning otherwise.
 
 ### Custom endpoints (local LLMs, gateways, proxies)
 
-Loom works with any OpenAI-compatible API -- a hosted service like [Jetstream](https://docs.jetstream-cloud.org/inference-service/overview/), or a local backend like [LiteLLM](https://litellm.ai/) or [Ollama](https://ollama.com/) -- and with Anthropic-compatible gateways that front the Messages API, such as an institutional proxy or LiteLLM in anthropic mode.
+Orbit works with any OpenAI-compatible API -- a hosted service like [Jetstream](https://docs.jetstream-cloud.org/inference-service/overview/), or a local backend like [LiteLLM](https://litellm.ai/) or [Ollama](https://ollama.com/) -- and with Anthropic-compatible gateways that front the Messages API, such as an institutional proxy or LiteLLM in anthropic mode.
 
 In **Orbit**, open Preferences, set the provider to **OpenAI-compatible endpoint**, pick the **API shape**, enter the base URL + API key (or click the **Jetstream** preset), and choose a model. The key is stored encrypted.
 
-For the **CLI**, add a provider entry with a `baseUrl` to `~/.loom/config.json`:
+For the **CLI**, add a provider entry with a `baseUrl` to `~/.orbit/config.json`:
 
 ```json
 {
@@ -571,7 +571,7 @@ For the **CLI**, add a provider entry with a `baseUrl` to `~/.loom/config.json`:
 }
 ```
 
-The `baseUrl` marks the entry as a custom endpoint: Loom registers it with Pi for you (writing the matching `~/.pi/agent/models.json` entry, with sensible metadata defaults) and passes the key to Pi at runtime, so the key never lands in `models.json`. The provider name is yours to choose -- `"openai-compatible"` is just a convention.
+The `baseUrl` marks the entry as a custom endpoint: Orbit registers it with Pi for you (writing the matching `~/.pi/agent/models.json` entry, with sensible metadata defaults) and passes the key to Pi at runtime, so the key never lands in `models.json`. The provider name is yours to choose -- `"openai-compatible"` is just a convention.
 
 An optional `api` field picks the wire format. It defaults to `openai-completions`, so existing entries need no change; set it to `anthropic-messages` for a gateway that speaks the Anthropic Messages API:
 
@@ -593,10 +593,10 @@ An optional `api` field picks the wire format. It defaults to `openai-completion
 
 **The two shapes want different base URLs**, because their clients append different paths. An `openai-completions` URL includes the version segment (`https://host/v1`); an `anthropic-messages` URL stops at the host (`https://host`) because the client adds `/v1/messages` itself. A `/v1` in the wrong place is a 404 against a URL that looks correct.
 
-### Standing instructions (`LOOM.md`)
+### Standing instructions (`ORBIT.md`)
 
-Preferences you'd otherwise repeat every session belong in a `LOOM.md` file,
-which Loom loads into every conversation:
+Preferences you'd otherwise repeat every session belong in a `ORBIT.md` file,
+which Orbit loads into every conversation:
 
 ```
 Always end an analysis with a visualization.
@@ -604,11 +604,11 @@ Prefer IWC workflows over hand-assembled tool chains.
 Use HISAT2 for RNA-seq alignment, not bowtie.
 ```
 
-Loom reads two places:
+Orbit reads two places:
 
-- `~/.pi/agent/LOOM.md` -- yours, applied to every session. Run
+- `~/.pi/agent/ORBIT.md` -- yours, applied to every session. Run
   `/instructions init` to create it.
-- `LOOM.md` in your project directory, or any directory above it -- applied to
+- `ORBIT.md` in your project directory, or any directory above it -- applied to
   work in that directory. `/instructions init project` creates one.
 
 Run `/instructions` to see exactly which files loaded, which is the fastest way
@@ -619,7 +619,7 @@ and goes into the system prompt. A project file travels with the folder -- a
 cloned repo, a shared drive, something a collaborator sent you -- so it is
 supplied as reference material instead: it can steer tool choice and output
 conventions, but it cannot grant permissions, skip a confirmation prompt, or
-override anything Loom was told at startup.
+override anything Orbit was told at startup.
 
 Files are capped at 8KB or 200 lines and at eight files total; anything past
 that is dropped, and `/instructions` tells you when it happened. Edits take
@@ -627,13 +627,13 @@ effect on your next message -- no restart.
 
 ## Local execution safety
 
-Loom drives a real coding agent: alongside the Galaxy tools, the model has `bash`, `write`, `edit`, and `read` on your machine. That's the point -- local analysis needs it -- but it means a misreading model, or one that's been prompt-injected by untrusted content (a Galaxy dataset, tool output, a fetched page), could run something destructive as you. This risk is higher with cheaper, less-capable models, which Loom lets you pick to save money.
+Orbit drives a real coding agent: alongside the Galaxy tools, the model has `bash`, `write`, `edit`, and `read` on your machine. That's the point -- local analysis needs it -- but it means a misreading model, or one that's been prompt-injected by untrusted content (a Galaxy dataset, tool output, a fetched page), could run something destructive as you. This risk is higher with cheaper, less-capable models, which Orbit lets you pick to save money.
 
-So Loom gates the model's local actions by default (the "exec-guard"):
+So Orbit gates the model's local actions by default (the "exec-guard"):
 
 - **Workspace jail.** Reads, writes, and edits inside your analysis directory (plus the OS temp dir) are silent; anything that resolves outside -- including via `..`, a symlink, or `~`/`$HOME` -- prompts, or is denied for weak models. So the model reads and writes freely in your project but must ask to reach anything else on disk. Writes to control locations (`.git`, `.loom/`) always prompt, even inside the workspace -- a `.git/hooks` script would run on your next commit.
 - **Risk-classified `bash`.** Read-only/analysis commands (`ls`, `cat`, `grep`, ...) run without friction when they stay in the workspace. Catastrophic patterns (`rm -rf /`, `sudo`, `curl | sh`, `dd of=/dev/...`, fork bombs, ...) are always blocked -- including path-prefixed (`/usr/bin/sudo`), long-flag (`rm --recursive --force /`), wrapper-hidden (`env rm -rf ~`), explicit-home (`rm -rf $HOME`), and multi-line variants, plus any attempt to edit the gate's own config. Anything else prompts -- and any compound, redirected, or multi-line command (`;`, `&&`, `|`, `$(...)`, `>`, a newline) drops to a prompt rather than being trusted.
-- **Sensitive paths.** `~/.ssh`, `~/.aws`, `.env`, `*.pem`/`*.key`, `~/.loom/config.json`, OS keychains, and similar always prompt (or are denied for weak models) even inside the workspace -- whether the model uses `read`, `grep`, `ls`, `find`, or a `cat` in `bash`.
+- **Sensitive paths.** `~/.ssh`, `~/.aws`, `.env`, `*.pem`/`*.key`, `~/.orbit/config.json`, OS keychains, and similar always prompt (or are denied for weak models) even inside the workspace -- whether the model uses `read`, `grep`, `ls`, `find`, or a `cat` in `bash`.
 - **Model-tier aware.** Every model is gated. Weaker models (Haiku / GPT-4o-mini / Flash class, or unknown / local / low-cost models) get stricter defaults: a sensitive path or anything resolving outside the workspace is denied outright rather than offered for approval, and they never earn the silent auto-allow a capable model gets in a trusted workspace. An ordinary unrecognized command, though -- running a script it just wrote, or a compound/redirected command -- still drops to the _same_ approval prompt a capable model would get, so scripting in explicit local mode works once you approve it. (Headless/scripted runs have no one to approve, so anything that would prompt is denied there for every tier.)
 - **Fail-closed.** With no interactive session to approve (headless / scripted runs), anything that would prompt is denied. A one-time consent notice is shown on the first gated action, and every decision is recorded in `activity.jsonl`.
 
@@ -643,19 +643,19 @@ When a command needs approval you can allow it once, allow it for the session, o
 
 If you fully control the environment and want the agent to run unattended (CI, a trusted pipeline, your own box), you can turn the gate off:
 
-- **Config:** set `"guardian": { "dangerouslyBypassPermissions": true }` in `~/.loom/config.json`.
-- **CLI:** `loom --dangerously-bypass-permissions` (one invocation; does not persist). `--safe` (or `LOOM_SAFE=1`) forces the gate back on and wins over everything.
+- **Config:** set `"guardian": { "dangerouslyBypassPermissions": true }` in `~/.orbit/config.json`.
+- **CLI:** `orbit --dangerously-bypass-permissions` (one invocation; does not persist). `--safe` (or `ORBIT_SAFE=1`) forces the gate back on and wins over everything.
 - **Orbit:** Preferences -> Safety -> "Dangerously bypass permissions" (a native confirm appears first; a red banner stays up while it's active).
 
-Bypass is total -- it removes all prompts and the workspace jail. It can only be enabled by a human through one of those channels: the agent can't turn it on itself, because writing `~/.loom/config.json` is blocked whether it uses the file tools or `bash`, and Orbit's toggle requires an OS-level confirmation the renderer can't forge. The default (`guardian.enabled: true`, not bypassed) is secure; relaxing it is always an explicit choice.
+Bypass is total -- it removes all prompts and the workspace jail. It can only be enabled by a human through one of those channels: the agent can't turn it on itself, because writing `~/.orbit/config.json` is blocked whether it uses the file tools or `bash`, and Orbit's toggle requires an OS-level confirmation the renderer can't forge. The default (`guardian.enabled: true`, not bypassed) is secure; relaxing it is always an explicit choice.
 
 ### What the write-jail actually confines -- and what it doesn't
 
-To be precise about the boundary: the workspace jail (default-on, every platform) confines the AI's file writes via the `write` and `edit` tools. Those tools can create or modify files inside your analysis directory (where `notebook.md` lives), plus the OS temp dir and Loom's own `.loom` state; writing anywhere else, or to a credential-shaped path (private keys like `id_rsa`/`id_ed25519`, `*.pem`, `*.key`, `.env`, and `ssh`/`aws`/`gcloud`/`kube`/`docker`/keychain dirs), prompts for approval.
+To be precise about the boundary: the workspace jail (default-on, every platform) confines the AI's file writes via the `write` and `edit` tools. Those tools can create or modify files inside your analysis directory (where `notebook.md` lives), plus the OS temp dir and Orbit's own `.loom` state; writing anywhere else, or to a credential-shaped path (private keys like `id_rsa`/`id_ed25519`, `*.pem`, `*.key`, `.env`, and `ssh`/`aws`/`gcloud`/`kube`/`docker`/keychain dirs), prompts for approval.
 
-Shell (`bash`) commands are **not** OS-sandboxed by default -- they're gated per action by the same approval flow (catastrophic patterns blocked outright, everything else prompts), but a bash command that writes a file or touches the network doesn't go through the write-jail path. To also confine bash writes and limit its network access inside a real OS sandbox, enable the opt-in bash sandbox (`--sandbox` / `LOOM_SANDBOX=1` / `guardian.sandbox`), available on macOS and Linux/WSL2.
+Shell (`bash`) commands are **not** OS-sandboxed by default -- they're gated per action by the same approval flow (catastrophic patterns blocked outright, everything else prompts), but a bash command that writes a file or touches the network doesn't go through the write-jail path. To also confine bash writes and limit its network access inside a real OS sandbox, enable the opt-in bash sandbox (`--sandbox` / `ORBIT_SANDBOX=1` / `guardian.sandbox`), available on macOS and Linux/WSL2.
 
-What this does **not** confine: reading files (the write-jail is not an exfiltration control), and data leaving via remote channels -- syncing the notebook to a Galaxy Page, Galaxy tool operations (uploads, running tools), `skills_fetch`'s cache writes under `~/.loom`, or web fetches. Treat the working-dir confinement as "the AI's edits stay in your analysis directory," not "your data cannot leave the machine."
+What this does **not** confine: reading files (the write-jail is not an exfiltration control), and data leaving via remote channels -- syncing the notebook to a Galaxy Page, Galaxy tool operations (uploads, running tools), `skills_fetch`'s cache writes under `~/.orbit`, or web fetches. Treat the working-dir confinement as "the AI's edits stay in your analysis directory," not "your data cannot leave the machine."
 
 ## Cost tracking
 
@@ -668,7 +668,7 @@ npx codeburn month    # this month
 npx codeburn status   # one-liner: today + month totals
 ```
 
-CodeBurn auto-detects Loom/Pi sessions under `~/.pi/agent/sessions/` (Pi is a first-class supported provider — no configuration needed) and pulls model pricing from LiteLLM's catalog, so newly-released models work without a Loom update. Each Loom project (= cwd) shows up as a separate row, so you can see what each analysis cost. CSV / JSON export is built in.
+CodeBurn auto-detects Orbit/Pi sessions under `~/.pi/agent/sessions/` (Pi is a first-class supported provider — no configuration needed) and pulls model pricing from LiteLLM's catalog, so newly-released models work without an Orbit update. Each Orbit project (= cwd) shows up as a separate row, so you can see what each analysis cost. CSV / JSON export is built in.
 
 ## Commands
 
@@ -684,7 +684,7 @@ Type `/` in the chat to open the autocomplete popup. Tab to accept; Enter still 
 | `/chat`                   | Restore the chat pane from the session transcript without restarting the agent     |
 | `/notebook`               | Show the notebook content in the Notebook tab                                      |
 | `/status`                 | Galaxy connection + notebook path summary                                          |
-| `/instructions`           | Show the `LOOM.md` standing instructions loaded this session                       |
+| `/instructions`           | Show the `ORBIT.md` standing instructions loaded this session                      |
 | `/summarize [N [M]]`      | Append a summary of prompts N..M into the notebook                                 |
 | `/cost`                   | Append the session token/cost breakdown to the notebook                            |
 | `/connect [name]`         | Open Galaxy connection settings (or switch to an existing profile)                 |
@@ -698,7 +698,7 @@ Type `/` in the chat to open the autocomplete popup. Tab to accept; Enter still 
 
 ## Tool reference
 
-Loom registers a small set of extension tools. Plans, decisions, results, and interpretation all live as markdown sections in `notebook.md` — the agent maintains them via the standard `Edit`/`Write` tools.
+Orbit registers a small set of extension tools. Plans, decisions, results, and interpretation all live as markdown sections in `notebook.md` — the agent maintains them via the standard `Edit`/`Write` tools.
 
 | Category                       | Tools                                                                                     |
 | ------------------------------ | ----------------------------------------------------------------------------------------- |
@@ -706,7 +706,7 @@ Loom registers a small set of extension tools. Plans, decisions, results, and in
 | **Galaxy invocations**         | `galaxy_invocation_record`, `galaxy_invocation_check_all`, `galaxy_invocation_check_one`  |
 | **Galaxy run proposals**       | `loom_propose` (you approve with `/approve`)                                              |
 | **Skills**                     | `skills_fetch` (SKILL.md / reference docs; `repo: "foundry"` reads bundled Foundry casts) |
-| **Multi-agent (experimental)** | `team_dispatch` (gated by `LOOM_TEAM_DISPATCH=1`)                                         |
+| **Multi-agent (experimental)** | `team_dispatch` (gated by `ORBIT_TEAM_DISPATCH=1`)                                        |
 
 The Galaxy tools run in-process through [galaxy-ops](https://github.com/galaxyproject/galaxy-mcp) under the operations' own names: `search_tools_by_name`, `run_tool`, `invoke_workflow`, `search_iwc_workflows`, `recommend_iwc_workflows`, `import_workflow_from_iwc`, user-defined tool lifecycle (`create_user_tool`, `list_user_tools`, `run_user_tool`, `delete_user_tool`), history/dataset operations, and more. There is no connect step: `/connect` stores the credentials they use.
 
@@ -732,7 +732,7 @@ For non-Electron validation:
 ```bash
 npm run typecheck
 npm test
-pi --no-extensions -e ./extensions/loom
+pi --no-extensions -e ./extensions/orbit
 ```
 
 Then validate the wrapper in a plain working directory:
@@ -740,7 +740,7 @@ Then validate the wrapper in a plain working directory:
 ```bash
 mkdir -p /tmp/loom-cli-validation
 cd /tmp/loom-cli-validation
-node /path/to/loom/bin/loom.js --provider anthropic --model claude-sonnet-4-6
+node /path/to/orbit/bin/orbit.js --provider anthropic --model claude-sonnet-4-6
 ```
 
 For a full terminal-only runbook, see [docs/terminal-validation.md](docs/terminal-validation.md).
@@ -748,9 +748,9 @@ For a full terminal-only runbook, see [docs/terminal-validation.md](docs/termina
 ## Related projects
 
 - [Galaxy](https://galaxyproject.org) — open-source platform for data-intensive biomedical research
-- [galaxy-mcp](https://github.com/galaxyproject/galaxy-mcp) — MCP server for the Galaxy API, and home of galaxy-ops, the operations Loom runs in-process
-- [galaxy-skills](https://github.com/galaxyproject/galaxy-skills) — curated operational skills, bundled with Loom at a pinned commit
-- [agentic-plugins](https://github.com/galaxyproject/agentic-plugins) — the pinned source Loom vendors its skill content from
+- [galaxy-mcp](https://github.com/galaxyproject/galaxy-mcp) — MCP server for the Galaxy API, and home of galaxy-ops, the operations Orbit runs in-process
+- [galaxy-skills](https://github.com/galaxyproject/galaxy-skills) — curated operational skills, bundled with Orbit at a pinned commit
+- [agentic-plugins](https://github.com/galaxyproject/agentic-plugins) — the pinned source Orbit vendors its skill content from
 - [Pi coding agent](https://github.com/badlogic/pi-mono) — the Pi.dev agent framework
 - [CodeBurn](https://github.com/getagentseal/codeburn) — TUI dashboard for AI-coding cost observability (Pi is a first-class provider)
 

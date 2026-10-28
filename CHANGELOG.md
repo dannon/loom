@@ -1,8 +1,18 @@
 # Changelog
 
-Notable, user-facing changes to Loom and Orbit. Each release lists a short set of
+Notable, user-facing changes to Orbit (called Loom before 0.9). Each release lists a short set of
 highlights; the full commit-level notes live on the GitHub release pages. Add a
 new `## [<version>] - <date>` block with a `### Highlights` list at release time.
+
+## [Unreleased]
+
+### Highlights
+
+- Loom is now Orbit. The CLI is `orbit` (`npm install -g @galaxyproject/orbit`), the desktop app keeps its name, and the repo is github.com/galaxyproject/orbit (old links redirect). `npm install -g @galaxyproject/loom` keeps working as a thin shim that runs Orbit and points you at the new package
+- What moves on your machine: settings are copied from `~/.loom/config.json` to `~/.orbit/config.json` on first run, API keys included, nothing deleted, with a `MOVED-TO-ORBIT.txt` note left behind. Analyses stay where they are. Environment variables are `ORBIT_*`; the `LOOM_*` spellings still work and say so once. Standing instructions are read from `ORBIT.md` first, then `LOOM.md`
+- What changes in notebooks: new typed blocks are written as `orbit-invocation`, `orbit-job` and friends. The `loom-*` blocks older releases wrote are read as before and converge to the new name when next updated, so a notebook shared between Orbit 0.8 and 0.9 does not grow duplicates
+- Linux: the desktop package and executable are `orbit-desktop`, so the app no longer shadows the `orbit` CLI on PATH. The 0.8 package was called `orbit`; remove it with `sudo apt remove orbit` (or `rpm -e orbit`) after installing the new one
+- The CLI's `/orbit` hand-off command is now `/desktop`; `/orbit` still works for now
 
 ## [0.8.0] - 2026-09-28
 
