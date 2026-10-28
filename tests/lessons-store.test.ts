@@ -485,7 +485,7 @@ describe("getLessonStore", () => {
     prevHome = process.env.HOME;
     prevUserProfile = process.env.USERPROFILE;
     home = path.join(dir, "home");
-    fs.mkdirSync(path.join(home, ".loom"), { recursive: true });
+    fs.mkdirSync(path.join(home, ".orbit"), { recursive: true });
     process.env.HOME = home;
     // os.homedir() reads USERPROFILE on Windows, so the temp home has to cover both.
     process.env.USERPROFILE = home;
@@ -502,7 +502,7 @@ describe("getLessonStore", () => {
   });
 
   const config = (obj: unknown) =>
-    fs.writeFileSync(path.join(home, ".loom", "config.json"), JSON.stringify(obj));
+    fs.writeFileSync(path.join(home, ".orbit", "config.json"), JSON.stringify(obj));
 
   it("has one userLessonsDir, importable without the store, for the /lesson writer", async () => {
     const dirModule = await import("../extensions/orbit/lessons/user-dir");
@@ -512,8 +512,8 @@ describe("getLessonStore", () => {
   });
 
   it("reads ~/.loom/lessons by default and LOOM_LESSONS_DIR instead when set", () => {
-    expect(userLessonsDir()).toBe(path.join(home, ".loom", "lessons"));
-    plant(path.join(home, ".loom", "lessons"), "stats/home.md", userFile("From home"));
+    expect(userLessonsDir()).toBe(path.join(home, ".orbit", "lessons"));
+    plant(path.join(home, ".orbit", "lessons"), "stats/home.md", userFile("From home"));
     plant(path.join(dir, "other"), "stats/other.md", userFile("From override"));
     expect(getLessonStore().lessons.map((l) => l.id)).toContain("stats/home");
     resetLessonStore();
@@ -526,7 +526,7 @@ describe("getLessonStore", () => {
   // Planted rather than read from the shipped snapshot, whose lessons go stale
   // on a calendar date this test should not depend on.
   const plantHome = () =>
-    plant(path.join(home, ".loom", "lessons"), "stats/home.md", userFile("From home"));
+    plant(path.join(home, ".orbit", "lessons"), "stats/home.md", userFile("From home"));
 
   it("is empty when LOOM_LESSONS=off or lessons.enabled is false", () => {
     plantHome();

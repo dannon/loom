@@ -263,7 +263,7 @@ describe("a fence that never closes is not a block", () => {
     const once = upsertInvocationBlock(content, { ...INVOCATION, label: "first" });
     expect(once).toContain("KEEP ME");
     expect(once.indexOf("label: first")).toBeLessThan(
-      once.indexOf("```loom-invocation\ninvocation_id: aa11bb22cc33dd44"),
+      once.indexOf("```orbit-invocation\ninvocation_id: aa11bb22cc33dd44"),
     );
 
     // Second write finds the clean copy and rewrites it in place.

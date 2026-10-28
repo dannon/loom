@@ -45,7 +45,7 @@ describe("galaxy-markdown-adapter -- push", () => {
   it("replaces the loom-invocation fence with a hidden carrier and leaves narrative intact", () => {
     const out = orbitToGalaxyMarkdown(NOTEBOOK);
     expect(out).not.toContain("```loom-invocation");
-    expect(out).toMatch(/^\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+"$/m);
+    expect(out).toMatch(/^\[orbit-invocation:v1\]: #orbit "[A-Za-z0-9+/=]+"$/m);
     expect(out).toContain("## Plan A: chrM Variant Calling [hybrid]");
     expect(out).toContain("- [x] {#plan-a-step-2} BWA alignment");
     expect(out).toContain("| s1     | 96.2     |");
@@ -113,7 +113,7 @@ describe("galaxy-markdown-adapter -- round trip", () => {
       NOTEBOOK +
       "\n\n```loom-invocation\ninvocation_id: def456\ngalaxy_server_url: https://test.galaxyproject.org\nnotebook_anchor: plan-a-step-3\nlabel: calling\nsubmitted_at: 2026-05-29T13:00:00Z\nstatus: in_progress\n```\n";
     const pushed = orbitToGalaxyMarkdown(two);
-    expect((pushed.match(/^\[loom-invocation:v1\]: #loom "/gm) ?? []).length).toBe(2);
+    expect((pushed.match(/^\[orbit-invocation:v1\]: #orbit "/gm) ?? []).length).toBe(2);
     expect(galaxyMarkdownToOrbit(pushed)).toBe(two);
   });
 });
@@ -123,7 +123,7 @@ describe("galaxy-markdown-adapter -- rich push", () => {
     const out = await orbitToGalaxyMarkdownRich(NOTEBOOK, ALL_VALID);
     expect(out).toContain("```galaxy");
     expect(out).toContain("invocation_outputs(invocation_id=abc123)");
-    expect(out).toMatch(/^\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+"$/m);
+    expect(out).toMatch(/^\[orbit-invocation:v1\]: #orbit "[A-Za-z0-9+/=]+"$/m);
     // round trip still restores the original, stripping the directive
     expect(galaxyMarkdownToOrbit(out)).toBe(NOTEBOOK);
   });
@@ -131,7 +131,7 @@ describe("galaxy-markdown-adapter -- rich push", () => {
   it("omits the directive when the id does not validate, but keeps the carrier", async () => {
     const out = await orbitToGalaxyMarkdownRich(NOTEBOOK, NONE_VALID);
     expect(out).not.toContain("```galaxy");
-    expect(out).toMatch(/^\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+"$/m);
+    expect(out).toMatch(/^\[orbit-invocation:v1\]: #orbit "[A-Za-z0-9+/=]+"$/m);
     expect(galaxyMarkdownToOrbit(out)).toBe(NOTEBOOK);
   });
 
@@ -154,7 +154,7 @@ describe("galaxy-markdown-adapter -- rich push", () => {
     };
     const out = await orbitToGalaxyMarkdownRich(noId, { invocation: validator, job: validator });
     expect(out).not.toContain("```galaxy");
-    expect(out).toMatch(/^\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+"$/m);
+    expect(out).toMatch(/^\[orbit-invocation:v1\]: #orbit "[A-Za-z0-9+/=]+"$/m);
     expect(galaxyMarkdownToOrbit(out)).toBe(noId);
   });
 });
@@ -164,15 +164,15 @@ describe("galaxy-markdown-adapter -- carrier whitespace tolerance", () => {
     const rich = await orbitToGalaxyMarkdownRich(NOTEBOOK, ALL_VALID);
     // Simulate a storage round trip that appended whitespace to the carrier line.
     const withTrailingWs = rich.replace(
-      /(\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+")$/m,
+      /(\[orbit-invocation:v1\]: #orbit "[A-Za-z0-9+/=]+")$/m,
       "$1  ",
     );
     expect(withTrailingWs).not.toBe(rich); // guard: the mutation actually landed
 
     const pulled = galaxyMarkdownToOrbit(withTrailingWs);
-    expect(pulled).toContain("```loom-invocation");
+    expect(pulled).toContain("```loom-invocation"); // the fixture block round-trips as written
     expect(pulled).toContain("invocation_id: abc123");
-    expect(pulled).not.toContain("[loom-invocation:v1]"); // carrier was decoded, not left behind
+    expect(pulled).not.toContain("[orbit-invocation:v1]"); // carrier was decoded, not left behind
     expect(pulled).not.toContain("invocation_outputs("); // Loom's own directive was stripped
   });
 });
@@ -250,7 +250,7 @@ describe("galaxy-markdown-adapter -- job and session fences", () => {
     const body = `# NB\n\n${JOB_BLOCK}\n\ntail\n`;
     const pushed = orbitToGalaxyMarkdown(body);
     expect(pushed).not.toContain("```loom-job");
-    expect(pushed).toMatch(/^\[loom-job:v1\]: #loom "[A-Za-z0-9+/=]+"$/m);
+    expect(pushed).toMatch(/^\[orbit-job:v1\]: #orbit "[A-Za-z0-9+/=]+"$/m);
     expect(galaxyMarkdownToOrbit(pushed)).toBe(body);
   });
 
@@ -258,7 +258,7 @@ describe("galaxy-markdown-adapter -- job and session fences", () => {
     const body = `# NB\n\n${SESSION_BLOCK}\n`;
     const pushed = orbitToGalaxyMarkdown(body);
     expect(pushed).not.toContain("```loom-session");
-    expect(pushed).toMatch(/^\[loom-session:v1\]: #loom "[A-Za-z0-9+/=]+"$/m);
+    expect(pushed).toMatch(/^\[orbit-session:v1\]: #orbit "[A-Za-z0-9+/=]+"$/m);
     expect(galaxyMarkdownToOrbit(pushed)).toBe(body);
   });
 
@@ -274,7 +274,7 @@ describe("galaxy-markdown-adapter -- job and session fences", () => {
     expect(at).toBeGreaterThan(0);
     expect(lines[at - 1]).toBe("```galaxy");
     expect(lines[at + 1]).toBe("```");
-    expect(lines[at + 2]).toMatch(/^\[loom-job:v1\]: #loom "/);
+    expect(lines[at + 2]).toMatch(/^\[orbit-job:v1\]: #orbit "/);
     expect(galaxyMarkdownToOrbit(out)).toBe(`# NB\n\n${JOB_BLOCK}\n`);
   });
 
@@ -282,7 +282,7 @@ describe("galaxy-markdown-adapter -- job and session fences", () => {
     const out = await orbitToGalaxyMarkdownRich(`# NB\n\n${JOB_BLOCK}\n`, NONE_VALID);
     expect(out).not.toContain("```galaxy");
     expect(out).not.toContain("job_parameters(");
-    expect(out).toMatch(/^\[loom-job:v1\]: #loom "/m);
+    expect(out).toMatch(/^\[orbit-job:v1\]: #orbit "/m);
     expect(galaxyMarkdownToOrbit(out)).toBe(`# NB\n\n${JOB_BLOCK}\n`);
   });
 
@@ -314,7 +314,7 @@ describe("galaxy-markdown-adapter -- job and session fences", () => {
     const out = await orbitToGalaxyMarkdownRich(MIXED, ALL_VALID);
     for (const kind of ["invocation", "job", "session"]) {
       expect(out).not.toContain("```loom-" + kind);
-      expect(out).toMatch(new RegExp(`^\\[loom-${kind}:v1\\]: #loom "`, "m"));
+      expect(out).toMatch(new RegExp(`^\\[orbit-${kind}:v1\\]: #orbit "`, "m"));
     }
     expect(out).toContain("invocation_outputs(invocation_id=abc123)");
     expect(out).toContain("job_parameters(job_id=5f2c1a9e0b7d3c44)");
@@ -343,7 +343,9 @@ describe("galaxy-markdown-adapter -- job and session fences", () => {
     ].join("\n");
     expect(galaxyMarkdownToOrbit(page)).toBe(`# Old page\n${block}\n`);
     // And the encoder still writes exactly that carrier line.
-    expect(orbitToGalaxyMarkdown(block)).toBe(carrier);
+    expect(orbitToGalaxyMarkdown(block)).toBe(
+      carrier.replace("[loom-invocation:v1]: #loom", "[orbit-invocation:v1]: #orbit"),
+    );
   });
 
   it("decodes job and session carriers labelled with the orbit prefix", () => {

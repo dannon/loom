@@ -30,7 +30,7 @@ afterEach(() => {
 function seed(rel: string, content?: string): string {
   const dir = path.join(root, rel);
   fs.mkdirSync(dir, { recursive: true });
-  if (content !== undefined) fs.writeFileSync(path.join(dir, INIT_INSTRUCTIONS_FILENAME), content);
+  if (content !== undefined) fs.writeFileSync(path.join(dir, "LOOM.md"), content);
   return dir;
 }
 

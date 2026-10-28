@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  WARN_ON_LEGACY_ENV,
+  _resetLegacyEnvWarnings,
   _setLegacyEnvWarnings,
   envNames,
   isDesktopShell,
@@ -19,7 +21,7 @@ import { buildBrainEnv } from "../shared/brain-env.js";
 const REPO = resolve(import.meta.dirname, "..");
 
 afterEach(() => {
-  _setLegacyEnvWarnings(false);
+  _resetLegacyEnvWarnings();
   vi.restoreAllMocks();
 });
 
@@ -62,10 +64,13 @@ describe("readEnv", () => {
     expect(String(write.mock.calls[0][0])).toContain("ORBIT_MODE");
   });
 
-  it("stays silent by default in the compatibility release", () => {
+  it("warns by default in this release, once per legacy name", () => {
+    expect(WARN_ON_LEGACY_ENV).toBe(true);
     const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    expect(readEnv("MODE", { LOOM_MODE: "remote" })).toBe("remote");
     readEnv("MODE", { LOOM_MODE: "remote" });
-    expect(write).not.toHaveBeenCalled();
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(String(write.mock.calls[0][0])).toContain("LOOM_MODE is deprecated");
   });
 });
 

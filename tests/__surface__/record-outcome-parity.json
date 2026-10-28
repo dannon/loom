@@ -1,6 +1,8 @@
 {
   "completed": {
     "loom": [
+      "-7 ```loom-job",
+      "+7 ```orbit-job",
       "-14 status: in_progress",
       "+14 status: completed",
       "+16 galaxy_state: ok",
@@ -16,6 +18,8 @@
   },
   "failed": {
     "loom": [
+      "-7 ```loom-job",
+      "+7 ```orbit-job",
       "-14 status: in_progress",
       "+14 status: failed",
       "+16 galaxy_state: error",

@@ -33,7 +33,7 @@
     },
     "notebook": {
       "contains": [
-        "```loom-udt",
+        "```orbit-udt",
         "tool_uuid: 8d5f1c2e-9a0b-4c3d-8e7f-1a2b3c4d5e6f",
         "definition: .loom/provenance/udt/clean_table-8d5f1c2e-9a0b-4c3d-8e7f-1a2b3c4d5e6f.yaml",
         "notebook_anchor: plan-a-step-1"

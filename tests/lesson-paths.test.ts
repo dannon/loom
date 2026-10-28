@@ -29,17 +29,17 @@ afterEach(() => {
 
 describe("path resolution", () => {
   it("puts lessons under the state directory", () => {
-    expect(lessonsDir()).toBe(path.join(tmp, ".loom", "lessons"));
+    expect(lessonsDir()).toBe(path.join(tmp, ".orbit", "lessons"));
     expect(lessonFilePath("stats", "na-is-zero")).toBe(
-      path.join(tmp, ".loom", "lessons", "stats", "na-is-zero.md"),
+      path.join(tmp, ".orbit", "lessons", "stats", "na-is-zero.md"),
     );
   });
 
   it("keeps staged drafts out of the lessons tree entirely", () => {
-    expect(draftsDir()).toBe(path.join(tmp, ".loom", "lesson-drafts"));
+    expect(draftsDir()).toBe(path.join(tmp, ".orbit", "lesson-drafts"));
     expect(draftsDir().startsWith(lessonsDir())).toBe(false);
     expect(draftFilePath("stats", "na-is-zero")).toBe(
-      path.join(tmp, ".loom", "lesson-drafts", "stats__na-is-zero.md"),
+      path.join(tmp, ".orbit", "lesson-drafts", "stats__na-is-zero.md"),
     );
   });
 
@@ -217,7 +217,7 @@ describe("symlinked directories", () => {
   it("refuses a lessons directory that is itself a link, with no override set", () => {
     const elsewhere = path.join(tmp, "elsewhere");
     fs.mkdirSync(elsewhere, { recursive: true });
-    fs.mkdirSync(path.join(tmp, ".loom"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, ".orbit"), { recursive: true });
     fs.symlinkSync(elsewhere, lessonsDir());
     const result = writeNoClobber(lessonFilePath("stats", "x"), "text");
     expect(result.ok).toBe(false);

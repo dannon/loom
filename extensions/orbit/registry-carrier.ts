@@ -14,6 +14,10 @@
  */
 
 import { gunzipSync, gzipSync } from "zlib";
+import {
+  NOTEBOOK_FENCE_READ_PREFIXES,
+  NOTEBOOK_FENCE_WRITE_PREFIX,
+} from "../../shared/notebook-fences.js";
 
 /**
  * Past this many characters an encoded carrier is neither emitted nor read.
@@ -34,9 +38,8 @@ export const MAX_CARRIER_CHARS = 512 * 1024;
 /** The decoded registry may not be larger than the store accepts anyway. */
 export const MAX_CARRIER_DECODED_BYTES = 4 * 1024 * 1024;
 
-const PREFIXES = ["loom", "orbit"];
-const WRITE_PREFIX = "loom";
-const ALT = PREFIXES.join("|");
+const WRITE_PREFIX = NOTEBOOK_FENCE_WRITE_PREFIX;
+const ALT = NOTEBOOK_FENCE_READ_PREFIXES.join("|");
 // Whole line, so carrier-shaped text inside prose is never read as one.
 const LINE = new RegExp(`^\\[(?:${ALT})-registry:v3\\]: #(?:${ALT}) "([A-Za-z0-9+/=]*)"[ \\t]*$`);
 // Anything that looks like it means to be a registry carrier, valid or not.

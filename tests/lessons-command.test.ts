@@ -22,7 +22,7 @@ beforeEach(() => {
   for (const k of ENV_KEYS) saved[k] = process.env[k];
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-lessons-cmd-"));
   home = path.join(dir, "home");
-  fs.mkdirSync(path.join(home, ".loom"), { recursive: true });
+  fs.mkdirSync(path.join(home, ".orbit"), { recursive: true });
   process.env.HOME = home;
   process.env.USERPROFILE = home;
   process.env.LOOM_LESSONS_DIR = path.join(dir, "lessons");
@@ -39,7 +39,7 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-const configPath = () => path.join(home, ".loom", "config.json");
+const configPath = () => path.join(home, ".orbit", "config.json");
 const writeConfig = (obj: unknown) => fs.writeFileSync(configPath(), JSON.stringify(obj));
 const readConfig = () =>
   fs.existsSync(configPath()) ? JSON.parse(fs.readFileSync(configPath(), "utf-8")) : null;

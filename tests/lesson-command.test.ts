@@ -92,7 +92,7 @@ function plantLesson(namespace: string, slug: string, text = VALID) {
   fs.writeFileSync(target, text);
 }
 
-const CONFIG = () => path.join(tmp, ".loom", "config.json");
+const CONFIG = () => path.join(tmp, ".orbit", "config.json");
 const readConfig = () => JSON.parse(fs.readFileSync(CONFIG(), "utf-8"));
 
 beforeEach(() => {
@@ -359,7 +359,7 @@ describe("LOOM_LESSONS_DIR", () => {
   it("saves into the override, where the store loads it and /lesson list shows it", async () => {
     const draft = draftFilePath("stats", "na-is-zero");
     // Drafts stay in the state dir, never inside the override.
-    expect(draft.startsWith(path.join(tmp, ".loom", "lesson-drafts"))).toBe(true);
+    expect(draft.startsWith(path.join(tmp, ".orbit", "lesson-drafts"))).toBe(true);
     fs.mkdirSync(path.dirname(draft), { recursive: true });
     fs.writeFileSync(draft, VALID);
     const h = harness();
@@ -367,7 +367,7 @@ describe("LOOM_LESSONS_DIR", () => {
     expect(h.notifications.at(-1)!.msg).toMatch(/^Saved stats\/na-is-zero/);
     const saved = path.join(shared, "stats", "na-is-zero.md");
     expect(fs.readFileSync(saved, "utf-8")).toBe(VALID);
-    expect(fs.existsSync(path.join(tmp, ".loom", "lessons"))).toBe(false);
+    expect(fs.existsSync(path.join(tmp, ".orbit", "lessons"))).toBe(false);
 
     expect(getLessonStore().lessons.map((l) => l.id)).toContain("stats/na-is-zero");
     await h.run("list");
@@ -378,8 +378,8 @@ describe("LOOM_LESSONS_DIR", () => {
     // The user named the link, so it is the root, not a link inside the tier.
     const target = path.join(tmp, "synced-lessons");
     fs.mkdirSync(target, { recursive: true });
-    fs.mkdirSync(path.join(tmp, ".loom"), { recursive: true });
-    const linked = path.join(tmp, ".loom", "shared");
+    fs.mkdirSync(path.join(tmp, ".orbit"), { recursive: true });
+    const linked = path.join(tmp, ".orbit", "shared");
     fs.symlinkSync(target, linked);
     process.env.LOOM_LESSONS_DIR = linked;
     const draft = draftFilePath("stats", "na-is-zero");

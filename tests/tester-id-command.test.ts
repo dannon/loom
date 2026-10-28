@@ -42,7 +42,7 @@ describe("validateTesterId", () => {
 
 describe("setTesterId (disk round-trip)", () => {
   let tmp: string;
-  const configFile = () => path.join(tmp, ".loom", "config.json");
+  const configFile = () => path.join(tmp, ".orbit", "config.json");
   const readConfig = () => JSON.parse(fs.readFileSync(configFile(), "utf-8"));
 
   beforeEach(() => {
@@ -55,7 +55,7 @@ describe("setTesterId (disk round-trip)", () => {
   });
 
   it("writes only the testerId key and preserves existing secrets", () => {
-    fs.mkdirSync(path.join(tmp, ".loom"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, ".orbit"), { recursive: true });
     fs.writeFileSync(
       configFile(),
       JSON.stringify({
@@ -86,7 +86,7 @@ describe("setTesterId (disk round-trip)", () => {
   });
 
   it("fails closed on an unreadable config instead of clobbering secrets", () => {
-    fs.mkdirSync(path.join(tmp, ".loom"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, ".orbit"), { recursive: true });
     // Invalid JSON that still holds a secret-shaped value loadConfig would drop.
     const corrupt = '{ "llm": broken, "apiKey": "sk-SECRET-keep-me"';
     fs.writeFileSync(configFile(), corrupt);
@@ -98,7 +98,7 @@ describe("setTesterId (disk round-trip)", () => {
 
   it("rewraps a save failure in a fixed message, never reflecting the raw error", () => {
     // Make ~/.loom a regular file so saveConfig's mkdir fails for real.
-    fs.writeFileSync(path.join(tmp, ".loom"), "not a directory");
+    fs.writeFileSync(path.join(tmp, ".orbit"), "not a directory");
 
     let caught: unknown;
     try {
@@ -119,7 +119,7 @@ describe("setTesterId (disk round-trip)", () => {
 describe("registerTesterIdCommand handler", () => {
   let tmp: string;
   const readConfig = () =>
-    JSON.parse(fs.readFileSync(path.join(tmp, ".loom", "config.json"), "utf-8"));
+    JSON.parse(fs.readFileSync(path.join(tmp, ".orbit", "config.json"), "utf-8"));
 
   // Capture the registered handler + every notify call.
   function harness() {
@@ -182,14 +182,14 @@ describe("registerTesterIdCommand handler", () => {
     const { commands, notifications, ctx } = harness();
     await commands.get("tester-id")!.handler("not valid!!", ctx);
 
-    expect(fs.existsSync(path.join(tmp, ".loom", "config.json"))).toBe(false);
+    expect(fs.existsSync(path.join(tmp, ".orbit", "config.json"))).toBe(false);
     expect(notifications.some((n) => n.level === "error")).toBe(true);
   });
 
   it("never echoes another config value in its confirmation (#183)", async () => {
-    fs.mkdirSync(path.join(tmp, ".loom"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, ".orbit"), { recursive: true });
     fs.writeFileSync(
-      path.join(tmp, ".loom", "config.json"),
+      path.join(tmp, ".orbit", "config.json"),
       JSON.stringify({
         llm: {
           active: "anthropic",

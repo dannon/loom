@@ -89,7 +89,7 @@ describe("switchProfile env handling", () => {
 
   it("does not reuse a stale env key when switching to an encrypted-only profile with no env injection", () => {
     saveProfile("a", "https://a.galaxyproject.org", "key-A");
-    const cfgPath = path.join(sandboxHome, ".loom/config.json");
+    const cfgPath = path.join(sandboxHome, ".orbit/config.json");
     const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
     cfg.galaxy.profiles.b = { url: "https://b.galaxyproject.org", apiKeyEncrypted: "ZW5jLWZvci1i" };
     fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
@@ -107,7 +107,7 @@ describe("switchProfile env handling", () => {
     // ciphertext, so the safer move is to fail loud and require a
     // restart. This is the security-sensitive path.
     saveProfile("a", "https://a.galaxyproject.org", "key-A");
-    const cfgPath = path.join(sandboxHome, ".loom/config.json");
+    const cfgPath = path.join(sandboxHome, ".orbit/config.json");
     const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
     cfg.galaxy.profiles.b = { url: "https://b.galaxyproject.org", apiKeyEncrypted: "ZW5jLWZvci1i" };
     fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));

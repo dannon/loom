@@ -157,8 +157,15 @@ describe("shadowed legacy file in the listing", () => {
 });
 
 describe("initTargetIn", () => {
-  it("creates the legacy name when nothing is there yet", () => {
+  it("creates ORBIT.md when nothing is there yet", () => {
+    expect(INIT_INSTRUCTIONS_FILENAME).toBe("ORBIT.md");
     expect(initTargetIn(root)).toBe(path.join(root, INIT_INSTRUCTIONS_FILENAME));
+  });
+
+  it("points at an existing LOOM.md from before the rename instead of planting ORBIT.md", () => {
+    fs.writeFileSync(path.join(root, "LOOM.md"), "x");
+
+    expect(initTargetIn(root)).toBe(path.join(root, "LOOM.md"));
   });
 
   it("points at an existing ORBIT.md instead of planting a second file", () => {

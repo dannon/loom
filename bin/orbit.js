@@ -106,7 +106,13 @@ function hasArg(flag) {
 const isInformationalCommand = ["--help", "-h", "--version", "--list-models"].some(hasArg);
 
 // Before the first config read, so a fresh copy in ~/.orbit is what gets read.
-migrateStateDir();
+const migration = migrateStateDir();
+if (migration.status === "failed") {
+  const why = migration.error instanceof Error ? migration.error.message : String(migration.error);
+  console.error(
+    `orbit: could not copy ~/.loom to ~/.orbit (${why}); still reading ~/.loom/config.json.`,
+  );
+}
 
 // Config opt-out feeds the same single signal the extension + refresh read.
 try {
@@ -444,7 +450,7 @@ then start a new session.`
       : `Open Preferences, sign in to "${provider}", then start a new session.`;
   }
   if (!canUseApiKey) {
-    return `Launch via Orbit (\`cd app && npm start\`) and sign in from Preferences,
+    return `Launch the Orbit desktop app and sign in from Preferences,
 or unset "llm.active" in ~/.orbit/config.json.`;
   }
   const envVar = PROVIDER_ENV_MAP[provider] || "AI_GATEWAY_API_KEY";
@@ -453,7 +459,7 @@ or unset "llm.active" in ~/.orbit/config.json.`;
   * Export the key for this shell:
       export ${envVar}=...
 
-  * Launch via Orbit (\`cd app && npm start\`), which decrypts the stored key
+  * Launch the Orbit desktop app, which decrypts the stored key
     and injects ${envVar} into the brain.
 
   * Unset "llm.active" in ~/.orbit/config.json.`;

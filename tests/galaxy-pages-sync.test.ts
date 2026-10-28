@@ -75,7 +75,7 @@ describe("pushNotebookToGalaxy", () => {
     });
     expect(notebookWriter.writeNotebook).toHaveBeenCalledOnce();
     const written = vi.mocked(notebookWriter.writeNotebook).mock.calls[0][1];
-    expect(written).toContain("```loom-galaxy-page");
+    expect(written).toContain("```orbit-galaxy-page");
     expect(written).toContain("page_id: p1");
     expect(written).toContain("last_synced_revision: r1");
   });
@@ -111,7 +111,7 @@ describe("pushNotebookToGalaxy", () => {
     await pushNotebookToGalaxy({ historyId: "h1", title: "Analysis" });
 
     const sent = vi.mocked(pagesApi.createPage).mock.calls[0][0].content;
-    expect(sent).toMatch(/^\[loom-invocation:v1\]: #loom "/m);
+    expect(sent).toMatch(/^\[orbit-invocation:v1\]: #orbit "/m);
     expect(sent).toContain("invocation_outputs(invocation_id=f2db41e1fa331b3e)");
     expect(sent).not.toContain("```loom-invocation");
     // the local notebook stays canonical -- the raw fence, not the projection
@@ -119,28 +119,28 @@ describe("pushNotebookToGalaxy", () => {
     expect(writtenLocal).toContain("```loom-invocation");
   });
 
-  it("projects loom-job and loom-session blocks to carriers, never raw fences", async () => {
+  it("projects orbit-job and orbit-session blocks to carriers, never raw fences", async () => {
     // Echo whatever id was asked for, so both the invocation and job lookups
-    // validate. Galaxy can't render loom-* cells, so none may reach the page.
+    // validate. Galaxy can't render orbit-* cells, so none may reach the page.
     vi.mocked(galaxyApi.galaxyGet).mockImplementation(async (path: string) => ({
       id: path.split("/").pop(),
     }));
     const notebook = [
       "# Analysis",
       "",
-      "```loom-invocation",
+      "```orbit-invocation",
       "invocation_id: f2db41e1fa331b3e",
       "label: BWA alignment",
       "status: completed",
       "```",
       "",
-      "```loom-job",
+      "```orbit-job",
       "job_id: 0a1b2c3d4e5f6789",
       "label: FastQC",
       "status: completed",
       "```",
       "",
-      "```loom-session",
+      "```orbit-session",
       "id: s-1",
       "started_at: 2026-05-20T10:00:00Z",
       "ended_at: 2026-05-20T11:00:00Z",
@@ -163,10 +163,10 @@ describe("pushNotebookToGalaxy", () => {
     await pushNotebookToGalaxy({ historyId: "h1", title: "Analysis" });
 
     const sent = vi.mocked(pagesApi.createPage).mock.calls[0][0].content;
-    expect(sent).not.toMatch(/^```loom-/m);
-    expect(sent).toMatch(/^\[loom-invocation:v1\]: #loom "/m);
-    expect(sent).toMatch(/^\[loom-job:v1\]: #loom "/m);
-    expect(sent).toMatch(/^\[loom-session:v1\]: #loom "/m);
+    expect(sent).not.toMatch(/^```orbit-/m);
+    expect(sent).toMatch(/^\[orbit-invocation:v1\]: #orbit "/m);
+    expect(sent).toMatch(/^\[orbit-job:v1\]: #orbit "/m);
+    expect(sent).toMatch(/^\[orbit-session:v1\]: #orbit "/m);
     expect(sent).toContain("invocation_outputs(invocation_id=f2db41e1fa331b3e)");
     expect(sent).toContain("job_parameters(job_id=0a1b2c3d4e5f6789)");
     expect(galaxyApi.galaxyGet).toHaveBeenCalledWith("/jobs/0a1b2c3d4e5f6789");
@@ -194,7 +194,7 @@ describe("pushNotebookToGalaxy", () => {
     const sent = vi.mocked(pagesApi.createPage).mock.calls[0][0].content;
     expect(sent).not.toContain("job_parameters(");
     expect(sent).not.toContain("```loom-job");
-    expect(sent).toMatch(/^\[loom-job:v1\]: #loom "/m);
+    expect(sent).toMatch(/^\[orbit-job:v1\]: #orbit "/m);
   });
 
   it("updates the existing page when a binding is present", async () => {
@@ -326,7 +326,7 @@ describe("pullNotebookFromGalaxy", () => {
     expect(written).toContain("# Remote body");
     expect(written).toContain("Updated server-side.");
     expect(written).not.toContain("Some local edits.");
-    expect(written).toContain("```loom-galaxy-page");
+    expect(written).toContain("```orbit-galaxy-page");
     expect(written).toContain("last_synced_revision: r2");
   });
 

@@ -185,7 +185,7 @@ describe("deliverObservation", () => {
   const realUserProfile = process.env.USERPROFILE;
   beforeEach(() => {
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "loom-obs-trig-"));
-    fs.mkdirSync(path.join(tmpHome, ".loom"), { recursive: true });
+    fs.mkdirSync(path.join(tmpHome, ".orbit"), { recursive: true });
     process.env.HOME = tmpHome;
     process.env.USERPROFILE = tmpHome;
   });
@@ -365,8 +365,8 @@ describe("deliverObservation", () => {
 
   it("says unsaved, not queued, when the outbox can't be written", async () => {
     // The second review's setup: both state dirs are regular files.
-    fs.rmSync(path.join(tmpHome, ".loom"), { recursive: true, force: true });
-    fs.writeFileSync(path.join(tmpHome, ".loom"), "not a directory");
+    fs.rmSync(path.join(tmpHome, ".orbit"), { recursive: true, force: true });
+    fs.writeFileSync(path.join(tmpHome, ".orbit"), "not a directory");
     fs.writeFileSync(path.join(tmpHome, ".orbit"), "not a directory");
     const d = deps({
       submit: async () => ({ ok: false, status: 503, error: "unconfigured", queueable: true }),
@@ -389,7 +389,7 @@ describe("deliverObservation", () => {
         submit: async () => ({ ok: false, status: 503, error: "unconfigured", queueable: true }),
       });
       expect(await deliverObservation(facts, ctx, d)).toBe("queued");
-      const file = path.join(tmpHome, ".loom", "observations-outbox.jsonl");
+      const file = path.join(tmpHome, ".orbit", "observations-outbox.jsonl");
       const row = JSON.parse(fs.readFileSync(file, "utf-8").trim());
       expect(row.consent.mode).toBe(mode);
       expect(row.consent.sha256).toBe(
@@ -603,9 +603,9 @@ describe("registerObservationTriggers", () => {
   const realUserProfile = process.env.USERPROFILE;
   beforeEach(() => {
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "loom-obs-reg-"));
-    fs.mkdirSync(path.join(tmpHome, ".loom"), { recursive: true });
+    fs.mkdirSync(path.join(tmpHome, ".orbit"), { recursive: true });
     fs.writeFileSync(
-      path.join(tmpHome, ".loom", "config.json"),
+      path.join(tmpHome, ".orbit", "config.json"),
       JSON.stringify({ lessons: { enabled: true }, observations: { mode: "ask" } }),
     );
     process.env.HOME = tmpHome;
@@ -680,7 +680,7 @@ describe("registerObservationTriggers", () => {
   async function settleOneFailure(config: unknown) {
     // Reporting needs the switch in the CONFIG: the env spelling reads lessons only.
     fs.writeFileSync(
-      path.join(tmpHome, ".loom", "config.json"),
+      path.join(tmpHome, ".orbit", "config.json"),
       JSON.stringify({ lessons: { enabled: true }, ...(config as object) }),
     );
     const { registerObservationTriggers } =

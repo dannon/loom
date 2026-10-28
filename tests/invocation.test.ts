@@ -22,7 +22,7 @@ function makeInvocation(overrides: Partial<InvocationYaml> = {}): InvocationYaml
 describe("renderInvocationYaml", () => {
   it("renders a fenced loom-invocation block with all fields", () => {
     const out = renderInvocationYaml(makeInvocation());
-    expect(out).toContain("```loom-invocation");
+    expect(out).toContain("```orbit-invocation");
     expect(out).toContain("invocation_id: inv-1");
     expect(out).toContain("galaxy_server_url: https://usegalaxy.org");
     expect(out).toContain("notebook_anchor: plan-a-step-1");
@@ -121,7 +121,7 @@ describe("upsertInvocationBlock", () => {
 
   it("appends without a leading newline when the file is empty", () => {
     const updated = upsertInvocationBlock("", makeInvocation());
-    expect(updated.startsWith("```loom-invocation")).toBe(true);
+    expect(updated.startsWith("```orbit-invocation")).toBe(true);
   });
 
   it("replaces in place when invocation_id already exists", () => {

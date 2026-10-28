@@ -18,7 +18,7 @@ const sample: SessionSummaryYaml = {
 describe("renderSessionSummaryYaml", () => {
   it("emits a fenced loom-session block with all required fields", () => {
     const out = renderSessionSummaryYaml(sample);
-    expect(out).toContain("```loom-session");
+    expect(out).toContain("```orbit-session");
     expect(out).toContain("id: sess_abc123");
     expect(out).toContain("started_at: 2026-05-08T19:30:00Z");
     expect(out).toContain("ended_at: 2026-05-08T20:15:42Z");
@@ -32,13 +32,13 @@ describe("appendSessionSummaryBlock", () => {
   it("appends to a non-empty notebook with a separating blank line", () => {
     const before = "# notebook\n\nsome content here\n";
     const out = appendSessionSummaryBlock(before, sample);
-    expect(out.startsWith("# notebook\n\nsome content here\n\n```loom-session\n")).toBe(true);
+    expect(out.startsWith("# notebook\n\nsome content here\n\n```orbit-session\n")).toBe(true);
     expect(out.endsWith("```\n")).toBe(true);
   });
 
   it("appends to an empty notebook without a leading blank line", () => {
     const out = appendSessionSummaryBlock("", sample);
-    expect(out.startsWith("```loom-session\n")).toBe(true);
+    expect(out.startsWith("```orbit-session\n")).toBe(true);
   });
 
   it("preserves prior session blocks (sessions are append-only)", () => {

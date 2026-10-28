@@ -26,7 +26,7 @@ describe("resolveStoragePath", () => {
 
   it("lives in the brain state dir and is stable", () => {
     const p = resolveStoragePath();
-    expect(p).toBe(path.join(home, ".loom", "upload-resume.json"));
+    expect(p).toBe(path.join(home, ".orbit", "upload-resume.json"));
     expect(resolveStoragePath()).toBe(p);
   });
 });

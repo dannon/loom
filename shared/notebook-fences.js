@@ -8,7 +8,7 @@
 // whole write-side switch; upserts rewrite a matched block under it, so a
 // mixed notebook converges instead of growing duplicates.
 
-export const NOTEBOOK_FENCE_WRITE_PREFIX = "loom";
+export const NOTEBOOK_FENCE_WRITE_PREFIX = "orbit";
 
 export const NOTEBOOK_FENCE_READ_PREFIXES = Object.freeze(["loom", "orbit"]);
 

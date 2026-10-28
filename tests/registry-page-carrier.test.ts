@@ -60,6 +60,16 @@ describe("carrier codec", () => {
     expect(got).toEqual({ kind: "found", body: "# Notebook\n\nSome prose.\n", registryText: text });
   });
 
+  it("decodes a carrier a 0.8 release pushed under the loom prefix", () => {
+    const text = '{"v":3}';
+    const legacy = encodeRegistryCarrier(text)
+      .replace("[orbit-registry:", "[loom-registry:")
+      .replace("#orbit ", "#loom ");
+    expect(legacy).toContain("[loom-registry:v3]: #loom ");
+    const got = extractRegistryCarrier(`# Notebook\n\n${legacy}\n`);
+    expect(got).toMatchObject({ kind: "found", registryText: text });
+  });
+
   it("leaves content without a carrier exactly as it was", () => {
     const page = "# Notebook\n\nNo carrier [loom-registry:v3] mentioned inline.\n\n";
     expect(extractRegistryCarrier(page)).toEqual({ kind: "none", body: page });
@@ -67,8 +77,12 @@ describe("carrier codec", () => {
 
   it("rejects two carriers, a malformed one, and one that doesn't decode -- and strips them all", () => {
     const one = encodeRegistryCarrier("{}");
+    const legacyOne = one
+      .replace("[orbit-registry:", "[loom-registry:")
+      .replace("#orbit ", "#loom ");
     for (const page of [
       `a\n${one}\n${one}\n`,
+      `a\n${one}\n${legacyOne}\n`,
       `a\n[loom-registry:v3]: #loom "not base64!"\n`,
       `a\n[loom-registry:v3]: #loom "AAAA"\n`,
       `a\n[loom-registry:v9]: #loom "AAAA"\n`,
@@ -213,7 +227,7 @@ describe("the carrier through the store and the Page", () => {
     } as never);
     await pushNotebookToGalaxy();
     const pushed = vi.mocked(pagesApi.updatePage).mock.calls[0][1].content as string;
-    expect(pushed).toMatch(/^\[loom-registry:v3\]: #loom "/m);
+    expect(pushed).toMatch(/^\[orbit-registry:v3\]: #orbit "/m);
 
     pageWith(pushed);
     const result = await pullNotebookFromGalaxy();
@@ -342,7 +356,7 @@ describe("the carrier through the store and the Page", () => {
     } as never);
     await pushNotebookToGalaxy();
     const pushed = vi.mocked(pagesApi.updatePage).mock.calls.at(-1)![1].content as string;
-    expect(pushed.match(/^\[loom-registry:v3\]/gm)).toHaveLength(1);
+    expect(pushed.match(/^\[(?:loom|orbit)-registry:v3\]/gm)).toHaveLength(1);
     pageWith(pushed);
     await pullNotebookFromGalaxy();
     expect(Object.values(session.store.snapshot().attempts)[0].approval?.status).toBe("live");

@@ -9,9 +9,9 @@
  * The legacy name is still written because an older bundle only reads LOOM_*.
  */
 
-// Off for the compatibility release, so nothing a user sees changes yet. Flip
-// it in the release that renames the product.
-export const WARN_ON_LEGACY_ENV = false;
+// On since the rename release: a LOOM_* name still works, but says so once per
+// variable so shells, Dockerfiles and tool wrappers get moved over.
+export const WARN_ON_LEGACY_ENV = true;
 let warnEnabled = WARN_ON_LEGACY_ENV;
 
 // Names whose legacy spelling isn't simply LOOM_<name>: ORBIT_BIN already
@@ -114,5 +114,11 @@ export function isDesktopShell(env = process.env) {
 /** Test-only: toggle the legacy-name warning and forget which names already warned. */
 export function _setLegacyEnvWarnings(enabled) {
   warnEnabled = enabled;
+  warned.clear();
+}
+
+/** Test seam: back to the shipped default, with the once-per-name memory cleared. */
+export function _resetLegacyEnvWarnings() {
+  warnEnabled = WARN_ON_LEGACY_ENV;
   warned.clear();
 }

@@ -22,9 +22,9 @@ import { piAgentDir } from "./agent-dir.js";
  *  LOOM.md stays readable indefinitely so existing users never have to rename. */
 export const INSTRUCTIONS_FILENAMES = ["ORBIT.md", "LOOM.md"] as const;
 
-/** What `/instructions init` creates. Still the legacy name until the release
- *  that renames the product, so an older build reading this dir finds it. */
-export const INIT_INSTRUCTIONS_FILENAME = "LOOM.md";
+/** What `/instructions init` creates. Builds from 0.8 on read ORBIT.md too, and an
+ *  existing LOOM.md keeps winning in a directory that has only that. */
+export const INIT_INSTRUCTIONS_FILENAME = "ORBIT.md";
 
 /** The whole cached system prefix is ~8K tokens; an unbounded user file could
  *  quietly double it on every turn, so both caps are deliberately tight. */
