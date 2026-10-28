@@ -38,6 +38,12 @@ import {
   type ModelOption,
 } from "./model-options.js";
 import { planLiveValidation, planModelDiscovery } from "./model-discovery-gate.js";
+import { FALLBACK_MODELS_BY_PROVIDER, type ModelChoice } from "./model-fallback.js";
+import {
+  UnavailableModels,
+  availabilityUpdate,
+  unavailableModelLabel,
+} from "./model-entitlement.js";
 import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
 import {
   ALLOWED_SKILLS_PREFIX,
@@ -260,6 +266,19 @@ let currentModel: string | null = null;
 // and usage events carry only the model — so we set this at the explicit
 // model/provider change sites (startup, /model switch, prefs save).
 let currentProvider: string | null = null;
+
+function rendererStorage(): Storage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+const unavailableModels = new UnavailableModels(rendererStorage());
+
+function modelOptionLabel(provider: string, id: string, label: string): string {
+  return unavailableModels.has(provider, id) ? unavailableModelLabel(label) : label;
+}
 
 // Current context occupancy: input + cacheRead of the LATEST assistant turn's
 // usage (the size of the last request sent to the model). This is NOT the
@@ -1109,7 +1128,7 @@ function populateWelcomeModels(
   for (const m of models) {
     const opt = document.createElement("option");
     opt.value = m.id;
-    opt.textContent = m.label;
+    opt.textContent = modelOptionLabel(provider, m.id, m.label);
     if (selected && m.id === selected) opt.selected = true;
     welcomeModel.appendChild(opt);
   }
@@ -1118,7 +1137,7 @@ function populateWelcomeModels(
   if (selected && !models.some((m) => m.id === selected)) {
     const opt = document.createElement("option");
     opt.value = selected;
-    opt.textContent = `${selected} (custom)`;
+    opt.textContent = modelOptionLabel(provider, selected, `${selected} (custom)`);
     opt.selected = true;
     welcomeModel.appendChild(opt);
   }
@@ -1244,12 +1263,18 @@ welcomeOauthSignIn.addEventListener("click", async () => {
   welcomeError.textContent = "";
   welcomeOauthSignIn.disabled = true;
   welcomeOauthStatus.textContent = "Opening browser…";
+  // Captured before the await: the picker can change while the browser is open.
+  const provider = welcomeProvider.value;
   try {
-    const res = await window.orbit.oauthSignIn(welcomeProvider.value);
+    const res = await window.orbit.oauthSignIn(provider);
     if (res.ok) {
       welcomeOauthStatus.textContent = formatOAuthStatus(res.status);
       welcomeOauthStatus.classList.toggle("signed-in", res.status.signedIn);
       welcomeOauthSignIn.textContent = "Sign in again";
+      unavailableModels.clear(provider);
+      if (welcomeProvider.value === provider) {
+        populateWelcomeModels(provider, readWelcomeModel(provider) || undefined);
+      }
     } else {
       welcomeError.textContent = `Sign-in failed: ${res.error}`;
       welcomeOauthStatus.textContent = "Not signed in";
@@ -2915,10 +2940,24 @@ window.orbit.onAgentEvent((event) => {
       // Commit per-assistant-message usage to the session total
       // Each assistant message = one LLM call billed separately
       const msg = (
-        event as { message?: { role?: string; stopReason?: string; errorMessage?: string } }
+        event as {
+          message?: {
+            role?: string;
+            stopReason?: string;
+            errorMessage?: string;
+            provider?: string;
+            model?: string;
+          };
+        }
       ).message;
       if (msg?.role === "assistant") {
         commitTurnUsage();
+        const update = availabilityUpdate(msg, {
+          provider: currentProvider,
+          model: currentModel,
+        });
+        if (update?.action === "mark") unavailableModels.mark(update.provider, update.model);
+        else if (update) unavailableModels.clear(update.provider, update.model);
         // Surface assistant-side errors (e.g. 401 invalid API key) so the user
         // isn't staring at a silent UI after a failed call.
         if (msg.stopReason === "error") {
@@ -3505,57 +3544,10 @@ const prefsModelRefresh = document.getElementById("prefs-model-refresh") as HTML
 const prefsModelStatusRow = document.getElementById("prefs-model-status-row")!;
 const prefsModelStatus = document.getElementById("prefs-model-status")!;
 
-// Model catalog by provider — labels include cost guidance
-// (in/out price per 1M tokens). Fallback only — populateDynamicModelData()
-// at startup overwrites this from pi-ai's bundled registry via main IPC,
-// so new models don't require hand-edits here.
-interface ModelChoice {
-  id: string;
-  label: string;
-}
-let MODELS_BY_PROVIDER: Record<string, ModelChoice[]> = {
-  anthropic: [
-    { id: "claude-opus-5", label: "Opus 5 — $5/$25 (recommended)" },
-    { id: "claude-sonnet-5", label: "Sonnet 5 — $2/$10" },
-    { id: "claude-haiku-4-5", label: "Haiku 4.5 — $1/$5 (cheapest)" },
-    { id: "claude-fable-5", label: "Fable 5 — $10/$50 (most capable)" },
-    { id: "claude-opus-4-8", label: "Opus 4.8 — $5/$25" },
-    { id: "claude-sonnet-4-6", label: "Sonnet 4.6 — $3/$15" },
-    { id: "claude-opus-4-7", label: "Opus 4.7 — $5/$25" },
-  ],
-  openai: [
-    { id: "gpt-5.4-mini", label: "GPT-5.4 mini — $0.75/$4.50 (cheapest)" },
-    { id: "gpt-5.4", label: "GPT-5.4 — $2.50/$15 (recommended)" },
-    { id: "gpt-5.2", label: "GPT-5.2 — $1.75/$14" },
-    { id: "gpt-5.5", label: "GPT-5.5 — $5/$30" },
-  ],
-  "openai-codex": [
-    { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
-    { id: "gpt-5.4", label: "GPT-5.4" },
-    { id: "gpt-5.4-mini", label: "GPT-5.4 mini" },
-  ],
-  google: [
-    { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite — $0.25/$1.50 (cheapest)" },
-    { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro — $2/$12 (recommended)" },
-    { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash — $1.50/$9" },
-    { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro — $1.25/$10" },
-  ],
-  mistral: [
-    { id: "mistral-large-latest", label: "Mistral Large" },
-    { id: "mistral-medium-latest", label: "Mistral Medium" },
-    { id: "mistral-small-latest", label: "Mistral Small" },
-  ],
-  groq: [
-    { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B" },
-    { id: "llama-3.1-8b-instant", label: "Llama 3.1 8B (fast)" },
-  ],
-  xai: [{ id: "grok-2-latest", label: "Grok 2" }],
-  deepseek: [
-    { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
-    { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash (fast)" },
-  ],
-  "openai-compatible": [],
-};
+// Fallback until populateDynamicModelData() swaps in pi-ai's registry.
+let MODELS_BY_PROVIDER: Record<string, ModelChoice[]> = Object.fromEntries(
+  Object.entries(FALLBACK_MODELS_BY_PROVIDER).map(([p, models]) => [p, [...models]]),
+);
 
 function populateModels(provider: string, selected?: string, discovered?: readonly string[]): void {
   if (provider === CUSTOM_ENDPOINT_PROVIDER) {
@@ -3579,7 +3571,7 @@ function populateModels(provider: string, selected?: string, discovered?: readon
   for (const m of models) {
     const opt = document.createElement("option");
     opt.value = m.id;
-    opt.textContent = m.label;
+    opt.textContent = modelOptionLabel(provider, m.id, m.label);
     if (selected && m.id === selected) opt.selected = true;
     prefsModel.appendChild(opt);
   }
@@ -3587,7 +3579,7 @@ function populateModels(provider: string, selected?: string, discovered?: readon
   if (selected && !models.find((m) => m.id === selected)) {
     const opt = document.createElement("option");
     opt.value = selected;
-    opt.textContent = `${selected} (custom)`;
+    opt.textContent = modelOptionLabel(provider, selected, `${selected} (custom)`);
     opt.selected = true;
     prefsModel.appendChild(opt);
   }
@@ -3709,13 +3701,27 @@ async function updatePrefsAuthUi(): Promise<void> {
   }
 }
 
+function forgetPrefsUnavailableModels(provider: string): void {
+  unavailableModels.clear(provider);
+  if (prefsProvider.value !== provider) return;
+  populateModels(
+    provider,
+    readPrefsModel(provider) || undefined,
+    prefsProviderStates[provider]?.discoveredModels,
+  );
+}
+
 prefsOauthSignIn.addEventListener("click", async () => {
   prefsOauthSignIn.disabled = true;
   prefsOauthStatus.textContent = "Opening browser…";
   prefsOauthStatus.classList.remove("signed-in");
+  // Captured before the await: the picker can change while the browser is open.
+  const provider = prefsProvider.value;
   try {
-    const res = await window.orbit.oauthSignIn(prefsProvider.value);
+    const res = await window.orbit.oauthSignIn(provider);
     if (res.ok) {
+      // A different account may be offered different models.
+      forgetPrefsUnavailableModels(provider);
       prefsOauthStatus.textContent = formatOAuthStatus(res.status);
       prefsOauthStatus.classList.toggle("signed-in", res.status.signedIn);
       prefsOauthSignIn.textContent = "Sign in again";
@@ -3737,7 +3743,9 @@ prefsOauthSignOut.addEventListener("click", async () => {
   if (!confirm(`Sign out of ${oauthAccountLabel(prefsProvider.value)}? ${consequence}`)) return;
   prefsOauthSignOut.disabled = true;
   try {
-    await window.orbit.oauthSignOut(prefsProvider.value);
+    const provider = prefsProvider.value;
+    await window.orbit.oauthSignOut(provider);
+    forgetPrefsUnavailableModels(provider);
     prefsOauthStatus.textContent = "Not signed in";
     prefsOauthStatus.classList.remove("signed-in");
     prefsOauthSignIn.textContent = oauthSignInLabel(prefsProvider.value, false);
