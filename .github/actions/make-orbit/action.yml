@@ -107,6 +107,14 @@ runs:
         echo "$APPLE_API_KEY_BASE64" | base64 --decode > "$KEY_PATH"
         echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
 
+    # Same cache as build.yml's package step, keyed on the target rather than the
+    # runner since a macOS host can build the other arch's whisper-cli.
+    - name: Cache dictation runtime
+      uses: actions/cache@v5
+      with:
+        path: app/.speech-stage/speech
+        key: speech-${{ inputs.platform }}-${{ inputs.arch }}-${{ hashFiles('app/scripts/speech-assets.json') }}
+
     - name: Make Orbit (${{ inputs.platform }}-${{ inputs.arch }})
       shell: bash
       working-directory: app
