@@ -1,0 +1,45 @@
+name: publish-loom-shim
+
+# One-shot, run by hand once v0.9.0 is on npm as @galaxyproject/orbit: publishes
+# the final @galaxyproject/loom release, the shim in packages/loom-shim whose
+# `loom` bin runs Orbit. It is not on the tag trigger on purpose -- the shim's
+# version never moves again, so a later tag would only fail trying to republish
+# it. The trusted publisher for @galaxyproject/loom (npmjs.com -> package
+# Settings -> Trusted Publisher) has to point at this repo and this file.
+#
+# Afterwards, from a machine logged in to npm:
+#   npm deprecate @galaxyproject/loom "Loom is now Orbit -- npm install -g @galaxyproject/orbit"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: packages/loom-shim
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # OIDC trusted publishing needs npm >= 11.5.1; Node 22 still ships npm 10.x.
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@latest
+
+      # The shim is useless if the Orbit it depends on is not published yet.
+      - name: Check that the Orbit the shim depends on is on npm
+        run: |
+          RANGE="$(node -p "require('./package.json').dependencies['@galaxyproject/orbit']")"
+          npm view "@galaxyproject/orbit@$RANGE" version
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public

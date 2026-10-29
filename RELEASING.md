@@ -42,7 +42,10 @@ publisher for `@galaxyproject/orbit` (npmjs.com -> package Settings -> Trusted
 Publisher, pointing at this repo + `release.yml`), and the GitHub Pages site,
 which moved to `galaxyproject.github.io/orbit/` with a redirect stub left at
 the old path in `galaxyproject/galaxyproject.github.io`. `@galaxyproject/loom`
-stays published as a deprecated shim that installs Orbit and forwards to it.
+stays published as a deprecated shim that installs Orbit and forwards to it:
+that package is `packages/loom-shim/`, published once by hand through
+`.github/workflows/publish-loom-shim.yml` after v0.9.0 was on npm, then
+`npm deprecate`d. It never gets another release.
 
 ## What gets built
 
