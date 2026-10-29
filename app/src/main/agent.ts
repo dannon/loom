@@ -9,6 +9,7 @@ import { resolveLlmApiKey, resolveGalaxyApiKey } from "./secure-config.js";
 import { loadSessionHistory, newestSessionFile } from "./session-replay.js";
 import { collectDescendantsOf } from "./proc-monitor.js";
 import { buildBrainEnv as buildBaseBrainEnv } from "../../../shared/brain-env.js";
+import { resolveGalaxyCredentials } from "../../../shared/galaxy-credentials.js";
 import {
   isConfigFailure,
   summarizeStartupFailure,
@@ -71,10 +72,19 @@ function buildSecretEnv(): Record<string, string> {
     else if (llmKey) env[targetVar] = llmKey;
   }
 
-  // Galaxy key: config wins, else an exported GALAXY_API_KEY.
-  const galaxyKey = resolveGalaxyApiKey(cfg) ?? process.env.GALAXY_API_KEY;
-  if (galaxyKey) {
-    env.GALAXY_API_KEY = galaxyKey;
+  // The profile picked in the UI wins, else an exported GALAXY_URL +
+  // GALAXY_API_KEY pair. Always hand the brain both halves of one source: a key
+  // alone gets paired with whatever URL the brain finds, which may be another
+  // server's.
+  const galaxy = resolveGalaxyCredentials({
+    config: cfg,
+    profileApiKey: resolveGalaxyApiKey(cfg),
+    env: process.env,
+    prefer: "profile",
+  });
+  if (galaxy) {
+    env.GALAXY_URL = galaxy.url;
+    env.GALAXY_API_KEY = galaxy.apiKey;
   }
 
   return env;
@@ -125,6 +135,10 @@ function buildBrainEnv(fresh: boolean): NodeJS.ProcessEnv {
   // keys come from the OS keychain via buildSecretEnv on desktop, so we don't
   // ask the base helper to forward them from shell env.
   const env = buildBaseBrainEnv();
+  // buildSecretEnv sets these as a pair or not at all; a forwarded half from
+  // Orbit's own env must not survive alongside it.
+  delete env.GALAXY_URL;
+  delete env.GALAXY_API_KEY;
   writeEnv(env, "SHELL_KIND", DESKTOP_SHELL_KIND);
   // The desktop always has a local *file* surface, so exec-guard stays on
   // everywhere. LOOM_LOCAL_EXEC is the shell->brain capability signal

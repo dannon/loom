@@ -329,7 +329,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
           return;
         }
       } else if (profileNames.length === 1 && active && current.url && current.apiKey) {
-        ctx.ui.notify(`Connecting to ${profiles[active].url}...`, "info");
+        ctx.ui.notify(`Connecting to ${current.url}...`, "info");
         await reloadSession();
         return;
       }

@@ -31,7 +31,7 @@ export class EncryptedProfileUnavailableError extends Error {
   constructor(public profileName: string) {
     super(
       `Profile "${profileName}" has only an encrypted API key; this process can't decrypt it. ` +
-        `Run from Orbit (auto-injects the key) or export GALAXY_API_KEY explicitly.`,
+        `Run from Orbit (auto-injects the key) or export GALAXY_URL and GALAXY_API_KEY explicitly.`,
     );
     this.name = "EncryptedProfileUnavailableError";
   }
@@ -196,7 +196,8 @@ export type ActiveGalaxyStatus = "usable" | "configured-unusable" | "none";
  *   there -- plaintext profile, explicit export, or Orbit's decrypt-inject).
  * - `configured-unusable`: no usable env key, but the active profile carries an
  *   encrypted key this process can't decrypt (Orbit-only safeStorage). Galaxy
- *   calls would 401; the fix is to run from Orbit or export GALAXY_API_KEY.
+ *   calls would 401; the fix is to run from Orbit or export GALAXY_URL and
+ *   GALAXY_API_KEY together.
  * - `none`: no usable active profile to speak of.
  *
  * Pure given (profiles, env); without `env` it reads the live credentials, which
@@ -253,6 +254,10 @@ export function switchProfile(name: string): boolean {
         `GALAXY_API_KEY in this session; restart the shell so Orbit can ` +
         `re-inject the decrypted key for this profile.`,
     );
+  } else {
+    // A keyless profile (hand-edited config) must not inherit the previous
+    // profile's key against its own URL.
+    delete process.env.GALAXY_API_KEY;
   }
   return true;
 }

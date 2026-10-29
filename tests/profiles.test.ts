@@ -116,6 +116,18 @@ describe("switchProfile env handling", () => {
     expect(process.env.GALAXY_API_KEY).toBeUndefined();
     expect(process.env.GALAXY_URL).toBe("https://b.galaxyproject.org");
   });
+
+  it("drops the previous key when switching to a profile with no key at all", () => {
+    saveProfile("a", "https://a.galaxyproject.org", "key-A");
+    const cfgPath = path.join(sandboxHome, ".orbit/config.json");
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
+    cfg.galaxy.profiles.b = { url: "https://b.galaxyproject.org" };
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+    expect(switchProfile("a")).toBe(true);
+    expect(switchProfile("b")).toBe(true);
+    expect(process.env.GALAXY_URL).toBe("https://b.galaxyproject.org");
+    expect(process.env.GALAXY_API_KEY).toBeUndefined();
+  });
 });
 
 describe("getActiveGalaxyStatus", () => {

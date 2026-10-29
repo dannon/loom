@@ -58,13 +58,23 @@ describe("resolveGalaxyStatus", () => {
     expect(status.url).toBe("https://profile.example");
   });
 
-  it("falls back to the exported GALAXY_API_KEY when config has no resolvable key", () => {
+  it("falls back to an exported pair when config has no resolvable key", () => {
+    const status = resolveGalaxyStatus(
+      profileConfig("https://main.example"),
+      { GALAXY_URL: "https://env.example", GALAXY_API_KEY: "env-key" } as NodeJS.ProcessEnv,
+      noConfigKey,
+    );
+    expect(status).toEqual({ connected: true, url: "https://env.example" });
+  });
+
+  it("won't pair an exported key with the profile URL when the profile key is unreadable", () => {
+    // That key may belong to another server; the brain is never handed the mix.
     const status = resolveGalaxyStatus(
       profileConfig("https://main.example"),
       { GALAXY_API_KEY: "env-key" } as NodeJS.ProcessEnv,
       noConfigKey,
     );
-    expect(status.connected).toBe(true);
+    expect(status).toEqual({ connected: false, url: "https://main.example" });
   });
 });
 
@@ -74,26 +84,45 @@ describe("resolveGalaxyServerUrl", () => {
       resolveGalaxyServerUrl(
         {} as OrbitConfig,
         { GALAXY_URL: "https://env.example" } as NodeJS.ProcessEnv,
+        noConfigKey,
       ),
     ).toBe("https://env.example");
   });
 
   it("uses the active profile URL with no env", () => {
     expect(
-      resolveGalaxyServerUrl(profileConfig("https://main.example"), {} as NodeJS.ProcessEnv),
+      resolveGalaxyServerUrl(
+        profileConfig("https://main.example"),
+        {} as NodeJS.ProcessEnv,
+        noConfigKey,
+      ),
     ).toBe("https://main.example");
   });
 
-  it("prefers the active profile URL over an exported GALAXY_URL", () => {
+  it("prefers the active profile URL over an exported pair when its key resolves", () => {
     expect(
-      resolveGalaxyServerUrl(profileConfig("https://profile.example"), {
-        GALAXY_URL: "https://env.example",
-      } as NodeJS.ProcessEnv),
+      resolveGalaxyServerUrl(
+        profileConfig("https://profile.example"),
+        { GALAXY_URL: "https://env.example", GALAXY_API_KEY: "k" } as NodeJS.ProcessEnv,
+        () => "ck",
+      ),
     ).toBe("https://profile.example");
   });
 
+  it("follows the exported pair when the profile key doesn't resolve, as the brain does", () => {
+    expect(
+      resolveGalaxyServerUrl(
+        profileConfig("https://profile.example"),
+        { GALAXY_URL: "https://env.example", GALAXY_API_KEY: "k" } as NodeJS.ProcessEnv,
+        noConfigKey,
+      ),
+    ).toBe("https://env.example");
+  });
+
   it("is null with no profile and no env", () => {
-    expect(resolveGalaxyServerUrl({} as OrbitConfig, {} as NodeJS.ProcessEnv)).toBeNull();
+    expect(
+      resolveGalaxyServerUrl({} as OrbitConfig, {} as NodeJS.ProcessEnv, noConfigKey),
+    ).toBeNull();
   });
 });
 
@@ -105,6 +134,7 @@ describe("resolveGalaxyHistoryOpenUrl", () => {
     const serverUrl = resolveGalaxyServerUrl(
       {} as OrbitConfig,
       { GALAXY_URL: "https://env.example" } as NodeJS.ProcessEnv,
+      noConfigKey,
     );
     expect(resolveGalaxyHistoryOpenUrl(HISTORY, serverUrl)).toBe(HISTORY);
   });

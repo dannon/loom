@@ -465,7 +465,7 @@ export GALAXY_URL="https://usegalaxy.org"
 export GALAXY_API_KEY="your-api-key"
 ```
 
-Galaxy credentials can also be provided via environment variables (`GALAXY_URL`, `GALAXY_API_KEY`) for CI or testing, but `~/.orbit/config.json` is the primary source.
+An exported `GALAXY_URL` + `GALAXY_API_KEY` pair wins over the saved profile in `~/.orbit/config.json`, so one env prefix points the CLI at any Galaxy; setting only one of the two is ignored with a warning. The desktop app prefers the profile picked in its UI.
 
 #### Beta tester ID
 

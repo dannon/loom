@@ -290,7 +290,7 @@ export function planStartupGreeting(status: ActiveGalaxyStatus, isOrbit: boolean
       level: "warning",
       text:
         `Welcome to Orbit. A Galaxy profile is configured, but its API key only decrypts inside the Orbit desktop app -- ` +
-        `Galaxy tools won't work in this terminal. Run from Orbit, export GALAXY_API_KEY, or /connect a server. ` +
+        `Galaxy tools won't work in this terminal. Run from Orbit, export GALAXY_URL and GALAXY_API_KEY, or /connect a server. ` +
         `What would you like to work on?`,
     };
   }
