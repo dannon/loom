@@ -53,3 +53,8 @@ agentic-plugins), drop `proposed_home` from its frontmatter, land it, bump the p
 `scripts/skills.manifest.json`, delete it here, and re-sync. The path stays the same, so the only
 thing that changes for the model is `repo: "orbit"` becoming the default repo. Forgetting the delete
 fails the sync: two plugins would vendor the same file.
+
+If it was the last skill here, also remove the `orbit-skills` entry from
+`scripts/skills.manifest.json` before re-syncing. The sync refuses an entry whose files match
+nothing, so an empty `skills/` with the entry still in place fails both `sync:skills` and
+`check:skills`.
