@@ -97,6 +97,12 @@ Galaxy adds the library dataset to the target history as a new item, without cop
 and the job's output lands after it. Expect one extra history item per library input. That is
 normal, not a duplicate upload.
 
+**Several library datasets into one `multiple: true` input:** wrap the list,
+`{"tars": {"values": [{"src": "ldda", "id": "..."}, {"src": "ldda", "id": "..."}]}}`. A bare list
+of `ldda` references is rejected before any job is created, with `'LibraryDatasetDatasetAssociation'
+object has no attribute 'auto_propagated_tags'`. Bare lists of `hda` references are fine, so
+importing first also works.
+
 **Workflows:** Galaxy accepts `ldda` inputs to a workflow, but `invoke_workflow`'s input check only
 accepts `hda`/`hdca` and rejects the run. Import the dataset into the history first (below) and pass
 the resulting `hda`.
@@ -145,6 +151,7 @@ conversation.
 | "'content' id of lda or hda is missing"                   | Import POST without `content`                                                                                                                                                                                 |
 | An import brought in a file you never asked for           | A folder id was sent with `source: "library"`. Galaxy does not reject it: it drops the `F` and imports whatever dataset has that number. Use `library_folder` for folders, and check the imported item's name |
 | A folder seems to hold exactly 10 files                   | You read only the default page; check `metadata.total_rows`                                                                                                                                                   |
+| `'LibraryDatasetDatasetAssociation' object has no attribute 'auto_propagated_tags'` | A bare list of `ldda` refs in a multiple input; wrap it as `{"values": [...]}` |
 | `invoke_workflow` rejects an `ldda` input                 | Known limit of the input check; import first and pass the `hda`                                                                                                                                               |
 
 ## Related
