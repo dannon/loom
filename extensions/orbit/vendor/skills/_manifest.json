@@ -4,8 +4,8 @@
   "commit": "aa4da4bd68eb00e360dfd5aa6e998feb5de0ac49",
   "commitDate": "2026-09-17",
   "tag": null,
-  "manifestSha256": "99317e9260487e804b48efcef5c3a40b9405d00f7e07987bce7828a09f2396a4",
-  "catalogSha256": "f1c6b85851ca03a868168e41cac949c307abf65f7b27e11b79136813cb0c5def",
+  "manifestSha256": "de474f5f009de109248e24d2a1db042c05f1a5c13c0508829cc1b4251d9784da",
+  "catalogSha256": "9079443c6d16e2d78aa0f4cada21485a2809c93b9af904e52ec7d154243316b7",
   "syncSha256": "3b179d252f45336ff5d4aaf826f52943c6efcb9c9317ac15f6794f7709a8d7f7",
   "plugins": [
     {
@@ -38,6 +38,17 @@
         "commit": "5aac370fffa778adabd42053dbb952dd5a77c1c7",
         "path": "casts/claude/skills"
       }
+    },
+    {
+      "plugin": "orbit-skills",
+      "source": "local",
+      "dir": "skills",
+      "as": "skills",
+      "repo": "orbit",
+      "router": "catalog",
+      "transforms": [],
+      "why": "Skills Orbit writes and tests itself before they move to agentic-plugins.",
+      "upstream": null
     }
   ],
   "files": [
@@ -726,6 +737,13 @@
       "source": "plugins/galaxy-skills/skills/collection-manipulation/references/tools.md",
       "bytes": 18796,
       "sha256": "577ba1706b2faf0b26cad3fd9f97848ad52c1c59abe02397969014106449c0f0"
+    },
+    {
+      "target": "skills/galaxy-data-libraries/SKILL.md",
+      "plugin": "orbit-skills",
+      "source": "skills/galaxy-data-libraries/SKILL.md",
+      "bytes": 9564,
+      "sha256": "e5f59d5d22527516f9f13c26659fa0dc91e24c1a7f0563f176ac5a71ceaf4b5d"
     },
     {
       "target": "skills/galaxy-integration/README.md",

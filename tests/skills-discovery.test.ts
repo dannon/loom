@@ -364,6 +364,10 @@ describe("catalog cache", () => {
   });
 });
 
+// Orbit's own skills ride along in every summary: they are not a configured repo,
+// but /skills status has to say they are there.
+const BUILT_IN_ROW = { repo: "orbit", count: 1, ok: true, bundled: true, builtIn: true };
+
 describe("refreshAllCatalogs", () => {
   let tmp: string;
   beforeEach(() => {
@@ -399,7 +403,7 @@ describe("refreshAllCatalogs", () => {
       }),
     );
     const summary = await refreshAllCatalogs();
-    expect(summary).toEqual([{ repo: "galaxy-skills-wip", count: 1, ok: true }]);
+    expect(summary).toEqual([{ repo: "galaxy-skills-wip", count: 1, ok: true }, BUILT_IN_ROW]);
   });
 
   it("reports a bundled repo as bundled instead of walking it", async () => {
@@ -417,8 +421,9 @@ describe("refreshAllCatalogs", () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const summary = await refreshAllCatalogs();
-    expect(summary).toHaveLength(1);
+    expect(summary).toHaveLength(2);
     expect(summary[0]).toMatchObject({ repo: "galaxy-skills", ok: true, bundled: true });
+    expect(summary[1]).toEqual(BUILT_IN_ROW);
     expect(summary[0].count).toBeGreaterThan(0);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -429,10 +434,35 @@ describe("refreshAllCatalogs", () => {
       vi.fn().mockResolvedValue(new Response("rate limited", { status: 403 })),
     );
     const summary = await refreshAllCatalogs();
-    expect(summary).toHaveLength(1);
+    expect(summary).toHaveLength(2);
     expect(summary[0].repo).toBe("galaxy-skills-wip");
     expect(summary[0].ok).toBe(false);
     expect(summary[0].error).toMatch(/403/);
+    expect(summary[1]).toEqual(BUILT_IN_ROW);
+  });
+
+  it("drops the built-in row when a configured repo has taken the name", async () => {
+    fs.writeFileSync(
+      path.join(tmp, ".orbit", "config.json"),
+      JSON.stringify({
+        skills: {
+          repos: [
+            {
+              name: "orbit",
+              url: "https://github.com/galaxyproject/orbit",
+              branch: "wip",
+              enabled: true,
+            },
+          ],
+        },
+      }),
+      "utf-8",
+    );
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 404 })));
+    const summary = await refreshAllCatalogs();
+    expect(summary.map((r) => r.repo)).toEqual(["orbit"]);
+    expect(summary[0].builtIn).toBeUndefined();
   });
 });
 

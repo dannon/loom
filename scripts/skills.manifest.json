@@ -37,6 +37,18 @@
         "validate-galaxy-workflow/**"
       ],
       "exclude": ["**/_feedback.md"]
+    },
+    {
+      "plugin": "orbit-skills",
+      "source": "local",
+      "dir": "skills",
+      "repo": "orbit",
+      "as": "skills",
+      "router": "catalog",
+      "transforms": [],
+      "why": "Skills Orbit writes and tests itself before they move to agentic-plugins.",
+      "include": ["**"],
+      "exclude": ["README.md"]
     }
   ]
 }
