@@ -312,8 +312,11 @@ export function resetStagingShadowWarning(): void {
 
 /**
  * Orbit's staging skills, when this session offers them: the package holds
- * some and no configured repo has taken the name. A configured `orbit` repo is
- * someone previewing a branch of Orbit's skills, so it wins -- but not quietly.
+ * some and no configured repo has taken the name. A configured `orbit` repo
+ * wins -- an explicit choice beats the package -- but not quietly. It is not a
+ * clean branch preview yet: a live walk of the Orbit repo has no subtree
+ * filter, so it lists every loom-tagged SKILL.md in the tree, vendored copies
+ * included.
  */
 export function stagingSkillEntries(): SkillEntry[] | null {
   if (!hasBundledContent(STAGING_REPO_NAME)) return null;

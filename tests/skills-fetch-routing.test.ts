@@ -152,7 +152,7 @@ describe("skills_fetch source selection", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("lets a configured repo named orbit win, so a branch can be previewed", async () => {
+  it("lets a configured repo named orbit win over the package", async () => {
     writeConfig([
       DEFAULT_REPO,
       {

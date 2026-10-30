@@ -34,8 +34,8 @@ export const STAGING_REPO_NAME = "orbit";
 
 /**
  * Names `skills_fetch` answers from the package without any configured repo
- * behind them. A configured repo of the same name still wins: that is how a
- * branch of either gets previewed.
+ * behind them. A configured repo of the same name still wins, so an explicitly
+ * chosen repo is never silently answered from the package.
  */
 const RESERVED_REPOS: ReadonlySet<string> = new Set([VENDOR_REPO_NAME, STAGING_REPO_NAME]);
 
