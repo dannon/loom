@@ -131,7 +131,7 @@ describe("skills_fetch source selection", () => {
     expect(String(fetchSpy.mock.calls[0][0])).toContain("galaxyproject/foundry");
   });
 
-  it("serves Orbit's built-in skills from the package when nobody has configured the name", async () => {
+  it("serves Orbit's staging skills from the package when nobody has configured the name", async () => {
     writeConfig([DEFAULT_REPO]);
     const res = await call(await skillsFetch(), {
       repo: "orbit",
@@ -142,7 +142,7 @@ describe("skills_fetch source selection", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("does not let the built-in name reach the galaxy-skills mirror under the shared prefix", async () => {
+  it("does not let the staging repo name reach the galaxy-skills mirror under the shared prefix", async () => {
     writeConfig([DEFAULT_REPO]);
     const res = await call(await skillsFetch(), {
       repo: "orbit",
@@ -171,7 +171,7 @@ describe("skills_fetch source selection", () => {
   });
 
   it("says plainly when the build ships nothing under a reserved name", async () => {
-    // A package built before any built-in skill existed, or one whose local
+    // A package built before any staging skill existed, or one whose local
     // plugin was dropped: the reserved name must not fall through to the network.
     const read = (name: string) =>
       JSON.parse(fs.readFileSync(path.join(vendorSkillsDir(), name), "utf-8"));

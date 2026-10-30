@@ -13,7 +13,7 @@ export function registerSkillsCommand(pi: ExtensionAPI): void {
           const results = await refreshAllCatalogs();
           const summary = results
             .map((r) => {
-              if (r.builtIn)
+              if (r.staging)
                 return `${r.repo}: ${r.count} staging skill(s) in Orbit, nothing to fetch`;
               if (r.bundled) return `${r.repo}: ${r.count} (bundled, nothing to fetch)`;
               return r.ok ? `${r.repo}: ${r.count}` : `${r.repo}: failed (${r.error})`;
@@ -25,7 +25,7 @@ export function registerSkillsCommand(pi: ExtensionAPI): void {
         if (sub === "status") {
           const summary = catalogSummary()
             .map((r) => {
-              if (r.builtIn)
+              if (r.staging)
                 return `${r.repo}: ${r.count} staging skill(s) in Orbit, awaiting a permanent home`;
               if (r.bundled) return `${r.repo}: ${r.count} skill(s) bundled with Orbit`;
               return r.cached

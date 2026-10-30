@@ -368,12 +368,12 @@ describe("catalog cache", () => {
 // Orbit's own skills ride along in every summary: they are not a configured repo,
 // but /skills status has to say they are there. The count comes from the real
 // catalog, so staging another skill doesn't break tests about something else.
-const BUILT_IN_ROW = {
+const STAGING_ROW = {
   repo: "orbit",
   count: readBundledCatalog()?.orbit?.length,
   ok: true,
   bundled: true,
-  builtIn: true,
+  staging: true,
 };
 
 describe("refreshAllCatalogs", () => {
@@ -411,7 +411,7 @@ describe("refreshAllCatalogs", () => {
       }),
     );
     const summary = await refreshAllCatalogs();
-    expect(summary).toEqual([{ repo: "galaxy-skills-wip", count: 1, ok: true }, BUILT_IN_ROW]);
+    expect(summary).toEqual([{ repo: "galaxy-skills-wip", count: 1, ok: true }, STAGING_ROW]);
   });
 
   it("reports a bundled repo as bundled instead of walking it", async () => {
@@ -431,7 +431,7 @@ describe("refreshAllCatalogs", () => {
     const summary = await refreshAllCatalogs();
     expect(summary).toHaveLength(2);
     expect(summary[0]).toMatchObject({ repo: "galaxy-skills", ok: true, bundled: true });
-    expect(summary[1]).toEqual(BUILT_IN_ROW);
+    expect(summary[1]).toEqual(STAGING_ROW);
     expect(summary[0].count).toBeGreaterThan(0);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -446,10 +446,10 @@ describe("refreshAllCatalogs", () => {
     expect(summary[0].repo).toBe("galaxy-skills-wip");
     expect(summary[0].ok).toBe(false);
     expect(summary[0].error).toMatch(/403/);
-    expect(summary[1]).toEqual(BUILT_IN_ROW);
+    expect(summary[1]).toEqual(STAGING_ROW);
   });
 
-  it("drops the built-in row when a configured repo has taken the name", async () => {
+  it("drops the staging row when a configured repo has taken the name", async () => {
     fs.writeFileSync(
       path.join(tmp, ".orbit", "config.json"),
       JSON.stringify({
@@ -470,7 +470,7 @@ describe("refreshAllCatalogs", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 404 })));
     const summary = await refreshAllCatalogs();
     expect(summary.map((r) => r.repo)).toEqual(["orbit"]);
-    expect(summary[0].builtIn).toBeUndefined();
+    expect(summary[0].staging).toBeUndefined();
   });
 });
 

@@ -9,7 +9,7 @@ import {
   selectSkills as selectSurfaceSkills,
 } from "../../shared/skills-router.js";
 import {
-  BUILT_IN_REPO_NAME,
+  STAGING_REPO_NAME,
   hasBundledContent,
   isBundledRepo,
   readBundledCatalog,
@@ -300,35 +300,35 @@ export interface CatalogRefreshResult {
   /** Ships in the package; there was nothing to fetch. */
   bundled?: boolean;
   /** Orbit's staging skills, not a configured repo. */
-  builtIn?: boolean;
+  staging?: boolean;
 }
 
-let warnedShadowedBuiltIns = false;
+let warnedShadowedStaging = false;
 
 /**
  * Orbit's staging skills, when this session offers them: the package holds
  * some and no configured repo has taken the name. A configured `orbit` repo is
  * someone previewing a branch of Orbit's skills, so it wins -- but not quietly.
  */
-export function builtInSkillEntries(): SkillEntry[] | null {
-  if (!hasBundledContent(BUILT_IN_REPO_NAME)) return null;
-  if (findSkillRepo(BUILT_IN_REPO_NAME)) {
-    if (!warnedShadowedBuiltIns) {
-      warnedShadowedBuiltIns = true;
+export function stagingSkillEntries(): SkillEntry[] | null {
+  if (!hasBundledContent(STAGING_REPO_NAME)) return null;
+  if (findSkillRepo(STAGING_REPO_NAME)) {
+    if (!warnedShadowedStaging) {
+      warnedShadowedStaging = true;
       console.warn(
-        `[skills] a configured repo named "${BUILT_IN_REPO_NAME}" replaces Orbit's staging skills`,
+        `[skills] a configured repo named "${STAGING_REPO_NAME}" replaces Orbit's staging skills`,
       );
     }
     return null;
   }
-  return readBundledCatalog()?.[BUILT_IN_REPO_NAME] ?? [];
+  return readBundledCatalog()?.[STAGING_REPO_NAME] ?? [];
 }
 
-function builtInSummary(): CatalogRefreshResult[] {
-  const entries = builtInSkillEntries();
+function stagingSummary(): CatalogRefreshResult[] {
+  const entries = stagingSkillEntries();
   if (!entries) return [];
   return [
-    { repo: BUILT_IN_REPO_NAME, count: entries.length, ok: true, bundled: true, builtIn: true },
+    { repo: STAGING_REPO_NAME, count: entries.length, ok: true, bundled: true, staging: true },
   ];
 }
 
@@ -357,7 +357,7 @@ export async function refreshAllCatalogs(): Promise<CatalogRefreshResult[]> {
       }
     }),
   );
-  return [...results, ...builtInSummary()];
+  return [...results, ...stagingSummary()];
 }
 
 /**
@@ -404,7 +404,7 @@ export function catalogSummary(): CatalogRefreshResult[] {
     const cat = readCatalog(repo);
     return { repo: repo.name, count: cat?.skills.length ?? 0, ok: true, cached: cat !== null };
   });
-  return [...configured, ...builtInSummary()];
+  return [...configured, ...stagingSummary()];
 }
 
 /**

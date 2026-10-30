@@ -58,14 +58,14 @@ describe("renderSkillsSection", () => {
     expect(out).toContain('skills_fetch({ repo: "extra", path: "b/SKILL.md" })');
   });
 
-  it("labels a built-in repo and names it in every fetch line", () => {
-    const withBuiltIn = [...repos, { name: "orbit", url: "", branch: "" }];
+  it("labels a staging repo and names it in every fetch line", () => {
+    const withStaging = [...repos, { name: "orbit", url: "", branch: "" }];
     const map = new Map<string, SkillEntry[]>([
       ["galaxy-skills", [{ path: "a/SKILL.md", name: "a", description: "d", surfaces: ["loom"] }]],
       ["orbit", [{ path: "b/SKILL.md", name: "b", description: "d", surfaces: ["loom"] }]],
     ]);
     const out = renderSkillsSection(
-      withBuiltIn,
+      withStaging,
       map,
       new Set(["galaxy-skills"]),
       new Set(["orbit"]),
@@ -76,9 +76,9 @@ describe("renderSkillsSection", () => {
     expect(out).toContain("ships with Orbit and reads from disk");
   });
 
-  it("never makes a built-in the default, even when nothing is configured", () => {
+  it("never makes a staging repo the default, even when nothing is configured", () => {
     // A repo-less skills_fetch goes to the first configured repo, and with none
-    // configured it errors -- so the built-in's lines must still name it.
+    // configured it errors -- so the staging repo's lines must still name it.
     const map = new Map<string, SkillEntry[]>([
       ["orbit", [{ path: "b/SKILL.md", name: "b", description: "d", surfaces: ["loom"] }]],
     ]);

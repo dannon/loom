@@ -30,14 +30,14 @@ import type { SkillEntry } from "./skills-discovery";
 export const VENDOR_REPO_NAME = "foundry";
 
 /** Reserved repo name for Orbit's staging skills, `skills_fetch({ repo: "orbit" })`. */
-export const BUILT_IN_REPO_NAME = "orbit";
+export const STAGING_REPO_NAME = "orbit";
 
 /**
  * Names `skills_fetch` answers from the package without any configured repo
  * behind them. A configured repo of the same name still wins: that is how a
  * branch of either gets previewed.
  */
-const RESERVED_REPOS: ReadonlySet<string> = new Set([VENDOR_REPO_NAME, BUILT_IN_REPO_NAME]);
+const RESERVED_REPOS: ReadonlySet<string> = new Set([VENDOR_REPO_NAME, STAGING_REPO_NAME]);
 
 export function isReservedRepo(name: unknown): name is string {
   return typeof name === "string" && RESERVED_REPOS.has(name);

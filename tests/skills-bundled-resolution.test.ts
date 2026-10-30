@@ -116,11 +116,11 @@ describe("the generated catalog", () => {
   });
 
   it("holds nothing from a repo that is kept out of the router", () => {
-    // galaxy-skills and Orbit's own built-ins are routed; the Foundry casts are not.
+    // galaxy-skills and Orbit's own staging skills are routed; the Foundry casts are not.
     expect(Object.keys(readBundledCatalog()!)).toEqual([DEFAULT.name, "orbit"]);
   });
 
-  it("names built-in paths that resolve under the orbit repo and nowhere else", () => {
+  it("names staging paths that resolve under the orbit repo and nowhere else", () => {
     const entries = readBundledCatalog()!.orbit;
     expect(entries.length).toBeGreaterThan(0);
     for (const entry of entries) {

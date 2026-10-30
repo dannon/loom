@@ -219,7 +219,7 @@ describe("an installed vendor skills source", () => {
 });
 
 describe("isReservedRepo", () => {
-  it("names the bundled reference set and Orbit's built-ins", () => {
+  it("names the bundled reference set and Orbit's staging skills", () => {
     expect(isReservedRepo("foundry")).toBe(true);
     expect(isReservedRepo("orbit")).toBe(true);
   });
