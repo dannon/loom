@@ -761,6 +761,31 @@ export function listFiles(dir) {
 }
 
 /**
+ * The text the sync writes for one selected file: read from `root`, refused if
+ * binary, transformed under its target name. The local drift check hashes this
+ * same text, so the two cannot disagree about what "unchanged" means.
+ *
+ * @param {string} root directory the file's `source` is relative to
+ * @param {{source: string, target: string}} file
+ * @param {string[]} transforms
+ * @param {string} from the source path to name in errors
+ */
+export function readTransformed(root, file, transforms, from) {
+  const bytes = fs.readFileSync(path.join(root, file.source));
+  // Everything vendored is prose or JSON. Reading a binary as UTF-8 would
+  // replace every invalid sequence, hash the damage as if it were the content,
+  // and sail through the gate.
+  if (bytes.includes(0)) {
+    throw new Error(`${from}: looks binary; the vendored set is text only`);
+  }
+  try {
+    return applyTransforms(bytes.toString("utf-8"), file.target, transforms);
+  } catch (err) {
+    throw new Error(`${from}: ${err.message}`, { cause: err });
+  }
+}
+
+/**
  * The files of a local plugin, as slash-separated paths relative to its `dir`.
  *
  * A working-tree walk rather than `git ls-files`, because a skill being written
@@ -806,7 +831,7 @@ export function listLocalFiles(dir, { repoRoot = REPO_ROOT, vendorDir = VENDOR_D
  * @param {string} args.dir its source dir, for messages
  * @param {{source: string, target: string}[]} args.selected what the entry selects from the source now
  * @param {{target: string, plugin: string, sha256: string}[]} args.recorded every entry in the vendored manifest
- * @param {(source: string) => string | null} args.hashOfSource hash of a source file, transformed as the sync would
+ * @param {(file: {source: string, target: string}) => string | null} args.hashOfSource hash of a source file, transformed as the sync would
  * @returns {{kind: string, message: string}[]}
  */
 export function checkLocalPlugin({ plugin, dir, selected, recorded, hashOfSource }) {
@@ -819,7 +844,7 @@ export function checkLocalPlugin({ plugin, dir, selected, recorded, hashOfSource
       continue;
     }
     mine.delete(file.target);
-    if (hashOfSource(file.source) !== entry.sha256) {
+    if (hashOfSource(file) !== entry.sha256) {
       failures.push({
         kind: "hash-mismatch",
         message: `${dir}/${file.source}: changed since the last sync`,
@@ -958,24 +983,7 @@ async function sync() {
 
       const pluginFiles = selectFiles(plugin, committed);
       const transformed = new Map(
-        pluginFiles.map((f) => {
-          const from = fromOf(f);
-          const bytes = fs.readFileSync(path.join(root, f.source));
-          // Everything vendored is prose or JSON. Reading a binary as UTF-8
-          // would replace every invalid sequence, hash the damage as if it were
-          // the content, and sail through the gate.
-          if (bytes.includes(0)) {
-            throw new Error(`${from}: looks binary; the vendored set is text only`);
-          }
-          try {
-            return [
-              f.target,
-              applyTransforms(bytes.toString("utf-8"), f.target, plugin.transforms),
-            ];
-          } catch (err) {
-            throw new Error(`${from}: ${err.message}`, { cause: err });
-          }
-        }),
+        pluginFiles.map((f) => [f.target, readTransformed(root, f, plugin.transforms, fromOf(f))]),
       );
 
       // Checked for every plugin, not only the routed ones: reads are scoped by
@@ -1240,10 +1248,11 @@ function check() {
         dir: plugin.dir,
         selected,
         recorded: vendored.files,
-        hashOfSource: (source) => {
+        hashOfSource: (file) => {
           try {
-            const text = fs.readFileSync(path.join(root, source), "utf-8");
-            return sha256(applyTransforms(text, source, plugin.transforms ?? []));
+            return sha256(
+              readTransformed(root, file, plugin.transforms ?? [], `${plugin.dir}/${file.source}`),
+            );
           } catch {
             return null;
           }

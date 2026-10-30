@@ -29,6 +29,7 @@ import {
   listLocalFiles,
   matchesPattern,
   parseFrontmatter,
+  readTransformed,
   rewriteLocalPaths,
   safeVendorPath,
   selectFiles,
@@ -779,6 +780,29 @@ describe("listLocalFiles", () => {
 
   it("refuses a dir that does not exist", () => {
     expect(() => list("nope")).toThrow(/does not exist/);
+  });
+});
+
+describe("readTransformed", () => {
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "read-transformed-"));
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  it("transforms under the target name, which is what the sync writes", () => {
+    writeFileSync(join(root, "a.md"), "see [[other-note]]\n");
+    const file = { source: "a.md", target: "skills/a.md" };
+    expect(readTransformed(root, file, ["strip-wiki-links"], "skills/a.md")).toBe(
+      applyTransforms("see [[other-note]]\n", "skills/a.md", ["strip-wiki-links"]),
+    );
+  });
+
+  it("refuses a binary and names the source it came from", () => {
+    writeFileSync(join(root, "b.md"), Buffer.from([0x61, 0x00, 0x62]));
+    expect(() =>
+      readTransformed(root, { source: "b.md", target: "skills/b.md" }, [], "skills/b.md"),
+    ).toThrow(/skills\/b\.md: looks binary/);
   });
 });
 

@@ -6,7 +6,7 @@
   "tag": null,
   "manifestSha256": "07e17bc2852c070dfc166d86f10f646995891cb08ba232bea5fbf8c17465eb82",
   "catalogSha256": "9079443c6d16e2d78aa0f4cada21485a2809c93b9af904e52ec7d154243316b7",
-  "syncSha256": "a3665099e748ab392fd6f247a7be46419b0989006f24e738abe94c1f9d7007df",
+  "syncSha256": "f0a06c03be74ecc2bad0b1c367c367e0b419b49a65398db37a075073cd630e95",
   "plugins": [
     {
       "plugin": "galaxy-skills",
