@@ -1,4 +1,5 @@
 import type { OrbitConfig } from "./config.js";
+import { resolveGalaxyCredentials } from "../../../shared/galaxy-credentials.js";
 
 export interface GalaxyStatus {
   /** True when the brain has a usable Galaxy connection (a URL *and* a key). */
@@ -8,42 +9,49 @@ export interface GalaxyStatus {
 }
 
 /**
- * The effective Galaxy server URL with the same precedence the brain's env
- * uses: the active config profile's URL wins, else an exported `GALAXY_URL`,
- * else null. Shared by the footer status resolver and the open-history origin
- * pin so both agree on which server an env-driven session is actually talking
- * to -- deriving it from the masked config profile alone missed the env-driven
- * / auto-connect path (#290, follow-up to #284).
+ * The Galaxy server the brain is handed, resolved exactly as agent.ts
+ * `buildSecretEnv` resolves it: the active profile with a readable key, else an
+ * exported `GALAXY_URL` + `GALAXY_API_KEY` pair. When neither is usable the URL
+ * still falls back to the profile's, then `GALAXY_URL`, so the footer can name
+ * the server that isn't connected. Shared by the footer status resolver and
+ * the open-history origin pin so both agree with the brain (#284, #290).
+ *
+ * `resolveKey` is injected (the caller passes the safeStorage-backed
+ * `resolveGalaxyApiKey`) so this stays a pure, Electron-free unit.
  */
-export function resolveGalaxyServerUrl(cfg: OrbitConfig, env: NodeJS.ProcessEnv): string | null {
-  const active = cfg.galaxy?.active;
-  const profileUrl = active ? cfg.galaxy?.profiles?.[active]?.url : undefined;
-  return profileUrl || env.GALAXY_URL || null;
+export function resolveGalaxyServerUrl(
+  cfg: OrbitConfig,
+  env: NodeJS.ProcessEnv,
+  resolveKey: (c: OrbitConfig) => string | null,
+): string | null {
+  return resolveGalaxyStatus(cfg, env, resolveKey).url;
 }
 
 /**
  * Effective Galaxy connection state as the brain actually sees it. The brain
  * treats Galaxy as connected when `GALAXY_URL` and `GALAXY_API_KEY` are both
- * present in its env (extensions/orbit/context.ts), and Orbit builds that env
- * with the same precedence used here: the active config profile wins, else a
- * value exported into Orbit's own environment (agent.ts `buildSecretEnv`).
+ * present in its env, and Orbit only ever hands it both from one source.
  *
  * The footer status dot reads this instead of the masked config alone, so an
  * env-driven / auto-connect session that never saved a profile still reads
  * connected -- previously the dot stayed "not configured" even though the URL
  * was known and tool calls worked (#284).
- *
- * `resolveKey` is injected (the caller passes the safeStorage-backed
- * `resolveGalaxyApiKey`) so this stays a pure, Electron-free unit.
  */
 export function resolveGalaxyStatus(
   cfg: OrbitConfig,
   env: NodeJS.ProcessEnv,
   resolveKey: (c: OrbitConfig) => string | null,
 ): GalaxyStatus {
-  const url = resolveGalaxyServerUrl(cfg, env);
-  const key = resolveKey(cfg) ?? env.GALAXY_API_KEY ?? null;
-  return { connected: Boolean(url && key), url };
+  const creds = resolveGalaxyCredentials({
+    config: cfg,
+    profileApiKey: resolveKey(cfg),
+    env,
+    prefer: "profile",
+  });
+  if (creds) return { connected: true, url: creds.url };
+  const active = cfg.galaxy?.active;
+  const profileUrl = active ? cfg.galaxy?.profiles?.[active]?.url : undefined;
+  return { connected: false, url: profileUrl || env.GALAXY_URL || null };
 }
 
 /**

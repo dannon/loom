@@ -15,6 +15,10 @@ import { SEED_OAUTH_ONLY_PROVIDERS } from "../shared/provider-auth-caps.js";
 import { EX_CONFIG } from "../shared/brain-exit.js";
 import { resolvePiExtensionDir } from "./pi-extension-path.js";
 import { migrateLegacyMcpConfig } from "./legacy-mcp-config.js";
+import {
+  describeMissingGalaxyCredentials,
+  resolveGalaxyCredentials,
+} from "../shared/galaxy-credentials.js";
 import { loadPiDefaultModels, piDefaultModel } from "../shared/pi-default-model.js";
 import {
   isKnownProvider,
@@ -321,24 +325,26 @@ if (activeLlmProvider && OAUTH_ONLY_PROVIDERS.has(activeLlmProvider)) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Galaxy credentials
 //
-// Credentials come from ~/.orbit/config.json (written by /connect) or env
-// vars (CI/testing). The in-process Galaxy tools are always registered;
-// the agent decides per-plan whether to use Galaxy. The `executionMode`
-// field affects prompt guidance, not which tools are registered.
+// Credentials come from an exported GALAXY_URL + GALAXY_API_KEY pair, else
+// the active profile in config.json (written by /connect). The pair wins so
+// any server is one env prefix away; shells pass their chosen server the same
+// way. The in-process Galaxy tools are always registered; the agent decides
+// per-plan whether to use Galaxy. The `executionMode` field affects prompt
+// guidance, not which tools are registered.
 // ─────────────────────────────────────────────────────────────────────────────
 
-let galaxyUrl = null;
-let galaxyApiKey = null;
-
-if (orbitConfig.galaxy?.active && orbitConfig.galaxy.profiles) {
-  const active = orbitConfig.galaxy.profiles[orbitConfig.galaxy.active];
-  if (active) {
-    galaxyUrl = active.url;
-    galaxyApiKey = active.apiKey;
-  }
+const galaxyCredentials = resolveGalaxyCredentials({
+  config: orbitConfig,
+  env: process.env,
+  prefer: "env",
+});
+const galaxyUrl = galaxyCredentials?.url ?? null;
+const galaxyApiKey = galaxyCredentials?.apiKey ?? null;
+// A half-set env pair is worth a word even when the saved profile still works.
+if (galaxyCredentials?.source !== "env" && !isInformationalCommand && !isDesktopShell()) {
+  const why = describeMissingGalaxyCredentials({ config: orbitConfig, env: process.env });
+  if (why) console.error(`[orbit] ${why}`);
 }
-if (!galaxyUrl) galaxyUrl = process.env.GALAXY_URL || null;
-if (!galaxyApiKey) galaxyApiKey = process.env.GALAXY_API_KEY || null;
 
 // Publish to env so the extension can read them. If credentials are absent,
 // scrub stale env so the extension doesn't see ghosts from a prior session.

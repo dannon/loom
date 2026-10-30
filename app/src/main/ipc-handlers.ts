@@ -774,7 +774,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
   // left history links dead, #290) and enforces the http(s) + /histories/view
   // checks. It returns the normalized URL to open, or null to reject.
   ipc.handle("galaxy:open-history", async (_e, url: unknown) => {
-    const serverUrl = resolveGalaxyServerUrl(loadConfig(), process.env);
+    const serverUrl = resolveGalaxyServerUrl(loadConfig(), process.env, resolveGalaxyApiKey);
     const target = resolveGalaxyHistoryOpenUrl(url, serverUrl);
     if (!target) return { opened: false };
     await shell.openExternal(target);
