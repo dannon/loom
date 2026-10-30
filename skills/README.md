@@ -11,9 +11,9 @@ the system-prompt router lists them under an `orbit` section labelled as staging
 
 ## Currently staged
 
-| Skill                                                     | Proposed home | Why it is here first                                                                                                                                                                                                                                         |
-| --------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`galaxy-data-libraries`](galaxy-data-libraries/SKILL.md) | galaxy-skills | Browsing a data library and running tools on its datasets in place. Written for the CM4AI DREAM hackathon on galaxy.cfdeworkspace.org; it also specifies three library operations galaxy-ops does not have yet, after which most of its REST section can go. |
+| Skill                                                     | Proposed home | Why it is here first                                                                                                                                                                                                                                    |
+| --------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`galaxy-data-libraries`](galaxy-data-libraries/SKILL.md) | galaxy-skills | Browsing a data library and running tools on its datasets in place. Nothing upstream covered data libraries when users needed it. It also specifies three library operations galaxy-ops does not have yet, after which most of its REST section can go. |
 
 Keep this table current: add a row with each new skill, and delete the row when the skill moves.
 
