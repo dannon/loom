@@ -149,7 +149,7 @@ function upstreamRepo(url) {
 
 /**
  * Copy the galaxy-skills plugin out of Orbit's vendor tree, checked against its manifest. Found by
- * repo rather than by its `skills/` prefix: Orbit's built-in skills are vendored under the same
+ * repo rather than by its `skills/` prefix: Orbit's staging skills are vendored under the same
  * prefix so that their paths survive the move upstream.
  */
 async function vendorLocal(manifest) {

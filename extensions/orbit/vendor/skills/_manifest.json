@@ -4,9 +4,9 @@
   "commit": "aa4da4bd68eb00e360dfd5aa6e998feb5de0ac49",
   "commitDate": "2026-09-17",
   "tag": null,
-  "manifestSha256": "de474f5f009de109248e24d2a1db042c05f1a5c13c0508829cc1b4251d9784da",
+  "manifestSha256": "07e17bc2852c070dfc166d86f10f646995891cb08ba232bea5fbf8c17465eb82",
   "catalogSha256": "9079443c6d16e2d78aa0f4cada21485a2809c93b9af904e52ec7d154243316b7",
-  "syncSha256": "3b179d252f45336ff5d4aaf826f52943c6efcb9c9317ac15f6794f7709a8d7f7",
+  "syncSha256": "a3665099e748ab392fd6f247a7be46419b0989006f24e738abe94c1f9d7007df",
   "plugins": [
     {
       "plugin": "galaxy-skills",
@@ -742,8 +742,8 @@
       "target": "skills/galaxy-data-libraries/SKILL.md",
       "plugin": "orbit-skills",
       "source": "skills/galaxy-data-libraries/SKILL.md",
-      "bytes": 10131,
-      "sha256": "2c000c2b92ee0ea0bf400e65c770c9f430758aa543c52ab2f4f7b0d7522bd61b"
+      "bytes": 10216,
+      "sha256": "fd28b6d144680f9a2da37c21b0f6a362df8891d51c7bb0781a01f8a386a85bce"
     },
     {
       "target": "skills/galaxy-integration/README.md",

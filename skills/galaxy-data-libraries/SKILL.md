@@ -3,6 +3,8 @@ name: galaxy-data-libraries
 description: Use when data lives in a Galaxy data library rather than a history (a named library, or a folder id starting with F) -- walk folders, get dataset ids, run tools on library datasets in place, import only when needed.
 metadata:
   surfaces: [loom]
+  # Staging in Orbit; this is where it should end up.
+  proposed_home: galaxy-skills
 user_invocable: true
 ---
 

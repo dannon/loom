@@ -715,7 +715,7 @@ Use the `skills_fetch({ repo, path })` tool to load a skill on demand. **Don't g
 ### Configured repos
 
 - **galaxy-skills** — https://github.com/galaxyproject/galaxy-skills (bundled)
-- **orbit** — built into Orbit
+- **orbit** — staging in Orbit until it moves to a permanent home
 
 ### galaxy-skills skills
 

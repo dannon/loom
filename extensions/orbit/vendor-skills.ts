@@ -14,10 +14,10 @@
  * Foundry casts back nothing configured and never enter the router -- nothing in
  * them is ambient guidance the model needs to know exists up front, so a hint
  * names the exact file at the moment it becomes relevant (see
- * `invocation-failure-hint.ts`). Orbit's built-in skills come from `skills/` in
- * this repo rather than from agentic-plugins; they are the staging ground for
- * skills Orbit needs before they move upstream, and they are routed under the
- * reserved `orbit` repo.
+ * `invocation-failure-hint.ts`). Orbit's staging skills come from `skills/` in
+ * this repo rather than from agentic-plugins: skills Orbit needs before they
+ * have a permanent home, each naming where it should move. They are routed
+ * under the reserved `orbit` repo.
  */
 
 import fs from "node:fs";
@@ -29,7 +29,7 @@ import type { SkillEntry } from "./skills-discovery";
 /** Reserved repo name for `skills_fetch({ repo: "foundry" })`. */
 export const VENDOR_REPO_NAME = "foundry";
 
-/** Reserved repo name for Orbit's own skills, `skills_fetch({ repo: "orbit" })`. */
+/** Reserved repo name for Orbit's staging skills, `skills_fetch({ repo: "orbit" })`. */
 export const BUILT_IN_REPO_NAME = "orbit";
 
 /**

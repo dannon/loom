@@ -667,7 +667,7 @@ export function renderSkillsSection(
     repos.map((r) => ({
       name: r.name,
       label: builtIn.has(r.name)
-        ? "built into Orbit"
+        ? "staging in Orbit until it moves to a permanent home"
         : `${r.url} (${bundled.has(r.name) ? "bundled" : `branch: ${r.branch || "main"}`})`,
     })),
     new Map(

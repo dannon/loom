@@ -21,8 +21,8 @@
  * A checkout that is at the pin is also the way to re-sync offline.
  *
  * A plugin entry with `"source": "local"` is the exception to all of the above:
- * its files come from `dir` in this repo (Orbit's built-in skills under
- * `skills/`), not from agentic-plugins. They go through the same selection,
+ * its files come from `dir` in this repo (Orbit's staging skills under
+ * `skills/`, each naming its destination), not from agentic-plugins. They go through the same selection,
  * transforms and catalog as everything else, so nothing downstream can tell
  * them apart, but their provenance is this repo's own history -- so they record
  * no upstream, and `--check` compares them against their source directly,
@@ -472,6 +472,30 @@ export function buildCatalogEntries(plugin, files, readText) {
     );
   }
   return entries;
+}
+
+/**
+ * Every skill in a local plugin has to say where it is meant to end up. The
+ * local tier is a staging ground, not a home, and a skill that names no
+ * destination is one nobody will ever move.
+ */
+export function assertProposedHome(plugin, files, readText) {
+  for (const file of files) {
+    if (file.target !== "SKILL.md" && !file.target.endsWith("/SKILL.md")) continue;
+    const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(readText(file));
+    let home;
+    try {
+      home = m ? parseYaml(m[1])?.metadata?.proposed_home : undefined;
+    } catch {
+      home = undefined;
+    }
+    if (typeof home !== "string" || !home.trim()) {
+      throw new Error(
+        `${file.target}: a staging skill in "${plugin.plugin}" must name where it should move, ` +
+          `as metadata.proposed_home in its frontmatter (e.g. galaxy-skills)`,
+      );
+    }
+  }
 }
 
 function assertNoLocalCheckout(text, targetName) {
@@ -962,6 +986,7 @@ async function sync() {
         }
         claimedRepos.add(plugin.repo);
       }
+      if (local) assertProposedHome(plugin, pluginFiles, (f) => transformed.get(f.target));
       if (plugin.router === "catalog") {
         if (!plugin.repo) {
           throw new Error(`plugin "${plugin.plugin}" is in the router but names no repo`);

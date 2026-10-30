@@ -19,6 +19,7 @@ import { readVendorManifest, vendorSkillsDir } from "../extensions/orbit/vendor-
 import {
   REPO_BLOB_BASE,
   applyTransforms,
+  assertProposedHome,
   checkLocalPlugin,
   checkVendored,
   declaredTargets,
@@ -819,5 +820,33 @@ describe("checkLocalPlugin", () => {
     expect(check({ selected: [] })).toEqual([
       { kind: "orphaned", message: "skills/one/SKILL.md: vendored but its source is gone" },
     ]);
+  });
+});
+
+describe("assertProposedHome", () => {
+  const plugin = { plugin: "orbit-skills" };
+  const files = [{ target: "skills/one/SKILL.md" }, { target: "skills/one/notes.md" }];
+  const skill = (meta: string) =>
+    `---\nname: one\ndescription: d\nmetadata:\n  surfaces: [loom]\n${meta}---\nbody\n`;
+
+  it("passes a staging skill that names where it should move", () => {
+    expect(() =>
+      assertProposedHome(plugin, files, () => skill("  proposed_home: galaxy-skills\n")),
+    ).not.toThrow();
+  });
+
+  it("refuses one that names no destination, or an empty one", () => {
+    expect(() => assertProposedHome(plugin, files, () => skill(""))).toThrow(
+      /must name where it should move/,
+    );
+    expect(() => assertProposedHome(plugin, files, () => skill("  proposed_home: '  '\n"))).toThrow(
+      /proposed_home/,
+    );
+  });
+
+  it("only looks at SKILL.md files", () => {
+    const read = (f: { target: string }) =>
+      f.target.endsWith("SKILL.md") ? skill("  proposed_home: x\n") : "no frontmatter";
+    expect(() => assertProposedHome(plugin, files, read)).not.toThrow();
   });
 });

@@ -299,14 +299,14 @@ export interface CatalogRefreshResult {
   cached?: boolean;
   /** Ships in the package; there was nothing to fetch. */
   bundled?: boolean;
-  /** Orbit's own skills, not a configured repo. */
+  /** Orbit's staging skills, not a configured repo. */
   builtIn?: boolean;
 }
 
 let warnedShadowedBuiltIns = false;
 
 /**
- * Orbit's built-in skills, when this session offers them: the package holds
+ * Orbit's staging skills, when this session offers them: the package holds
  * some and no configured repo has taken the name. A configured `orbit` repo is
  * someone previewing a branch of Orbit's skills, so it wins -- but not quietly.
  */
@@ -316,7 +316,7 @@ export function builtInSkillEntries(): SkillEntry[] | null {
     if (!warnedShadowedBuiltIns) {
       warnedShadowedBuiltIns = true;
       console.warn(
-        `[skills] a configured repo named "${BUILT_IN_REPO_NAME}" replaces Orbit's built-in skills`,
+        `[skills] a configured repo named "${BUILT_IN_REPO_NAME}" replaces Orbit's staging skills`,
       );
     }
     return null;

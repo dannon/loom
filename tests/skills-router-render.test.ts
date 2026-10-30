@@ -70,7 +70,7 @@ describe("renderSkillsSection", () => {
       new Set(["galaxy-skills"]),
       new Set(["orbit"]),
     );
-    expect(out).toContain("- **orbit** — built into Orbit");
+    expect(out).toContain("- **orbit** — staging in Orbit until it moves to a permanent home");
     expect(out).toContain('skills_fetch({ path: "a/SKILL.md" })');
     expect(out).toContain('skills_fetch({ repo: "orbit", path: "b/SKILL.md" })');
     expect(out).toContain("ships with Orbit and reads from disk");

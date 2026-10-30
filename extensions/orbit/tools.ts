@@ -297,8 +297,8 @@ inside each; a repo marked bundled there is read from the package, and any other
 is fetched and cached locally for 24h. If \`repo\` is omitted, the first enabled
 repo is used (typically \`galaxy-skills\`).
 
-\`repo: "${BUILT_IN_REPO_NAME}"\` reads Orbit's own built-in skills, listed in the
-router under that name. \`repo: "${VENDOR_REPO_NAME}"\` reads Galaxy workflow
+\`repo: "${BUILT_IN_REPO_NAME}"\` reads Orbit's staging skills (ones that have not
+moved to a permanent repo yet), listed in the router under that name. \`repo: "${VENDOR_REPO_NAME}"\` reads Galaxy workflow
 reference material bundled with Orbit. Both are always offline. The
 ${VENDOR_REPO_NAME} material is deliberately absent from the router, so its
 paths are not listed there: a hint names the exact file when it becomes
@@ -308,7 +308,7 @@ relevant, and a wrong path answers with the entry points that do exist.`,
         Type.String({
           description:
             "Name of the skills repo to fetch from (e.g. 'galaxy-skills'), " +
-            `'${BUILT_IN_REPO_NAME}' for Orbit's built-in skills, or ` +
+            `'${BUILT_IN_REPO_NAME}' for Orbit's staging skills, or ` +
             `'${VENDOR_REPO_NAME}' for bundled reference material. ` +
             "Omit to use the default (first enabled repo).",
         }),
