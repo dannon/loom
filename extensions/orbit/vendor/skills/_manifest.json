@@ -742,8 +742,8 @@
       "target": "skills/galaxy-data-libraries/SKILL.md",
       "plugin": "orbit-skills",
       "source": "skills/galaxy-data-libraries/SKILL.md",
-      "bytes": 10597,
-      "sha256": "42f10585aa4ce1c20c07d61330926b01fee5e7dacad8d697c2abd92d9a7f1dc4"
+      "bytes": 10996,
+      "sha256": "823f9e340af0ae1942821f16970437739c8815583ec69a2cf322a0b37f79cf40"
     },
     {
       "target": "skills/galaxy-integration/README.md",
