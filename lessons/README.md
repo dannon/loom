@@ -18,7 +18,7 @@ Before writing a lesson, ask what the knowledge is. Exactly one destination:
 | Already a lesson here                                                                                            | Add evidence to the existing one -- counts, versions, another `sources` entry. No new lesson. |
 | Something a validator, a schema or a better error message would catch                                            | An issue on galaxy-mcp, the Foundry, or Galaxy. Never the corpus.                             |
 | A general how-to                                                                                                 | A GTN FAQ pull request. Regular docs are the default landing.                                 |
-| Agent misbehaviour                                                                                               | The Loom prompt plus an eval. Not knowledge.                                                  |
+| Agent misbehaviour                                                                                               | The Orbit prompt plus an eval. Not knowledge.                                                 |
 | A silent scientific pitfall, an expectation, a choice, a source quirk, or a reproduction note, with no hit above | A lesson here.                                                                                |
 
 The last row is the whole corpus. If a lesson would be better as an error

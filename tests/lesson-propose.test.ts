@@ -15,11 +15,11 @@ import {
   resetLessonProposalArming,
   takeLessonProposalArming,
   type ProposeUiContext,
-} from "../extensions/loom/lessons/propose";
-import type { LessonProposalInput } from "../extensions/loom/lessons/compose";
-import { draftFilePath, lessonFilePath, lessonsDir } from "../extensions/loom/lessons/paths";
-import { resetActivity } from "../extensions/loom/activity";
-import { setNotebookPath } from "../extensions/loom/state";
+} from "../extensions/orbit/lessons/propose";
+import type { LessonProposalInput } from "../extensions/orbit/lessons/compose";
+import { draftFilePath, lessonFilePath, lessonsDir } from "../extensions/orbit/lessons/paths";
+import { resetActivity } from "../extensions/orbit/activity";
+import { setNotebookPath } from "../extensions/orbit/state";
 import { validateLessonMarkdown } from "../shared/lesson-rules.js";
 
 // The lesson switch is off by default; these suites are about what happens

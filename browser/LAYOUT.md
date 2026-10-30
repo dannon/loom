@@ -11,11 +11,11 @@ It forwards `build`, `dev`, `preview`, `build:session`, `test:watch` and `test:u
 chains all of the checks.
 
 The brain in `core/src/agent/` is interim. It is the browser's own agent, and Orbit's brain
-(`extensions/loom/` at the repo root) is replacing it: the worker is to boot that brain through
+(`extensions/orbit/` at the repo root) is replacing it: the worker is to boot that brain through
 `pi-host.ts`, and the duplicated brain modules here are then deleted, keeping the worker,
 `pi-host.ts`, storage and the other shell support. Until then, fix bugs here when you have to,
 but put new brain behavior (prompt text, guards, Galaxy tool handling, notebook and record
-semantics) in `extensions/loom/` and `shared/`, and keep what is browser-only layered on top of
+semantics) in `extensions/orbit/` and `shared/`, and keep what is browser-only layered on top of
 Orbit's. The repo's `CLAUDE.md` and
 `docs/architecture.md` ("Browser shell") have the rule and where the migration stands.
 
@@ -29,7 +29,7 @@ core/                     @galaxyproject/orbit-browser, TypeScript source behind
   vite.ts                   the Vite preset a flavor builds with: proxies, defines, worker, Pyodide
   scripts/install_assets.js the orbit-browser-assets bin a flavor's build runs first: fetches
                             Pyodide's wheels into temp/ and copies the galaxy-skills corpus into
-                            src/ from Orbit's extensions/loom/vendor/skills (GitHub without it)
+                            src/ from Orbit's extensions/orbit/vendor/skills (GitHub without it)
   skills.lock.json          the galaxy-skills revision the core vendors, the commit Orbit vendors
   pyodide.requirements.txt  the Python packages run_python loads
   src/index.ts              the page entry: mountOrbitBrowser and what a page needs
@@ -195,7 +195,7 @@ what `--describe` returns, and `olit/src/agent/surface.test.ts` pins what the ag
 The galaxy-skills corpus under `core/src/agent/skills/` is a copy of files owned elsewhere. It is
 synced by copy, which works only while the copy stays byte-identical, so its hashes are pinned.
 Both shells take it from one source: `core/scripts/install_skills.js` copies the plugin Orbit
-vendors `as: "skills"` out of `extensions/loom/vendor/skills/` and pins `core/skills.lock.json` to
+vendors `as: "skills"` out of `extensions/orbit/vendor/skills/` and pins `core/skills.lock.json` to
 that plugin's upstream commit, so bumping `scripts/skills.manifest.json` at the repo root and
 running `npm run sync:skills` moves Orbit and the browser together. The check below fails while the
 lock and Orbit's manifest disagree, and under CI the build refuses to rewrite a lock that disagrees,

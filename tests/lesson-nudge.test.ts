@@ -9,12 +9,12 @@ import {
   isCorrectionObservation,
   registerLessonNudge,
   resetLessonNudge,
-} from "../extensions/loom/lesson-nudge";
-import { appendActivityEvent, loadActivityLog, resetActivity } from "../extensions/loom/activity";
+} from "../extensions/orbit/lesson-nudge";
+import { appendActivityEvent, loadActivityLog, resetActivity } from "../extensions/orbit/activity";
 import {
   peekLessonProposalArming,
   resetLessonProposalArming,
-} from "../extensions/loom/lessons/propose";
+} from "../extensions/orbit/lessons/propose";
 
 // The lesson switch is off by default; these suites are about what happens
 // once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.

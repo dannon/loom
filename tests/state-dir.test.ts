@@ -145,12 +145,12 @@ describe("migrateStateDir", () => {
     fs.mkdirSync(path.join(loom, "analyses", "demo"), { recursive: true });
   }
 
-  it("is off in this release", () => {
-    expect(MIGRATE_TO_ORBIT_STATE_DIR).toBe(false);
+  it("is on in this release", () => {
+    expect(MIGRATE_TO_ORBIT_STATE_DIR).toBe(true);
     seedLoom();
-    expect(migrateStateDir({ home })).toEqual({ status: "disabled" });
-    expect(fs.existsSync(orbit)).toBe(false);
-    expect(fs.existsSync(path.join(loom, MOVED_MARKER_FILE))).toBe(false);
+    expect(migrateStateDir({ home }).status).toBe("migrated");
+    expect(fs.existsSync(path.join(orbit, "config.json"))).toBe(true);
+    expect(fs.existsSync(path.join(loom, MOVED_MARKER_FILE))).toBe(true);
   });
 
   it("does nothing on a fresh machine", () => {
@@ -177,6 +177,65 @@ describe("migrateStateDir", () => {
     seedLoom(0o600);
     migrateStateDir({ home, enabled: true });
     expect(fs.statSync(path.join(orbit, "config.json")).mode & 0o777).toBe(0o600);
+  });
+
+  it("carries lessons, drafts, the outboxes and the retract tokens across, tokens at 0600", () => {
+    seedLoom();
+    put(path.join(loom, "lessons", "counters.json"), '{"n":1}');
+    put(path.join(loom, "lessons", "user", "my-lesson.md"), "# mine", 0o644);
+    put(path.join(loom, "lesson-drafts", "draft-1.md"), "draft");
+    put(path.join(loom, "observations-outbox.jsonl"), "{}\n");
+    put(path.join(loom, "observations-sent.jsonl"), "{}\n");
+    put(path.join(loom, "observations-tokens.json"), '{"t":"secret"}', 0o644);
+    put(path.join(loom, "feedback-outbox.jsonl"), "{}\n");
+    put(path.join(loom, "upload-resume.json"), "{}");
+
+    expect(migrateStateDir({ home }).status).toBe("migrated");
+
+    for (const rel of [
+      "lessons/counters.json",
+      "lessons/user/my-lesson.md",
+      "lesson-drafts/draft-1.md",
+      "observations-outbox.jsonl",
+      "observations-sent.jsonl",
+      "observations-tokens.json",
+      "feedback-outbox.jsonl",
+      "upload-resume.json",
+    ]) {
+      expect(fs.readFileSync(path.join(orbit, rel))).toEqual(fs.readFileSync(path.join(loom, rel)));
+    }
+    if (process.platform !== "win32") {
+      expect(fs.statSync(path.join(orbit, "observations-tokens.json")).mode & 0o777).toBe(0o600);
+      expect(fs.statSync(path.join(orbit, "lessons", "user", "my-lesson.md")).mode & 0o777).toBe(
+        0o644,
+      );
+    }
+    expect(fs.readFileSync(path.join(loom, MOVED_MARKER_FILE), "utf-8")).toContain("saved lessons");
+  });
+
+  it("resumes an interrupted copy without overwriting what is already there", () => {
+    seedLoom();
+    put(path.join(loom, "lessons", "a.md"), "old a");
+    put(path.join(loom, "lessons", "b.md"), "old b");
+    put(path.join(orbit, "lessons", "a.md"), "already copied and edited");
+
+    expect(migrateStateDir({ home }).status).toBe("migrated");
+    expect(fs.readFileSync(path.join(orbit, "lessons", "a.md"), "utf-8")).toBe(
+      "already copied and edited",
+    );
+    expect(fs.readFileSync(path.join(orbit, "lessons", "b.md"), "utf-8")).toBe("old b");
+  });
+
+  posixOnly("leaves config.json uncopied when durable state cannot be copied", () => {
+    seedLoom();
+    put(path.join(loom, "lessons", "a.md"), "a");
+    fs.mkdirSync(orbit, { recursive: true });
+    // A file where the lessons directory must go makes the tree copy fail.
+    fs.writeFileSync(path.join(orbit, "lessons"), "not a dir");
+
+    expect(migrateStateDir({ home }).status).toBe("failed");
+    expect(fs.existsSync(path.join(orbit, "config.json"))).toBe(false);
+    expect(resolveStateDir({ home })).toBe(loom);
   });
 
   it("copies the what's-new stamp but not caches or the version check", () => {
@@ -258,7 +317,7 @@ describe("callers follow the resolver", () => {
   it("loadConfig/saveConfig use ~/.orbit when it holds the config", async () => {
     put(path.join(loom, "config.json"), JSON.stringify({ testerId: "old" }));
     put(path.join(orbit, "config.json"), JSON.stringify({ testerId: "new" }));
-    const { loadConfig, saveConfig } = await import("../shared/loom-config.js");
+    const { loadConfig, saveConfig } = await import("../shared/orbit-config.js");
     const cfg = loadConfig();
     expect(cfg.testerId).toBe("new");
     saveConfig({ ...cfg, testerId: "newer" });
@@ -270,11 +329,11 @@ describe("callers follow the resolver", () => {
     );
   });
 
-  it("saveConfig writes ~/.loom on a fresh machine in this release", async () => {
-    const { saveConfig } = await import("../shared/loom-config.js");
+  it("saveConfig writes ~/.orbit on a fresh machine, and never creates ~/.loom", async () => {
+    const { saveConfig } = await import("../shared/orbit-config.js");
     saveConfig({ testerId: "x" });
-    expect(fs.existsSync(path.join(loom, "config.json"))).toBe(true);
-    expect(fs.existsSync(orbit)).toBe(false);
+    expect(fs.existsSync(path.join(orbit, "config.json"))).toBe(true);
+    expect(fs.existsSync(loom)).toBe(false);
   });
 
   it("the CLI update check reads its own cache file in ~/.orbit", async () => {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { registerPlanTools } from "../extensions/loom/tools";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+import { registerPlanTools } from "../extensions/orbit/tools";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 import { SPELLED } from "./galaxy-test-helpers";
 
 // The record tools name the submission tool they follow, and those names reach the model, so

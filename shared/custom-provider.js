@@ -50,7 +50,7 @@ export function normalizeEndpointApi(value) {
 
 /**
  * Build a permissive model def from just a model id. Cost is zeroed (custom
- * endpoints are typically free, self-hosted, or billed somewhere Loom cannot
+ * endpoints are typically free, self-hosted, or billed somewhere Orbit cannot
  * see) and the model is registered for selection; the key is supplied
  * separately at runtime.
  *
@@ -92,7 +92,7 @@ export const ACTIVE_LLM_API_KEY_ENV = "LOOM_ACTIVE_LLM_API_KEY";
  * secret itself. pi's ModelRegistry rejects any custom (non-built-in) provider
  * that defines models without an apiKey and drops the whole provider, so
  * omitting it makes `--provider/--model` fail to resolve and the brain won't
- * launch. The real key never lands on disk: bin/loom.js hands it to pi with
+ * launch. The real key never lands on disk: bin/orbit.js hands it to pi with
  * --api-key, which takes precedence. (pi 1.x reads a bare apiKey string as a
  * literal, not an env-var name, so without --api-key this name itself is what
  * gets sent.)
@@ -112,7 +112,7 @@ export function mergeCustomProviderIntoModelsConfig(modelsConfig, providerName, 
 /**
  * Read models.json (if present), upsert the custom provider, write it back with
  * mode 0600. Best-effort: a malformed existing file is treated as empty rather
- * than throwing, matching how bin/loom.js already tolerates models.json.
+ * than throwing, matching how bin/orbit.js already tolerates models.json.
  */
 export function syncCustomProviderModelsFile(modelsJsonPath, providerName, entry) {
   let current = {};

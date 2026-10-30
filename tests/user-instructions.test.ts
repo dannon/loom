@@ -14,7 +14,7 @@ import {
   MAX_LINES,
   type FsLike,
   type InstructionFile,
-} from "../extensions/loom/user-instructions";
+} from "../extensions/orbit/user-instructions";
 
 let root: string;
 
@@ -30,7 +30,7 @@ afterEach(() => {
 function seed(rel: string, content?: string): string {
   const dir = path.join(root, rel);
   fs.mkdirSync(dir, { recursive: true });
-  if (content !== undefined) fs.writeFileSync(path.join(dir, INIT_INSTRUCTIONS_FILENAME), content);
+  if (content !== undefined) fs.writeFileSync(path.join(dir, "LOOM.md"), content);
   return dir;
 }
 
@@ -104,7 +104,7 @@ describe("an over-cap file always says so", () => {
 
       expect(found).toHaveLength(1);
       expect(found[0].truncated).toBe(true);
-      expect(found[0].content).toContain("truncated by Loom");
+      expect(found[0].content).toContain("truncated by Orbit");
     });
   }
 
@@ -114,14 +114,14 @@ describe("an over-cap file always says so", () => {
     const found = discoverInstructionFiles({ cwd, agentDir: seed("agent") });
 
     expect(found[0].truncated).toBe(false);
-    expect(found[0].content).not.toContain("truncated by Loom");
+    expect(found[0].content).not.toContain("truncated by Orbit");
   });
 
   it("honours an explicit already-truncated signal even for short text", () => {
     const { text, truncated } = capContent("short", true);
 
     expect(truncated).toBe(true);
-    expect(text).toContain("truncated by Loom");
+    expect(text).toContain("truncated by Orbit");
   });
 });
 

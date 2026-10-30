@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import * as sync from "../extensions/loom/galaxy-pages-sync";
+import * as sync from "../extensions/orbit/galaxy-pages-sync";
 import { GALAXY } from "./galaxy-family-fixture";
 
-vi.mock("../extensions/loom/galaxy-pages-sync");
+vi.mock("../extensions/orbit/galaxy-pages-sync");
 
 interface ToolDef {
   name: string;
@@ -33,7 +33,7 @@ function makeFakeApi() {
 describe("notebook_push_to_galaxy tool", () => {
   it("registers with expected label and forwards args to pushNotebookToGalaxy", async () => {
     const { api, tools } = makeFakeApi();
-    const { registerNotebookSyncTools } = await import("../extensions/loom/tools-sync");
+    const { registerNotebookSyncTools } = await import("../extensions/orbit/tools-sync");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerNotebookSyncTools(api as any, GALAXY);
 

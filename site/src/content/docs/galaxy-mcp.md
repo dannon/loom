@@ -59,12 +59,12 @@ Add Galaxy MCP to `claude_desktop_config.json`:
 
 Restart Claude Desktop and the Galaxy tools become available in the conversation.
 
-## With Orbit and Loom
+## With Orbit
 
-Orbit and the Loom CLI don't run this server. They call the same Galaxy operations
+Orbit and the Orbit CLI don't run this server. They call the same Galaxy operations
 in-process, through the galaxy-ops package from the galaxy-mcp repository: when you
 connect Galaxy in Orbit, or set `GALAXY_URL` / `GALAXY_API_KEY` for the CLI, the
-tools are ready with nothing else to install. See [Getting started](/loom/docs/getting-started).
+tools are ready with nothing else to install. See [Getting started](/orbit/docs/getting-started).
 
 The source lives at
 [`galaxyproject/galaxy-mcp`](https://github.com/galaxyproject/galaxy-mcp).

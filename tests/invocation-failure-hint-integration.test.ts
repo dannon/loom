@@ -13,16 +13,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
-import { renderInvocationYaml, type InvocationYaml } from "../extensions/loom/notebook-writer";
-import * as galaxyApi from "../extensions/loom/galaxy-api";
-import { checkInvocations } from "../extensions/loom/tools";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
+import { renderInvocationYaml, type InvocationYaml } from "../extensions/orbit/notebook-writer";
+import * as galaxyApi from "../extensions/orbit/galaxy-api";
+import { checkInvocations } from "../extensions/orbit/tools";
 import {
   INVOCATION_FAILURE_REFERENCE,
   JOB_FAILURE_REFERENCE,
-} from "../extensions/loom/invocation-failure-hint";
-import { readVendoredSkill } from "../extensions/loom/vendor-skills";
-import { applySkillTriggers, skillTriggers } from "../extensions/loom/skill-triggers";
+} from "../extensions/orbit/invocation-failure-hint";
+import { readVendoredSkill } from "../extensions/orbit/vendor-skills";
+import { applySkillTriggers, skillTriggers } from "../extensions/orbit/skill-triggers";
 import { GALAXY } from "./galaxy-family-fixture";
 
 // The hint now fires through the skill-triggers table; drive it the way a

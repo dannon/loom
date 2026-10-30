@@ -7,7 +7,7 @@ import {
   WORKSPACE_STATE_DIR_NAMES,
   resolveWorkspaceStateDir,
   resolveWorkspaceStateDirName,
-} from "../extensions/loom/workspace-state-dir";
+} from "../extensions/orbit/workspace-state-dir";
 
 let cwd: string;
 beforeEach(() => {

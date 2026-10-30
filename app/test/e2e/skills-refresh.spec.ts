@@ -38,7 +38,7 @@ function packagedExecutablePath(): string {
     );
   }
   if (process.platform === "linux") {
-    return path.join(root, "out", `Orbit-linux-${arch}`, "orbit");
+    return path.join(root, "out", `Orbit-linux-${arch}`, "orbit-desktop");
   }
   if (process.platform === "win32") {
     return path.join(root, "out", `Orbit-win32-${arch}`, "orbit.exe");
@@ -62,10 +62,10 @@ test("Refresh skills clears the catalog cache and restarts the agent", async () 
 
   // Seed a config with the default galaxy-skills repo so the Skills section is
   // populated and skills:refresh has a repo whose cache it can clear.
-  const loomDir = path.join(fakeHome, ".loom");
-  await fs.mkdir(loomDir, { recursive: true });
+  const stateDir = path.join(fakeHome, ".orbit");
+  await fs.mkdir(stateDir, { recursive: true });
   await fs.writeFile(
-    path.join(loomDir, "config.json"),
+    path.join(stateDir, "config.json"),
     JSON.stringify(
       {
         skills: {
@@ -86,7 +86,7 @@ test("Refresh skills clears the catalog cache and restarts the agent", async () 
 
   // Pre-seed a marker cache dir. The handler clears any galaxy-skills@* dir, so
   // this is removed on Refresh -- deterministic evidence of the clear.
-  const cacheBase = path.join(loomDir, "cache", "skills");
+  const cacheBase = path.join(stateDir, "cache", "skills");
   const markerDir = path.join(cacheBase, "galaxy-skills@e2e-marker");
   await fs.mkdir(markerDir, { recursive: true });
   await fs.writeFile(
@@ -100,7 +100,7 @@ test("Refresh skills clears the catalog cache and restarts the agent", async () 
     USERPROFILE: fakeHome,
     GALAXY_URL: "",
     GALAXY_API_KEY: "",
-    LOOM_FRESH_SESSION: "1",
+    ORBIT_FRESH_SESSION: "1",
     LOOM_DISABLE_SAFE_STORAGE: "1",
   };
 

@@ -15,16 +15,30 @@ import os from "node:os";
 import path from "node:path";
 
 // Off for the compatibility release: ~/.orbit is used only if a newer release
-// already put a config there, and nothing is copied. The rename release flips
-// this, which turns on the one-time copy and makes ~/.orbit the default for
-// new installs.
-export const MIGRATE_TO_ORBIT_STATE_DIR = false;
+// already put a config there, and nothing is copied. On since the rename
+// release: the first run copies config.json (encrypted fields intact, mode
+// 0600) and the user's other durable state into ~/.orbit, leaves a
+// MOVED-TO-ORBIT.txt marker behind, and ~/.orbit is the default for new installs. ~/.loom/analyses stays where it is (see
+// resolveDefaultAnalysesDir).
+export const MIGRATE_TO_ORBIT_STATE_DIR = true;
 
 export const MOVED_MARKER_FILE = "MOVED-TO-ORBIT.txt";
 const CONFIG_FILE = "config.json";
-// Carried across on migration. Caches, the session index and the version
-// check regenerate on their own, so they stay behind.
-const MIGRATED_EXTRA_FILES = ["whats-new-seen.json"];
+// Carried across on migration besides config.json: what the user accumulated
+// and could not get back. Caches, the session index and the version-check
+// cache rebuild themselves and stay behind, as does analyses/ (see
+// resolveDefaultAnalysesDir).
+const MIGRATED_FILES = [
+  "whats-new-seen.json",
+  "upload-resume.json",
+  "feedback-outbox.jsonl",
+  "observations-outbox.jsonl",
+  "observations-sent.jsonl",
+  "observations-tokens.json",
+];
+const MIGRATED_DIRS = ["lessons", "lesson-drafts"];
+// Holds a credential or a secret token: copied at 0600 whatever the source had.
+const PRIVATE_FILES = new Set([CONFIG_FILE, "observations-tokens.json"]);
 
 /**
  * @typedef {{ home?: string, migrate?: boolean }} StateDirOptions
@@ -97,13 +111,15 @@ export function resolveDefaultAnalysesDir(opts = {}) {
 function movedNotice(legacyDir, orbitDir, when) {
   return `Loom is now Orbit, and its settings live in ${orbitDir} now.
 
-On ${when} Orbit copied config.json (and the what's-new stamp, if any) from
-this directory to ${orbitDir}. From now on it reads ${path.join(orbitDir, CONFIG_FILE)}
+On ${when} Orbit copied config.json, saved lessons and drafts, the observation
+and feedback outboxes and the what's-new stamp from this directory to
+${orbitDir}. From now on it reads ${path.join(orbitDir, CONFIG_FILE)}
 and ignores ${path.join(legacyDir, CONFIG_FILE)}, so changes made to the copy here
-have no effect. Saved API keys were copied as-is and keep working.
+have no effect. Saved API keys were copied as-is and keep working. Caches and
+the session index were not copied; they rebuild on their own.
 
 Nothing here was deleted. Analyses under ${path.join(legacyDir, "analyses")} stay
-where they are, and Orbit keeps opening them. Loom releases older than 0.8
+where they are, and Orbit keeps opening them. Loom releases older than 0.9
 still read the old config.json here. Once you no longer run one, the rest of
 this directory apart from analyses/ is safe to remove.
 `;
@@ -119,30 +135,57 @@ function copyNoClobber(src, dest, mode) {
   fs.rmSync(tmp, { force: true });
   const fd = fs.openSync(tmp, "wx", mode);
   try {
-    fs.writeSync(fd, bytes);
+    // writeFileSync on a descriptor loops until every byte is down; a short
+    // writeSync would otherwise be fsynced and linked into place as the config.
+    fs.writeFileSync(fd, bytes);
     fs.fsyncSync(fd);
   } finally {
     fs.closeSync(fd);
   }
   try {
+    if (fs.statSync(tmp).size !== bytes.length) throw new Error(`short write staging ${dest}`);
     fs.chmodSync(tmp, mode);
     try {
       fs.linkSync(tmp, dest);
       return true;
     } catch (err) {
       if (err?.code === "EEXIST") return false;
-      // Filesystems without hard links: fall back to a checked rename.
-      if (fs.existsSync(dest)) return false;
-      fs.renameSync(tmp, dest);
-      return true;
+      // Filesystems without hard links: an exclusive copy keeps the no-clobber
+      // guarantee (a rename after an existence check would not).
+      try {
+        fs.copyFileSync(tmp, dest, fs.constants.COPYFILE_EXCL);
+        return true;
+      } catch (copyErr) {
+        if (copyErr?.code === "EEXIST") return false;
+        throw copyErr;
+      }
     }
   } finally {
     fs.rmSync(tmp, { force: true });
   }
 }
 
+function modeFor(name, src) {
+  return PRIVATE_FILES.has(name) ? 0o600 : fs.statSync(src).mode & 0o777;
+}
+
+// Copies files that are missing on the destination side, so an interrupted
+// migration picks up where it stopped. Symlinks are left alone: the lessons
+// store refuses linked directories, and following one could copy anything.
+function copyTreeNoClobber(srcDir, destDir) {
+  fs.mkdirSync(destDir, { recursive: true, mode: 0o700 });
+  for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+    const src = path.join(srcDir, entry.name);
+    const dest = path.join(destDir, entry.name);
+    if (entry.isSymbolicLink()) continue;
+    if (entry.isDirectory()) copyTreeNoClobber(src, dest);
+    else if (entry.isFile() && !fs.existsSync(dest))
+      copyNoClobber(src, dest, modeFor(entry.name, src));
+  }
+}
+
 /**
- * One-time copy of ~/.loom's settings into ~/.orbit. Copies, never moves:
+ * One-time copy of ~/.loom's settings and durable state into ~/.orbit. Copies, never moves:
  * ~/.loom is left intact apart from a MOVED-TO-ORBIT.txt explaining where
  * things went. Safe to call on every startup.
  *
@@ -174,13 +217,17 @@ export function migrateStateDir(opts = {}) {
   }
   try {
     fs.mkdirSync(orbit, { recursive: true, mode: 0o700 });
-    for (const name of MIGRATED_EXTRA_FILES) {
+    // Any failure here aborts before config.json is copied, so the user stays
+    // on ~/.loom with everything intact and the next start tries again.
+    for (const name of MIGRATED_FILES) {
       const src = path.join(legacy, name);
       if (!fs.existsSync(src) || fs.existsSync(path.join(orbit, name))) continue;
-      try {
-        copyNoClobber(src, path.join(orbit, name), fs.statSync(src).mode & 0o777);
-      } catch {
-        /* a lost what's-new stamp just shows the notice once more */
+      copyNoClobber(src, path.join(orbit, name), modeFor(name, src));
+    }
+    for (const name of MIGRATED_DIRS) {
+      const src = path.join(legacy, name);
+      if (fs.existsSync(src) && fs.statSync(src).isDirectory()) {
+        copyTreeNoClobber(src, path.join(orbit, name));
       }
     }
     // Last, because its presence is what switches resolveStateDir over.

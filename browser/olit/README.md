@@ -17,4 +17,4 @@ then rebuild the client (`make client`, or `cd client && pnpm run plugins`) and 
 Galaxy 26.1 or newer is required.
 
 Source, development notes and the full guide:
-https://github.com/galaxyproject/loom/tree/main/browser
+https://github.com/galaxyproject/orbit/tree/main/browser

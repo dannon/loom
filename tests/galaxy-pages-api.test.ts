@@ -7,7 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as galaxyApi from "../extensions/loom/galaxy-api";
+import * as galaxyApi from "../extensions/orbit/galaxy-api";
 import {
   createPage,
   getPage,
@@ -20,7 +20,7 @@ import {
   type GalaxyPageRevisionDetails,
   type GalaxyPageRevisionSummary,
   type GalaxyPageSummary,
-} from "../extensions/loom/galaxy-pages-api";
+} from "../extensions/orbit/galaxy-pages-api";
 
 const origUrl = process.env.GALAXY_URL;
 const origKey = process.env.GALAXY_API_KEY;

@@ -4,10 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-vi.mock("../extensions/loom/state");
-vi.mock("../extensions/loom/config", () => ({ loadConfig: () => ({}) }));
+vi.mock("../extensions/orbit/state");
+vi.mock("../extensions/orbit/config", () => ({ loadConfig: () => ({}) }));
 
-import * as state from "../extensions/loom/state";
+import * as state from "../extensions/orbit/state";
 import {
   adjudicateNotebookWrite,
   onEvidenceDecision,
@@ -15,12 +15,12 @@ import {
   registerEvidenceGate,
   resetEvidenceOverrides,
   resolveMode,
-} from "../extensions/loom/evidence-gate";
+} from "../extensions/orbit/evidence-gate";
 import {
   planOverride,
   registerEvidenceOverrideCommand,
-} from "../extensions/loom/evidence-override-command";
-import { renderInvocationYaml, type InvocationYaml } from "../extensions/loom/notebook-writer";
+} from "../extensions/orbit/evidence-override-command";
+import { renderInvocationYaml, type InvocationYaml } from "../extensions/orbit/notebook-writer";
 import { GALAXY } from "./galaxy-family-fixture";
 
 const PLAN = `# Notebook

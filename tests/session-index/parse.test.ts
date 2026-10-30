@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import path from "node:path";
-import { parseSessionFile } from "../../extensions/loom/session-index/parse";
+import { parseSessionFile } from "../../extensions/orbit/session-index/parse";
 
 const FIXTURE_DIR = path.resolve(__dirname, "fixtures");
 

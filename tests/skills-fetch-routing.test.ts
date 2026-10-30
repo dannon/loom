@@ -42,7 +42,7 @@ async function skillsFetch(): Promise<ToolDef> {
     registerCommand: vi.fn(),
     sendUserMessage: vi.fn(),
   };
-  const { registerPlanTools } = await import("../extensions/loom/tools");
+  const { registerPlanTools } = await import("../extensions/orbit/tools");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registerPlanTools(api as any, GALAXY);
   return tools.find((t) => t.name === "skills_fetch")!;

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import * as pagesApi from "../extensions/loom/galaxy-pages-api";
-import * as galaxyApi from "../extensions/loom/galaxy-api";
-import * as notebookWriter from "../extensions/loom/notebook-writer";
-import * as state from "../extensions/loom/state";
+import * as pagesApi from "../extensions/orbit/galaxy-pages-api";
+import * as galaxyApi from "../extensions/orbit/galaxy-api";
+import * as notebookWriter from "../extensions/orbit/notebook-writer";
+import * as state from "../extensions/orbit/state";
 import {
   pushNotebookToGalaxy,
   pullNotebookFromGalaxy,
@@ -10,15 +10,15 @@ import {
   resumeGalaxyPage,
   UNTRUSTED_BEGIN,
   UNTRUSTED_END,
-} from "../extensions/loom/galaxy-pages-sync";
+} from "../extensions/orbit/galaxy-pages-sync";
 import {
-  loomToGalaxyMarkdown,
-  galaxyMarkdownToLoom,
-} from "../extensions/loom/galaxy-markdown-adapter";
+  orbitToGalaxyMarkdown,
+  galaxyMarkdownToOrbit,
+} from "../extensions/orbit/galaxy-markdown-adapter";
 
-vi.mock("../extensions/loom/galaxy-pages-api");
-vi.mock("../extensions/loom/galaxy-api");
-vi.mock("../extensions/loom/notebook-writer", async (importOriginal) => {
+vi.mock("../extensions/orbit/galaxy-pages-api");
+vi.mock("../extensions/orbit/galaxy-api");
+vi.mock("../extensions/orbit/notebook-writer", async (importOriginal) => {
   const actual = await importOriginal<typeof notebookWriter>();
   return {
     ...actual,
@@ -27,7 +27,7 @@ vi.mock("../extensions/loom/notebook-writer", async (importOriginal) => {
     withNotebookLock: vi.fn(async (_p: string, fn: () => Promise<unknown>) => fn()),
   };
 });
-vi.mock("../extensions/loom/state");
+vi.mock("../extensions/orbit/state");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -75,7 +75,7 @@ describe("pushNotebookToGalaxy", () => {
     });
     expect(notebookWriter.writeNotebook).toHaveBeenCalledOnce();
     const written = vi.mocked(notebookWriter.writeNotebook).mock.calls[0][1];
-    expect(written).toContain("```loom-galaxy-page");
+    expect(written).toContain("```orbit-galaxy-page");
     expect(written).toContain("page_id: p1");
     expect(written).toContain("last_synced_revision: r1");
   });
@@ -111,7 +111,7 @@ describe("pushNotebookToGalaxy", () => {
     await pushNotebookToGalaxy({ historyId: "h1", title: "Analysis" });
 
     const sent = vi.mocked(pagesApi.createPage).mock.calls[0][0].content;
-    expect(sent).toMatch(/^\[loom-invocation:v1\]: #loom "/m);
+    expect(sent).toMatch(/^\[orbit-invocation:v1\]: #orbit "/m);
     expect(sent).toContain("invocation_outputs(invocation_id=f2db41e1fa331b3e)");
     expect(sent).not.toContain("```loom-invocation");
     // the local notebook stays canonical -- the raw fence, not the projection
@@ -119,28 +119,28 @@ describe("pushNotebookToGalaxy", () => {
     expect(writtenLocal).toContain("```loom-invocation");
   });
 
-  it("projects loom-job and loom-session blocks to carriers, never raw fences", async () => {
+  it("projects orbit-job and orbit-session blocks to carriers, never raw fences", async () => {
     // Echo whatever id was asked for, so both the invocation and job lookups
-    // validate. Galaxy can't render loom-* cells, so none may reach the page.
+    // validate. Galaxy can't render orbit-* cells, so none may reach the page.
     vi.mocked(galaxyApi.galaxyGet).mockImplementation(async (path: string) => ({
       id: path.split("/").pop(),
     }));
     const notebook = [
       "# Analysis",
       "",
-      "```loom-invocation",
+      "```orbit-invocation",
       "invocation_id: f2db41e1fa331b3e",
       "label: BWA alignment",
       "status: completed",
       "```",
       "",
-      "```loom-job",
+      "```orbit-job",
       "job_id: 0a1b2c3d4e5f6789",
       "label: FastQC",
       "status: completed",
       "```",
       "",
-      "```loom-session",
+      "```orbit-session",
       "id: s-1",
       "started_at: 2026-05-20T10:00:00Z",
       "ended_at: 2026-05-20T11:00:00Z",
@@ -163,15 +163,15 @@ describe("pushNotebookToGalaxy", () => {
     await pushNotebookToGalaxy({ historyId: "h1", title: "Analysis" });
 
     const sent = vi.mocked(pagesApi.createPage).mock.calls[0][0].content;
-    expect(sent).not.toMatch(/^```loom-/m);
-    expect(sent).toMatch(/^\[loom-invocation:v1\]: #loom "/m);
-    expect(sent).toMatch(/^\[loom-job:v1\]: #loom "/m);
-    expect(sent).toMatch(/^\[loom-session:v1\]: #loom "/m);
+    expect(sent).not.toMatch(/^```orbit-/m);
+    expect(sent).toMatch(/^\[orbit-invocation:v1\]: #orbit "/m);
+    expect(sent).toMatch(/^\[orbit-job:v1\]: #orbit "/m);
+    expect(sent).toMatch(/^\[orbit-session:v1\]: #orbit "/m);
     expect(sent).toContain("invocation_outputs(invocation_id=f2db41e1fa331b3e)");
     expect(sent).toContain("job_parameters(job_id=0a1b2c3d4e5f6789)");
     expect(galaxyApi.galaxyGet).toHaveBeenCalledWith("/jobs/0a1b2c3d4e5f6789");
     // Pulling the pushed page back yields the canonical notebook unchanged.
-    expect(galaxyMarkdownToLoom(sent)).toBe(notebook);
+    expect(galaxyMarkdownToOrbit(sent)).toBe(notebook);
   });
 
   it("omits the job directive (but keeps the carrier) when Galaxy doesn't know the job", async () => {
@@ -194,7 +194,7 @@ describe("pushNotebookToGalaxy", () => {
     const sent = vi.mocked(pagesApi.createPage).mock.calls[0][0].content;
     expect(sent).not.toContain("job_parameters(");
     expect(sent).not.toContain("```loom-job");
-    expect(sent).toMatch(/^\[loom-job:v1\]: #loom "/m);
+    expect(sent).toMatch(/^\[orbit-job:v1\]: #orbit "/m);
   });
 
   it("updates the existing page when a binding is present", async () => {
@@ -326,7 +326,7 @@ describe("pullNotebookFromGalaxy", () => {
     expect(written).toContain("# Remote body");
     expect(written).toContain("Updated server-side.");
     expect(written).not.toContain("Some local edits.");
-    expect(written).toContain("```loom-galaxy-page");
+    expect(written).toContain("```orbit-galaxy-page");
     expect(written).toContain("last_synced_revision: r2");
   });
 
@@ -349,10 +349,10 @@ describe("pullNotebookFromGalaxy", () => {
     // A page body as it would look after a Loom push: the loom-invocation fence
     // is encoded to a render-invisible carrier. Pull must decode it back AND
     // still apply the untrusted-content wrap -- the two transforms compose.
-    const loomBlock = ["```loom-invocation", "invocation_id: abc123", "label: QC", "```"].join(
+    const orbitBlock = ["```loom-invocation", "invocation_id: abc123", "label: QC", "```"].join(
       "\n",
     );
-    const remoteWithCarrier = loomToGalaxyMarkdown(`# Remote report\n\n${loomBlock}\n`);
+    const remoteWithCarrier = orbitToGalaxyMarkdown(`# Remote report\n\n${orbitBlock}\n`);
     vi.mocked(pagesApi.getPage).mockResolvedValue({
       id: "p1",
       slug: "a",
@@ -398,7 +398,7 @@ describe("pullNotebookFromGalaxy", () => {
     const sessionBlock = ["```loom-session", "id: s-1", "orphaned_active_steps: 0", "```"].join(
       "\n",
     );
-    const remote = loomToGalaxyMarkdown(`# Remote\n\n${jobBlock}\n\n${sessionBlock}\n`);
+    const remote = orbitToGalaxyMarkdown(`# Remote\n\n${jobBlock}\n\n${sessionBlock}\n`);
     vi.mocked(pagesApi.getPage).mockResolvedValue({
       id: "p1",
       slug: "a",

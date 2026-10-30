@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import { describe, it, expect } from "vitest";
-import { classifyBash } from "../extensions/loom/exec-guard/bash-risk";
-import { WORKSPACE_STATE_DIR_NAMES } from "../extensions/loom/workspace-state-dir";
+import { classifyBash } from "../extensions/orbit/exec-guard/bash-risk";
+import { WORKSPACE_STATE_DIR_NAMES } from "../extensions/orbit/workspace-state-dir";
 
 describe("classifyBash", () => {
   it("catastrophic patterns -> catastrophic", () => {
@@ -322,12 +322,14 @@ describe.each(WORKSPACE_STATE_DIR_NAMES)(
     it("surfaces carved-out targets so the policy layer can realpath them", () => {
       // classifyBash judges strings; only the policy layer has a resolver, so a
       // carved-out target is handed over rather than declared safe outright.
-      expect(classifyBash(`cp a.txt ${ANALYSIS}/b.txt`, HOME).loomWriteTargets).toEqual([
+      expect(classifyBash(`cp a.txt ${ANALYSIS}/b.txt`, HOME).stateDirWriteTargets).toEqual([
         path.normalize(`${ANALYSIS}/b.txt`),
       ]);
-      expect(classifyBash(`echo x > ${HOME}/${D}/config.json`, HOME).loomWriteTargets).toEqual([]);
-      expect(classifyBash(`cat ${ANALYSIS}/notebook.md`, HOME).loomWriteTargets).toEqual([]);
-      expect(classifyBash("ls -la", HOME).loomWriteTargets).toEqual([]);
+      expect(classifyBash(`echo x > ${HOME}/${D}/config.json`, HOME).stateDirWriteTargets).toEqual(
+        [],
+      );
+      expect(classifyBash(`cat ${ANALYSIS}/notebook.md`, HOME).stateDirWriteTargets).toEqual([]);
+      expect(classifyBash("ls -la", HOME).stateDirWriteTargets).toEqual([]);
     });
 
     it("a quote does not end the shell word", () => {
@@ -552,10 +554,10 @@ describe("classifyBash -- both state-dir spellings, whichever the workspace uses
     ]) {
       const a = classifyBash(loom, HOME);
       const b = classifyBash(orbit, HOME);
-      expect([b.kind, b.readPaths, b.loomWriteTargets], orbit).toEqual([
+      expect([b.kind, b.readPaths, b.stateDirWriteTargets], orbit).toEqual([
         a.kind,
         a.readPaths,
-        a.loomWriteTargets,
+        a.stateDirWriteTargets,
       ]);
     }
   });
@@ -613,12 +615,12 @@ describe("classifyBash -- a cd changes what relative operands mean", () => {
   it("hands a carved-out target reached by cd to the policy layer to realpath", () => {
     const r = classifyBash("cd ~/.loom/analyses/proj && echo x > out.txt", H, C);
     expect(r.kind).toBe("unknown");
-    expect(r.loomWriteTargets).toContain(`${H}/.loom/analyses/proj/out.txt`);
+    expect(r.stateDirWriteTargets).toContain(`${H}/.loom/analyses/proj/out.txt`);
     expect(r.guardedCwd).toBe(false);
   });
   it("adds nothing for a cd anywhere else", () => {
     const r = classifyBash("cd ~/work/x && echo > y && cat notes.txt", H, C);
-    expect(r.loomWriteTargets).toEqual([]);
+    expect(r.stateDirWriteTargets).toEqual([]);
     expect(r.guardedCwd).toBe(false);
     expect(r.sensitiveReadPaths).toEqual(["notes.txt"]);
     expect(r.cdReadPaths).toEqual([`${H}/work/x/notes.txt`]);
@@ -650,7 +652,7 @@ describe("classifyBash -- a cd changes what relative operands mean", () => {
     const up = classifyBash("cd ~/.loom/analyses/proj/data && cp ../raw.csv .", H, C);
     expect(up.kind).toBe("unknown");
     expect(up.guardedCwd).toBe(false);
-    expect(up.loomWriteTargets).toContain(`${H}/.loom/analyses/proj/data`);
+    expect(up.stateDirWriteTargets).toContain(`${H}/.loom/analyses/proj/data`);
     const glob = classifyBash("cd ~/.loom/analyses/proj/data && cp *.csv out/", H, C);
     expect(glob.kind).toBe("unknown");
     expect(glob.guardedCwd).toBe(false);

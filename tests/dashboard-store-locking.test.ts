@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 import {
   DASHBOARD_FILENAME,
   createDefaultDashboardDocument,
@@ -13,7 +13,7 @@ import {
   resetDashboardUndo,
   undoDashboardChange,
   updateDashboardDocument,
-} from "../extensions/loom/dashboard-store";
+} from "../extensions/orbit/dashboard-store";
 
 /**
  * The layout file has three writers and one in-process lock. `updateDashboard-

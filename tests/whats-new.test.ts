@@ -122,10 +122,10 @@ describe("selectEntries (latest, for /whatsnew)", () => {
 describe("releaseUrlFor", () => {
   it("builds the tag URL and tolerates a leading v", () => {
     expect(releaseUrlFor("0.5.0")).toBe(
-      "https://github.com/galaxyproject/loom/releases/tag/v0.5.0",
+      "https://github.com/galaxyproject/orbit/releases/tag/v0.5.0",
     );
     expect(releaseUrlFor("v0.5.0")).toBe(
-      "https://github.com/galaxyproject/loom/releases/tag/v0.5.0",
+      "https://github.com/galaxyproject/orbit/releases/tag/v0.5.0",
     );
   });
 });

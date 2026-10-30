@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fixtureFetch, parseGalaxyFixture } from "../extensions/loom/galaxy-fixture";
+import { fixtureFetch, parseGalaxyFixture } from "../extensions/orbit/galaxy-fixture";
 
 describe("Galaxy fixture seam", () => {
   const routes = parseGalaxyFixture(

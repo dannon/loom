@@ -3,12 +3,12 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { registerExecutionCommands } from "../extensions/loom/execution-commands";
-import { buildStepLessonNote } from "../extensions/loom/lesson-hint";
-import { resetLessonStore } from "../extensions/loom/lessons/store";
-import { readCounters } from "../extensions/loom/lessons/counters";
-import { resetActivity } from "../extensions/loom/activity";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+import { registerExecutionCommands } from "../extensions/orbit/execution-commands";
+import { buildStepLessonNote } from "../extensions/orbit/lesson-hint";
+import { resetLessonStore } from "../extensions/orbit/lessons/store";
+import { readCounters } from "../extensions/orbit/lessons/counters";
+import { resetActivity } from "../extensions/orbit/activity";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 import { lessonFile } from "./lessons-fixture";
 
 // The lesson switch is off by default; these suites are about what happens

@@ -7,9 +7,9 @@ import { linkGalaxyArtifacts } from "../app/src/renderer/chat/galaxy-links.js";
 import {
   renderGalaxyPageBlock,
   findGalaxyPageBlocks,
-} from "../extensions/loom/galaxy-page-binding.js";
-import { renderInvocationYaml } from "../extensions/loom/notebook-writer.js";
-import { renderJobYaml } from "../extensions/loom/galaxy-job-block.js";
+} from "../extensions/orbit/galaxy-page-binding.js";
+import { renderInvocationYaml } from "../extensions/orbit/notebook-writer.js";
+import { renderJobYaml } from "../extensions/orbit/galaxy-job-block.js";
 import { refreshGalaxyInvocations } from "../app/src/renderer/galaxy-invocations.js";
 
 vi.hoisted(() => {
@@ -75,8 +75,8 @@ describe("clickable Galaxy references in rendered Markdown", () => {
     expect(el.querySelector('a[title*="revision"]')?.title).toContain("JSON");
   });
 
-  it("links notebook blocks written under the orbit- fence prefix too", () => {
-    const orbitBlock = block.replace("```loom-galaxy-page", "```orbit-galaxy-page");
+  it("links notebook blocks still written under the legacy loom- fence prefix too", () => {
+    const orbitBlock = block.replace("```orbit-galaxy-page", "```loom-galaxy-page");
     expect(orbitBlock).not.toBe(block);
     const hrefs = [...render(orbitBlock).querySelectorAll("a")].map((a) => a.href);
     expect(hrefs).toEqual([...render(block).querySelectorAll("a")].map((a) => a.href));

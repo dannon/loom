@@ -4,7 +4,7 @@
   "tier": 2,
   "requiresModel": true,
   "env": { "LOOM_LESSONS": "on" },
-  "loomArgs": ["--tools", "read"],
+  "coreArgs": ["--tools", "read"],
   "inputs": [
     "Read ./galaxy-tool-output.txt -- that is what the last Galaxy call returned for step 2. What happened?",
     "/lesson"

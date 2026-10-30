@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { pollGalaxyNow, setCaptureTickHook } from "../extensions/loom/galaxy-poller";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+import { pollGalaxyNow, setCaptureTickHook } from "../extensions/orbit/galaxy-poller";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 
 describe("capture tick hook", () => {
   afterEach(() => {

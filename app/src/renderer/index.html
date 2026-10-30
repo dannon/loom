@@ -58,26 +58,6 @@
           ×
         </button>
       </div>
-      <!-- "Orbit has moved" banner. Shown only once GitHub reports that the
-           galaxyproject/loom repo has been renamed, as a safety net for
-           installs whose auto-update doesn't follow the rename. Desktop only. -->
-      <div id="moved-banner" class="hidden" role="status" aria-live="polite">
-        <span class="update-banner-text"
-          >Orbit has moved -- download the latest version to keep getting updates.</span
-        >
-        <button id="moved-banner-link" class="update-banner-link" type="button">
-          Download Orbit
-        </button>
-        <button
-          id="moved-banner-dismiss"
-          class="update-banner-dismiss"
-          type="button"
-          title="Dismiss"
-          aria-label="Dismiss Orbit has moved notice"
-        >
-          ×
-        </button>
-      </div>
       <!-- What's-new banner. Shown on the first launch of a version newer than
            the one last seen; clicking opens the highlights modal. Packaged
            builds only; reads the bundled CHANGELOG (offline). -->
@@ -704,7 +684,7 @@
             <div class="prefs-row">
               <label for="prefs-default-cwd">Default directory</label>
               <div class="prefs-row-with-btn">
-                <input id="prefs-default-cwd" type="text" placeholder="~/.loom/analyses" />
+                <input id="prefs-default-cwd" type="text" placeholder="~/.orbit/analyses" />
                 <button id="prefs-browse-cwd" class="plan-btn">Browse</button>
               </div>
             </div>
@@ -722,7 +702,7 @@
             <h3>Skills</h3>
             <p class="prefs-help">
               GitHub repos of <code>SKILL.md</code> files. The agent loads them on demand via the
-              <code>skills_fetch</code> tool. A repo marked <em>bundled</em> ships inside Loom at
+              <code>skills_fetch</code> tool. A repo marked <em>bundled</em> ships inside Orbit at
               the commit shown and is read from disk, so it works offline; point one at a different
               branch or URL and it is fetched from GitHub instead.
               <strong>Alpha restriction:</strong> only repos under
@@ -759,7 +739,7 @@
           <section class="prefs-section" id="prefs-section-safety">
             <h3>Safety</h3>
             <p class="prefs-help">
-              By default Loom gates the AI's local actions: shell commands and writes outside your
+              By default Orbit gates the AI's local actions: shell commands and writes outside your
               workspace need your approval, and destructive patterns are blocked. Bypassing
               permissions turns that gate off entirely — the AI can run any command and edit any
               file as you, with no prompts. Only enable this in an environment you fully control.
@@ -805,11 +785,11 @@
     <div id="welcome-overlay" class="modal-overlay hidden">
       <div class="modal welcome-modal">
         <div class="modal-header">
-          <h2>Welcome to orbit</h2>
+          <h2>Welcome to Orbit</h2>
         </div>
         <div class="modal-body">
           <p class="welcome-intro">
-            orbit is an AI-driven bioinformatics analysis app. Configure your LLM provider to get
+            Orbit is an AI-driven bioinformatics analysis app. Configure your LLM provider to get
             started. You can change settings later in Preferences.
           </p>
 
@@ -1002,14 +982,14 @@
         <div class="modal-body">
           <div id="report-form-fields">
             <div class="report-account-note">
-              Your feedback goes straight to the Loom team's private feedback store — no GitHub
+              Your feedback goes straight to the Orbit team's private feedback store — no GitHub
               account needed. If that service is unreachable, Orbit falls back to opening a
               pre-filled issue on
               <a
-                href="https://github.com/galaxyproject/loom"
+                href="https://github.com/galaxyproject/orbit"
                 target="_blank"
                 rel="noopener noreferrer"
-                >github.com/galaxyproject/loom</a
+                >github.com/galaxyproject/orbit</a
               >
               with only your title and description (no diagnostics), which you submit there.
             </div>
@@ -1045,7 +1025,7 @@
               </p>
               <p>
                 Both are on by default for the beta so we get useful diagnostics. Feedback goes to
-                Loom's private feedback store; uncheck either box to leave it out. If the store is
+                Orbit's private feedback store; uncheck either box to leave it out. If the store is
                 unreachable and we fall back to a public GitHub issue, only your text is sent —
                 never these diagnostics.
               </p>

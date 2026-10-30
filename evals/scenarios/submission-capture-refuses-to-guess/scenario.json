@@ -36,8 +36,8 @@
     },
     "notebook": {
       "mustNotContain": [
-        "```loom-job",
-        "```loom-invocation",
+        "```orbit-job",
+        "```orbit-invocation",
         "0a248a1f62a0cc04",
         "d5e6f7a8b9c0d1e2",
         "1a2b3c4d5e6f7a8b"

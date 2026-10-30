@@ -1,6 +1,6 @@
 import { app, safeStorage } from "electron";
-import type { LlmProviderConfig, LoomConfig } from "../../../shared/loom-config.js";
-import { loadConfig, saveConfig } from "../../../shared/loom-config.js";
+import type { LlmProviderConfig, OrbitConfig } from "../../../shared/orbit-config.js";
+import { loadConfig, saveConfig } from "../../../shared/orbit-config.js";
 import { readEnv } from "../../../shared/orbit-env.js";
 
 function log(...args: unknown[]): void {
@@ -14,7 +14,7 @@ export function isAvailable(): boolean {
   // env makes us skip the probe entirely; encrypted secrets just stay
   // unread for the duration of the test.
   if (readEnv("DISABLE_SAFE_STORAGE") === "1") return false;
-  // Dev (`npm start`, unpackaged) shares ~/.loom/config.json with the installed
+  // Dev (`npm start`, unpackaged) shares ~/.orbit/config.json with the installed
   // app but runs as a different, cdhash-pinned Electron binary. If dev touched
   // safeStorage it would create and own the "<App> Safe Storage" keychain item,
   // and the installed Developer ID build would no longer match its ACL -- the
@@ -62,7 +62,7 @@ export function resolveProviderApiKey(entry: LlmProviderConfig | undefined): str
  * if available, preferring the encrypted field. `null` means no key is
  * available via config (env vars may still supply one).
  */
-export function resolveLlmApiKey(config: LoomConfig): string | null {
+export function resolveLlmApiKey(config: OrbitConfig): string | null {
   const llm = config.llm;
   if (!llm?.active || !llm.providers) return null;
   return resolveProviderApiKey(llm.providers[llm.active]);
@@ -72,7 +72,7 @@ export function resolveLlmApiKey(config: LoomConfig): string | null {
  * Resolve the active Galaxy profile's API key. Returns `null` if no active
  * profile, no key, or decryption unavailable.
  */
-export function resolveGalaxyApiKey(config: LoomConfig): string | null {
+export function resolveGalaxyApiKey(config: OrbitConfig): string | null {
   const active = config.galaxy?.active;
   if (!active) return null;
   const profile = config.galaxy?.profiles?.[active];

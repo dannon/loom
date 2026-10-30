@@ -364,12 +364,12 @@ describe("readFileForWeb", () => {
   });
 });
 
-// Orbit's default workspace is ~/.loom/analyses/<name>, which sits under two
-// dotted segments and inside the directory holding ~/.loom/config.json. If the
+// Orbit's default workspace is ~/.orbit/analyses/<name>, which sits under two
+// dotted segments and inside the directory holding ~/.orbit/config.json. If the
 // sensitive-path policy read that as a credential store the whole surface would
 // be dead in the default configuration.
 describe("the default Orbit workspace", () => {
-  it("serves an analysis that lives under ~/.loom/analyses", async () => {
+  it("serves an analysis that lives under ~/.orbit/analyses", async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "files-surface-loomhome-"));
     const analysis = path.join(home, ".loom", "analyses", "demo");
     fs.mkdirSync(analysis, { recursive: true });

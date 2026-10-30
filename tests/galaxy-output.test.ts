@@ -5,7 +5,7 @@ import {
   GALAXY_OUTPUT_MARKER,
   inspectOutput,
   spillPreview,
-} from "../extensions/loom/galaxy-output";
+} from "../extensions/orbit/galaxy-output";
 import { utf8ByteLength } from "../shared/truncate-middle.js";
 
 const ROOT = join(__dirname, "..");
@@ -231,19 +231,19 @@ const HOT_PATH = [
   "shared/truncate-middle.js",
   "shared/markdown-sections.js",
   "shared/malformed-object-ids.js",
-  "extensions/loom/galaxy-output.ts",
-  "extensions/loom/galaxy-output-store.ts",
-  "extensions/loom/galaxy-ops-tools.ts",
-  "extensions/loom/galaxy-tool-wrap.ts",
-  "extensions/loom/galaxy-failure.ts",
-  "extensions/loom/galaxy-op-policy.ts",
-  "extensions/loom/galaxy-page-ops.ts",
-  "extensions/loom/galaxy-job-ops.ts",
+  "extensions/orbit/galaxy-output.ts",
+  "extensions/orbit/galaxy-output-store.ts",
+  "extensions/orbit/galaxy-ops-tools.ts",
+  "extensions/orbit/galaxy-tool-wrap.ts",
+  "extensions/orbit/galaxy-failure.ts",
+  "extensions/orbit/galaxy-op-policy.ts",
+  "extensions/orbit/galaxy-page-ops.ts",
+  "extensions/orbit/galaxy-job-ops.ts",
 ];
 
 // The transport seam, reached through galaxyOpsContext. Its process.env read is the fallback
 // when no transport supplies credentials, and the browser installs one; nothing else may read env.
-const ENV_FALLBACK = new Set(["extensions/loom/galaxy-api.ts"]);
+const ENV_FALLBACK = new Set(["extensions/orbit/galaxy-api.ts"]);
 // Posix spelling, so the set and the reach list match on Windows too.
 const rel = (file: string) => relative(ROOT, file).split(sep).join("/");
 
@@ -309,12 +309,12 @@ describe("hot-path modules stay Node-free", () => {
     // Proves the walk follows imports; the ring's ids come through ulid.ts.
     const reached = [...seen].map(rel);
     expect(reached).toContain("shared/random.js");
-    expect(reached).toContain("extensions/loom/galaxy-api.ts");
+    expect(reached).toContain("extensions/orbit/galaxy-api.ts");
     expect(reached).toContain("shared/page-content-hash.js");
     // The page policy's record lock comes through the seam, never the fs-backed store.
-    expect(reached).toContain("extensions/loom/record-store-seam.ts");
-    expect(reached).not.toContain("extensions/loom/record-store-file.ts");
+    expect(reached).toContain("extensions/orbit/record-store-seam.ts");
+    expect(reached).not.toContain("extensions/orbit/record-store-file.ts");
     // Only the source's types are imported; the registrar and the profile it reads stay out.
-    expect(reached).not.toContain("extensions/loom/galaxy-tool-source.ts");
+    expect(reached).not.toContain("extensions/orbit/galaxy-tool-source.ts");
   });
 });

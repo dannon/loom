@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { setupContextInjection } from "../extensions/loom/context";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+import { setupContextInjection } from "../extensions/orbit/context";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 
-const LOOM_NOTEBOOK_CONTEXT_TYPE = "loom-notebook-context";
+const ORBIT_NOTEBOOK_CONTEXT_TYPE = "loom-notebook-context";
 const MARKER = "Some durable notes about variant calling";
 
 type Msg = {
@@ -28,7 +28,7 @@ function wire(): Map<string, Handler> {
 
 const injected = (messages: Msg[] | undefined) =>
   (messages ?? []).filter(
-    (m) => m.role === "custom" && m.customType === LOOM_NOTEBOOK_CONTEXT_TYPE,
+    (m) => m.role === "custom" && m.customType === ORBIT_NOTEBOOK_CONTEXT_TYPE,
   );
 
 let dir: string;
@@ -97,7 +97,7 @@ describe("live notebook context injection", () => {
     );
     const msgs = messages ?? [];
     const injIdx = msgs.findIndex(
-      (m) => m.role === "custom" && m.customType === LOOM_NOTEBOOK_CONTEXT_TYPE,
+      (m) => m.role === "custom" && m.customType === ORBIT_NOTEBOOK_CONTEXT_TYPE,
     );
     const lastUserIdx = msgs.map((m) => m.role).lastIndexOf("user");
     expect(injIdx).toBeGreaterThanOrEqual(0);

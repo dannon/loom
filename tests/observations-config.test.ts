@@ -45,7 +45,7 @@ function readConfig(): Record<string, any> {
 }
 
 async function load() {
-  return await import("../extensions/loom/observations-config.js");
+  return await import("../extensions/orbit/observations-config.js");
 }
 
 describe("resolveObservationsMode", () => {

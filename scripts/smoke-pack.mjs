@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Tarball smoke test: npm-pack the Loom package, extract into a tmpdir,
-// install runtime deps, and run `node bin/loom.js --help` to verify the
+// Tarball smoke test: npm-pack the Orbit package, extract into a tmpdir,
+// install runtime deps, and run `node bin/orbit.js --help` to verify the
 // published surface is self-contained and at least starts up.
 //
 // Usage: `npm run smoke:pack` (also wired as `prepublishOnly`).
@@ -41,7 +41,7 @@ try {
   // so a change to that list, or to where the sync writes, drops it silently:
   // every check that reads the repo still passes and the published CLI has no
   // catalog and no reference material behind its own hints.
-  const VENDOR = "extensions/loom/vendor/skills";
+  const VENDOR = "extensions/orbit/vendor/skills";
   // Checked before they are read, or excluding the vendor tree from `files`
   // fails with a raw ENOENT instead of the message written for exactly that.
   const generated = [`${VENDOR}/_manifest.json`, `${VENDOR}/_catalog.json`].filter(
@@ -112,8 +112,8 @@ try {
   });
 
   // 5. Run loom --help.
-  console.log(`[smoke] node bin/loom.js --help`);
-  const out = execFileSync("node", ["bin/loom.js", "--help"], {
+  console.log(`[smoke] node bin/orbit.js --help`);
+  const out = execFileSync("node", ["bin/orbit.js", "--help"], {
     cwd: pkgDir,
     encoding: "utf8",
   });

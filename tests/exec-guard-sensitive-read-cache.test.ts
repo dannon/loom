@@ -50,7 +50,7 @@ vi.mock("fs", async (importOriginal) => {
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { isCredentialStore } from "../extensions/loom/exec-guard/sensitive-read";
+import { isCredentialStore } from "../extensions/orbit/exec-guard/sensitive-read";
 
 // One realpath per distinct parent: $HOME, ~/.loom, ~/.orbit and the agent
 // dir. Fewer than the fourteen credential files, which is the bound that matters.

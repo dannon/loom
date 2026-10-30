@@ -2,14 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import * as state from "../extensions/loom/state";
-import { galaxyPageMarkdownGuidance } from "../extensions/loom/galaxy-page-markdown-guidance";
-import { galaxyToolFamily } from "../extensions/loom/galaxy-tool-source";
-import { notebookPushToGalaxyDescription } from "../extensions/loom/tools-sync";
-import { buildGalaxyPageBindingBlock } from "../extensions/loom/context";
+import * as state from "../extensions/orbit/state";
+import { galaxyPageMarkdownGuidance } from "../extensions/orbit/galaxy-page-markdown-guidance";
+import { galaxyToolFamily } from "../extensions/orbit/galaxy-tool-source";
+import { notebookPushToGalaxyDescription } from "../extensions/orbit/tools-sync";
+import { buildGalaxyPageBindingBlock } from "../extensions/orbit/context";
 import { GALAXY } from "./galaxy-family-fixture";
 
-vi.mock("../extensions/loom/state");
+vi.mock("../extensions/orbit/state");
 
 const GALAXY_PAGE_MARKDOWN_GUIDANCE = galaxyPageMarkdownGuidance(GALAXY);
 

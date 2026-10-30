@@ -11,14 +11,14 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_SKILLS } from "../shared/loom-config.js";
+import { DEFAULT_SKILLS } from "../shared/orbit-config.js";
 import {
   hasBundledContent,
   isBundledRepo,
   readBundledCatalog,
   readBundledRepoFile,
   readVendoredSkill,
-} from "../extensions/loom/vendor-skills";
+} from "../extensions/orbit/vendor-skills";
 
 const DEFAULT = DEFAULT_SKILLS[0];
 
@@ -156,7 +156,7 @@ describe("when the package does not actually hold the content", () => {
     );
     const homedir = vi.spyOn(os, "homedir").mockReturnValue(tmp);
     try {
-      const { catalogSummary } = await import("../extensions/loom/skills-discovery");
+      const { catalogSummary } = await import("../extensions/orbit/skills-discovery");
       // The real repo does have content, so this asserts the healthy direction:
       // bundled is reported only because the files are genuinely there.
       const summary = catalogSummary();

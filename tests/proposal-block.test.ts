@@ -6,7 +6,7 @@ import {
   proposalSightings,
   renderProposalBlock,
   setProposalSpecRevision,
-} from "../extensions/loom/notebook-writer";
+} from "../extensions/orbit/notebook-writer";
 import { toolProposal } from "./registry-proposal-fixtures";
 
 const NOTEBOOK = "# Analysis\n\n## Plan A: QC [remote]\n\n- [ ] 1. Trim {#plan-a-step-1}\n";
@@ -83,13 +83,17 @@ describe("loom-proposal block", () => {
   it("goes in ahead of an unclosed fence rather than after it", () => {
     const orphan = NOTEBOOK + "\n```loom-job\njob_id: j1\n\nprose the user wrote\n";
     const content = appendProposalBlock(orphan, toolProposal());
-    expect(content.indexOf("```loom-proposal")).toBeLessThan(content.indexOf("```loom-job"));
+    const at = content.indexOf("```orbit-proposal");
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(at).toBeLessThan(content.indexOf("```loom-job"));
     expect(content).toContain("prose the user wrote");
   });
 
-  it("reads the orbit- prefix too", () => {
-    const rendered = renderProposalBlock(toolProposal()).replace("```loom-", "```orbit-");
-    expect(findProposalBlocks(rendered)).toHaveLength(1);
+  it("reads a block an older release wrote under the loom- prefix", () => {
+    const written = renderProposalBlock(toolProposal());
+    const legacy = written.replace("```orbit-", "```loom-");
+    expect(legacy).not.toBe(written);
+    expect(findProposalBlocks(legacy)).toHaveLength(1);
   });
 });
 

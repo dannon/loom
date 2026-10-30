@@ -12,7 +12,7 @@ import * as os from "os";
 import * as path from "path";
 import { describe, expect, it } from "vitest";
 
-const EXT = path.join(__dirname, "..", "extensions", "loom");
+const EXT = path.join(__dirname, "..", "extensions", "orbit");
 const BUILTINS = new Set(builtinModules.flatMap((m) => [m, `node:${m}`]));
 const FORBIDDEN_LOCAL = new Set(["index.ts", "state.ts"]);
 

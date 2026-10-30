@@ -4,7 +4,7 @@ name: release
 # via workflow_dispatch (handy for re-running on the same tag without
 # inventing a new one).
 # Builds platform-specific Orbit installers and attaches them to a draft
-# GitHub Release (promote the draft manually), and publishes the @galaxyproject/loom
+# GitHub Release (promote the draft manually), and publishes the @galaxyproject/orbit
 # npm package via OIDC trusted publishing (no token, no 2FA prompt).
 #
 # All five installer legs (arm64 mac, Intel mac, linux x64/arm64, win32 x64) build in one
@@ -129,7 +129,7 @@ jobs:
             artifacts/**/*.rpm
           fail_on_unmatched_files: true
 
-  # Publish the @galaxyproject/loom npm package (the Loom CLI -- not Orbit) via
+  # Publish the @galaxyproject/orbit npm package (the Orbit CLI -- not the desktop app) via
   # OIDC trusted publishing. No NPM_TOKEN and no 2FA OTP: GitHub mints a
   # short-lived id-token that npm verifies against the package's configured
   # trusted publisher (npmjs.com -> package Settings -> Trusted Publisher,

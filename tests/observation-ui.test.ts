@@ -4,7 +4,7 @@ import {
   renderObservationForConfirm,
   confirmObservation,
   describeObservation,
-} from "../extensions/loom/observation-ui.js";
+} from "../extensions/orbit/observation-ui.js";
 import type { Observation } from "../shared/observation-contract.js";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 

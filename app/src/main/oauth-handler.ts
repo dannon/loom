@@ -121,7 +121,7 @@ export function listOAuthProviders(): Record<string, ProviderAuthCaps> {
 
 function getAuthPath(): string {
   // Honor PI_CODING_AGENT_DIR so test/dev overrides land in the same place
-  // the brain subprocess reads from. Mirrors bin/loom.js's agentDir resolution.
+  // the brain subprocess reads from. Mirrors bin/orbit.js's agentDir resolution.
   const envDir = process.env.PI_CODING_AGENT_DIR;
   const agentDir = envDir
     ? envDir.replace(/^~(?=$|\/|\\)/, os.homedir())

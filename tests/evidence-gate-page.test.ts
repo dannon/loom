@@ -7,20 +7,20 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import * as state from "../extensions/loom/state";
+import * as state from "../extensions/orbit/state";
 import {
   computeAfterContent,
   registerEvidenceGate,
   resetEvidenceOverrides,
-} from "../extensions/loom/evidence-gate";
-import { renderInvocationYaml } from "../extensions/loom/notebook-writer";
-import { setRecordStore, type RecordStore } from "../extensions/loom/record-store";
-import { GalaxyApiError } from "../extensions/loom/galaxy-api";
+} from "../extensions/orbit/evidence-gate";
+import { renderInvocationYaml } from "../extensions/orbit/notebook-writer";
+import { setRecordStore, type RecordStore } from "../extensions/orbit/record-store";
+import { GalaxyApiError } from "../extensions/orbit/galaxy-api";
 import { bareFamily } from "../shared/galaxy-tool-family.js";
 import { sectionsHeaded } from "../shared/markdown-sections.js";
 
-vi.mock("../extensions/loom/state", async (actual) => ({
-  ...(await actual<typeof import("../extensions/loom/state")>()),
+vi.mock("../extensions/orbit/state", async (actual) => ({
+  ...(await actual<typeof import("../extensions/orbit/state")>()),
   getNotebookPath: vi.fn(),
 }));
 

@@ -1,13 +1,13 @@
 ---
 title: Architecture
-description: One agent brain, many shells — how Loom, Orbit, the web shell, and Galaxy fit together.
+description: One agent brain, many shells — how the Orbit core, the desktop app, the web shell, and Galaxy fit together.
 group: Reference
 order: 4
 ---
 
 # Architecture
 
-Loom is an AI research harness for [Galaxy](https://galaxyproject.org)
+Orbit is an AI research harness for [Galaxy](https://galaxyproject.org)
 bioinformatics, built on [Pi.dev](https://pi.dev). It is deliberately split into a
 single **brain** and several thin **shells** that talk to it over RPC.
 
@@ -16,7 +16,7 @@ single **brain** and several thin **shells** that talk to it over RPC.
 ```
 Brain (Loom)                        Shells
 ────────────                        ──────
-extensions/loom/                    bin/loom.js      terminal CLI
+extensions/orbit/                    bin/orbit.js      terminal CLI
   index.ts    extension entry       app/             Orbit (Electron desktop)
   state.ts    session state           src/main/        Node.js main process
   tools.ts    LLM-callable tools       src/renderer/    chat + artifact panes
@@ -24,7 +24,7 @@ extensions/loom/                    bin/loom.js      terminal CLI
   notebook-writer.ts  notebook I/O
 ```
 
-**Loom** is the agent brain — the Pi.dev runtime, the system-prompt context,
+**Orbit** is the agent brain — the Pi.dev runtime, the system-prompt context,
 Galaxy invocation tracking, the skills system, and the RPC contract.
 
 **Orbit** is the Electron desktop shell with a chat + tabbed-artifact layout.
@@ -37,16 +37,16 @@ same contract.
 
 The durable state is `notebook.md`. Plans, decisions, results, and interpretation
 all live as markdown sections inside it; the agent maintains them via standard
-`Edit` / `Write` tools. The only structured side-records are `loom-invocation`
-YAML blocks for in-flight Galaxy work. See [Concepts](/loom/docs/concepts).
+`Edit` / `Write` tools. The only structured side-records are `orbit-invocation`
+YAML blocks for in-flight Galaxy work. See [Concepts](/orbit/docs/concepts).
 
-This keeps Loom aligned with the broader Galaxy ecosystem: **Galaxy is the
-substrate, Page is the shareable artifact, and Loom is one live authoring shell.**
+This keeps Orbit aligned with the broader Galaxy ecosystem: **Galaxy is the
+substrate, Page is the shareable artifact, and Orbit is one live authoring shell.**
 
 ## Galaxy integration
 
 Galaxy work runs through in-process Galaxy tools (galaxy-ops, the operations
-[Galaxy MCP](/loom/docs/galaxy-mcp) serves) when credentials are available. During
+[Galaxy MCP](/orbit/docs/galaxy-mcp) serves) when credentials are available. During
 planning the agent surveys the workflow registry and tool catalog, then routes each
 step to Galaxy or local execution as appropriate.
 
@@ -58,5 +58,5 @@ The Orbit desktop shell is **Electron** (Vite + electron-forge), rendered with
 `marked`, in a Galaxy-brand dark theme. Tested with Vitest.
 
 > For the engineer-facing deep dive, see
-> [`docs/architecture.md`](https://github.com/galaxyproject/loom/blob/main/docs/architecture.md)
+> [`docs/architecture.md`](https://github.com/galaxyproject/orbit/blob/main/docs/architecture.md)
 > in the loom repository.

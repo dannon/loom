@@ -15,23 +15,23 @@ import {
   versionFromToolId,
   walkInvocationJobs,
   type EnrichDeps,
-} from "../extensions/loom/galaxy-enrich";
-import { GalaxyApiError, type InvocationDetail } from "../extensions/loom/galaxy-api";
-import { findJobBlocks, upsertJobBlock, type JobYaml } from "../extensions/loom/galaxy-job-block";
+} from "../extensions/orbit/galaxy-enrich";
+import { GalaxyApiError, type InvocationDetail } from "../extensions/orbit/galaxy-api";
+import { findJobBlocks, upsertJobBlock, type JobYaml } from "../extensions/orbit/galaxy-job-block";
 import {
   findInvocationBlocks,
   upsertInvocationBlock,
   type InvocationYaml,
-} from "../extensions/loom/notebook-writer";
+} from "../extensions/orbit/notebook-writer";
 import {
   ensureAttemptRecord,
   noteEnrichmentRetry,
   readAttemptRecord,
   writeEnrichment,
   UNKNOWN,
-} from "../extensions/loom/galaxy-provenance";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
-import { ulid } from "../extensions/loom/ulid";
+} from "../extensions/orbit/galaxy-provenance";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
+import { ulid } from "../extensions/orbit/ulid";
 
 const SERVER = "https://usegalaxy.org";
 const FASTP = "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp";

@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execSync } from "node:child_process";
-import { loadConfig, saveConfig, type LoomConfig } from "./config.js";
+import { loadConfig, saveConfig, type OrbitConfig } from "./config.js";
 import {
   encryptSecret,
   isAvailable as safeStorageAvailable,
@@ -36,7 +36,7 @@ import {
   modelsProbeRequest,
 } from "./endpoint-probe.js";
 import { discoverProviderModels } from "./model-discovery.js";
-import { checkLatestVersion, checkRepoMoved } from "./version-check.js";
+import { checkLatestVersion } from "./version-check.js";
 import { resolveReleasePageUrl } from "./release-page.js";
 import { postFeedback } from "./feedback.js";
 import type { FeedbackPayload } from "../../../shared/feedback-contract.js";
@@ -56,7 +56,7 @@ import { resolveStateDir } from "../../../shared/state-dir.js";
 import { agentPromptPayload } from "../../../shared/agent-prompt.js";
 
 /** Where "report an issue" files go. One place to flip when the repo is renamed. */
-const ISSUE_REPO = "galaxyproject/loom";
+const ISSUE_REPO = "galaxyproject/orbit";
 
 /**
  * Sentinel the renderer sends back in a secret field when the user did NOT
@@ -65,7 +65,7 @@ const ISSUE_REPO = "galaxyproject/loom";
 export const UNCHANGED_SECRET = "__loom_unchanged_secret__";
 
 /** Masked shape returned to the renderer — never carries plaintext secrets. */
-interface MaskedLoomConfig extends Omit<LoomConfig, "llm" | "galaxy"> {
+interface MaskedOrbitConfig extends Omit<OrbitConfig, "llm" | "galaxy"> {
   llm?: {
     active: string;
     providers: Record<
@@ -80,9 +80,9 @@ interface MaskedLoomConfig extends Omit<LoomConfig, "llm" | "galaxy"> {
   localShellAvailable?: boolean;
 }
 
-function maskConfig(cfg: LoomConfig): MaskedLoomConfig {
+function maskConfig(cfg: OrbitConfig): MaskedOrbitConfig {
   const { llm: _llm, galaxy: _galaxy, ...rest } = cfg;
-  const masked: MaskedLoomConfig = { ...rest };
+  const masked: MaskedOrbitConfig = { ...rest };
   if (cfg.llm) {
     masked.llm = {
       active: cfg.llm.active,
@@ -123,10 +123,10 @@ function maskConfig(cfg: LoomConfig): MaskedLoomConfig {
  * Reconcile the renderer-supplied config against what's on disk, encrypting
  * any newly-supplied plaintext secrets and preserving unchanged ones.
  */
-function reconcileIncomingConfig(incoming: Record<string, unknown>): LoomConfig {
+function reconcileIncomingConfig(incoming: Record<string, unknown>): OrbitConfig {
   const current = loadConfig();
   const canEncrypt = safeStorageAvailable();
-  const out: LoomConfig = { ...current, ...(incoming as LoomConfig) };
+  const out: OrbitConfig = { ...current, ...(incoming as OrbitConfig) };
 
   // Guardian: only the sandbox toggle comes from the renderer; merge it onto the
   // stored block so toggling it never drops dangerouslyBypassPermissions / trustedWorkspaces.
@@ -153,7 +153,7 @@ function reconcileIncomingConfig(incoming: Record<string, unknown>): LoomConfig 
   if (incomingLlm) {
     // Seed from disk so a partial payload (e.g. /model switching just one
     // provider's model) preserves every other provider's encrypted blob.
-    const mergedProviders: NonNullable<LoomConfig["llm"]>["providers"] = {
+    const mergedProviders: NonNullable<OrbitConfig["llm"]>["providers"] = {
       ...(current.llm?.providers ?? {}),
     };
     for (const [name, p] of Object.entries(incomingLlm.providers ?? {})) {
@@ -191,7 +191,7 @@ function reconcileIncomingConfig(incoming: Record<string, unknown>): LoomConfig 
   }
 
   // Galaxy profile reconciliation (per profile)
-  type GalaxyConfig = NonNullable<LoomConfig["galaxy"]>;
+  type GalaxyConfig = NonNullable<OrbitConfig["galaxy"]>;
   const incomingGalaxy = (incoming as { galaxy?: GalaxyConfig }).galaxy;
   if (incomingGalaxy) {
     const mergedProfiles: GalaxyConfig["profiles"] = {};
@@ -442,7 +442,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
     "updateCheck",
   ]);
 
-  function sanitizeConfig(input: unknown): LoomConfig {
+  function sanitizeConfig(input: unknown): OrbitConfig {
     if (!input || typeof input !== "object" || Array.isArray(input)) {
       throw new Error("config:save expects an object payload");
     }
@@ -470,10 +470,10 @@ export function registerIpcHandlers(agent: AgentManager): void {
         theme: theme === "light" || theme === "dark" ? theme : "dark",
       };
     }
-    return out as LoomConfig;
+    return out as OrbitConfig;
   }
 
-  ipc.handle("config:save", async (_e, config: LoomConfig) => {
+  ipc.handle("config:save", async (_e, config: OrbitConfig) => {
     try {
       const safe = sanitizeConfig(config);
       const reconciled = reconcileIncomingConfig(safe as Record<string, unknown>);
@@ -740,12 +740,6 @@ export function registerIpcHandlers(agent: AgentManager): void {
     return await checkLatestVersion();
   });
 
-  // "Loom is now Orbit" safety net for installs whose auto-update may not
-  // follow the GitHub repo rename. Same on-disk cache/throttle as version:check.
-  ipc.handle("version:repo-moved", async () => {
-    return await checkRepoMoved();
-  });
-
   // Running app version + packaged flag for the what's-new banner. Unlike
   // version:check this never hits the network and ignores updateCheck -- the
   // what's-new surface is local and must work even with update checks off.
@@ -889,7 +883,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
 
 /**
  * Node's fetch ignores the proxy environment variables that curl and most
- * shells honour, and Loom sets nothing up to compensate -- so on a network
+ * shells honour, and Orbit sets nothing up to compensate -- so on a network
  * that only reaches the internet through a proxy, every probe here fails no
  * matter how correct the URL and key are. We can't fix that from inside the
  * catch block, but we can stop the user re-checking a URL that was fine.

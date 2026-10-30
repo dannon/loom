@@ -11,7 +11,7 @@ import {
   isUnusableDatasetState,
   ingestFailureMessage,
   type HistoryContentItem,
-} from "../extensions/loom/galaxy-upload";
+} from "../extensions/orbit/galaxy-upload";
 
 describe("resolveStoragePath", () => {
   let home: string;
@@ -26,7 +26,7 @@ describe("resolveStoragePath", () => {
 
   it("lives in the brain state dir and is stable", () => {
     const p = resolveStoragePath();
-    expect(p).toBe(path.join(home, ".loom", "upload-resume.json"));
+    expect(p).toBe(path.join(home, ".orbit", "upload-resume.json"));
     expect(resolveStoragePath()).toBe(p);
   });
 });
@@ -85,17 +85,17 @@ describe("pickUploadedDataset", () => {
 // Handler tests
 // ---------------------------------------------------------------------------
 
-vi.mock("../extensions/loom/galaxy-upload-tus", async (orig) => {
+vi.mock("../extensions/orbit/galaxy-upload-tus", async (orig) => {
   const real = (await orig()) as object;
   return { ...real, tusUpload: vi.fn(), waitForDataset: vi.fn() };
 });
-vi.mock("../extensions/loom/galaxy-api");
-vi.mock("../extensions/loom/state");
+vi.mock("../extensions/orbit/galaxy-api");
+vi.mock("../extensions/orbit/state");
 
-import { tusUpload, waitForDataset } from "../extensions/loom/galaxy-upload-tus";
-import { galaxyGet, galaxyPost, getGalaxyConfig } from "../extensions/loom/galaxy-api";
-import { getCurrentHistoryId } from "../extensions/loom/state";
-import { registerGalaxyUploadTool } from "../extensions/loom/galaxy-upload";
+import { tusUpload, waitForDataset } from "../extensions/orbit/galaxy-upload-tus";
+import { galaxyGet, galaxyPost, getGalaxyConfig } from "../extensions/orbit/galaxy-api";
+import { getCurrentHistoryId } from "../extensions/orbit/state";
+import { registerGalaxyUploadTool } from "../extensions/orbit/galaxy-upload";
 import type { GalaxyToolFamily } from "../shared/galaxy-tool-family.js";
 import { GALAXY } from "./galaxy-family-fixture";
 

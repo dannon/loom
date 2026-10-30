@@ -1,16 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { setGalaxyTransport } from "../extensions/loom/galaxy-api";
+import { setGalaxyTransport } from "../extensions/orbit/galaxy-api";
 import {
   GALAXY_OP_POLICY,
   registerGalaxyOpPolicy,
   resetShownPages,
   unreadInputs,
-} from "../extensions/loom/galaxy-op-policy";
-import { GALAXY_DEADLINE_MS } from "../extensions/loom/galaxy-tool-wrap";
-import { malformedIdsRefusal } from "../extensions/loom/galaxy-page-ops";
-import { setRecordStore, withRecordLock } from "../extensions/loom/record-store";
-import { createPageRecordStore } from "../extensions/loom/record-store-page";
+} from "../extensions/orbit/galaxy-op-policy";
+import { GALAXY_DEADLINE_MS } from "../extensions/orbit/galaxy-tool-wrap";
+import { malformedIdsRefusal } from "../extensions/orbit/galaxy-page-ops";
+import { setRecordStore, withRecordLock } from "../extensions/orbit/record-store";
+import { createPageRecordStore } from "../extensions/orbit/record-store-page";
 import { applySectionEdit } from "../shared/markdown-sections.js";
 import { pageContentHash } from "../shared/page-content-hash.js";
 import { ELISION_MARKER } from "../shared/record-excerpt.js";

@@ -7,13 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // one block went unseen in review. This golden is the whole assembled prompt,
 // with everything that varies by machine pinned: config, env, date, cwd.
 const { loadConfigMock } = vi.hoisted(() => ({ loadConfigMock: vi.fn() }));
-vi.mock("../extensions/loom/config", () => ({ loadConfig: loadConfigMock }));
+vi.mock("../extensions/orbit/config", () => ({ loadConfig: loadConfigMock }));
 
-import { DEFAULT_SKILLS } from "../shared/loom-config.js";
-import { setupContextInjection } from "../extensions/loom/context";
-import { setGalaxyFetchOverride } from "../extensions/loom/galaxy-api";
-import { fixtureFetch } from "../extensions/loom/galaxy-fixture";
-import { registerGalaxyTools, setGalaxyToolSource } from "../extensions/loom/galaxy-tool-source";
+import { DEFAULT_SKILLS } from "../shared/orbit-config.js";
+import { setupContextInjection } from "../extensions/orbit/context";
+import { setGalaxyFetchOverride } from "../extensions/orbit/galaxy-api";
+import { fixtureFetch } from "../extensions/orbit/galaxy-fixture";
+import { registerGalaxyTools, setGalaxyToolSource } from "../extensions/orbit/galaxy-tool-source";
 import { setCapabilityProfile } from "../shared/capability-profile.js";
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown>;

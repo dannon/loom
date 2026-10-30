@@ -13,19 +13,19 @@ import {
   resetReconcileState,
   runReconcile,
   type ReconcileDeps,
-} from "../extensions/loom/galaxy-reconcile";
-import type { GalaxyJobListing, InvocationDetail } from "../extensions/loom/galaxy-api";
-import { findJobBlocks, upsertJobBlock, type JobYaml } from "../extensions/loom/galaxy-job-block";
-import { findInvocationBlocks, upsertInvocationBlock } from "../extensions/loom/notebook-writer";
-import { renderGalaxyPageBlock } from "../extensions/loom/galaxy-page-binding";
+} from "../extensions/orbit/galaxy-reconcile";
+import type { GalaxyJobListing, InvocationDetail } from "../extensions/orbit/galaxy-api";
+import { findJobBlocks, upsertJobBlock, type JobYaml } from "../extensions/orbit/galaxy-job-block";
+import { findInvocationBlocks, upsertInvocationBlock } from "../extensions/orbit/notebook-writer";
+import { renderGalaxyPageBlock } from "../extensions/orbit/galaxy-page-binding";
 import {
   readAttemptRecord,
   readReconcileState,
   type AttemptRecord,
-} from "../extensions/loom/galaxy-provenance";
-import { setGalaxyFetchOverride } from "../extensions/loom/galaxy-api";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
-import { isUlid, ulid } from "../extensions/loom/ulid";
+} from "../extensions/orbit/galaxy-provenance";
+import { setGalaxyFetchOverride } from "../extensions/orbit/galaxy-api";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
+import { isUlid, ulid } from "../extensions/orbit/ulid";
 import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 
 const SERVER = "https://usegalaxy.org";

@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Task 2: buildFetchPayload
 // ---------------------------------------------------------------------------
 
-import { buildFetchPayload, type FetchPayloadOpts } from "../extensions/loom/galaxy-upload-tus";
+import { buildFetchPayload, type FetchPayloadOpts } from "../extensions/orbit/galaxy-upload-tus";
 
 describe("buildFetchPayload", () => {
   it("returns the correct shape with defaults (ext=auto, dbkey=?, auto_decompress=false)", () => {
@@ -56,7 +56,7 @@ describe("buildFetchPayload", () => {
 // Task 3: tusUpload
 // ---------------------------------------------------------------------------
 
-import { tusUpload, type TusUploadOpts } from "../extensions/loom/galaxy-upload-tus";
+import { tusUpload, type TusUploadOpts } from "../extensions/orbit/galaxy-upload-tus";
 
 // vi.hoisted runs before imports are processed, so the class is available
 // when the vi.mock factory executes (which also runs before imports).
@@ -496,7 +496,7 @@ import {
   waitForDataset,
   TERMINAL_DATASET_STATES,
   type DatasetState,
-} from "../extensions/loom/galaxy-upload-tus";
+} from "../extensions/orbit/galaxy-upload-tus";
 
 describe("TERMINAL_DATASET_STATES", () => {
   it("includes ok, error, discarded, failed_metadata, deferred", () => {

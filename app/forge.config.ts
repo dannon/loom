@@ -9,11 +9,11 @@ import { prepareSpeech, SPEECH_STAGE_DIR } from "./scripts/prepare-speech.mjs";
 
 const APP_DIR = __dirname;
 const REPO_ROOT = path.resolve(APP_DIR, "..");
-const LOOM_STAGE_PARENT = path.resolve(APP_DIR, ".loom-stage");
-const LOOM_STAGE_DIR = path.join(LOOM_STAGE_PARENT, "loom");
-const NODE_STAGE_DIR = path.join(LOOM_STAGE_PARENT, "node");
-const UV_STAGE_DIR = path.join(LOOM_STAGE_PARENT, "uv");
-const TARBALL_CACHE_DIR = path.join(LOOM_STAGE_PARENT, "cache");
+const ORBIT_STAGE_PARENT = path.resolve(APP_DIR, ".orbit-stage");
+const ORBIT_STAGE_DIR = path.join(ORBIT_STAGE_PARENT, "orbit");
+const NODE_STAGE_DIR = path.join(ORBIT_STAGE_PARENT, "node");
+const UV_STAGE_DIR = path.join(ORBIT_STAGE_PARENT, "uv");
+const TARBALL_CACHE_DIR = path.join(ORBIT_STAGE_PARENT, "cache");
 
 // uv release target triple per (platform, arch). Mirrors astral-sh/uv's
 // asset names on its GitHub releases.
@@ -25,9 +25,9 @@ const UV_TARGETS: Record<string, string> = {
   "win32-x64": "x86_64-pc-windows-msvc",
 };
 
-// Files copied verbatim from the Loom repo root into the staged bundle.
+// Files copied verbatim from the repo root into the staged bundle.
 // Mirrors the npm `files` allowlist plus package-lock.json (used by npm ci).
-const LOOM_BUNDLE_FILES = [
+const ORBIT_BUNDLE_FILES = [
   "bin",
   "extensions",
   "lessons",
@@ -39,36 +39,36 @@ const LOOM_BUNDLE_FILES = [
   "LICENSE",
 ];
 
-function stageLoomBundle(platform: string, arch: string): void {
-  fs.rmSync(LOOM_STAGE_DIR, { recursive: true, force: true });
-  fs.mkdirSync(LOOM_STAGE_DIR, { recursive: true });
+function stageOrbitBundle(platform: string, arch: string): void {
+  fs.rmSync(ORBIT_STAGE_DIR, { recursive: true, force: true });
+  fs.mkdirSync(ORBIT_STAGE_DIR, { recursive: true });
 
-  for (const item of LOOM_BUNDLE_FILES) {
+  for (const item of ORBIT_BUNDLE_FILES) {
     const src = path.join(REPO_ROOT, item);
     if (!fs.existsSync(src)) continue;
-    fs.cpSync(src, path.join(LOOM_STAGE_DIR, item), { recursive: true });
+    fs.cpSync(src, path.join(ORBIT_STAGE_DIR, item), { recursive: true });
   }
 
-  // Loom's root prepare script runs `husky`, which is a devDependency.
+  // Orbit's root prepare script runs `husky`, which is a devDependency.
   // `npm ci --omit=dev` skips installing husky but still fires the prepare
   // lifecycle → `sh -c husky` → exit 127. Strip prepare from the staged
   // copy before installing. Other install/postinstall hooks (native module
   // prebuild downloads) stay intact.
-  execSync("npm pkg delete scripts.prepare", { cwd: LOOM_STAGE_DIR, stdio: "inherit" });
+  execSync("npm pkg delete scripts.prepare", { cwd: ORBIT_STAGE_DIR, stdio: "inherit" });
 
   // Install runtime deps only (no devDependencies) into the staged bundle.
   // npm ci is faster + deterministic when the lockfile is present.
-  const installCmd = fs.existsSync(path.join(LOOM_STAGE_DIR, "package-lock.json"))
+  const installCmd = fs.existsSync(path.join(ORBIT_STAGE_DIR, "package-lock.json"))
     ? "npm ci --omit=dev --no-audit --no-fund"
     : "npm install --omit=dev --omit=optional --no-audit --no-fund";
-  execSync(installCmd, { cwd: LOOM_STAGE_DIR, stdio: "inherit" });
+  execSync(installCmd, { cwd: ORBIT_STAGE_DIR, stdio: "inherit" });
 
-  pruneLoomNodeModules(platform, arch);
+  pruneOrbitNodeModules(platform, arch);
 }
 
-// Trim runtime-irrelevant chunks from the staged Loom node_modules. Targets
+// Trim runtime-irrelevant chunks from the staged Orbit node_modules. Targets
 // only known-safe heavy directories; keeps everything that might be loaded.
-function pruneLoomNodeModules(platform: string, arch: string): void {
+function pruneOrbitNodeModules(platform: string, arch: string): void {
   // koffi ships prebuilt .node binaries for ~18 platforms (darwin/linux/
   // win32/freebsd/openbsd/musl x ia32/x64/arm64/...). We only need the
   // target platform's. Keeping just `<platform>_<arch>` saves ~30MB, and
@@ -77,7 +77,7 @@ function pruneLoomNodeModules(platform: string, arch: string): void {
   // npm hoists most copies to the top-level node_modules but pi-coding-agent
   // pins its own koffi, so the package can appear nested too. Walk for any.
   const keepDir = `${platform}_${arch}`;
-  for (const koffiBuild of findKoffiBuildDirs(path.join(LOOM_STAGE_DIR, "node_modules"))) {
+  for (const koffiBuild of findKoffiBuildDirs(path.join(ORBIT_STAGE_DIR, "node_modules"))) {
     for (const entry of fs.readdirSync(koffiBuild)) {
       if (entry !== keepDir) {
         fs.rmSync(path.join(koffiBuild, entry), { recursive: true, force: true });
@@ -86,12 +86,12 @@ function pruneLoomNodeModules(platform: string, arch: string): void {
   }
 
   // pi-coding-agent bundles an examples/ tree (demo extensions, including a
-  // DOOM WASM overlay) that Loom never loads at runtime -- ~1.2MB of dead
+  // DOOM WASM overlay) that Orbit never loads at runtime -- ~1.2MB of dead
   // weight that also drags out codesign, since notarization gives every file
   // an individual --timestamp round-trip. Drop it. (force: true no-ops if the
   // path is ever absent.)
   fs.rmSync(
-    path.join(LOOM_STAGE_DIR, "node_modules", "@earendil-works", "pi-coding-agent", "examples"),
+    path.join(ORBIT_STAGE_DIR, "node_modules", "@earendil-works", "pi-coding-agent", "examples"),
     { recursive: true, force: true },
   );
 }
@@ -173,23 +173,23 @@ async function stageNodeBundle(platform: string, arch: string): Promise<void> {
   const tarballPath = path.join(TARBALL_CACHE_DIR, filename);
 
   if (fs.existsSync(tarballPath)) {
-    console.log(`[loom-stage] reusing cached ${filename}`);
+    console.log(`[orbit-stage] reusing cached ${filename}`);
   } else {
-    console.log(`[loom-stage] downloading ${url}`);
+    console.log(`[orbit-stage] downloading ${url}`);
     await downloadFile(url, tarballPath);
   }
 
-  console.log(`[loom-stage] extracting ${filename}`);
+  console.log(`[orbit-stage] extracting ${filename}`);
   if (platform === "win32") {
     execSync(
-      `powershell -Command "Expand-Archive -Path '${tarballPath}' -DestinationPath '${LOOM_STAGE_PARENT}'"`,
+      `powershell -Command "Expand-Archive -Path '${tarballPath}' -DestinationPath '${ORBIT_STAGE_PARENT}'"`,
       { stdio: "inherit" },
     );
   } else {
-    execSync(`tar -xf "${tarballPath}" -C "${LOOM_STAGE_PARENT}"`, { stdio: "inherit" });
+    execSync(`tar -xf "${tarballPath}" -C "${ORBIT_STAGE_PARENT}"`, { stdio: "inherit" });
   }
 
-  const extractedPath = path.join(LOOM_STAGE_PARENT, distName);
+  const extractedPath = path.join(ORBIT_STAGE_PARENT, distName);
   fs.renameSync(extractedPath, NODE_STAGE_DIR);
 
   pruneNodeBundle();
@@ -211,12 +211,12 @@ function pruneNodeBundle(): void {
 // Bundle uv/uvx so Galaxy MCP (`uvx galaxy-mcp>=1.9.0`) doesn't need a
 // system-installed uv. Pulls the latest release tarball from astral-sh/uv.
 // "latest" resolves to a specific tag at fetch time -- the cached tarball
-// won't auto-refresh; remove `.loom-stage/cache/` to pick up newer uv.
+// won't auto-refresh; remove `.orbit-stage/cache/` to pick up newer uv.
 async function stageUvBundle(platform: string, arch: string): Promise<void> {
   const key = `${platform}-${arch}`;
   const target = UV_TARGETS[key];
   if (!target) {
-    throw new Error(`[loom-stage] no uv target mapping for ${key}; add it to UV_TARGETS.`);
+    throw new Error(`[orbit-stage] no uv target mapping for ${key}; add it to UV_TARGETS.`);
   }
   const isWin = platform === "win32";
   const ext = isWin ? "zip" : "tar.gz";
@@ -230,13 +230,13 @@ async function stageUvBundle(platform: string, arch: string): Promise<void> {
   const tarballPath = path.join(TARBALL_CACHE_DIR, filename);
 
   if (fs.existsSync(tarballPath)) {
-    console.log(`[loom-stage] reusing cached ${filename}`);
+    console.log(`[orbit-stage] reusing cached ${filename}`);
   } else {
-    console.log(`[loom-stage] downloading ${url}`);
+    console.log(`[orbit-stage] downloading ${url}`);
     await downloadFile(url, tarballPath);
   }
 
-  console.log(`[loom-stage] extracting ${filename}`);
+  console.log(`[orbit-stage] extracting ${filename}`);
   if (isWin) {
     execSync(
       `powershell -Command "Expand-Archive -Path '${tarballPath}' -DestinationPath '${UV_STAGE_DIR}'"`,
@@ -362,12 +362,18 @@ const config: ForgeConfig = {
     // @electron/packager derives CFBundleDisplayName (the name Finder shows
     // under the app icon) from executableName, not from `name` above -- so a
     // lowercase value here makes the macOS app read "orbit" even though the
-    // bundle is Orbit.app. The lowercase binary is only wanted for the Linux
-    // deb/rpm CLI command; macOS has no need for it. Use the proper-cased name
-    // on darwin and keep lowercase elsewhere. Each platform builds on its own
-    // native runner (same assumption the codesign gate below relies on), so
-    // process.platform reflects the target OS family here.
-    executableName: process.platform === "darwin" ? "Orbit" : "orbit",
+    // bundle is Orbit.app. On Linux the executable is `orbit-desktop` so it
+    // never collides with the `orbit` CLI from npm on PATH (the deb/rpm makers
+    // below are named to match). Windows keeps `orbit.exe`: nothing on PATH
+    // competes with it there. Each platform builds on its own native runner
+    // (same assumption the codesign gate below relies on), so process.platform
+    // reflects the target OS family here.
+    executableName:
+      process.platform === "linux"
+        ? "orbit-desktop"
+        : process.platform === "darwin"
+          ? "Orbit"
+          : "orbit",
     icon: "resources/icon",
     appBundleId: "org.galaxyproject.orbit",
     appCategoryType: "public.app-category.developer-tools",
@@ -375,10 +381,10 @@ const config: ForgeConfig = {
       NSMicrophoneUsageDescription:
         "Orbit uses your microphone to transcribe speech locally into the prompt.",
     },
-    // Copies the staged Loom bundle, Node runtime, and uv binary to
+    // Copies the staged Orbit bundle, Node runtime, and uv binary to
     // Contents/Resources/ in the packaged app. agent.ts resolves
-    // process.resourcesPath/{loom,node,uv}/... at brain spawn time.
-    extraResource: [LOOM_STAGE_DIR, NODE_STAGE_DIR, UV_STAGE_DIR, SPEECH_STAGE_DIR],
+    // process.resourcesPath/{orbit,node,uv}/... at brain spawn time.
+    extraResource: [ORBIT_STAGE_DIR, NODE_STAGE_DIR, UV_STAGE_DIR, SPEECH_STAGE_DIR],
     ...macCodesign,
   },
   hooks: {
@@ -387,7 +393,7 @@ const config: ForgeConfig = {
     // matching Node + uv binaries.
     prePackage: async (_forgeConfig, platform, arch) => {
       await prepareSpeech(platform, arch);
-      stageLoomBundle(platform, arch);
+      stageOrbitBundle(platform, arch);
       await stageNodeBundle(platform, arch);
       await stageUvBundle(platform, arch);
     },
@@ -432,15 +438,15 @@ const config: ForgeConfig = {
     },
     // The Windows Squirrel installer is deferred. The first real run of the
     // win32 leg (in the 0.5.0 release) showed electron-winstaller's `nuget pack`
-    // tripping the Win32 260-char MAX_PATH on the deeply-nested staged Loom
+    // tripping the Win32 260-char MAX_PATH on the deeply-nested staged Orbit
     // bundle -- @mistralai/mistralai's auto-generated SDK files under
-    // pi-coding-agent. The Loom CLI ships as real (non-asar) files because it's
+    // pi-coding-agent. The Orbit CLI ships as real (non-asar) files because it's
     // spawned as a subprocess, so that depth is unavoidable, and even with the
     // deepest path pruned to 254 chars nuget's internal staging still exceeds
     // 260. Windows ships as the portable maker-zip .zip until the installer's
-    // path problem is solved; set LOOM_WIN_SQUIRREL=1 to build the installer
+    // path problem is solved; set ORBIT_WIN_SQUIRREL=1 to build the installer
     // while iterating on it.
-    ...(process.env.LOOM_WIN_SQUIRREL === "1"
+    ...(process.env.ORBIT_WIN_SQUIRREL === "1"
       ? [
           {
             name: "@electron-forge/maker-squirrel",
@@ -462,6 +468,15 @@ const config: ForgeConfig = {
         options: {
           maintainer: "Galaxy Project contributors",
           homepage: "https://galaxyproject.org",
+          // electron-installer names the /usr/bin symlink, the .desktop
+          // entry's Exec line and the /usr/lib dir after the package name;
+          // `bin` only picks the file inside that dir. So the package itself
+          // has to be orbit-desktop for the npm CLI's `orbit` to stay free.
+          // These makers cannot declare Replaces/Obsoletes, so the 0.8 package
+          // (`orbit`) stays installed beside this one until the user removes
+          // it; INSTALL.md says how.
+          name: "orbit-desktop",
+          bin: "orbit-desktop",
           // electron-installer-debian's computed default depends omit ALSA, but
           // Electron links libasound.so.2 -- without it Orbit fails to launch on
           // Ubuntu/WSL2 with "error while loading shared libraries". depends is
@@ -483,6 +498,9 @@ const config: ForgeConfig = {
       config: {
         options: {
           homepage: "https://galaxyproject.org",
+          // Same naming story as the deb maker above.
+          name: "orbit-desktop",
+          bin: "orbit-desktop",
         },
       },
     },

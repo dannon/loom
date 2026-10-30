@@ -86,7 +86,7 @@ describe("brain startup with a provider pi doesn't ship", () => {
       mkdirSync(agentDir, { recursive: true });
       const res = spawnSync(
         process.execPath,
-        [resolve(__dirname, "../bin/loom.js"), "--mode", "rpc", "--no-session"],
+        [resolve(__dirname, "../bin/orbit.js"), "--mode", "rpc", "--no-session"],
         {
           env: {
             PATH: process.env.PATH,

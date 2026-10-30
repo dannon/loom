@@ -178,11 +178,11 @@ import {
   extractDatatypes,
   extractToolIds,
   buildCheckedObservation,
-} from "../extensions/loom/observations";
-import { factsForToolResult } from "../extensions/loom/observation-triggers";
+} from "../extensions/orbit/observations";
+import { factsForToolResult } from "../extensions/orbit/observation-triggers";
 import { scanObservationForLeaks, validateObservation } from "../shared/observation-contract.js";
 import { bareFamily } from "../shared/galaxy-tool-family.js";
-import type { ObservationEnvelope } from "../extensions/loom/observations";
+import type { ObservationEnvelope } from "../extensions/orbit/observations";
 
 describe("observation-redaction-hostile-result: the fixture against the real pipeline", () => {
   const dir = path.join(scenariosDir, "observation-redaction-hostile-result");

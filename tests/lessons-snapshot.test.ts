@@ -69,7 +69,7 @@ describe("the snapshot envelope", () => {
     expect(snapshot.licence).toBe(SNAPSHOT_LICENCE);
     expect(snapshot.licence).toBe("CC-BY-4.0");
     expect(snapshot.source).toEqual({ repo: SNAPSHOT_REPO, commit: COMMIT });
-    expect(snapshot.source.repo).toBe("galaxyproject/loom");
+    expect(snapshot.source.repo).toBe("galaxyproject/orbit");
     expect(snapshot.built_at).toBe(BUILT_AT);
   });
 
@@ -299,7 +299,7 @@ describe("the optional fields", () => {
           )
           .replace(
             /sources:\n {2}- \{ id: "([^"]+)" \}/,
-            'sources:\n  - { id: "$1", resource: "https://github.com/galaxyproject/loom/issues/355", title: "the original report" }',
+            'sources:\n  - { id: "$1", resource: "https://github.com/galaxyproject/orbit/issues/355", title: "the original report" }',
           ),
     });
     expect(validateLessonsDir(dir)).toEqual([]);
@@ -308,7 +308,7 @@ describe("the optional fields", () => {
     expect(lesson.verified).toEqual([{ by: "human:reviewer-one", at: "2026-09-30" }]);
     expect(lesson.sources[0]).toEqual({
       id: expect.any(String),
-      resource: "https://github.com/galaxyproject/loom/issues/355",
+      resource: "https://github.com/galaxyproject/orbit/issues/355",
       title: "the original report",
     });
   });

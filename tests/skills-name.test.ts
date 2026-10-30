@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isSafeSkillName } from "../extensions/loom/skills";
+import { isSafeSkillName } from "../extensions/orbit/skills";
 
 describe("isSafeSkillName", () => {
   it("accepts plain ASCII slugs", () => {

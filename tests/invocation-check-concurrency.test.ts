@@ -13,15 +13,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appendFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
-import * as notebookWriter from "../extensions/loom/notebook-writer";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
+import * as notebookWriter from "../extensions/orbit/notebook-writer";
 import {
   findInvocationBlocks,
   renderInvocationYaml,
   type InvocationYaml,
-} from "../extensions/loom/notebook-writer";
-import * as galaxyApi from "../extensions/loom/galaxy-api";
-import { checkInvocations } from "../extensions/loom/tools";
+} from "../extensions/orbit/notebook-writer";
+import * as galaxyApi from "../extensions/orbit/galaxy-api";
+import { checkInvocations } from "../extensions/orbit/tools";
 
 function invocation(overrides: Partial<InvocationYaml> = {}): InvocationYaml {
   return {

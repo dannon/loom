@@ -23,7 +23,7 @@ import type { ActivityEvent, AnyEvent, ModelEntry, Scenario, ScenarioRun } from 
 
 const __filename = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(__filename), "..", "..");
-const loomBin = path.join(repoRoot, "bin", "loom.js");
+const coreBin = path.join(repoRoot, "bin", "orbit.js");
 
 export async function runScenario(
   scenarioDir: string,
@@ -57,7 +57,7 @@ export async function runScenario(
       fs.mkdirSync(loomDir, { recursive: true });
       fs.writeFileSync(path.join(loomDir, "config.json"), JSON.stringify(scenario.config, null, 2));
     }
-    const result = await spawnLoom(scenario, model, tmpCwd, tmpAgentDir, tmpRoot, runId);
+    const result = await spawnCore(scenario, model, tmpCwd, tmpAgentDir, tmpRoot, runId);
     const events = parseJsonLines(result.stdout);
     const notebookContent = readNotebook(tmpCwd);
     const activityEvents = readActivityLog(tmpCwd);
@@ -185,7 +185,7 @@ export function assertScenarioConfigIsSafe(config: Record<string, unknown>): voi
   }
 }
 
-function spawnLoom(
+function spawnCore(
   scenario: Scenario,
   model: ModelEntry | null,
   cwd: string,
@@ -199,7 +199,7 @@ function spawnLoom(
     PI_CODING_AGENT_DIR: agentDir,
     PI_SKIP_VERSION_CHECK: "1",
     PI_TELEMETRY: "0",
-    LOOM_FRESH_SESSION: "1",
+    ORBIT_FRESH_SESSION: "1",
     HOME: fakeHome, // isolates ~/.loom/config.json reads
     USERPROFILE: fakeHome, // os.homedir() reads this one on Windows
   };
@@ -208,13 +208,13 @@ function spawnLoom(
   if (model) {
     args.push("--provider", model.provider, "--model", model.model);
   }
-  for (const arg of scenario.loomArgs ?? []) args.push(arg);
+  for (const arg of scenario.coreArgs ?? []) args.push(arg);
   for (const input of scenario.inputs) args.push(substituteRunId(input, runId));
 
   const timeoutMs = scenario.timeoutMs ?? 15000;
 
   return new Promise((resolve, reject) => {
-    const child = spawn("node", [loomBin, ...args], {
+    const child = spawn("node", [coreBin, ...args], {
       cwd,
       env,
       stdio: ["ignore", "pipe", "pipe"],

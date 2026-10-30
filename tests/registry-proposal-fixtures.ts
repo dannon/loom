@@ -6,8 +6,8 @@
  */
 
 import type { DatatypesMapping } from "@galaxyproject/galaxy-ops";
-import type { Proposal } from "../extensions/loom/registry-proposal";
-import type { TemplateSnapshot } from "../extensions/loom/registry-submitter";
+import type { Proposal } from "../extensions/orbit/registry-proposal";
+import type { TemplateSnapshot } from "../extensions/orbit/registry-submitter";
 import { SERVER } from "./registry-fixtures";
 
 export const TOOL_ID = "toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.23.4+galaxy0";

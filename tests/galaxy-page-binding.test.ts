@@ -5,7 +5,7 @@ import {
   stripGalaxyPageBlocks,
   upsertGalaxyPageBlock,
   type GalaxyPageBindingYaml,
-} from "../extensions/loom/galaxy-page-binding";
+} from "../extensions/orbit/galaxy-page-binding";
 
 function binding(overrides: Partial<GalaxyPageBindingYaml> = {}): GalaxyPageBindingYaml {
   return {
@@ -20,11 +20,11 @@ function binding(overrides: Partial<GalaxyPageBindingYaml> = {}): GalaxyPageBind
 }
 
 describe("renderGalaxyPageBlock", () => {
-  it("emits the fenced loom-galaxy-page grammar", () => {
+  it("emits the fenced orbit-galaxy-page grammar", () => {
     const out = renderGalaxyPageBlock(binding());
     expect(out).toBe(
       [
-        "```loom-galaxy-page",
+        "```orbit-galaxy-page",
         "page_id: page-abc",
         "page_slug: my-analysis",
         'galaxy_server_url: "https://usegalaxy.org"',
@@ -136,7 +136,7 @@ describe("upsertGalaxyPageBlock", () => {
 
   it("works on empty content (no leading blank line needed)", () => {
     const out = upsertGalaxyPageBlock("", binding());
-    expect(out.startsWith("```loom-galaxy-page")).toBe(true);
+    expect(out.startsWith("```orbit-galaxy-page")).toBe(true);
     expect(findGalaxyPageBlocks(out)).toHaveLength(1);
   });
 });

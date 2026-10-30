@@ -70,7 +70,7 @@ const NETWORK_HINTS: Record<string, string> = {
 /**
  * Certificate rejections deserve their own sentence: they are what a
  * TLS-inspecting corporate proxy or a private CA looks like from here, and
- * Loom verifies against Node's bundled CA list rather than the OS trust store,
+ * Orbit verifies against Node's bundled CA list rather than the OS trust store,
  * so a certificate the browser accepts can still fail this probe.
  */
 const CERT_CODES = new Set([
@@ -127,7 +127,7 @@ export function describeNetworkError(
   const code = firstCode(err);
   let head: string;
   if (code && CERT_CODES.has(code)) {
-    head = `TLS certificate not trusted (${code}) -- Loom checks Node's CA list, not the system store`;
+    head = `TLS certificate not trusted (${code}) -- Orbit checks Node's CA list, not the system store`;
   } else if (code && NETWORK_HINTS[code]) {
     head = `${NETWORK_HINTS[code]} (${code})`;
   } else if (code && code.startsWith("ERR_SSL")) {
@@ -138,7 +138,7 @@ export function describeNetworkError(
     head = `Network error: ${message || "request failed"}`;
   }
   // Only worth saying once we already know the request failed.
-  if (opts.proxyConfigured) head += ". A proxy is set in your environment; Loom does not use it";
+  if (opts.proxyConfigured) head += ". A proxy is set in your environment; Orbit does not use it";
   return head;
 }
 

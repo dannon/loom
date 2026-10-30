@@ -10,15 +10,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 import {
   findInvocationBlocks,
   renderInvocationYaml,
   upsertInvocationBlock,
-} from "../extensions/loom/notebook-writer";
-import * as anchors from "../extensions/loom/notebook-anchors";
-import { findJobBlocks, upsertJobBlock } from "../extensions/loom/galaxy-job-block";
-import { registerPlanTools } from "../extensions/loom/tools";
+} from "../extensions/orbit/notebook-writer";
+import * as anchors from "../extensions/orbit/notebook-anchors";
+import { findJobBlocks, upsertJobBlock } from "../extensions/orbit/galaxy-job-block";
+import { registerPlanTools } from "../extensions/orbit/tools";
 import { GALAXY } from "./galaxy-family-fixture";
 
 interface ToolDef {

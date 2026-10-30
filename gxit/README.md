@@ -1,6 +1,6 @@
 # Orbit as a Galaxy Interactive Tool
 
-Runs the remote Orbit web shell (`LOOM_MODE=remote`) as a per-user Galaxy
+Runs the remote Orbit web shell (`ORBIT_MODE=remote`) as a per-user Galaxy
 Interactive Tool. The same container image runs standalone (`docker run`) or as a
 GxIT; this directory is the Galaxy-side wrapper that launches it per user, injects
 a scoped API key, and proxies the user in.
@@ -46,7 +46,7 @@ orbit_destination:
   env:
     - name: ANTHROPIC_API_KEY
       value: "sk-ant-..." # or another provider's key
-    # - name: LOOM_LLM_PROVIDER
+    # - name: ORBIT_LLM_PROVIDER
     #   value: anthropic
 ```
 
@@ -57,9 +57,9 @@ never persisted or sent back to the browser. (For a free/local model, see
 
 ### Custom OpenAI-compatible provider (e.g. a local/free endpoint)
 
-The brain reads a custom provider's `baseUrl` from `~/.loom/config.json` inside the
-container and resolves the key from `LOOM_ACTIVE_LLM_API_KEY`. To use one, bake a
-`~/.loom/config.json` into a derived image (or mount one) with:
+The brain reads a custom provider's `baseUrl` from `~/.orbit/config.json` inside the
+container and resolves the key from `ORBIT_ACTIVE_LLM_API_KEY`. To use one, bake a
+`~/.orbit/config.json` into a derived image (or mount one) with:
 
 ```json
 {
@@ -70,14 +70,14 @@ container and resolves the key from `LOOM_ACTIVE_LLM_API_KEY`. To use one, bake 
 }
 ```
 
-and inject `LOOM_ACTIVE_LLM_API_KEY` via the destination env.
+and inject `ORBIT_ACTIVE_LLM_API_KEY` via the destination env.
 
 ## 4. Trust model
 
-`LOOM_WEB_ALLOW_INSECURE=1` (set in the tool XML) is safe here: gx-it-proxy
+`ORBIT_WEB_ALLOW_INSECURE=1` (set in the tool XML) is safe here: gx-it-proxy
 authenticates the Galaxy user and routes only them to their container; the
 container is not otherwise reachable, and a Galaxy-controlled entry-point URL
-can't carry `LOOM_WEB_TOKEN`. The agent receives a **scoped** per-user key
+can't carry `ORBIT_WEB_TOKEN`. The agent receives a **scoped** per-user key
 (`inject="api_key"`), never the user's personal key.
 
 "Not otherwise reachable" is doing real work in that paragraph, and it's a
@@ -89,7 +89,7 @@ a WebSocket upgrade, and requires it to match `Host`. Browser clients through
 gx-it-proxy are unaffected; an origin-less client connecting straight to the port
 is refused. If you deploy this somewhere the container's port is genuinely shared,
 that check is the only thing standing between a neighbour and the agent -- prefer
-`LOOM_WEB_TOKEN` where the entry point can carry one.
+`ORBIT_WEB_TOKEN` where the entry point can carry one.
 
 ## Known requirements / gotchas (found in live testing)
 

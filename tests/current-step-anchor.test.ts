@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { parseMostRecentPlan } from "../extensions/loom/init-gate";
+import { parseMostRecentPlan } from "../extensions/orbit/init-gate";
 import {
   getCurrentStepAnchor,
   setCurrentStepAnchor,
   getState,
   resetState,
-} from "../extensions/loom/state";
+} from "../extensions/orbit/state";
 
 const PLAN = [
   "## Plan A: chrM Variant Calling [galaxy]",

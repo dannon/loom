@@ -22,8 +22,8 @@ import {
   EMPTY_COMPLETION_RETRYING,
   endedEmpty,
   registerEmptyCompletionCheck,
-} from "../extensions/loom/empty-completion";
-import { createFollowUpDelivery, setActiveFollowUpDelivery } from "../extensions/loom/auto-resume";
+} from "../extensions/orbit/empty-completion";
+import { createFollowUpDelivery, setActiveFollowUpDelivery } from "../extensions/orbit/auto-resume";
 
 const assistant = (content: unknown[], stopReason = "stop") => ({
   role: "assistant",

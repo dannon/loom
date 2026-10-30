@@ -7,6 +7,8 @@
  * model is named as such.
  * @param {{ model?: string, provider?: string }} [options] @returns {string}
  */
+import { NOTEBOOK_FENCE_WRITE_PREFIX } from "./notebook-fences.js";
+
 export function activeModelBlock({ model, provider } = {}) {
   if (!provider) return "";
   return `## Active LLM
@@ -86,7 +88,7 @@ const bare = (name) => name;
 export function sraImportGuidance({
   before = "",
   record = "notebook",
-  recording = `Loom records the import job itself; bind it to its plan step with
+  recording = `Orbit records the import job itself; bind it to its plan step with
 galaxy_job_record and note the returned collection ID in the notebook.`,
 } = {}) {
   return `### Importing SRA/ENA sequencing runs
@@ -212,7 +214,7 @@ get blank lines from the renderer; run-on prose does not.`;
 export function galaxyTerminology({
   tool = bare,
   more = [],
-  invocationNote = "Tracked in the notebook via `loom-invocation` blocks.",
+  invocationNote = `Tracked in the notebook via \`${NOTEBOOK_FENCE_WRITE_PREFIX}-invocation\` blocks.`,
   routing = true,
 } = {}) {
   const invocation = invocationNote ? ` ${invocationNote}` : "";
@@ -253,7 +255,7 @@ lives -- an *outcome* of the plan you draft, not a mode setting:
  */
 export function artifactLinkGuidance({
   record = "notebook",
-  blocks = "loom-galaxy-page, loom-invocation, and loom-job YAML blocks",
+  blocks = `${NOTEBOOK_FENCE_WRITE_PREFIX}-galaxy-page, ${NOTEBOOK_FENCE_WRITE_PREFIX}-invocation, and ${NOTEBOOK_FENCE_WRITE_PREFIX}-job YAML blocks`,
   root,
 } = {}) {
   const base = root
@@ -402,11 +404,11 @@ export function operatingDiscipline({
   credentials = `If a tool call fails because a credential is missing or wrong:
 
 - **Galaxy** -- point the user at Orbit's Preferences -> Galaxy panel
-  (URL + API key fields), or the brain config at \`~/.loom/config.json\`
+  (URL + API key fields), or the brain config at \`~/.orbit/config.json\`
   for headless setups. The Galaxy tools pick the key up automatically
   when it is present; no chat paste needed.
 - **LLM providers** -- same path: Orbit's Preferences -> API Key, or
-  \`~/.loom/config.json\`'s \`llm.providers\` map (one entry per provider,
+  \`~/.orbit/config.json\`'s \`llm.providers\` map (one entry per provider,
   pointed to by \`llm.active\`). The renderer encrypts via Electron
   \`safeStorage\` if available.
 - **Other MCP credentials** -- point at the relevant config file or
@@ -844,7 +846,7 @@ workflow's template and returns a table: show it, and ask the user to type
 block afterwards revokes the approval. Once approved, submit exactly what
 was proposed with the usual Galaxy tools, and pass \`proposalId\` when you
 record the run.`,
-  recording = `**The harness records the run; you name the step it belongs to.** Loom
+  recording = `**The harness records the run; you name the step it belongs to.** Orbit
 writes the notebook block itself the moment a Galaxy submission answers,
 reading the id out of Galaxy's own response, so the poller is already
 watching the run before your next turn starts. What it cannot reliably know
@@ -852,9 +854,9 @@ is which plan step the run is for, so bind every run immediately after
 submission, inside an \`/execute\` or not: workflow runs with \`galaxy_invocation_record({
 invocationId, notebookAnchor, label })\` and tool runs with
 \`galaxy_job_record({ jobId, notebookAnchor, label })\`. The call sets the
-label and anchor on the block Loom already wrote, and writes a new block only
+label and anchor on the block Orbit already wrote, and writes a new block only
 if nothing in the notebook carries that id. Use the IDs returned by Galaxy.
-Runs Loom finds in the history that no block recorded are written with
+Runs Orbit finds in the history that no block recorded are written with
 \`notebook_anchor: unattributed\`; bind them the same way, and the user can run
 \`/reconcile\` to re-check the history against the notebook.`,
   waiting = `- If a prerequisite is still running and no other authorized work is ready,

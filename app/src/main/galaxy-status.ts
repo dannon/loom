@@ -1,4 +1,4 @@
-import type { LoomConfig } from "./config.js";
+import type { OrbitConfig } from "./config.js";
 
 export interface GalaxyStatus {
   /** True when the brain has a usable Galaxy connection (a URL *and* a key). */
@@ -15,7 +15,7 @@ export interface GalaxyStatus {
  * to -- deriving it from the masked config profile alone missed the env-driven
  * / auto-connect path (#290, follow-up to #284).
  */
-export function resolveGalaxyServerUrl(cfg: LoomConfig, env: NodeJS.ProcessEnv): string | null {
+export function resolveGalaxyServerUrl(cfg: OrbitConfig, env: NodeJS.ProcessEnv): string | null {
   const active = cfg.galaxy?.active;
   const profileUrl = active ? cfg.galaxy?.profiles?.[active]?.url : undefined;
   return profileUrl || env.GALAXY_URL || null;
@@ -24,7 +24,7 @@ export function resolveGalaxyServerUrl(cfg: LoomConfig, env: NodeJS.ProcessEnv):
 /**
  * Effective Galaxy connection state as the brain actually sees it. The brain
  * treats Galaxy as connected when `GALAXY_URL` and `GALAXY_API_KEY` are both
- * present in its env (extensions/loom/context.ts), and Orbit builds that env
+ * present in its env (extensions/orbit/context.ts), and Orbit builds that env
  * with the same precedence used here: the active config profile wins, else a
  * value exported into Orbit's own environment (agent.ts `buildSecretEnv`).
  *
@@ -37,9 +37,9 @@ export function resolveGalaxyServerUrl(cfg: LoomConfig, env: NodeJS.ProcessEnv):
  * `resolveGalaxyApiKey`) so this stays a pure, Electron-free unit.
  */
 export function resolveGalaxyStatus(
-  cfg: LoomConfig,
+  cfg: OrbitConfig,
   env: NodeJS.ProcessEnv,
-  resolveKey: (c: LoomConfig) => string | null,
+  resolveKey: (c: OrbitConfig) => string | null,
 ): GalaxyStatus {
   const url = resolveGalaxyServerUrl(cfg, env);
   const key = resolveKey(cfg) ?? env.GALAXY_API_KEY ?? null;

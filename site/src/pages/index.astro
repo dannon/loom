@@ -28,7 +28,7 @@ const features = [
   },
   {
     title: 'Git-tracked by default',
-    body: 'Loom git-inits the directory and auto-commits every notebook change — full undo history, timestamped reproducibility evidence, shareable via GitHub.',
+    body: 'Orbit git-inits the directory and auto-commits every notebook change — full undo history, timestamped reproducibility evidence, shareable via GitHub.',
     icon: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M8.5 6H14a2.5 2.5 0 0 1 2.5 2.5v0"/>',
   },
   {
@@ -112,12 +112,12 @@ const grounded = [
 
 const faqs = [
   {
-    q: 'Why two names — Orbit and Loom?',
-    a: `<strong>Loom is the brain; Orbit is the shell.</strong> Loom is the agent runtime — the system-prompt context, Galaxy routing and invocation tracking, the skills system, and the RPC contract — and you can run it straight from a terminal with <code>loom</code>. <strong>Orbit</strong> is the Electron desktop app that wraps that same brain in a chat + notebook + activity layout. Same brain, two ways to observe it; future shells (a Galaxy-embedded UI, a hosted mode) talk to it over the same RPC contract. The names trace the cosmology: the cosmic web weaves galaxies along filaments of dark matter — Loom weaves your research record the same way, and Orbit is the electron shell you observe it from.`,
+    q: 'Wasn\'t this called Loom?',
+    a: `Yes, until 0.9. <strong>The agent core used to be Loom and the desktop app was Orbit</strong>; two names for one product confused more people than it helped, so everything is Orbit now: the <code>orbit</code> CLI (<code>npm install -g @galaxyproject/orbit</code>), the Orbit desktop app, and the repo <code>galaxyproject/orbit</code>. Old links redirect, <code>@galaxyproject/loom</code> still installs and forwards to Orbit, and notebooks written by Loom keep working as they are.`,
   },
   {
     q: 'Do I need a Galaxy account to try it?',
-    a: `No — Loom is useful for local exploration and planning before you connect anything. But Galaxy is the primary execution path: add a Galaxy URL and API key and the agent surveys the workflow registry and tool catalog while drafting plans, then routes the heavy steps to Galaxy and tracks each invocation in the notebook.`,
+    a: `No — Orbit is useful for local exploration and planning before you connect anything. But Galaxy is the primary execution path: add a Galaxy URL and API key and the agent surveys the workflow registry and tool catalog while drafting plans, then routes the heavy steps to Galaxy and tracks each invocation in the notebook.`,
   },
   {
     q: 'Which AI models can I use?',
@@ -129,7 +129,7 @@ const faqs = [
   },
   {
     q: 'Does this replace the Galaxy interface?',
-    a: `No — it's an additive way to work with Galaxy, not a replacement, and that's the point. Galaxy stays the substrate: every heavy step runs as a real Galaxy job or workflow invocation, so the analysis itself lands in your Galaxy history — fully reproducible, re-runnable, and shareable like any other Galaxy work. On top of that, Loom keeps a durable record of the <em>reasoning</em> — the plans, parameter choices, and interpretation — in <code>notebook.md</code> as it happens. So <strong>both halves are transparent and reproducible</strong>: the conversation and decisions in the notebook <em>and</em> the actual analysis in Galaxy. You can always open Galaxy and re-run exactly what the agent did — it's still Galaxy.`,
+    a: `No — it's an additive way to work with Galaxy, not a replacement, and that's the point. Galaxy stays the substrate: every heavy step runs as a real Galaxy job or workflow invocation, so the analysis itself lands in your Galaxy history — fully reproducible, re-runnable, and shareable like any other Galaxy work. On top of that, Orbit keeps a durable record of the <em>reasoning</em> — the plans, parameter choices, and interpretation — in <code>notebook.md</code> as it happens. So <strong>both halves are transparent and reproducible</strong>: the conversation and decisions in the notebook <em>and</em> the actual analysis in Galaxy. You can always open Galaxy and re-run exactly what the agent did — it's still Galaxy.`,
   },
   {
     q: "Won't the AI just hallucinate tools and parameters?",
@@ -141,11 +141,11 @@ const faqs = [
   },
   {
     q: 'Can I drive Galaxy from Claude Desktop or another agent — not just Orbit?',
-    a: `Yes. <a href="${url('/docs/galaxy-mcp')}">Galaxy MCP</a> (<code>uvx galaxy-mcp</code>) is a standalone Model Context Protocol server — point any MCP-capable client (Claude Desktop and others) at a Galaxy instance and it can search and run tools, drive workflows, and manage histories. Orbit and Loom call the same Galaxy operations in-process, so they need no separate server.`,
+    a: `Yes. <a href="${url('/docs/galaxy-mcp')}">Galaxy MCP</a> (<code>uvx galaxy-mcp</code>) is a standalone Model Context Protocol server — point any MCP-capable client (Claude Desktop and others) at a Galaxy instance and it can search and run tools, drive workflows, and manage histories. The CLI and the desktop app call the same Galaxy operations in-process, so they need no separate server.`,
   },
   {
     q: 'Is it open source? What does it cost?',
-    a: `Loom, Orbit, and Galaxy MCP are open source (MIT). There's no license fee — you pay only for your own model usage (your API key) and whatever Galaxy compute your account uses.`,
+    a: `Orbit and Galaxy MCP are open source (MIT). There's no license fee — you pay only for your own model usage (your API key) and whatever Galaxy compute your account uses.`,
   },
   {
     q: 'What platforms does Orbit run on?',
@@ -153,7 +153,7 @@ const faqs = [
   },
   {
     q: 'Is it ready for everyday use?',
-    a: `Orbit and Loom are in active development — think capable beta. The core loop (plan, route to Galaxy, track invocations, record the notebook) works today; end-to-end validation against live Galaxy servers is ongoing. Galaxy credentials are stored in your OS keychain in Orbit, and local execution is confined to your working directory by default.`,
+    a: `Orbit is in active development — think capable beta. The core loop (plan, route to Galaxy, track invocations, record the notebook) works today; end-to-end validation against live Galaxy servers is ongoing. Galaxy credentials are stored in your OS keychain in Orbit, and local execution is confined to your working directory by default.`,
   },
 ];
 ---
@@ -165,7 +165,7 @@ const faqs = [
     <CosmicWeb />
     <div class="hero__wrap">
       <div class="hero__copy">
-        <span class="eyebrow reveal d1" style="color: var(--color-galaxy-gold)">Orbit · Loom · Galaxy MCP</span>
+        <span class="eyebrow reveal d1" style="color: var(--color-galaxy-gold)">Orbit · Orbit · Galaxy MCP</span>
         <h1 class="hero__title reveal d2">
           Agentic Science<br />
           <span class="hero__accent">with Galaxy</span>
@@ -183,7 +183,7 @@ const faqs = [
           <span class="hero__meta-sep">·</span>
           <span>macOS · Linux · Windows</span>
           <span class="hero__meta-sep">·</span>
-          <span><code>npm i -g @galaxyproject/loom</code></span>
+          <span><code>npm i -g @galaxyproject/orbit</code></span>
         </div>
       </div>
       <div class="hero__mock reveal d3">
@@ -198,8 +198,8 @@ const faqs = [
       <div class="pillar__icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><ellipse cx="12" cy="12" rx="10" ry="4.5" transform="rotate(30 12 12)"/></svg>
       </div>
-      <h3>Orbit &amp; Loom</h3>
-      <p>A co-scientist desktop app and CLI. Loom is the agent brain; Orbit is the electron shell you observe it from. Same brain, terminal or desktop.</p>
+      <h3>Orbit &amp; Orbit</h3>
+      <p>A co-scientist desktop app and CLI. Orbit is the agent brain; Orbit is the electron shell you observe it from. Same brain, terminal or desktop.</p>
       <a href={url('/') + '#orbit'} class="pillar__more">Explore Orbit →</a>
     </div>
     <div class="pillar card gold-hover">
@@ -245,7 +245,7 @@ const faqs = [
   <!-- ========================================================== ORBIT -->
   <section id="orbit" class="wrap section">
     <div class="section-head">
-      <span class="eyebrow" style="color: var(--color-galaxy-primary)">Orbit &amp; Loom</span>
+      <span class="eyebrow" style="color: var(--color-galaxy-primary)">Orbit &amp; Orbit</span>
       <h2>Your Galaxy co-scientist</h2>
       <p class="section-sub">
         Agentic bioinformatics that produces useful work — without the familiar failure mode
@@ -308,7 +308,7 @@ const faqs = [
       </div>
       <p class="method__foot">
         Galaxy histories remain the computational truth. <code>notebook.md</code> is the durable
-        working record — <strong>Galaxy is the substrate, and Loom is one live authoring shell.</strong>
+        working record — <strong>Galaxy is the substrate, and Orbit is one live authoring shell.</strong>
       </p>
     </div>
   </section>
@@ -384,16 +384,16 @@ const faqs = [
       <div class="install__grid">
         <div class="icard card">
           <h4><span class="icard__k">Desktop</span> Orbit app</h4>
-          <p>Native installers that bundle their own Node, uv, and Loom — macOS builds are signed &amp; notarized. Just download and open.</p>
+          <p>Native installers that bundle their own Node, uv, and Orbit — macOS builds are signed &amp; notarized. Just download and open.</p>
           <a href={links.releases} class="btn btn-gold icard__btn">Download for macOS · Linux · Windows</a>
           <span class="icard__hint">From the GitHub Releases page.</span>
         </div>
         <div class="icard card">
-          <h4><span class="icard__k">Terminal</span> Loom CLI</h4>
+          <h4><span class="icard__k">Terminal</span> Orbit CLI</h4>
           <p>The same brain, in your shell. Needs Node 22.19+.</p>
-          <pre class="icard__pre"><code>npm install -g @galaxyproject/loom
+          <pre class="icard__pre"><code>npm install -g @galaxyproject/orbit
 loom</code></pre>
-          <span class="icard__hint">Or run it once with <code>npx @galaxyproject/loom</code>.</span>
+          <span class="icard__hint">Or run it once with <code>npx @galaxyproject/orbit</code>.</span>
         </div>
         <div class="icard card">
           <h4><span class="icard__k">Any agent</span> Galaxy MCP</h4>

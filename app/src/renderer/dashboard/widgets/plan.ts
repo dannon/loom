@@ -24,7 +24,7 @@ type PlanConfig = {
   showCompleted: boolean;
 };
 
-const EMPTY = "No plan yet -- ask Loom to draft one.";
+const EMPTY = "No plan yet -- ask Orbit to draft one.";
 
 /**
  * Which earlier plans each panel has open, by panel id.

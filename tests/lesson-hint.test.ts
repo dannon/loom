@@ -11,17 +11,17 @@ import {
   MAX_HINTS_PER_TURN,
   recordSurfacing,
   registerLessonHint,
-} from "../extensions/loom/lesson-hint";
-import { registerSecretRedaction } from "../extensions/loom/secret-redaction";
-import { resetLessonStore } from "../extensions/loom/lessons/store";
-import { readCounters } from "../extensions/loom/lessons/counters";
-import type { Lesson } from "../extensions/loom/lessons/types";
-import { resetActivity } from "../extensions/loom/activity";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+} from "../extensions/orbit/lesson-hint";
+import { registerSecretRedaction } from "../extensions/orbit/secret-redaction";
+import { resetLessonStore } from "../extensions/orbit/lessons/store";
+import { readCounters } from "../extensions/orbit/lessons/counters";
+import type { Lesson } from "../extensions/orbit/lessons/types";
+import { resetActivity } from "../extensions/orbit/activity";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 import { lessonFile } from "./lessons-fixture";
-import { clip, collapse, firstSentence } from "../extensions/loom/lessons/text";
-import { LESSONS_WRAPPER_TAG, wrapLessons } from "../extensions/loom/lessons/wrapper";
-import { appendHintToContent, resultTextOf } from "../extensions/loom/lessons/pi-event-contract";
+import { clip, collapse, firstSentence } from "../extensions/orbit/lessons/text";
+import { LESSONS_WRAPPER_TAG, wrapLessons } from "../extensions/orbit/lessons/wrapper";
+import { appendHintToContent, resultTextOf } from "../extensions/orbit/lessons/pi-event-contract";
 import { withoutLessonHints } from "../shared/lesson-hint-marker.js";
 
 // The lesson switch is off by default; these suites are about what happens
@@ -476,7 +476,7 @@ describe("recordSurfacing + registerLessonHint", () => {
 
 describe("registration order", () => {
   // Comments stripped, so prose that names a register call can't satisfy the check.
-  const source = readFileSync("extensions/loom/index.ts", "utf-8")
+  const source = readFileSync("extensions/orbit/index.ts", "utf-8")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .split("\n")
     .filter((line) => !line.trim().startsWith("//"))

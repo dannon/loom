@@ -49,7 +49,7 @@ export const BRAIN_ENV_PASSTHROUGH = new Set([
 export const BRAIN_ENV_PREFIXES = ["LOOM_", "ORBIT_", "GALAXY_", "PI_"];
 
 // Built-in provider -> the env var its API key lives in. Mirrors the brain's
-// PROVIDER_ENV_MAP (bin/loom.js / app/src/main/agent.ts).
+// PROVIDER_ENV_MAP (bin/orbit.js / app/src/main/agent.ts).
 //
 // Don't try to derive these by uppercasing the provider name: google's key is
 // GEMINI_API_KEY, not GOOGLE_API_KEY, so a name-derived guess silently fails to
@@ -66,7 +66,7 @@ export const PROVIDER_KEY_VARS = {
 };
 
 // Must stay a superset of the brain's built-in provider->env-key map
-// (PROVIDER_ENV_MAP in bin/loom.js / app/src/main/agent.ts): a provider key
+// (PROVIDER_ENV_MAP in bin/orbit.js / app/src/main/agent.ts): a provider key
 // that isn't listed here is dropped at this boundary, so in remote mode -- where
 // creds are env-only -- the brain would fail its credential check and refuse to
 // launch. brain-env.test.ts guards the superset relationship. Derived from the

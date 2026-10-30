@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isAllowedSkillUrl, ALLOWED_SKILLS_PREFIX } from "../shared/loom-config.js";
+import { isAllowedSkillUrl, ALLOWED_SKILLS_PREFIX } from "../shared/orbit-config.js";
 
 describe("isAllowedSkillUrl", () => {
   it("accepts the seeded galaxy-skills URL", () => {

@@ -16,7 +16,7 @@ import type {
   ParameterFormPayload,
   ParameterGroup,
   ParameterSpec,
-} from "../../../../shared/loom-shell-contract.js";
+} from "../../../../shared/orbit-shell-contract.js";
 
 export type MessageRecord =
   | { role: "user"; text: string }

@@ -1,26 +1,26 @@
 import * as fs from "fs";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { GalaxyApiError } from "../extensions/loom/galaxy-api";
+import { GalaxyApiError } from "../extensions/orbit/galaxy-api";
 import {
   evaluateRegistryAttempts,
   renderRegistryProjection,
   resetRegistryEvaluator,
   type EvaluatorDeps,
-} from "../extensions/loom/registry-evaluator";
-import { findJobBlocks, renderJobYaml } from "../extensions/loom/galaxy-job-block";
+} from "../extensions/orbit/registry-evaluator";
+import { findJobBlocks, renderJobYaml } from "../extensions/orbit/galaxy-job-block";
 import {
   closeSessionRegistry,
   openSessionRegistry,
   recordActiveAtShutdown,
-} from "../extensions/loom/registry-runtime";
+} from "../extensions/orbit/registry-runtime";
 import {
   canonicalJson,
   sha256Hex,
   specRevision,
   type Attempt,
   type Registry,
-} from "../extensions/loom/registry-schema";
+} from "../extensions/orbit/registry-schema";
 import { eligibleAttempt, makeSpec, SERVER, tmpAnalysisDir } from "./registry-fixtures";
 
 let dir: string;

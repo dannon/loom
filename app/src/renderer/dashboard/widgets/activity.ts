@@ -2,7 +2,7 @@
  * Analysis log widget -- a readable running log of what the agent has done.
  *
  * The source is `activity.jsonl`, which the brain appends to from six places
- * (`extensions/loom/activity-hooks.ts`, `galaxy-poller.ts`, `evidence-gate.ts`,
+ * (`extensions/orbit/activity-hooks.ts`, `galaxy-poller.ts`, `evidence-gate.ts`,
  * `evidence-override-command.ts`, `exec-guard/gate.ts`, `state.ts`). Every row
  * is the same envelope, so the only thing this file really does is turn a
  * `{kind, payload}` into one sentence a biologist can read, and stay honest
@@ -496,7 +496,7 @@ function describe(
         event.source === "interactive" || event.source === "rpc" || event.source === ""
           ? "You asked"
           : event.source === "extension"
-            ? "Loom followed up"
+            ? "Orbit followed up"
             : "A prompt arrived";
       const text = strOf(p.text);
       return { tone: "info", text: text ? `${who}: ${text}` : `${who}, with no text recorded` };

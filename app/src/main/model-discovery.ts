@@ -1,10 +1,10 @@
-import type { LlmProviderConfig, LoomConfig } from "../../../shared/loom-config.js";
+import type { LlmProviderConfig, OrbitConfig } from "../../../shared/orbit-config.js";
 
 export type DiscoverModelsResult = { ok: true; models: string[] } | { ok: false; error: string };
 
 export interface DiscoverModelsDeps {
   /** Stored config, secrets included -- main-process side only. */
-  config: LoomConfig;
+  config: OrbitConfig;
   /** Plaintext key for a provider entry, or null when none is stored. */
   resolveKey: (entry: LlmProviderConfig) => string | null;
   /** Ask the endpoint what it serves. Mirrors validateApiKey's custom-endpoint branch. */

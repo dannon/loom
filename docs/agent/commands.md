@@ -2,18 +2,18 @@
 
 ## Tool reference
 
-Loom registers a small set of tools at the extension layer:
+Orbit registers a small set of tools at the extension layer:
 
-| Category                     | Tools                                                                                           |
-| ---------------------------- | ----------------------------------------------------------------------------------------------- |
-| GTN tutorials                | `gtn_search`, `gtn_fetch`                                                                       |
-| Skills                       | `skills_fetch` (SKILL.md / reference docs; `repo: "foundry"` reads bundled Foundry casts)       |
-| Saved Galaxy output          | `galaxy_read_output` (search/page an oversized Galaxy response held for this session)           |
-| Saved MCP output             | `mcp_read_output` (search/page an oversized brc-analytics MCP response pi already saved)        |
-| Galaxy invocations           | `galaxy_invocation_record`, `galaxy_invocation_check_all`, `galaxy_invocation_check_one`        |
-| Dashboard                    | `dashboard_read`, `dashboard_update`                                                            |
-| Multi-agent (experimental)   | `team_dispatch` (gated by `LOOM_TEAM_DISPATCH=1`)                                               |
-| Session index (experimental) | `chat_search`, `chat_session_context`, `chat_find_tool_calls` (gated by `LOOM_SESSION_INDEX=1`) |
+| Category                     | Tools                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------ |
+| GTN tutorials                | `gtn_search`, `gtn_fetch`                                                                        |
+| Skills                       | `skills_fetch` (SKILL.md / reference docs; `repo: "foundry"` reads bundled Foundry casts)        |
+| Saved Galaxy output          | `galaxy_read_output` (search/page an oversized Galaxy response held for this session)            |
+| Saved MCP output             | `mcp_read_output` (search/page an oversized brc-analytics MCP response pi already saved)         |
+| Galaxy invocations           | `galaxy_invocation_record`, `galaxy_invocation_check_all`, `galaxy_invocation_check_one`         |
+| Dashboard                    | `dashboard_read`, `dashboard_update`                                                             |
+| Multi-agent (experimental)   | `team_dispatch` (gated by `ORBIT_TEAM_DISPATCH=1`)                                               |
+| Session index (experimental) | `chat_search`, `chat_session_context`, `chat_find_tool_calls` (gated by `ORBIT_SESSION_INDEX=1`) |
 
 The Galaxy tools run in-process through galaxy-ops and are always registered,
 under the operations' own names: `search_tools_by_name`, `run_tool`,
@@ -41,7 +41,7 @@ inspection is capped at 32 MB per file. Either kind can be gone: repeat only
 a narrower read-only lookup, never a submission just to recover its output.
 
 For installed tools, use `search_tools_by_name` (name, ID, description)
-and inspect candidate schemas. Loom blocks the catalog-wide
+and inspect candidate schemas. Orbit blocks the catalog-wide
 `search_tools_by_keywords` schema fan-out before dispatch. Input-datatype-only
 matches still require schema inspection; a name search does not prove absence.
 Timeouts receive agent-facing recovery guidance. Identical timed-out reads are
@@ -56,7 +56,7 @@ without model calls. As a fallback, repeated metadata checks of an unfinished
 resource wait in the harness for two minutes; Stop cancels the
 wait, and a new user request may ask for a fresh check immediately. Terminal
 outputs remain available for immediate verification. While an agent turn is
-active, Loom emits a factual progress notification about once a minute if the
+active, Orbit emits a factual progress notification about once a minute if the
 assistant has been silent. Orbit displays these in the main chat; they do not
 consume model tokens. These updates do not imply that scientific results passed
 verification or that a background LLM worker has been started.
@@ -71,24 +71,24 @@ Saving a large response is normal output handling, not a model context failure.
 
 ## Slash commands
 
-| Command                   | What it does                                                                                                                                      |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/notebook`               | View current notebook content                                                                                                                     |
-| `/status`                 | Galaxy connection + notebook path summary                                                                                                         |
-| `/instructions`           | Show the `LOOM.md` standing instructions loaded this session; `init` / `init project` creates one                                                 |
-| `/connect [name]`         | Connect to Galaxy (prompts for credentials, or switches profile)                                                                                  |
-| `/profiles`               | List saved Galaxy server profiles                                                                                                                 |
-| `/execute` (alias `/run`) | Tell the agent to run the next pending step in the latest plan section                                                                            |
-| `/reconcile`              | Check the bound Galaxy history against the notebook: record runs no block claims as unattributed, and fetch details for finished runs now         |
-| `/override <step> <why>`  | User-only. Clear the evidence gate for one plan step, with the reason recorded (in the registry when the registry holds the step)                 |
-| `/pending`                | List run proposals waiting for approval, and why each is waiting                                                                                  |
-| `/approve <proposal-id>`  | User-only. Freeze a `loom_propose` proposal against Galaxy's template and record the approval                                                     |
-| `/revoke <proposal-id>`   | User-only. Withdraw an approval                                                                                                                   |
-| `/lessons [sub]`          | User-only. The switch for the whole lesson loop: `status`, `on` (asks once), `off`. Off by default; off means no lesson surfaces and no reporting |
-| `/observations [sub]`     | User-only. Show or change Galaxy-failure reporting: `status`, `mode <off\|ask\|auto>`, `sent`, `retract <id>`                                     |
-| `/observe [note]`         | User-only. Report something that went wrong, as one generic line. The payload is shown before it is sent                                          |
-| `/dashboard [sub]`        | Show the dashboard layout; `preset <name>`, `reset`, `undo` change it. User-only                                                                  |
-| `/compact [instructions]` | Compact the conversation to reclaim context; optional summary steer (Orbit defaults to a notebook-aware summary; terminal CLI uses pi's built-in) |
+| Command                   | What it does                                                                                                                                          |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/notebook`               | View current notebook content                                                                                                                         |
+| `/status`                 | Galaxy connection + notebook path summary                                                                                                             |
+| `/instructions`           | Show the `ORBIT.md` standing instructions loaded this session (a `LOOM.md` from before the rename is still read); `init` / `init project` creates one |
+| `/connect [name]`         | Connect to Galaxy (prompts for credentials, or switches profile)                                                                                      |
+| `/profiles`               | List saved Galaxy server profiles                                                                                                                     |
+| `/execute` (alias `/run`) | Tell the agent to run the next pending step in the latest plan section                                                                                |
+| `/reconcile`              | Check the bound Galaxy history against the notebook: record runs no block claims as unattributed, and fetch details for finished runs now             |
+| `/override <step> <why>`  | User-only. Clear the evidence gate for one plan step, with the reason recorded (in the registry when the registry holds the step)                     |
+| `/pending`                | List run proposals waiting for approval, and why each is waiting                                                                                      |
+| `/approve <proposal-id>`  | User-only. Freeze a `loom_propose` proposal against Galaxy's template and record the approval                                                         |
+| `/revoke <proposal-id>`   | User-only. Withdraw an approval                                                                                                                       |
+| `/lessons [sub]`          | User-only. The switch for the whole lesson loop: `status`, `on` (asks once), `off`. Off by default; off means no lesson surfaces and no reporting     |
+| `/observations [sub]`     | User-only. Show or change Galaxy-failure reporting: `status`, `mode <off\|ask\|auto>`, `sent`, `retract <id>`                                         |
+| `/observe [note]`         | User-only. Report something that went wrong, as one generic line. The payload is shown before it is sent                                              |
+| `/dashboard [sub]`        | Show the dashboard layout; `preset <name>`, `reset`, `undo` change it. User-only                                                                      |
+| `/compact [instructions]` | Compact the conversation to reclaim context; optional summary steer (Orbit defaults to a notebook-aware summary; terminal CLI uses pi's built-in)     |
 
 `/override` is the user's, not yours. Bare `/override` lists the plan
 steps the evidence gate is currently holding and the anchor to address

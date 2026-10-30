@@ -19,20 +19,20 @@ import {
   renderInvocationYaml,
   upsertInvocationBlock,
   type InvocationYaml,
-} from "../extensions/loom/notebook-writer";
+} from "../extensions/orbit/notebook-writer";
 import {
   findJobBlocks,
   renderJobYaml,
   upsertJobBlock,
   type JobYaml,
-} from "../extensions/loom/galaxy-job-block";
-import { UnrenderableBlockValue } from "../extensions/loom/harness-block-fields";
+} from "../extensions/orbit/galaxy-job-block";
+import { UnrenderableBlockValue } from "../extensions/orbit/harness-block-fields";
 import {
   findUdtBlocks,
   renderUdtYaml,
   upsertUdtBlock,
   type UdtYaml,
-} from "../extensions/loom/galaxy-udt-block";
+} from "../extensions/orbit/galaxy-udt-block";
 import { parseInvocationBlocks } from "../app/src/renderer/galaxy-invocations.js";
 
 const INVOCATION: InvocationYaml = {
@@ -263,7 +263,7 @@ describe("a fence that never closes is not a block", () => {
     const once = upsertInvocationBlock(content, { ...INVOCATION, label: "first" });
     expect(once).toContain("KEEP ME");
     expect(once.indexOf("label: first")).toBeLessThan(
-      once.indexOf("```loom-invocation\ninvocation_id: aa11bb22cc33dd44"),
+      once.indexOf("```orbit-invocation\ninvocation_id: aa11bb22cc33dd44"),
     );
 
     // Second write finds the clean copy and rewrites it in place.

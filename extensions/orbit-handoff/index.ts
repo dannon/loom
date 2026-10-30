@@ -1,11 +1,11 @@
 /**
- * Orbit hand-off — terminal-CLI shell glue, deliberately NOT part of the loom
- * brain.
+ * Orbit hand-off — terminal-CLI shell glue, deliberately NOT part of the Orbit
+ * core.
  *
  * All Orbit-specific knowledge (install paths, bundle layout, the `--cwd`
- * launch protocol, the release URL) lives here so `extensions/loom/` stays
- * shell-neutral. bin/loom.js loads this extension alongside the brain; because
- * the same bin/loom.js also runs as Orbit's embedded brain, the handler no-ops
+ * launch protocol, the release URL) lives here so `extensions/orbit/` stays
+ * shell-neutral. bin/orbit.js loads this extension alongside the brain; because
+ * the same bin/orbit.js also runs as Orbit's embedded brain, the handler no-ops
  * when it's already inside Orbit rather than handing the session off to itself.
  */
 
@@ -13,7 +13,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { findOrbit, launchOrbit } from "./orbit-launcher";
 import { isDesktopShell } from "../../shared/orbit-env.js";
 
-const RELEASE_URL = "https://github.com/galaxyproject/loom/releases";
+const RELEASE_URL = "https://github.com/galaxyproject/orbit/releases";
 
 export async function handleOrbitHandoff(
   _args: string | undefined,
@@ -30,8 +30,8 @@ export async function handleOrbitHandoff(
   if (!orbitPath) {
     ctx.ui.notify(
       `Orbit is not installed. Grab a release for your platform from ${RELEASE_URL}, ` +
-        `then run /orbit again. (If Orbit is installed in a non-standard location, ` +
-        `set ORBIT_BIN to the binary path.)`,
+        `then run /desktop again. (If Orbit is installed in a non-standard location, ` +
+        `set ORBIT_DESKTOP_BIN to the binary path.)`,
       "warning",
     );
     return;
@@ -60,8 +60,14 @@ export async function handleOrbitHandoff(
 }
 
 export default function orbitHandoffExtension(pi: ExtensionAPI): void {
-  pi.registerCommand("orbit", {
+  pi.registerCommand("desktop", {
     description: "Hand off this session to the Orbit desktop app",
+    handler: handleOrbitHandoff,
+  });
+  // The command was /orbit while the CLI was called Loom. Kept as an alias so
+  // muscle memory and old docs keep working; drop it in the sunset release.
+  pi.registerCommand("orbit", {
+    description: "Alias of /desktop",
     handler: handleOrbitHandoff,
   });
 }

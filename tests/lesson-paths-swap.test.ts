@@ -20,7 +20,7 @@ vi.mock("fs", async (importOriginal) => {
 
 const fs = await vi.importActual<typeof import("fs")>("fs");
 const { lessonFilePath, lessonsDir, writeNoClobber } =
-  await import("../extensions/loom/lessons/paths");
+  await import("../extensions/orbit/lessons/paths");
 
 let tmp: string;
 

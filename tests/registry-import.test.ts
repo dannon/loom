@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { applyImportRule } from "../extensions/loom/registry-import";
-import type { Registry } from "../extensions/loom/registry-schema";
-import { ulid } from "../extensions/loom/ulid";
+import { applyImportRule } from "../extensions/orbit/registry-import";
+import type { Registry } from "../extensions/orbit/registry-schema";
+import { ulid } from "../extensions/orbit/ulid";
 import { eligibleAttempt, OTHER_SERVER, SERVER, T0, userException } from "./registry-fixtures";
 
 function registryOf(...attempts: ReturnType<typeof eligibleAttempt>[]): Registry {

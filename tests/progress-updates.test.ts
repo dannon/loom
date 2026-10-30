@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { registerProgressUpdates, PROGRESS_INTERVAL_MS } from "../extensions/loom/progress-updates";
+import {
+  registerProgressUpdates,
+  PROGRESS_INTERVAL_MS,
+} from "../extensions/orbit/progress-updates";
 import { GALAXY } from "./galaxy-family-fixture";
 
 function harness(hasUI = true) {

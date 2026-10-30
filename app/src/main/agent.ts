@@ -80,21 +80,21 @@ function buildSecretEnv(): Record<string, string> {
   return env;
 }
 
-// Resolve the loom entry point. In dev (`electron-forge start`), Loom lives at
+// Resolve the Orbit core entry point. In dev (`electron-forge start`), Orbit lives at
 // the repo root next to app/. In packaged builds, the prePackage hook stages
-// Loom into Resources/loom/ via electron-packager's extraResource so the brain
+// the core into Resources/orbit/ via electron-packager's extraResource so the brain
 // runs out of an installed bundle, not a path that walks up out of the .app.
 // `app` is undefined when this module is imported outside an Electron runtime
 // (e.g. vitest), so optional-chain through `app.isPackaged` to fall back to dev.
-function resolveLoomBin(): string {
+function resolveCoreBin(): string {
   if (app?.isPackaged) {
-    return path.join(process.resourcesPath, "loom", "bin", "loom.js");
+    return path.join(process.resourcesPath, "orbit", "bin", "orbit.js");
   }
-  return path.resolve(__dirname, "../../../bin/loom.js");
+  return path.resolve(__dirname, "../../../bin/orbit.js");
 }
 
 // Resolve the Node binary the brain runs under. Dev assumes Node 22.19+ on PATH.
-// Packaged Orbit ships its own Node next to Loom (Resources/node/) so users
+// Packaged Orbit ships its own Node next to the core (Resources/node/) so users
 // don't need to have Node installed; this also keeps native module ABI in sync
 // with whatever Node ran `npm ci` during prePackage staging.
 function resolveNodeBin(): string {
@@ -105,7 +105,7 @@ function resolveNodeBin(): string {
   return "node";
 }
 
-const LOOM_BIN = resolveLoomBin();
+const CORE_BIN = resolveCoreBin();
 const NODE_BIN = resolveNodeBin();
 
 export type AgentStatus = "running" | "stopped" | "error";
@@ -128,7 +128,7 @@ function buildBrainEnv(fresh: boolean): NodeJS.ProcessEnv {
   writeEnv(env, "SHELL_KIND", DESKTOP_SHELL_KIND);
   // The desktop always has a local *file* surface, so exec-guard stays on
   // everywhere. LOOM_LOCAL_EXEC is the shell->brain capability signal
-  // (extensions/loom/local-exec.ts); set it authoritatively so an ambient
+  // (extensions/orbit/local-exec.ts); set it authoritatively so an ambient
   // LOOM_LOCAL_EXEC=off in the launching environment can't silently disable the
   // guard. Windows remote-only does NOT flip this: it keeps the file write-jail
   // and instead removes the bash *tool* (see noLocalShellSpawnExtras / the args
@@ -264,7 +264,7 @@ export class AgentManager {
    * Fails closed when config.json exists but won't parse: loadConfig() silently
    * returns {} on a read/parse error, so writing that back would wipe stored
    * credentials. Refuse rather than clobber -- a genuinely absent file is still
-   * fine to create. Mirrors setTesterId() in extensions/loom/tester-id-command.ts.
+   * fine to create. Mirrors setTesterId() in extensions/orbit/tester-id-command.ts.
    */
   private persistCwd(cwd: string): void {
     try {
@@ -273,7 +273,7 @@ export class AgentManager {
         try {
           JSON.parse(fs.readFileSync(configPath, "utf-8"));
         } catch {
-          log("skipped persisting cwd -- ~/.loom/config.json is unreadable");
+          log("skipped persisting cwd -- ~/.orbit/config.json is unreadable");
           return;
         }
       }
@@ -298,7 +298,7 @@ export class AgentManager {
   /**
    * The session file /chat should replay. Returns the pinned file when set
    * (--continue path), otherwise lazily adopts via cwd/session.jsonl -- the
-   * symlink Loom's session-lifecycle creates on session_start. Returns null
+   * symlink Orbit's session-lifecycle creates on session_start. Returns null
    * if neither applies; /chat then sends an empty history rather than
    * surfacing a stale prior-run session.
    */
@@ -349,7 +349,7 @@ export class AgentManager {
       !this.nextStartSkipContinue &&
       !this.nextStartIsFresh &&
       (this.hasStartedBefore || this.hasExistingSession());
-    const args = [LOOM_BIN, "--mode", "rpc"];
+    const args = [CORE_BIN, "--mode", "rpc"];
     if (wantsContinue) {
       args.push("--continue");
     }
@@ -377,7 +377,7 @@ export class AgentManager {
     this.nextStartIsFresh = false;
     log("starting agent", {
       node: NODE_BIN,
-      bin: LOOM_BIN,
+      bin: CORE_BIN,
       cwd: this.cwd,
       continue: args.includes("--continue"),
       fresh,

@@ -68,7 +68,7 @@ jobs:
         run: npm test
 
       # Packs the tarball and installs it WITHOUT the lockfile, so the runtime
-      # deps resolve the way a user's `npm i -g @galaxyproject/loom` resolves
+      # deps resolve the way a user's `npm i -g @galaxyproject/orbit` resolves
       # them rather than the way our pinned tree does. That gap is not
       # theoretical: #395 was a published dependency adding an `exports` map,
       # which every lockfile-pinned check here sailed past and every fresh

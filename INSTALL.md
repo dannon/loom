@@ -1,7 +1,7 @@
 # Installing Orbit
 
 Installers ship from the
-[Releases page](https://github.com/galaxyproject/loom/releases) — pick the
+[Releases page](https://github.com/galaxyproject/orbit/releases) — pick the
 latest release and download the artifact for your machine.
 
 The macOS builds are Developer ID signed and notarized by Apple, so they open
@@ -50,7 +50,7 @@ Drag **Orbit** from **Applications** to the **Trash**. Per-user state
 lives under:
 
 - `~/.orbit/` — window position, version-check cache.
-- `~/.loom/` — agent configuration, API keys (encrypted via macOS
+- `~/.orbit/` — agent configuration, API keys (encrypted via macOS
   Keychain), session history.
 
 Remove those directories to fully reset the app.
@@ -59,58 +59,64 @@ Remove those directories to fully reset the app.
 
 Two package formats are published per release:
 
-| File                            | When to pick it                                          |
-| ------------------------------- | -------------------------------------------------------- |
-| `orbit_<version>_amd64.deb`     | Debian, Ubuntu, Linux Mint, Pop!\_OS, and derivatives    |
-| `orbit-<version>.x86_64.rpm`    | Fedora, RHEL, CentOS, openSUSE                           |
-| `Orbit-linux-x64-<version>.zip` | Any distro — extract and run the `orbit` binary directly |
+| File                                 | When to pick it                                                  |
+| ------------------------------------ | ---------------------------------------------------------------- |
+| `orbit-desktop_<version>_amd64.deb`  | Debian, Ubuntu, Linux Mint, Pop!\_OS, and derivatives            |
+| `orbit-desktop-<version>.x86_64.rpm` | Fedora, RHEL, CentOS, openSUSE                                   |
+| `Orbit-linux-x64-<version>.zip`      | Any distro — extract and run the `orbit-desktop` binary directly |
 
 ### Install (.deb — Debian/Ubuntu)
 
 ```bash
-sudo dpkg -i orbit_<version>_amd64.deb
+sudo dpkg -i orbit-desktop_<version>_amd64.deb
 sudo apt-get install -f   # resolves any missing dependencies
-orbit                     # launch from terminal, or find it in your app launcher
+orbit-desktop             # launch from terminal, or find it in your app launcher
 ```
 
 Not showing up in your application menu? Some desktop environments don't
 refresh their app database right after a `dpkg` install, so the Orbit icon can
 be missing even though the install worked. Run `sudo update-desktop-database
 /usr/share/applications` (or just log out and back in) and it'll appear. Either
-way, `orbit` from the terminal always launches it.
+way, `orbit-desktop` from the terminal always launches it.
+
+Upgrading from 0.8 or older? That package was called `orbit`, and the Linux
+executable has been renamed so it stops shadowing the `orbit` CLI from npm.
+Install `orbit-desktop`, then remove the old package: `sudo apt remove orbit`.
 
 ### Install (.rpm — Fedora/RHEL)
 
 ```bash
-sudo rpm -i orbit-<version>.x86_64.rpm
-orbit
+sudo rpm -U orbit-desktop-<version>.x86_64.rpm
+orbit-desktop
+# Upgrading from 0.8 or older: the old package was called orbit.
+sudo rpm -e orbit
 ```
 
 ### Install (.zip — any distro)
 
 ```bash
 unzip Orbit-linux-x64-<version>.zip -d ~/orbit
-~/orbit/orbit
+~/orbit/orbit-desktop
 ```
 
 ### Uninstall
 
 ```bash
-sudo dpkg -r orbit          # Debian/Ubuntu
-sudo rpm -e orbit           # Fedora/RHEL
+sudo dpkg -r orbit-desktop  # Debian/Ubuntu
+sudo rpm -e orbit-desktop   # Fedora/RHEL
 ```
 
-Per-user state lives under `~/.orbit/` and `~/.loom/` — remove those to fully reset.
+Per-user state lives under `~/.orbit/` (plus `~/.loom/`, left behind by releases before 0.9) — remove those to fully reset.
 
 ---
 
 ## Windows (portable, remote-only)
 
 Download `Orbit-win32-x64-<version>.zip` from the
-[Releases page](https://github.com/galaxyproject/loom/releases), unzip it
+[Releases page](https://github.com/galaxyproject/orbit/releases), unzip it
 anywhere you like, and run `orbit.exe` from the extracted folder. There is no
 installer: the Squirrel installer trips Win32's 260-character path limit while
-staging the bundled Loom CLI, which ships as real files rather than inside an
+staging the bundled Orbit CLI, which ships as real files rather than inside an
 asar because it runs as a subprocess. Until that is solved, the portable `.zip`
 is the Windows build.
 
@@ -164,9 +170,9 @@ Open your WSL2 terminal and run:
 
 ```bash
 # Download the .deb from the Releases page, then:
-sudo dpkg -i orbit_<version>_amd64.deb
+sudo dpkg -i orbit-desktop_<version>_amd64.deb
 sudo apt-get install -f
-orbit
+orbit-desktop
 ```
 
 On most setups the Orbit window opens on your Windows desktop via WSLg with no
@@ -177,7 +183,7 @@ below.
 ### If the window doesn't appear
 
 On a fresh or minimal WSL2 distro, WSLg's GUI session sometimes fails to come
-up on the first launch: `orbit` starts with no error in the terminal, but no
+up on the first launch: `orbit-desktop` starts with no error in the terminal, but no
 window appears and the taskbar entry shows a `[WARN COPY MODE] ...` title. A
 full WSL restart is what reliably clears it. Here's the recovery, in order:
 
@@ -197,13 +203,13 @@ full WSL restart is what reliably clears it. Here's the recovery, in order:
    This stops **all** running WSL2 distros and the WSL VM, so save work in any
    other WSL sessions first.
 
-3. Reopen your WSL2 terminal and run `orbit` again -- the window should now
+3. Reopen your WSL2 terminal and run `orbit-desktop` again -- the window should now
    appear. (Launching `gedit` is a quick way to confirm WSLg itself is back.)
 
 ### Notes
 
 - File paths inside WSL2 are at `/mnt/c/...` from within the terminal. Point Orbit's working directory at a path inside WSL2 (`~/analyses/`) for best performance -- cross-filesystem I/O over `/mnt/c` is slower.
-- Keychain-based API key encryption is not available in WSL2 (no `safeStorage`). API keys are stored in plaintext in `~/.loom/config.json` inside the WSL2 filesystem. Use filesystem permissions (`chmod 600`) to restrict access.
+- Keychain-based API key encryption is not available in WSL2 (no `safeStorage`). API keys are stored in plaintext in `~/.orbit/config.json` inside the WSL2 filesystem. Use filesystem permissions (`chmod 600`) to restrict access.
 
 ---
 
@@ -211,6 +217,6 @@ full WSL restart is what reliably clears it. Here's the recovery, in order:
 
 If the DMG won't open, the app crashes on launch, or Gatekeeper behaves
 differently than described, please file an issue at
-[github.com/galaxyproject/loom/issues](https://github.com/galaxyproject/loom/issues)
+[github.com/galaxyproject/orbit/issues](https://github.com/galaxyproject/orbit/issues)
 with: macOS version, Mac model (Apple menu → About This Mac), the exact
 filename downloaded, and any error text.

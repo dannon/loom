@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { mirrorToLegacyEnv } from "../shared/orbit-env.js";
 import { buildBrainEnv } from "../shared/brain-env.js";
 import { ACTIVE_LLM_API_KEY_ENV } from "../shared/custom-provider.js";
-import { collectSecretValues } from "../extensions/loom/secret-redaction";
+import { collectSecretValues } from "../extensions/orbit/secret-redaction";
 
 // pi looks the custom-provider key up by the one name models.json gives it,
 // and the web BYO-key check does the same, so a key supplied only under the
@@ -81,7 +81,7 @@ describe("redaction", () => {
 
 describe("entry points", () => {
   const REPO = resolve(__dirname, "..");
-  it.each(["web/server.ts", "bin/loom.js"])("%s mirrors the key at startup", (f) => {
+  it.each(["web/server.ts", "bin/orbit.js"])("%s mirrors the key at startup", (f) => {
     const src = readFileSync(resolve(REPO, f), "utf-8");
     expect(src).toMatch(/mirrorToLegacyEnv\(process\.env, "ACTIVE_LLM_API_KEY"\)/);
   });

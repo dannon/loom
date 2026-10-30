@@ -2,15 +2,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { bareFamily } from "../shared/galaxy-tool-family.js";
-import { createGalaxyOpsToolSource } from "../extensions/loom/galaxy-ops-tools";
-import { parseSubmission, resolveResultPayload } from "../extensions/loom/galaxy-submission";
-import { submissionToolName } from "../extensions/loom/galaxy-submission-capture";
-import { renderGalaxyResult, GALAXY_SPILL_BYTES } from "../extensions/loom/galaxy-tool-wrap";
+import { createGalaxyOpsToolSource } from "../extensions/orbit/galaxy-ops-tools";
+import { parseSubmission, resolveResultPayload } from "../extensions/orbit/galaxy-submission";
+import { submissionToolName } from "../extensions/orbit/galaxy-submission-capture";
+import { renderGalaxyResult, GALAXY_SPILL_BYTES } from "../extensions/orbit/galaxy-tool-wrap";
 import {
   createMemoryOutputStore,
   galaxyOutputStore,
   setGalaxyOutputStore,
-} from "../extensions/loom/galaxy-output-store";
+} from "../extensions/orbit/galaxy-output-store";
 
 /**
  * Real tool results from the in-process galaxy-ops source, captured against

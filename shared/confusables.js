@@ -14,7 +14,7 @@
  * earendil-works/pi#638 (case-mismatch case): "this is not something pi
  * will 'normalize', and the suggested fix is just plain wrong." So
  * landing this upstream is unlikely. Meanwhile we can't intercept
- * before pi-agent-core's find() from inside Loom either -- the
+ * before pi-agent-core's find() from inside Orbit either -- the
  * message_end extension event is queued async by agent-session.js and
  * races the synchronous tool dispatch.
  *

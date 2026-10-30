@@ -17,15 +17,15 @@ vi.mock("os", async (importOriginal) => {
   return { ...actual, release: () => osState.release || actual.release() };
 });
 
-vi.mock("../extensions/loom/config.js", () => ({
+vi.mock("../extensions/orbit/config.js", () => ({
   loadConfig: () => ({
     llm: { active: "anthropic", providers: { anthropic: { model: "claude-opus-5" } } },
   }),
   getConfigDir: () => "/tmp/loom-test",
 }));
-vi.mock("../extensions/loom/profiles.js", () => ({ loadProfiles: () => ({ active: null }) }));
+vi.mock("../extensions/orbit/profiles.js", () => ({ loadProfiles: () => ({ active: null }) }));
 
-const { buildBrainSysinfo } = await import("../extensions/loom/feedback.js");
+const { buildBrainSysinfo } = await import("../extensions/orbit/feedback.js");
 
 /** process.platform is read-only; swap the descriptor and always restore it. */
 function withPlatform(platform: string, fn: () => void): void {

@@ -15,8 +15,8 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { convertMcpResult } from "../node_modules/@earendil-works/pi-coding-agent/dist/extensions/mcp/tools.js";
-import { registerMcpOutputRecovery } from "../extensions/loom/mcp-output";
-import { registerGalaxyRecovery } from "../extensions/loom/galaxy-recovery";
+import { registerMcpOutputRecovery } from "../extensions/orbit/mcp-output";
+import { registerGalaxyRecovery } from "../extensions/orbit/galaxy-recovery";
 import { GALAXY } from "./galaxy-family-fixture";
 
 // pi's real MCP truncation for brc-analytics, Galaxy recovery for the in-process tools, real Pi

@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect } from "vitest";
-import { isLocalExecDisabled, isLocalShellDisabled } from "../extensions/loom/local-exec.js";
+import { isLocalExecDisabled, isLocalShellDisabled } from "../extensions/orbit/local-exec.js";
 import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 
 describe("isLocalExecDisabled", () => {

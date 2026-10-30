@@ -14,7 +14,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { registerSraImportGate } from "../extensions/loom/sra-import-gate";
+import { registerSraImportGate } from "../extensions/orbit/sra-import-gate";
 import { GALAXY } from "./galaxy-family-fixture";
 
 // Real Pi event ordering matters: all sibling calls must be visible to the

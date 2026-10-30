@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { submitFeedback } from "../extensions/loom/feedback.js";
+import { submitFeedback } from "../extensions/orbit/feedback.js";
 
 describe("brain submitFeedback", () => {
   beforeEach(() => vi.restoreAllMocks());

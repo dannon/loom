@@ -4,12 +4,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { renderInvocationYaml, type InvocationYaml } from "../extensions/loom/notebook-writer";
-import { renderJobYaml, type JobYaml } from "../extensions/loom/galaxy-job-block";
+import { renderInvocationYaml, type InvocationYaml } from "../extensions/orbit/notebook-writer";
+import { renderJobYaml, type JobYaml } from "../extensions/orbit/galaxy-job-block";
 import {
   renderGalaxyPageBlock,
   type GalaxyPageBindingYaml,
-} from "../extensions/loom/galaxy-page-binding";
+} from "../extensions/orbit/galaxy-page-binding";
 import { parseInvocationBlocks } from "../app/src/renderer/galaxy-invocations.js";
 import { parseGalaxyHistoryBindings } from "../app/src/renderer/galaxy-history.js";
 import { parseJobBlocks } from "../app/src/renderer/dashboard/data-sources.js";

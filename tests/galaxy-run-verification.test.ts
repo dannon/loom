@@ -8,7 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GalaxyApiError, sameGalaxyServer, verifyGalaxyRun } from "../extensions/loom/galaxy-api";
+import { GalaxyApiError, sameGalaxyServer, verifyGalaxyRun } from "../extensions/orbit/galaxy-api";
 
 /** Galaxy's encoded ids are hex; the verifier refuses anything else outright. */
 const INV_ID = "f2db41e1fa331b3e";

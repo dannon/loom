@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Loom / Orbit WSL2 setup script
+# Orbit WSL2 setup script
 # Run this INSIDE an Ubuntu WSL2 instance on Windows.
 #
 # Prerequisites (run in PowerShell as Administrator first):
@@ -7,17 +7,17 @@
 #   # Reboot, then open Ubuntu from Start menu and set up your user.
 #
 # Then inside Ubuntu/WSL2:
-#   curl -fsSL https://raw.githubusercontent.com/galaxyproject/loom/main/scripts/setup-wsl.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/galaxyproject/orbit/main/scripts/setup-wsl.sh | bash
 
 set -euo pipefail
 
-echo "=== Loom / Orbit WSL2 Setup ==="
+echo "=== Orbit WSL2 Setup ==="
 echo ""
 
 # ── Check we're in WSL2 ──────────────────────────────────────────────────────
 if ! grep -qi microsoft /proc/version 2>/dev/null; then
   echo "WARNING: This doesn't look like WSL2. Script is designed for WSL2 on Windows."
-  echo "On native Linux, just run: cd loom/app && npm install && npm start"
+  echo "On native Linux, just run: cd orbit/app && npm install && npm start"
   read -rp "Continue anyway? [y/N] " yn
   [[ "$yn" =~ ^[Yy] ]] || exit 0
 fi
@@ -59,30 +59,30 @@ else
   echo "uv/uvx found."
 fi
 
-# ── Clone Loom ───────────────────────────────────────────────────────────────
-LOOM_DIR="$HOME/loom"
-if [ ! -d "$LOOM_DIR" ]; then
-  echo "Cloning loom..."
-  git clone https://github.com/galaxyproject/loom.git "$LOOM_DIR"
+# ── Clone Orbit ───────────────────────────────────────────────────────────────
+ORBIT_DIR="$HOME/orbit"
+if [ ! -d "$ORBIT_DIR" ]; then
+  echo "Cloning orbit..."
+  git clone https://github.com/galaxyproject/orbit.git "$ORBIT_DIR"
 else
-  echo "loom already cloned at $LOOM_DIR"
+  echo "orbit already cloned at $ORBIT_DIR"
 fi
 
 # ── Install npm dependencies ─────────────────────────────────────────────────
 echo "Installing npm dependencies..."
-cd "$LOOM_DIR"
+cd "$ORBIT_DIR"
 npm install
-cd "$LOOM_DIR/app"
+cd "$ORBIT_DIR/app"
 npm install
 
 echo ""
 echo "=== Setup complete ==="
 echo ""
 echo "To start Orbit (the Electron shell):"
-echo "  cd ~/loom/app && npm start"
+echo "  cd ~/orbit/app && npm start"
 echo ""
-echo "Or to use the Loom CLI directly:"
-echo "  cd ~/loom && node bin/loom.js"
+echo "Or to use the Orbit CLI directly:"
+echo "  cd ~/orbit && node bin/orbit.js"
 echo ""
 echo "Notes:"
 echo "  - WSLg provides the display automatically (Windows 11 / updated Windows 10)"

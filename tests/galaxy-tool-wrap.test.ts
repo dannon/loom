@@ -1,20 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Type } from "@sinclair/typebox";
 import { allOperations, type AnyOperation, type GalaxyContext } from "@galaxyproject/galaxy-ops";
-import { setGalaxyTransport } from "../extensions/loom/galaxy-api";
-import { GALAXY_DEADLINE_TEXT } from "../extensions/loom/galaxy-failure";
-import { GALAXY_OUTPUT_MARKER } from "../extensions/loom/galaxy-output";
-import { galaxyOutputStore, setGalaxyOutputStore } from "../extensions/loom/galaxy-output-store";
-import { toolFromOperation } from "../extensions/loom/galaxy-ops-tools";
-import type { GalaxyTool } from "../extensions/loom/galaxy-tool-source";
+import { setGalaxyTransport } from "../extensions/orbit/galaxy-api";
+import { GALAXY_DEADLINE_TEXT } from "../extensions/orbit/galaxy-failure";
+import { GALAXY_OUTPUT_MARKER } from "../extensions/orbit/galaxy-output";
+import { galaxyOutputStore, setGalaxyOutputStore } from "../extensions/orbit/galaxy-output-store";
+import { toolFromOperation } from "../extensions/orbit/galaxy-ops-tools";
+import type { GalaxyTool } from "../extensions/orbit/galaxy-tool-source";
 import {
   GALAXY_DEADLINE_MS,
   GALAXY_SPILL_BYTES,
   renderGalaxyResult,
   runGalaxyCall,
   wrapGalaxyTool,
-} from "../extensions/loom/galaxy-tool-wrap";
-import { isUlid } from "../extensions/loom/ulid";
+} from "../extensions/orbit/galaxy-tool-wrap";
+import { isUlid } from "../extensions/orbit/ulid";
 import { utf8ByteLength } from "../shared/truncate-middle.js";
 import { CREDENTIALS, json } from "./galaxy-test-helpers";
 

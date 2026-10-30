@@ -20,7 +20,7 @@ import {
   serializeDashboardDocument,
 } from "../shared/dashboard-contract.js";
 import type { DashboardDocument } from "../shared/dashboard-contract.js";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 import {
   applyDashboardActions,
@@ -33,12 +33,12 @@ import {
   registerDashboardTools,
   widgetCatalogLines,
   MAX_READ_CHARS,
-} from "../extensions/loom/dashboard-tools";
+} from "../extensions/orbit/dashboard-tools";
 import {
   getDashboardPath,
   resetDashboardUndo,
   updateDashboardDocument,
-} from "../extensions/loom/dashboard-store";
+} from "../extensions/orbit/dashboard-store";
 
 interface ToolDef {
   name: string;

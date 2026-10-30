@@ -18,18 +18,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 import {
   findInvocationBlocks,
   renderInvocationYaml,
   type InvocationYaml,
-} from "../extensions/loom/notebook-writer";
-import { checkInvocations } from "../extensions/loom/tools";
+} from "../extensions/orbit/notebook-writer";
+import { checkInvocations } from "../extensions/orbit/tools";
 import {
   pollGalaxyNow,
   startGalaxyPoller,
   stopGalaxyPoller,
-} from "../extensions/loom/galaxy-poller";
+} from "../extensions/orbit/galaxy-poller";
 import { json } from "./galaxy-test-helpers";
 
 const GALAXY = "https://galaxy.example";

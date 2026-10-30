@@ -15,8 +15,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
-vi.mock("../extensions/loom/galaxy-api.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../extensions/loom/galaxy-api.js")>();
+vi.mock("../extensions/orbit/galaxy-api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../extensions/orbit/galaxy-api.js")>();
   return {
     ...actual,
     getGalaxyConfig: vi.fn(() => ({ url: "https://galaxy.test", apiKey: "k" })),
@@ -25,15 +25,15 @@ vi.mock("../extensions/loom/galaxy-api.js", async (importOriginal) => {
   };
 });
 
-import { resetState, setNotebookPath } from "../extensions/loom/state";
-import { findInvocationBlocks, renderInvocationYaml } from "../extensions/loom/notebook-writer";
-import { findJobBlocks, renderJobYaml, type JobYaml } from "../extensions/loom/galaxy-job-block";
-import { galaxyGetInvocation, galaxyGetJobDetails } from "../extensions/loom/galaxy-api.js";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
+import { findInvocationBlocks, renderInvocationYaml } from "../extensions/orbit/notebook-writer";
+import { findJobBlocks, renderJobYaml, type JobYaml } from "../extensions/orbit/galaxy-job-block";
+import { galaxyGetInvocation, galaxyGetJobDetails } from "../extensions/orbit/galaxy-api.js";
 import {
   pollGalaxyNow,
   startGalaxyPoller,
   stopGalaxyPoller,
-} from "../extensions/loom/galaxy-poller";
+} from "../extensions/orbit/galaxy-poller";
 
 const mockGalaxyGet = vi.mocked(galaxyGetInvocation);
 const mockJobDetails = vi.mocked(galaxyGetJobDetails);

@@ -22,7 +22,7 @@ import { registerDashboardIpc } from "./dashboard-handler.js";
 import { registerDictationIpc } from "./dictation-handler.js";
 import { ProcMonitor } from "./proc-monitor.js";
 import { migratePlaintextSecrets, isAvailable as safeStorageAvailable } from "./secure-config.js";
-import { getConfigPath } from "../../../shared/loom-config.js";
+import { getConfigPath } from "../../../shared/orbit-config.js";
 import { parseCliArgs, type CliArgs } from "./cli-args.js";
 import { initAutoUpdate } from "./auto-update.js";
 import { resolveStartupCwd } from "./startup-cwd.js";
@@ -137,7 +137,7 @@ function startConfigWatcher(): void {
 }
 
 function getDefaultCwd(cliArgs?: CliArgs): string {
-  // Priority: --cwd CLI arg > LOOM_CWD env > brain config.defaultCwd > hardcoded.
+  // Priority: --cwd CLI arg > ORBIT_CWD env > brain config.defaultCwd > hardcoded.
   // config.defaultCwd is rewritten by AgentManager.switchCwd on every in-app
   // directory change, so a clean restart reopens the last-used directory (#312).
   let configDefaultCwd: string | undefined;

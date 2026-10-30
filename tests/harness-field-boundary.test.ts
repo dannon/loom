@@ -18,21 +18,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 import {
   applyInvocationUpdates,
   findInvocationBlocks,
   upsertInvocationBlock,
   type InvocationYaml,
-} from "../extensions/loom/notebook-writer";
+} from "../extensions/orbit/notebook-writer";
 import {
   applyJobPollUpdate,
   findJobBlocks,
   upsertJobBlock,
   type JobYaml,
-} from "../extensions/loom/galaxy-job-block";
-import { registerPlanTools } from "../extensions/loom/tools";
-import type { HarnessBlockFields } from "../extensions/loom/harness-block-fields";
+} from "../extensions/orbit/galaxy-job-block";
+import { registerPlanTools } from "../extensions/orbit/tools";
+import type { HarnessBlockFields } from "../extensions/orbit/harness-block-fields";
 import { GALAXY } from "./galaxy-family-fixture";
 
 const INV_ID = "f2db41e1fa331b3e";

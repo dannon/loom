@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { registerGalaxyRepeatGuard } from "../extensions/loom/galaxy-repeat-guard";
+import { registerGalaxyRepeatGuard } from "../extensions/orbit/galaxy-repeat-guard";
 import { guardHooks } from "./galaxy-test-helpers";
 
 function guard() {

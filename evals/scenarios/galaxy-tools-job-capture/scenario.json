@@ -62,7 +62,7 @@
       ]
     },
     "notebook": {
-      "contains": ["```loom-job", "tool_id: wc_gnu"]
+      "contains": ["```orbit-job", "tool_id: wc_gnu"]
     }
   }
 }

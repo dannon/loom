@@ -8,7 +8,7 @@ import {
   registeredGalaxyTools,
   setGalaxyToolSource,
   type GalaxyTool,
-} from "../extensions/loom/galaxy-tool-source";
+} from "../extensions/orbit/galaxy-tool-source";
 import { GALAXY_TOOL_NAMES } from "./galaxy-family-fixture";
 
 const stub = (name: string): GalaxyTool => ({

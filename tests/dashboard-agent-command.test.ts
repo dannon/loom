@@ -14,10 +14,10 @@ import * as os from "os";
 import * as path from "path";
 import { DASHBOARD_FILENAME, serializeDashboardDocument } from "../shared/dashboard-contract.js";
 import type { DashboardDocument } from "../shared/dashboard-contract.js";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
-import { registerDashboardCommands } from "../extensions/loom/dashboard-commands";
-import { registerDashboardTools } from "../extensions/loom/dashboard-tools";
-import { resetDashboardUndo } from "../extensions/loom/dashboard-store";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
+import { registerDashboardCommands } from "../extensions/orbit/dashboard-commands";
+import { registerDashboardTools } from "../extensions/orbit/dashboard-tools";
+import { resetDashboardUndo } from "../extensions/orbit/dashboard-store";
 
 type Notify = ReturnType<typeof vi.fn>;
 

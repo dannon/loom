@@ -3,15 +3,15 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { lessonText, searchLessons, tokenize } from "../extensions/loom/lessons/search";
-import { registerLessonsSearchTool } from "../extensions/loom/lessons/search-tool";
+import { lessonText, searchLessons, tokenize } from "../extensions/orbit/lessons/search";
+import { registerLessonsSearchTool } from "../extensions/orbit/lessons/search-tool";
 import { lessonFile } from "./lessons-fixture";
-import { renderFullLesson, renderLessonSearchResult } from "../extensions/loom/lesson-hint";
-import { resetLessonStore } from "../extensions/loom/lessons/store";
-import { readCounters } from "../extensions/loom/lessons/counters";
-import { resetActivity } from "../extensions/loom/activity";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
-import type { Lesson } from "../extensions/loom/lessons/types";
+import { renderFullLesson, renderLessonSearchResult } from "../extensions/orbit/lesson-hint";
+import { resetLessonStore } from "../extensions/orbit/lessons/store";
+import { readCounters } from "../extensions/orbit/lessons/counters";
+import { resetActivity } from "../extensions/orbit/activity";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
+import type { Lesson } from "../extensions/orbit/lessons/types";
 
 // The lesson switch is off by default; these suites are about what happens
 // once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.
@@ -159,7 +159,7 @@ describe("renderFullLesson", () => {
     expect(out.indexOf("## Intervention")).toBeLessThan(out.indexOf("## Validate"));
     expect(out.indexOf("## Validate")).toBeLessThan(out.indexOf("## Does NOT apply when"));
     expect(out).not.toContain("## Cause");
-    expect(out).toContain("shipped with Loom");
+    expect(out).toContain("shipped with Orbit");
     expect(out).toContain("reproduction/condition-mapping-not-in-the-deposit");
   });
 

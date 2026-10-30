@@ -4,8 +4,8 @@ import {
   INVOCATION_FAILED_HINT,
   INVOCATION_FAILURE_REFERENCE,
   JOB_FAILURE_REFERENCE,
-} from "../extensions/loom/invocation-failure-hint";
-import { applySkillTriggers, skillTriggers } from "../extensions/loom/skill-triggers";
+} from "../extensions/orbit/invocation-failure-hint";
+import { applySkillTriggers, skillTriggers } from "../extensions/orbit/skill-triggers";
 import { GALAXY } from "./galaxy-family-fixture";
 
 // The hint now fires through the skill-triggers table; drive it the way a

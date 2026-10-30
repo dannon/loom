@@ -9,7 +9,7 @@ import {
   switchProfile,
   loadProfiles,
   getActiveGalaxyStatus,
-} from "../extensions/loom/profiles";
+} from "../extensions/orbit/profiles";
 
 // All loom-config / profiles paths derive from os.homedir() at call time.
 // POSIX reads HOME; Windows reads USERPROFILE. Override both so the on-disk
@@ -89,7 +89,7 @@ describe("switchProfile env handling", () => {
 
   it("does not reuse a stale env key when switching to an encrypted-only profile with no env injection", () => {
     saveProfile("a", "https://a.galaxyproject.org", "key-A");
-    const cfgPath = path.join(sandboxHome, ".loom/config.json");
+    const cfgPath = path.join(sandboxHome, ".orbit/config.json");
     const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
     cfg.galaxy.profiles.b = { url: "https://b.galaxyproject.org", apiKeyEncrypted: "ZW5jLWZvci1i" };
     fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
@@ -107,7 +107,7 @@ describe("switchProfile env handling", () => {
     // ciphertext, so the safer move is to fail loud and require a
     // restart. This is the security-sensitive path.
     saveProfile("a", "https://a.galaxyproject.org", "key-A");
-    const cfgPath = path.join(sandboxHome, ".loom/config.json");
+    const cfgPath = path.join(sandboxHome, ".orbit/config.json");
     const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
     cfg.galaxy.profiles.b = { url: "https://b.galaxyproject.org", apiKeyEncrypted: "ZW5jLWZvci1i" };
     fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
@@ -155,7 +155,7 @@ describe("getActiveGalaxyStatus", () => {
 
   it("is none for a plaintext-key profile not yet wired into env", () => {
     // Has a usable key on disk, so it's not the encrypted-unusable case; env
-    // just isn't set, which bin/loom.js wouldn't allow in practice. Documents
+    // just isn't set, which bin/orbit.js wouldn't allow in practice. Documents
     // the boundary.
     const status = getActiveGalaxyStatus(withDefault({ url: "u", apiKey: "plain" }), {});
     expect(status).toBe("none");

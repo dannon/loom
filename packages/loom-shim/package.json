@@ -1,0 +1,30 @@
+{
+  "name": "@galaxyproject/loom",
+  "version": "0.9.0",
+  "type": "module",
+  "description": "Loom is now Orbit. This package keeps the `loom` command working and forwards it to @galaxyproject/orbit.",
+  "keywords": [
+    "galaxy",
+    "bioinformatics",
+    "orbit"
+  ],
+  "author": "Galaxy Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/galaxyproject/orbit",
+    "directory": "packages/loom-shim"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "files": [
+    "bin/"
+  ],
+  "bin": {
+    "loom": "./bin/loom.js"
+  },
+  "dependencies": {
+    "@galaxyproject/orbit": ">=0.9.0"
+  }
+}

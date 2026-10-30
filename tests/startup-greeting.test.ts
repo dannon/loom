@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { planStartupGreeting, sendStartupGreeting } from "../extensions/loom/session-lifecycle.js";
+import { planStartupGreeting, sendStartupGreeting } from "../extensions/orbit/session-lifecycle.js";
 
 describe("planStartupGreeting", () => {
   it("usable -> a model turn that says the tools are ready, with no connect step", () => {

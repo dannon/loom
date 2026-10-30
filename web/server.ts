@@ -2,8 +2,8 @@
  * Orbit Web -- local dev server.
  *
  * Serves the Orbit renderer via Vite and bridges a WebSocket to a
- * loom subprocess (bin/loom.js --mode rpc). Single user, single
- * subprocess, same ~/.loom/config.json as the CLI and Electron app.
+ * loom subprocess (bin/orbit.js --mode rpc). Single user, single
+ * subprocess, same ~/.orbit/config.json as the CLI and Electron app.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -46,7 +46,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // otherwise the bundled server looks one level too deep (web/build/...) and
 // the brain, the lockdown gate, and the static bundle all silently go missing.
 const WEB_ROOT = basename(__dirname) === "build" ? resolve(__dirname, "..") : __dirname;
-const LOOM_BIN = resolve(WEB_ROOT, "../bin/loom.js");
+const CORE_BIN = resolve(WEB_ROOT, "../bin/orbit.js");
 // pi 1.0 refuses --provider without --model, and a bring-your-own key names
 // only the provider.
 const PI_DEFAULT_MODELS = await loadPiDefaultModels();
@@ -137,9 +137,9 @@ function getCwd(): string {
   return cwd;
 }
 
-// ── Loom subprocess ──────────────────────────────────────────────────────────
+// ── Orbit subprocess ──────────────────────────────────────────────────────────
 
-let loomProcess: ChildProcess | null = null;
+let coreProcess: ChildProcess | null = null;
 let activeSocket: WebSocket | null = null;
 let cwd = getCwd();
 
@@ -185,10 +185,10 @@ function llmKeyPresent(): boolean {
   });
 }
 
-function startLoom(opts: { fresh?: boolean } = {}): void {
-  if (loomProcess) stopLoom();
+function startCore(opts: { fresh?: boolean } = {}): void {
+  if (coreProcess) stopCore();
 
-  const args: string[] = [LOOM_BIN, "--mode", "rpc"];
+  const args: string[] = [CORE_BIN, "--mode", "rpc"];
   // Curated env via shared/brain-env. Web mode -- remote or local dev --
   // is env-authenticated by default (remote: operator injects at container
   // launch; local: dev exports keys in their shell), so provider keys are
@@ -232,28 +232,28 @@ function startLoom(opts: { fresh?: boolean } = {}): void {
     // No local execution surface in the container: the web-mode-gate is the
     // sole tool_call authority, so tell the brain to skip its local-exec guard
     // (whose headless approval prompts would otherwise hang). See
-    // extensions/loom/index.ts.
+    // extensions/orbit/index.ts.
     writeEnv(env, "LOCAL_EXEC", "off");
     // Deterministic notebook -> Galaxy Page persistence: resume on launch,
     // debounce-push on change, flush on shutdown. Brain-side, env-gated.
     writeEnv(env, "GALAXY_PAGE_SYNC", "auto");
   } else {
     // The local dev server DOES have a local execution surface, so pin the
-    // guard on authoritatively (same as agent.ts and bin/loom.js) -- the
+    // guard on authoritatively (same as agent.ts and bin/orbit.js) -- the
     // helper forwards LOOM_* wholesale, so an ambient LOOM_LOCAL_EXEC=off
     // left in the dev's shell would otherwise silently disable exec-guard.
     writeEnv(env, "LOCAL_EXEC", "on");
   }
 
-  log("starting loom subprocess", { bin: LOOM_BIN, cwd, remote: IS_REMOTE_MODE });
+  log("starting orbit core subprocess", { bin: CORE_BIN, cwd, remote: IS_REMOTE_MODE });
 
-  loomProcess = spawn("node", args, {
+  coreProcess = spawn("node", args, {
     stdio: ["pipe", "pipe", "pipe"],
     cwd,
     env,
   });
 
-  const rl = createInterface({ input: loomProcess.stdout!, terminal: false });
+  const rl = createInterface({ input: coreProcess.stdout!, terminal: false });
 
   rl.on("line", (line) => {
     let data: Record<string, unknown>;
@@ -278,15 +278,15 @@ function startLoom(opts: { fresh?: boolean } = {}): void {
   // Kept, not just logged: when the brain dies during startup its stderr is the
   // only account of why, and the browser has no terminal to read it in (#439).
   let stderr = "";
-  loomProcess.stderr?.on("data", (chunk: Buffer) => {
+  coreProcess.stderr?.on("data", (chunk: Buffer) => {
     const text = chunk.toString();
     stderr = appendStderr(stderr, text);
     log("loom stderr:", text.trimEnd());
   });
 
-  loomProcess.on("exit", (code, signal) => {
+  coreProcess.on("exit", (code, signal) => {
     log("loom exited", { code, signal });
-    loomProcess = null;
+    coreProcess = null;
     // A nonzero exit used to report a bare "stopped", which is indistinguishable
     // from someone closing the session deliberately.
     if (code !== 0 && code !== null) {
@@ -300,23 +300,23 @@ function startLoom(opts: { fresh?: boolean } = {}): void {
     sendEvent("agent:status", "stopped");
   });
 
-  loomProcess.on("error", (err) => {
+  coreProcess.on("error", (err) => {
     log("loom error:", err.message);
-    loomProcess = null;
+    coreProcess = null;
     sendEvent("agent:status", "error", err.message);
   });
 
   sendEvent("agent:status", "running");
 }
 
-function stopLoom(): void {
-  if (loomProcess) {
+function stopCore(): void {
+  if (coreProcess) {
     log("stopping loom");
-    loomProcess.removeAllListeners();
-    loomProcess.stdout?.removeAllListeners();
-    loomProcess.stderr?.removeAllListeners();
-    loomProcess.kill("SIGTERM");
-    loomProcess = null;
+    coreProcess.removeAllListeners();
+    coreProcess.stdout?.removeAllListeners();
+    coreProcess.stderr?.removeAllListeners();
+    coreProcess.kill("SIGTERM");
+    coreProcess = null;
   }
 }
 
@@ -325,9 +325,9 @@ function stopLoom(): void {
  * flush the notebook to Galaxy. SIGKILL backstop after timeoutMs (kept under
  * the container orchestrator's grace window).
  */
-function stopLoomGracefully(timeoutMs: number): Promise<void> {
+function stopCoreGracefully(timeoutMs: number): Promise<void> {
   return new Promise((resolve) => {
-    const proc = loomProcess;
+    const proc = coreProcess;
     if (!proc) return resolve();
     const timer = setTimeout(() => {
       try {
@@ -351,31 +351,31 @@ function stopLoomGracefully(timeoutMs: number): Promise<void> {
 }
 
 // A restart/reset now drains the outgoing brain before spawning its replacement,
-// which opens a window where loomProcess is a brain under SIGTERM. Writing to it
+// which opens a window where coreProcess is a brain under SIGTERM. Writing to it
 // would look like it worked -- the pipe is still writable -- and the message would
 // die with the process, leaving the UI waiting on a turn nobody is running. Hold
 // messages instead and hand them to the replacement once it's up.
 let draining = false;
 const drainQueue: Record<string, unknown>[] = [];
 
-function sendToLoom(obj: Record<string, unknown>): void {
+function sendToCore(obj: Record<string, unknown>): void {
   if (draining) {
     drainQueue.push(obj);
     return;
   }
-  if (!loomProcess?.stdin?.writable) return;
-  loomProcess.stdin.write(JSON.stringify(obj) + "\n");
+  if (!coreProcess?.stdin?.writable) return;
+  coreProcess.stdin.write(JSON.stringify(obj) + "\n");
 }
 
 function flushDrainQueue(): void {
   const queued = drainQueue.splice(0, drainQueue.length);
-  for (const obj of queued) sendToLoom(obj);
+  for (const obj of queued) sendToCore(obj);
 }
 
 /**
  * Run a brain swap with nothing else swapping underneath it. Two restarts landing
  * together used to await the same dying process and then both spawn, so the
- * second startLoom would SIGKILL the first replacement through the non-graceful
+ * second startCore would SIGKILL the first replacement through the non-graceful
  * path -- and a reset racing a restart could lose its fresh-session semantics
  * entirely.
  */
@@ -387,11 +387,11 @@ function serializeSwap(fn: () => Promise<void>): Promise<void> {
   return next;
 }
 
-/** Drain the current brain, then spawn its replacement (startLoom by default). */
-async function respawnBrain(spawnReplacement: () => void = startLoom): Promise<void> {
+/** Drain the current brain, then spawn its replacement (startCore by default). */
+async function respawnBrain(spawnReplacement: () => void = startCore): Promise<void> {
   draining = true;
   try {
-    await stopLoomGracefully(resolveShutdownGraceMs(process.env));
+    await stopCoreGracefully(resolveShutdownGraceMs(process.env));
     spawnReplacement();
   } finally {
     draining = false;
@@ -484,8 +484,8 @@ wss.on("connection", (socket) => {
   // In remote mode with no resolvable provider key, hold off spawning: the
   // renderer's key-entry screen drives agent:provide-llm-key, which spawns.
   // Non-remote (desktop/dev) is unchanged -- the brain reads its own
-  // ~/.loom/config.json key, which never reaches this env-only check.
-  if (!loomProcess && (!IS_REMOTE_MODE || llmKeyPresent())) startLoom();
+  // ~/.orbit/config.json key, which never reaches this env-only check.
+  if (!coreProcess && (!IS_REMOTE_MODE || llmKeyPresent())) startCore();
 
   socket.on("message", (raw) => {
     let msg: Record<string, unknown>;
@@ -514,8 +514,8 @@ wss.on("connection", (socket) => {
       // which then silently reverts to on. Merge like Orbit's config:save does.
       const { _mode: _ignored, ...current } = loadConfig();
       saveConfig({ ...current, ...(args[0] as Record<string, unknown>) });
-      stopLoom();
-      startLoom();
+      stopCore();
+      startCore();
       respond(id, { success: true });
       return;
     }
@@ -544,7 +544,7 @@ wss.on("connection", (socket) => {
       }
       providedLlmKey = payload.key; // never logged
       providedProvider = provider;
-      if (!loomProcess) startLoom();
+      if (!coreProcess) startCore();
       respond(id, { ok: true });
       return;
     }
@@ -631,8 +631,8 @@ wss.on("connection", (socket) => {
       }
       cwd = args[0] as string;
       mkdirSync(cwd, { recursive: true });
-      stopLoom();
-      startLoom();
+      stopCore();
+      startCore();
       sendEvent("agent:cwd-changed", cwd);
       respond(id, cwd);
       return;
@@ -652,23 +652,23 @@ wss.on("connection", (socket) => {
     if (channel === "agent:reset-session") {
       void serializeSwap(async () => {
         // Fresh start -- tell loom not to auto-load notebook.
-        await respawnBrain(() => startLoom({ fresh: true }));
+        await respawnBrain(() => startCore({ fresh: true }));
         respond(id, null);
       });
       return;
     }
     if (channel === "agent:new-session") {
-      sendToLoom({ type: "new_session", id });
+      sendToCore({ type: "new_session", id });
       return;
     }
     if (channel === "agent:get-state") {
-      sendToLoom({ type: "get_state", id });
+      sendToCore({ type: "get_state", id });
       return;
     }
 
     // Everything else forwards to loom subprocess
     if (channel === "agent:prompt") {
-      sendToLoom(
+      sendToCore(
         agentPromptPayload(
           args[0] as string,
           args[1] as { streamingBehavior?: "steer" | "followUp" } | undefined,
@@ -678,7 +678,7 @@ wss.on("connection", (socket) => {
       return;
     }
     if (channel === "agent:abort") {
-      sendToLoom({ type: "abort" });
+      sendToCore({ type: "abort" });
       if (id) respond(id, null);
       return;
     }
@@ -687,7 +687,7 @@ wss.on("connection", (socket) => {
       // genuine extension UI response may cross. See isForwardableUiResponse --
       // this is what stops a client smuggling {type:"bash"} past the gate.
       if (isForwardableUiResponse(args[0])) {
-        sendToLoom(args[0]);
+        sendToCore(args[0]);
       } else {
         log("dropped non-ui-response payload on agent:ui-response channel");
       }
@@ -752,7 +752,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   } catch {
     /* */
   }
-  await stopLoomGracefully(resolveShutdownGraceMs(process.env));
+  await stopCoreGracefully(resolveShutdownGraceMs(process.env));
   process.exit(0);
 }
 process.on("SIGTERM", () => void gracefulShutdown("SIGTERM"));

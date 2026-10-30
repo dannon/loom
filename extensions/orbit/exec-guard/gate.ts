@@ -1,0 +1,181 @@
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import * as os from "os";
+import * as path from "path";
+import { getNotebookPath } from "../state";
+import { appendActivityEvent } from "../activity";
+import { redactArgs } from "../activity-hooks";
+import {
+  loadGuardianConfig,
+  resolveBypass,
+  trustWorkspace,
+  recordConsent,
+} from "./guardian-config";
+import { createPathResolver } from "./path-jail";
+import { classifyModelTier } from "./model-tier";
+import { decide } from "./policy";
+import { CONSENT_VERSION, type PolicyResult } from "./types";
+import { buildApprovalPrompt } from "../../../shared/approval-prompt.js";
+
+// In-memory "allow for this session" set, keyed by tool + raw input signature.
+const sessionAllow = new Set<string>();
+function sig(toolName: string, input: Record<string, unknown>): string {
+  return toolName + ":" + JSON.stringify(input);
+}
+
+function audit(
+  toolName: string,
+  input: Record<string, unknown>,
+  result: PolicyResult,
+  outcome: string,
+): void {
+  const nb = getNotebookPath();
+  if (!nb) return;
+  appendActivityEvent(path.dirname(nb), {
+    timestamp: new Date().toISOString(),
+    kind: "guard.decision",
+    source: "exec-guard",
+    payload: {
+      toolName,
+      decision: result.decision,
+      category: result.category,
+      reason: result.reason,
+      outcome,
+      args: redactArgs(toolName, input),
+    },
+  });
+}
+
+// The state dir (.loom/.orbit) is deliberately not a root of its own. Under
+// cwd it is already inside the jail; the only thing a separate root ever added
+// was trust in wherever a symlinked state dir pointed, which the user never
+// granted.
+export function workspaceRoots(cwd: string, extra: string[]): string[] {
+  return [cwd, os.tmpdir(), ...extra];
+}
+
+export function registerExecGuard(pi: ExtensionAPI): void {
+  pi.on("tool_call", async (event, ctx) => {
+    const config = loadGuardianConfig();
+    if (!config.enabled) return; // gate fully disabled (advanced escape hatch)
+    // Fold the effective bypass back into the config the pure engine sees.
+    config.dangerouslyBypassPermissions = resolveBypass(config);
+
+    const input = event.input as Record<string, unknown>;
+    const cwd = ctx.cwd;
+    const resolver = createPathResolver(
+      workspaceRoots(cwd, config.extraWorkspaceRoots),
+      os.homedir(),
+    );
+
+    let result: PolicyResult;
+    try {
+      result = decide(
+        {
+          toolName: event.toolName,
+          toolInput: input,
+          modelTier: classifyModelTier(ctx.model),
+          config,
+          interactive: ctx.hasUI,
+          cwd,
+        },
+        { resolver, home: os.homedir() },
+      );
+    } catch {
+      const reason = "exec-guard internal error; failing closed";
+      audit(event.toolName, input, { decision: "deny", category: "error", reason }, "blocked");
+      return { block: true, reason };
+    }
+
+    if (result.decision === "allow") {
+      audit(event.toolName, input, result, "allowed");
+      return;
+    }
+    if (result.decision === "deny") {
+      audit(event.toolName, input, result, "blocked");
+      return { block: true, reason: result.reason };
+    }
+
+    // Destructive Galaxy op (#338): its own yes/no confirm, never cached and never
+    // offered "allow for session"/"trust workspace" -- every irreversible action
+    // re-prompts. Independent of the one-time local-exec consent disclosure (that's
+    // about shell execution; this is its own, more pointed prompt). The decision here
+    // is always "ask" -- the non-interactive case already denied above.
+    if (result.category === "galaxy:destructive") {
+      const proceed = await ctx.ui.confirm(
+        "Confirm destructive Galaxy operation",
+        `${ctx.model?.id ?? "The model"} wants to: ${result.reason}\n\nContinue?`,
+        {},
+      );
+      if (proceed) {
+        audit(event.toolName, input, result, "allowed:destructive-confirm");
+        return;
+      }
+      audit(event.toolName, input, result, "blocked:destructive-user");
+      return { block: true, reason: "Destructive Galaxy operation cancelled by user." };
+    }
+
+    // ask: session memory first.
+    if (sessionAllow.has(sig(event.toolName, input))) {
+      audit(event.toolName, input, result, "allowed:session");
+      return;
+    }
+
+    // One-time local-execution disclosure on the first gated action. Relies on
+    // the persisted flag (saveConfig is synchronous), so a failed save simply
+    // re-discloses rather than silently proceeding.
+    if (!config.consentAcknowledged) {
+      const ok = await ctx.ui.confirm(
+        "Orbit runs actions on your computer",
+        "Orbit can run shell commands and read/write files as you. Commands from the AI are gated, but no gate is perfect -- only use it in workspaces you trust. Continue?",
+        {},
+      );
+      if (!ok) {
+        audit(event.toolName, input, result, "blocked:consent-declined");
+        return { block: true, reason: "Local execution not consented." };
+      }
+      recordConsent(CONSENT_VERSION);
+    }
+
+    const modelName = ctx.model?.id ?? "the model";
+    // Heading and the thing being approved are separated by a blank line so a
+    // shell can render the command as a readable body instead of a headline.
+    // Lowercased to match the policy engine, which gates on the normalized
+    // name -- otherwise a "Bash" call would be gated as a command but prompted
+    // as a path, showing the user nothing of what they're approving.
+    const isBash = event.toolName.toLowerCase() === "bash";
+    const heading = isBash
+      ? `Allow ${modelName} to run this command?`
+      : `Allow ${modelName} to ${event.toolName} this path?`;
+    // File tools also arrive with the Anthropic `file_path` spelling and the policy
+    // layer gates both, so the prompt names every path the call carries: answering
+    // it while looking at one of two different targets is not consent.
+    const paths = [...new Set([input.path, input.file_path].filter((v) => typeof v === "string"))];
+    const detail = String(isBash ? (input.command ?? "") : paths.join(" + "));
+    const choice = await ctx.ui.select(
+      buildApprovalPrompt(heading, detail),
+      [
+        "Allow once",
+        "Allow for this session",
+        "Trust this workspace (stop asking for routine commands)",
+        "Deny",
+      ],
+      {},
+    );
+    if (choice === "Allow once") {
+      audit(event.toolName, input, result, "allowed:once");
+      return;
+    }
+    if (choice === "Allow for this session") {
+      sessionAllow.add(sig(event.toolName, input));
+      audit(event.toolName, input, result, "allowed:session");
+      return;
+    }
+    if (choice && choice.startsWith("Trust this workspace")) {
+      trustWorkspace(cwd);
+      audit(event.toolName, input, result, "allowed:trust-workspace");
+      return;
+    }
+    audit(event.toolName, input, result, "blocked:user");
+    return { block: true, reason: "Denied by user." };
+  });
+}

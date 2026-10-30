@@ -3,6 +3,6 @@ export {
   getConfigPath,
   loadConfig,
   saveConfig,
-} from "../../../shared/loom-config.js";
+} from "../../../shared/orbit-config.js";
 
-export type { LoomConfig } from "../../../shared/loom-config.js";
+export type { OrbitConfig } from "../../../shared/orbit-config.js";

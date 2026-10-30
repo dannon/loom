@@ -1,4 +1,4 @@
-/** Galaxy navigation shared by Loom and its shells. No credentials or network I/O. */
+/** Galaxy navigation shared by Orbit and its shells. No credentials or network I/O. */
 export function normalizeGalaxyLinkServer(serverUrl) {
   if (typeof serverUrl !== "string" || !/^https?:\/\//i.test(serverUrl.trim())) return null;
   try {
@@ -98,7 +98,7 @@ export function galaxyLinkServerInText(text) {
  * Typed references only. Bare hashes, history item numbers, dates, etc. stay text.
  *
  * A `galaxy_server_url` in the text only redirects the other IDs when the
- * caller says the text is trusted metadata (a notebook block Loom wrote).
+ * caller says the text is trusted metadata (a notebook block Orbit wrote).
  * Otherwise a dataset peek, fetched page, or README could point "Open Galaxy
  * history" links at any host it likes.
  */

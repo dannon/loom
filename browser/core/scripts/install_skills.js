@@ -19,7 +19,7 @@
  * for a project whose claim is reproducibility.
  *
  * In this repo the corpus comes from Orbit's own vendor tree instead: scripts/sync-skills.mjs
- * copies galaxy-skills out of galaxyproject/agentic-plugins into extensions/loom/vendor/skills,
+ * copies galaxy-skills out of galaxyproject/agentic-plugins into extensions/orbit/vendor/skills,
  * and when that tree's _manifest.json is present this copies the same files from it and pins
  * the lock to the manifest's upstream commit. One manifest bump then moves both shells, and the
  * build makes no GitHub round trip, so in this repo the pin moves through
@@ -48,7 +48,7 @@ const DEST = join(ROOT, "src", "agent", "skills", "galaxy-skills");
 const STAMP = join(DEST, "VENDORED.json");
 const LOCK = join(ROOT, "skills.lock.json");
 // Orbit's vendor tree, two levels above the core when it sits in the loom repo.
-const VENDOR = join(ROOT, "..", "..", "extensions", "loom", "vendor", "skills");
+const VENDOR = join(ROOT, "..", "..", "extensions", "orbit", "vendor", "skills");
 const VENDOR_MANIFEST = join(VENDOR, "_manifest.json");
 
 // The allowlist Orbit applies at runtime, applied here at build time instead.

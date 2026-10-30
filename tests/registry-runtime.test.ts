@@ -5,9 +5,9 @@ import {
   closeSessionRegistry,
   getSessionRegistry,
   openSessionRegistry,
-} from "../extensions/loom/registry-runtime";
-import { approveProposal } from "../extensions/loom/registry-proposal";
-import { RegistryStore } from "../extensions/loom/registry";
+} from "../extensions/orbit/registry-runtime";
+import { approveProposal } from "../extensions/orbit/registry-proposal";
+import { RegistryStore } from "../extensions/orbit/registry";
 import { SERVER, tmpAnalysisDir } from "./registry-fixtures";
 import { TOOL_SNAPSHOT, toolProposal } from "./registry-proposal-fixtures";
 

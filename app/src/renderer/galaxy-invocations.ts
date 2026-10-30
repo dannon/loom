@@ -31,7 +31,7 @@ export interface Invocation {
   failedJobs?: number;
   lastPolledAt?: string;
   // Harness-written provenance. The brain owns these (see
-  // extensions/loom/harness-block-fields.ts); this side only reads them, and
+  // extensions/orbit/harness-block-fields.ts); this side only reads them, and
   // mirrors the same drop-what-you-don't-recognise rule so a hand-edited
   // block renders as unknown provenance rather than as a claim.
   attemptId?: string;

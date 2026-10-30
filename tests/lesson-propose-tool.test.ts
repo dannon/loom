@@ -7,15 +7,15 @@ import { Value } from "@sinclair/typebox/value";
 import {
   LESSON_PROPOSE_TOOL_NAME,
   registerLessonProposeTool,
-} from "../extensions/loom/lessons/propose-tool";
+} from "../extensions/orbit/lessons/propose-tool";
 import {
   armLessonProposal,
   lessonArmingRunStarted,
   resetLessonProposalArming,
-} from "../extensions/loom/lessons/propose";
-import { lessonFilePath } from "../extensions/loom/lessons/paths";
-import { resetActivity } from "../extensions/loom/activity";
-import { setNotebookPath } from "../extensions/loom/state";
+} from "../extensions/orbit/lessons/propose";
+import { lessonFilePath } from "../extensions/orbit/lessons/paths";
+import { resetActivity } from "../extensions/orbit/activity";
+import { setNotebookPath } from "../extensions/orbit/state";
 import { LIMITS } from "../shared/lesson-rules.js";
 
 // The lesson switch is off by default; these suites are about what happens

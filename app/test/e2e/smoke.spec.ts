@@ -11,7 +11,7 @@
  *
  * Isolation: each test gets a fresh tmpdir for HOME, cwd, and Electron's
  * userData. Without this, the launched binary reads the developer's real
- * ~/.loom/config.json (LLM keys, Galaxy creds) and ~/.orbit state, and the
+ * ~/.orbit/config.json (LLM keys, Galaxy creds) and ~/.orbit state, and the
  * test side-effects on real analysis directories. The inherited env is also
  * scrubbed of GALAXY_* so a developer with creds set in their shell doesn't
  * accidentally launch the test against a real Galaxy server.
@@ -26,12 +26,12 @@ function packagedExecutablePath(): string {
   const root = path.resolve(__dirname, "../..");
   const arch = process.arch;
   if (process.platform === "linux") {
-    return path.join(root, "out", `Orbit-linux-${arch}`, "orbit");
+    return path.join(root, "out", `Orbit-linux-${arch}`, "orbit-desktop");
   }
   if (process.platform === "darwin") {
     // Inner binary name follows forge.config.ts `executableName`, which is the
-    // proper-cased "Orbit" on darwin (the lowercase variant is Linux/Windows
-    // only -- see the comment on executableName for why).
+    // proper-cased "Orbit" on darwin, `orbit-desktop` on Linux and `orbit` on
+    // Windows -- see the comment on executableName for why.
     return path.join(
       root,
       "out",
@@ -75,7 +75,7 @@ async function launchIsolatedOrbit(opts: { notebook?: string } = {}) {
     GALAXY_API_KEY: "",
     // Force a fresh session so the brain doesn't try to --continue from
     // an unrelated prior session if one happened to exist on disk.
-    LOOM_FRESH_SESSION: "1",
+    ORBIT_FRESH_SESSION: "1",
     // Skip the safeStorage keychain probe -- on macOS it pops a system
     // "keychain cannot be found" dialog under a redirected HOME and
     // blocks the test indefinitely.

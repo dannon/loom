@@ -1,5 +1,5 @@
 <tool id="interactive_tool_orbit" tool_type="interactive" name="Orbit" version="0.1.0">
-    <description>conversational AI analysis workbench (Loom)</description>
+    <description>conversational AI analysis workbench (Orbit)</description>
     <requirements>
         <!-- Replace with the published image, or a locally-built tag for a dev
              instance (see gxit/README.md). -->
@@ -17,10 +17,10 @@
         <environment_variable name="GALAXY_API_KEY" inject="api_key" />
         <!-- Galaxy's interactivetool proxy authenticates the user and routes only
              them to this container; a Galaxy-controlled entry-point URL can't carry
-             LOOM_WEB_TOKEN, so the proxy is the trust boundary. The image already
-             defaults LOOM_MODE=remote / NODE_ENV=production / PORT=3000 /
-             LOOM_WEB_HOST=0.0.0.0. -->
-        <environment_variable name="LOOM_WEB_ALLOW_INSECURE">1</environment_variable>
+             ORBIT_WEB_TOKEN, so the proxy is the trust boundary. The image already
+             defaults ORBIT_MODE=remote / NODE_ENV=production / PORT=3000 /
+             ORBIT_WEB_HOST=0.0.0.0. -->
+        <environment_variable name="ORBIT_WEB_ALLOW_INSECURE">1</environment_variable>
         <!-- Provider defaults to anthropic. The admin LLM provider key (e.g.
              ANTHROPIC_API_KEY) is a SECRET and is NOT set here; inject it via the
              job destination env in job_conf (see gxit/README.md). If omitted, the

@@ -7,7 +7,7 @@ import {
   renderJobYaml,
   upsertJobBlock,
   type JobYaml,
-} from "../extensions/loom/galaxy-job-block.js";
+} from "../extensions/orbit/galaxy-job-block.js";
 
 const job: JobYaml = {
   jobId: "abc123",

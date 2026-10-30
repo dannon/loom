@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Vendor skill content into `extensions/loom/vendor/skills/`.
+ * Vendor skill content into `extensions/orbit/vendor/skills/`.
  *
  * The source is `galaxyproject/agentic-plugins`, which mirrors galaxy-skills
  * and the Foundry casts at pins of its own and is what distributes the same
- * content to every other harness. Loom is a downstream client of it: pin one
+ * content to every other harness. Orbit is a downstream client of it: pin one
  * commit, copy a chosen subset, record hashes, and gate drift in CI. The copy
  * ships inside the package, so the guidance is available offline, at a version
  * that went through review, with no runtime dependency on GitHub.
@@ -39,7 +39,7 @@ import { realpathSync } from "node:fs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MANIFEST_PATH = path.join(REPO_ROOT, "scripts", "skills.manifest.json");
-const VENDOR_DIR = path.join(REPO_ROOT, "extensions", "loom", "vendor", "skills");
+const VENDOR_DIR = path.join(REPO_ROOT, "extensions", "orbit", "vendor", "skills");
 const VENDOR_MANIFEST_NAME = "_manifest.json";
 const VENDOR_MANIFEST = path.join(VENDOR_DIR, VENDOR_MANIFEST_NAME);
 const VENDOR_CATALOG_NAME = "_catalog.json";
@@ -51,7 +51,7 @@ const PIN_MODULE = path.join(REPO_ROOT, "shared", "skills-pin.js");
 const PIN_TYPES = path.join(REPO_ROOT, "shared", "skills-pin.d.ts");
 const GENERATED = new Set([VENDOR_MANIFEST_NAME, VENDOR_CATALOG_NAME]);
 
-/** The product-surface id Loom claims. A skill opts in with `metadata.surfaces: [loom]`. */
+/** The product-surface id Orbit claims. A skill opts in with `metadata.surfaces: [loom]`. */
 const SURFACE_ID = "loom";
 
 // agentic-plugins follows the plugin layout every harness reads: skill content
@@ -62,7 +62,7 @@ const PLUGIN_SKILLS_ROOT = "skills";
 // Research notes in the Foundry cite source by the author's local checkout
 // (`~/projects/repositories/galaxy/...`), in both frontmatter `sources:` and
 // body prose. Shipped as-is an agent may try to read a path that doesn't exist
-// on the user's machine; Loom's read-jail blocks it, so the turn is wasted or
+// on the user's machine; Orbit's read-jail blocks it, so the turn is wasted or
 // the user is pointed somewhere useless. Rewrite to the canonical GitHub
 // location, and refuse to ship a repo we have no rewrite for rather than
 // leaking a dead local path.

@@ -3,7 +3,7 @@ import type { FeedbackSysinfo } from "../../../shared/feedback-contract.js";
 // galaxy-tooltip.ts importing GalaxyUserStatus).
 import type { ReportSysinfoEnvelope } from "../main/report-sysinfo.js";
 
-/** The slice of LoomConfig the report needs. */
+/** The slice of OrbitConfig the report needs. */
 export interface FeedbackConfigView {
   llm?: { active?: string; providers?: Record<string, { model?: string }> };
   galaxy?: { active: string | null };

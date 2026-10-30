@@ -2,7 +2,7 @@ export declare const SCHEMA_VERSION: 1;
 export declare const FEEDBACK_ROUTE: "/feedback";
 export declare const FEEDBACK_KEY_HEADER: "X-Orbit-Feedback-Key";
 export declare const FEEDBACK_ENDPOINT_URL: string;
-export declare const CLI_FEEDBACK_SOURCE: "loom-cli";
+export declare const CLI_FEEDBACK_SOURCE: "orbit-cli";
 
 export interface FeedbackSysinfo {
   appVersion?: string;
@@ -28,7 +28,7 @@ export interface FeedbackPayload {
   schemaVersion: 1;
   source: "orbit" | "loom-cli" | "orbit-cli";
   /**
-   * Opaque beta-tester code (e.g. "orbit-007"), copied from LoomConfig.testerId.
+   * Opaque beta-tester code (e.g. "orbit-007"), copied from OrbitConfig.testerId.
    * MUST stay top-level: the orbit-feedback worker maps `payload.testerId` to a
    * first-class `tester_id` column. Optional + additive, so schemaVersion stays 1.
    */

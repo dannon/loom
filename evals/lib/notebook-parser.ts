@@ -1,5 +1,5 @@
 /**
- * Subset of extensions/loom/init-gate.ts's plan parser, scoped to what the
+ * Subset of extensions/orbit/init-gate.ts's plan parser, scoped to what the
  * notebook assertions need. Once init-gate.ts is on main (PR #104) this can
  * be replaced with an import; in the meantime, behavior is intentionally
  * a faithful subset so scenarios written against this parser keep passing

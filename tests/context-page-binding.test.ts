@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import * as state from "../extensions/loom/state";
-import { buildGalaxyPageBindingBlock } from "../extensions/loom/context";
+import * as state from "../extensions/orbit/state";
+import { buildGalaxyPageBindingBlock } from "../extensions/orbit/context";
 
-vi.mock("../extensions/loom/state");
+vi.mock("../extensions/orbit/state");
 
 // The block reads the record through the record store, so the fixture is a
 // real notebook.md in a scratch dir that the state automock points at.

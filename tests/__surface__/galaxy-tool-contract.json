@@ -79,7 +79,7 @@
     "vega_dataset"
   ],
   "orbitOnly": [],
-  "loomBridging": {
+  "orbitBridging": {
     "tools": ["list_jobs", "get_job_logs", "galaxy_read_output"],
     "wraps": [
       "get_job_details(job_id)",

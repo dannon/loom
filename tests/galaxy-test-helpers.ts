@@ -1,8 +1,8 @@
 import { vi } from "vitest";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { setGalaxyTransport } from "../extensions/loom/galaxy-api";
-import { createGalaxyOpsToolSource } from "../extensions/loom/galaxy-ops-tools";
-import type { GalaxyTool } from "../extensions/loom/galaxy-tool-source";
+import { setGalaxyTransport } from "../extensions/orbit/galaxy-api";
+import { createGalaxyOpsToolSource } from "../extensions/orbit/galaxy-ops-tools";
+import type { GalaxyTool } from "../extensions/orbit/galaxy-tool-source";
 import type { GalaxyToolFamily } from "../shared/galaxy-tool-family.js";
 import { GALAXY } from "./galaxy-family-fixture";
 

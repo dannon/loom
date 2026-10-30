@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * The conformance run: Orbit's whole brain (extensions/loom) booted on pi-host under the browser's
+ * The conformance run: Orbit's whole brain (extensions/orbit) booted on pi-host under the browser's
  * capability profile, with a tripwire on every Node reach. The run is pinned as a file snapshot
  * (pi-host.orbit.golden.json): every fs/child_process/chokidar/better-sqlite3 call site Orbit makes,
  * by phase, plus the shim's own notes. Slices 1 and 2 shrink that list; a change that grows it fails
@@ -92,7 +92,7 @@ const tripwire = vi.hoisted(() => {
 
 // The root galaxy-ops package's own two entries, by resolved path. From browser/core the bare
 // specifier resolves to the fork in browser/node_modules, and vitest keys a mock by the id it
-// resolves, so the mock names the root Node entry that extensions/loom resolves to and serves the
+// resolves, so the mock names the root Node entry that extensions/orbit resolves to and serves the
 // root browser entry in its place -- what the worker's bundler does with the "browser" condition.
 // Kept to this file: ops.ts and parity.test.ts need the fork, so no global alias.
 const galaxyOps = vi.hoisted(() => {
@@ -170,7 +170,7 @@ function stubAll(mod: typeof cp, label: string) {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..", "..", "..");
-const LOOM = join(REPO, "extensions", "loom");
+const LOOM = join(REPO, "extensions", "orbit");
 const SHARED = join(REPO, "shared");
 // shared/lesson-rules.js imports lessons/validate.mjs, so the validator's top level runs under Orbit.
 const LESSONS = join(REPO, "lessons");
@@ -338,28 +338,28 @@ beforeAll(async () => {
   });
 
   ledger.phase = "import";
-  const loom = await import("../../../../extensions/loom/index");
+  const loom = await import("../../../../extensions/orbit/index");
   const { setCapabilityProfile } = await import("../../../../shared/capability-profile.js");
   setCapabilityProfile(PROFILE);
   seams.push(() => setCapabilityProfile(null));
   const { setConfigSource } = await import("../../../../shared/config-source.js");
   setConfigSource({ load: () => CONFIG });
   seams.push(() => setConfigSource(null));
-  const { setInstructionSource } = await import("../../../../extensions/loom/user-instructions");
+  const { setInstructionSource } = await import("../../../../extensions/orbit/user-instructions");
   setInstructionSource({
     files: () => [
       { scope: "global", path: "shell://instructions", content: INSTRUCTION, truncated: false },
     ],
   });
   seams.push(() => setInstructionSource(null));
-  const { setVendorSkillsSource } = await import("../../../../extensions/loom/vendor-skills");
+  const { setVendorSkillsSource } = await import("../../../../extensions/orbit/vendor-skills");
   setVendorSkillsSource({
     catalog: vendorCatalog,
     manifest: vendorManifest,
     read: (target) => vendorFiles.get(target) ?? null,
   });
   seams.push(() => setVendorSkillsSource(null));
-  const { setGalaxyTransport } = await import("../../../../extensions/loom/galaxy-api");
+  const { setGalaxyTransport } = await import("../../../../extensions/orbit/galaxy-api");
   setGalaxyTransport({
     fetch: async (url, init) => {
       const method = init.method ?? "GET";
@@ -385,12 +385,12 @@ beforeAll(async () => {
   });
   // The record is a Galaxy page, not a file. The key stays under the temp dir so the side stores
   // keyed by its dirname (activity log, template replay) land where they did.
-  const { setRecordStore } = await import("../../../../extensions/loom/record-store");
-  const { createPageRecordStore } = await import("../../../../extensions/loom/record-store-page");
+  const { setRecordStore } = await import("../../../../extensions/orbit/record-store");
+  const { createPageRecordStore } = await import("../../../../extensions/orbit/record-store-page");
   setRecordStore(createPageRecordStore({ key: join(tmp, "notebook.md"), pageId: "p1" }));
-  const { setGalaxyToolSource } = await import("../../../../extensions/loom/galaxy-tool-source");
+  const { setGalaxyToolSource } = await import("../../../../extensions/orbit/galaxy-tool-source");
   const { createGalaxyOpsToolSource } =
-    await import("../../../../extensions/loom/galaxy-ops-tools");
+    await import("../../../../extensions/orbit/galaxy-ops-tools");
   setGalaxyToolSource(createGalaxyOpsToolSource({ extras: EXTRAS.map(stub) }));
   seams.push(() => setGalaxyToolSource(null));
 
@@ -518,7 +518,7 @@ describe("Orbit on pi-host", () => {
       // check adds three (session_start, input, agent_end).
       on: 71 + 7 + 1 + 2 + 3,
       // Orbit's own tools; the Galaxy family (the browser entry's 42 operations, the shell's three
-      // extras, and Loom's list_jobs and get_job_logs bridges); galaxy_read_output beside it; and
+      // extras, and Orbit's list_jobs and get_job_logs bridges); galaxy_read_output beside it; and
       // the probe. mcp_read_output is MCP-only.
       tools: 15 + 47 + 1 + 1,
       // The real /reconcile, in the stub's place.
@@ -533,14 +533,14 @@ describe("Orbit on pi-host", () => {
   });
 
   it("loads galaxy-ops' browser entry, which reaches nothing Node-only", async () => {
-    const { galaxyOpsEntry } = await import("../../../../extensions/loom/galaxy-ops-tools");
+    const { galaxyOpsEntry } = await import("../../../../extensions/orbit/galaxy-ops-tools");
     // 45 here would mean the Node entry loaded: it pushes its three operations into the array both
     // entries share, so the count is the tripwire for the mock above.
     const entry = galaxyOpsEntry();
     expect(entry.operations).toHaveLength(42);
     expect(entry.hasUploadFile).toBe(false);
     const { registeredGalaxyTools } =
-      await import("../../../../extensions/loom/galaxy-tool-source");
+      await import("../../../../extensions/orbit/galaxy-tool-source");
     const names = registeredGalaxyTools().map((t) => t.name);
     // The 47-name family, and galaxy_read_output registered beside it.
     expect(names).toHaveLength(47 + 1);
@@ -586,9 +586,9 @@ describe("Orbit on pi-host", () => {
    * everything queued before it.
    */
   async function drain() {
-    const { pollGalaxyNow } = await import("../../../../extensions/loom/galaxy-poller");
+    const { pollGalaxyNow } = await import("../../../../extensions/orbit/galaxy-poller");
     await pollGalaxyNow();
-    const { followThrough } = await import("../../../../extensions/loom/galaxy-reconcile");
+    const { followThrough } = await import("../../../../extensions/orbit/galaxy-reconcile");
     await followThrough("enrich");
   }
 
@@ -612,7 +612,7 @@ describe("Orbit on pi-host", () => {
     expect(pageCalls.GET).toBeGreaterThan(0);
     // The session-start reconcile ran over the memory provenance fs: it wrote its cursor beside
     // the record key without a .loom directory appearing on disk.
-    const { readReconcileState } = await import("../../../../extensions/loom/galaxy-provenance");
+    const { readReconcileState } = await import("../../../../extensions/orbit/galaxy-provenance");
     expect(await readReconcileState(tmp)).toMatchObject({ schema: 1 });
     expect(fs.existsSync(join(tmp, ".loom"))).toBe(false);
   });
@@ -707,7 +707,7 @@ describe("Orbit on pi-host", () => {
     await first!.wait(ctx);
     await until(() => runs.settled >= 4);
     // index.ts captures the new history id off the real create_history's POST.
-    const { getState } = await import("../../../../extensions/loom/state");
+    const { getState } = await import("../../../../extensions/orbit/state");
     expect(getState().currentHistoryId).toBe("h1");
     const results = () =>
       conversation.context(ctx).then((c) => c.messages.filter((m) => m.role === "toolResult"));
@@ -799,7 +799,7 @@ describe("Orbit on pi-host", () => {
     // Reads the writer registry the session opened over the in-memory fs. The command answers
     // without a registry too, so the mode is checked outright, and a fallback to read-only would
     // have reached the page as a warning.
-    const { getSessionRegistry } = await import("../../../../extensions/loom/registry-runtime");
+    const { getSessionRegistry } = await import("../../../../extensions/orbit/registry-runtime");
     expect(getSessionRegistry()?.store.mode).toBe("writer");
     expect(notices.filter(([level]) => level === "warning")).toEqual([]);
     expect(await host.command("pending", "")).toBe(true);

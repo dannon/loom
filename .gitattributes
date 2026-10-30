@@ -2,7 +2,7 @@
 # still have to be checked out the same way everywhere: a CRLF checkout turns
 # any diff of them into every line, and the copy under review stops matching
 # the copy a Windows contributor sees.
-extensions/loom/vendor/** text eol=lf
+extensions/orbit/vendor/** text eol=lf
 
 # The sync script starts with a #! line and is imported by the tests. Checked out
 # with CRLF, the test runner's module transform no longer recognises the hashbang

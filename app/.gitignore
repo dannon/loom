@@ -2,7 +2,7 @@ node_modules
 .vite/
 out/
 dist/
-.loom-stage/
+.orbit-stage/
 .speech-stage/
 test-results/
 playwright-report/

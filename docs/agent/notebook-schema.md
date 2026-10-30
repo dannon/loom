@@ -1,5 +1,10 @@
 # Notebook schema and plans
 
+> Fence names: typed blocks are written with the `orbit-` prefix since 0.9. The
+> `loom-` blocks earlier releases wrote are read exactly the same way and are
+> rewritten under the new name the next time they are updated, so a notebook
+> shared between versions converges instead of duplicating.
+
 ## Project model
 
 A "project" is the working directory you're invoked in. Inside, the
@@ -53,7 +58,7 @@ Conventions:
 - `## Plan X: <Title> [routing]` — routing tag is `[remote]`, `[hybrid]`, or
   `[local]`, by where the compute runs (see `galaxy-routing.md`). `[remote]`
   is the default when every step runs on Galaxy. Older notebooks may say
-  `[galaxy]`, which Loom reads as `[remote]`. Future tooling greps for these
+  `[galaxy]`, which Orbit reads as `[remote]`. Future tooling greps for these
   literals.
 - `{#plan-x-step-N}` anchors so invocation YAML can reference steps.
 - Every step needs a concrete `Verification:` sub-bullet describing the
@@ -61,7 +66,7 @@ Conventions:
 - Mark step status by editing the checkbox: `- [ ]` pending, `- [x]`
   verified completed, `- [!]` failed. Do not mark `- [x]` until the
   verification evidence is written into the notebook. Flipping a step to
-  `- [x]` while the `loom-invocation` block bound to its anchor still
+  `- [x]` while the `orbit-invocation` block bound to its anchor still
   reads `status: in_progress` is checked by the harness, not just asked
   for. See the evidence gate in `docs/agent/galaxy-routing.md`.
 - If a verification check is blocked or inconclusive but the step itself
@@ -80,14 +85,14 @@ explorations, summaries, ad-hoc edits — answer those directly. A plan
 is for multi-step pipeline orchestration the user explicitly wants
 driven (e.g. "draft a plan for variant calling on this data").
 
-## `loom-proposal` blocks
+## `orbit-proposal` blocks
 
 `loom_propose` writes one per proposed Galaxy run, after checking it against
 the target's template. Don't write or edit these by hand to change a run:
 an edit after approval revokes the approval, and a new run is a new
 proposal.
 
-```loom-proposal
+```orbit-proposal
 proposal_id: prop-7k2m9x
 step_anchor: plan-a-step-2
 label: Trim reads
@@ -106,14 +111,14 @@ spec_revision: <written after /approve; display only>
 Whether a proposal is approved is recorded in the approval registry, not
 in the block; `spec_revision` here only echoes it.
 
-## `loom-invocation` and `loom-job` blocks
+## `orbit-invocation` and `orbit-job` blocks
 
 Every Galaxy submission gets a block. A workflow invocation gets
-`loom-invocation`, keyed on `invocation_id`; a tool run gets `loom-job`,
+`orbit-invocation`, keyed on `invocation_id`; a tool run gets `orbit-job`,
 keyed on `job_id`, one block per job (a mapped-over run produces several).
 The background poller advances `status` from Galaxy job state.
 
-```loom-invocation
+```orbit-invocation
 invocation_id: ff1e2d3c4b5a6978
 galaxy_server_url: https://usegalaxy.org
 notebook_anchor: plan-a-step-3
@@ -138,7 +143,7 @@ not answer. Everything from `attempt_id` down is **harness-only**:
 - `attempt_id` -- ULID minted when the submission was dispatched. Joins the
   block to its full provenance record under `.loom/provenance/`.
 - `history_id` -- the Galaxy history the work landed in.
-- `submitted_by` -- `harness` when Loom watched the submission happen,
+- `submitted_by` -- `harness` when Orbit watched the submission happen,
   `agent` when only a record call reported it, `unknown` when reconciliation
   found it on Galaxy with nothing here to match.
 - `enrichment` / `enrichment_attempts` -- whether per-job tool versions,
@@ -156,14 +161,14 @@ anything. Blocks are also written automatically the moment a submission
 succeeds, so you do not need a record call to make a run pollable; what a
 record call is still for is naming the step the run belongs to.
 
-## `loom-galaxy-page` binding block
+## `orbit-galaxy-page` binding block
 
 Records the binding between this notebook and a Galaxy page (see
 galaxyproject/galaxy#22361, Galaxy Notebooks). One block per notebook for
 now -- the upsert grammar is keyed on `page_id` so future per-plan
 bindings are forward-compatible.
 
-```loom-galaxy-page
+```orbit-galaxy-page
 page_id: <encoded page id>
 page_slug: <optional slug>
 galaxy_server_url: "<scheme://host>"
@@ -198,7 +203,7 @@ Sync semantics:
 ## Notebook persistence and git
 
 When `notebook.md` is created in a directory that isn't a git repo,
-Loom runs `git init`, drops a bioinformatics-friendly `.gitignore`,
+Orbit runs `git init`, drops a bioinformatics-friendly `.gitignore`,
 and marks the repo with `git config loom.managed true`. From then on
 every notebook write triggers an auto-commit. This gives you:
 
@@ -207,8 +212,8 @@ every notebook write triggers an auto-commit. This gives you:
 - **Branch-based exploration.** Try alternatives on branches.
 - **Collaboration.** Push to GitHub; collaborators can pull.
 
-If the user starts Loom in an **existing** git repo, auto-commit stays
-off by default -- Loom won't write commits into a project it didn't
+If the user starts Orbit in an **existing** git repo, auto-commit stays
+off by default -- Orbit won't write commits into a project it didn't
 create. The user can opt in with `git config loom.managed true`. This
 is the right default; do not work around it by calling git directly.
 

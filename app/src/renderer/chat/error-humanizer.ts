@@ -56,7 +56,7 @@ const NOT_OVERFLOW_PATTERNS = [/rate limit/i, /too many requests/i, /throttl/i];
 
 // Overflow also happens before the user has said anything: Orbit's baseline
 // request -- the ~8K-token cached system prefix built in
-// extensions/loom/context.ts, plus the tool schemas -- already exceeds some
+// extensions/orbit/context.ts, plus the tool schemas -- already exceeds some
 // models' entire window, so the turn fails identically on a one-sentence
 // session and on a fresh /new. Two beta reporters hit that on gpt-4 (8,192
 // tokens) and were told to compact a conversation that had barely begun

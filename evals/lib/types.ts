@@ -32,7 +32,7 @@ export interface Assertions {
   };
   /**
    * Structural plan checks parsed from the agent's chat text. Use this for
-   * single-turn plan-creation scenarios -- Loom's plan-convention block
+   * single-turn plan-creation scenarios -- Orbit's plan-convention block
    * tells the agent to draft plans IN CHAT first and only write to
    * notebook.md after explicit user approval, so for a one-shot eval the
    * correct plan is in chat, not in the file.
@@ -142,7 +142,7 @@ export interface PlanAssertions {
   exists?: boolean;
   /**
    * Where to read the plan from. "any" (default) = notebook.md if it contains
-   * a plan, else the chat text. Models don't reliably follow Loom's
+   * a plan, else the chat text. Models don't reliably follow Orbit's
    * draft-in-chat-then-write gate, so "any" is the right default for grading.
    */
   source?: "chat" | "notebook" | "any";
@@ -208,7 +208,7 @@ export interface Scenario {
    * different tool surfaces. Comes after `--mode json` and any
    * `--provider`/`--model` injected by the runner.
    */
-  loomArgs?: string[];
+  coreArgs?: string[];
   /** Hard wall-clock cap for the loom invocation. Defaults to 15s. */
   timeoutMs?: number;
   assertions: Assertions;

@@ -17,8 +17,8 @@ import {
   refreshCatalog,
   skillsCacheDir,
   refreshAllCatalogs,
-} from "../extensions/loom/skills-discovery";
-import { listEnabledSkillRepos } from "../extensions/loom/skills";
+} from "../extensions/orbit/skills-discovery";
+import { listEnabledSkillRepos } from "../extensions/orbit/skills";
 
 describe("parseFrontmatter", () => {
   it("reads name, description, when_to_use, and a surfaces list", () => {
@@ -141,8 +141,8 @@ describe("fetchSkillFile", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("v1", { status: 200 })));
     await fetchSkillFile(REPO, "x/SKILL.md");
     const cacheFile = fs
-      .readdirSync(path.join(tmp, ".loom", "cache", "skills"))
-      .map((d) => path.join(tmp, ".loom", "cache", "skills", d, "x", "SKILL.md"))
+      .readdirSync(path.join(tmp, ".orbit", "cache", "skills"))
+      .map((d) => path.join(tmp, ".orbit", "cache", "skills", d, "x", "SKILL.md"))
       .find((p) => fs.existsSync(p))!;
     const old = Date.now() / 1000 - 2 * 60 * 60;
     fs.utimesSync(cacheFile, old, old);
@@ -372,9 +372,9 @@ describe("refreshAllCatalogs", () => {
     // (no module mocking, and no touching the developer's real config).
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-all-"));
     vi.spyOn(os, "homedir").mockReturnValue(tmp);
-    fs.mkdirSync(path.join(tmp, ".loom"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, ".orbit"), { recursive: true });
     fs.writeFileSync(
-      path.join(tmp, ".loom", "config.json"),
+      path.join(tmp, ".orbit", "config.json"),
       JSON.stringify({
         skills: {
           // A live repo on purpose: a seeded repo left at its default URL and
@@ -406,7 +406,7 @@ describe("refreshAllCatalogs", () => {
     // Refreshing what ships in the package would report a count the router does
     // not use, and offline it would report a failure for a repo that works.
     fs.writeFileSync(
-      path.join(tmp, ".loom", "config.json"),
+      path.join(tmp, ".orbit", "config.json"),
       JSON.stringify({
         skills: {
           repos: [{ name: "galaxy-skills", url: REPO.url, branch: "main", enabled: true }],
@@ -439,9 +439,9 @@ describe("refreshAllCatalogs", () => {
 describe("listEnabledSkillRepos", () => {
   let tmp: string;
   function writeConfig(repos: unknown): void {
-    fs.mkdirSync(path.join(tmp, ".loom"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, ".orbit"), { recursive: true });
     fs.writeFileSync(
-      path.join(tmp, ".loom", "config.json"),
+      path.join(tmp, ".orbit", "config.json"),
       JSON.stringify({ skills: { repos } }),
       "utf-8",
     );

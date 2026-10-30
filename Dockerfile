@@ -38,9 +38,10 @@ ENV LOOM_MODE=remote
 ENV ORBIT_MODE=remote
 ENV PORT=3000
 # Reachable via the published port. The server refuses to start on this bind
-# without LOOM_WEB_TOKEN (or LOOM_WEB_ALLOW_INSECURE=1 behind a trusted proxy),
+# without ORBIT_WEB_TOKEN (or ORBIT_WEB_ALLOW_INSECURE=1 behind a trusted proxy),
 # so the exposed container is fail-closed rather than an open agent.
 ENV LOOM_WEB_HOST=0.0.0.0
+ENV ORBIT_WEB_HOST=0.0.0.0
 
 WORKDIR /app
 COPY package.json package-lock.json ./

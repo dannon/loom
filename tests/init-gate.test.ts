@@ -8,8 +8,8 @@ import {
   checkPreconditions,
   normalizeRouting,
   renderFailures,
-} from "../extensions/loom/init-gate";
-import { setNotebookPath, setCurrentHistoryId, resetState } from "../extensions/loom/state";
+} from "../extensions/orbit/init-gate";
+import { setNotebookPath, setCurrentHistoryId, resetState } from "../extensions/orbit/state";
 
 let tmpDir: string;
 let nbPath: string;

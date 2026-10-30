@@ -8,7 +8,7 @@ import {
   loadActivityLog,
   onActivityChange,
   resetActivity,
-} from "../extensions/loom/activity";
+} from "../extensions/orbit/activity";
 import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 
 const event = {

@@ -1,7 +1,7 @@
 # Agentic Science with Galaxy — site
 
-The public marketing + docs site for Orbit, Loom, and Galaxy MCP. Astro 5 +
-Tailwind v4, deployed to GitHub Pages at **https://galaxyproject.github.io/loom/**.
+The public marketing + docs site for Orbit and Galaxy MCP. Astro 5 +
+Tailwind v4, deployed to GitHub Pages at **https://galaxyproject.github.io/orbit/**.
 
 ## Design
 

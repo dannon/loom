@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { encodeCwd, decodeCwd } from "../../extensions/loom/session-index/cwd";
+import { encodeCwd, decodeCwd } from "../../extensions/orbit/session-index/cwd";
 
 describe("cwd codec", () => {
   it("encodes absolute paths Pi-style", () => {

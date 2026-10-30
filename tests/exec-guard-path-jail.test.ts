@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { createPathResolver } from "../extensions/loom/exec-guard/path-jail";
+import { createPathResolver } from "../extensions/orbit/exec-guard/path-jail";
 
 let root: string, outside: string;
 beforeEach(() => {

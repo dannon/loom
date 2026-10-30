@@ -1,13 +1,13 @@
 ---
 name: release
-description: Use when cutting a release of galaxyproject/loom -- tagging a new version that publishes the @galaxyproject/loom npm package and builds the Orbit desktop installers. Triggers include "cut a release", "ship 0.x", "release loom", or /release.
+description: Use when cutting a release of galaxyproject/orbit -- tagging a new version that publishes the @galaxyproject/orbit npm package and builds the Orbit desktop installers. Triggers include "cut a release", "ship 0.x", "release orbit", or /release.
 ---
 
-# Release (Loom / Orbit)
+# Release (Orbit)
 
 ## Overview
 
-Cut a Loom/Orbit release end to end. Two actions are irreversible and outward-facing:
+Cut an Orbit release end to end. Two actions are irreversible and outward-facing:
 the **tag push** (fires `release.yml` -> npm publish + installer build) and the **draft
 promotion** (makes the GitHub release public). **STOP for explicit human confirmation
 before each.** Everything before the tag push is local and reversible.
@@ -35,11 +35,11 @@ git rev-parse --abbrev-ref HEAD            # must be: main
 # trip this (e.g. app/test-results/, app/out/) -- remove them, don't commit them.
 test -z "$(git status --porcelain)"
 gh auth status                             # gh must be authenticated
-# Canonical remote = whichever remote pushes to galaxyproject/loom (works from a
+# Canonical remote = whichever remote pushes to galaxyproject/orbit (works from a
 # fork-origin checkout or a galaxyproject-origin clone -- don't assume "upstream").
 # grep, not awk: BSD/macOS awk chokes on the /[:/]/ char class, and the line ends
 # in " (push)" so a trailing-$ anchor never matches anyway.
-CANON=$(git remote -v | grep '(push)' | grep 'galaxyproject/loom' | head -1 | cut -f1)
+CANON=$(git remote -v | grep '(push)' | grep 'galaxyproject/orbit' | head -1 | cut -f1)
 test -n "$CANON"                           # abort if no canonical remote found
 git fetch "$CANON" --tags
 git merge-base --is-ancestor "$CANON/main" HEAD && git merge-base --is-ancestor HEAD "$CANON/main"  # local main == canonical main
@@ -65,7 +65,7 @@ silently truncates at 30 without `--limit`:
 git log "$LAST_TAG"..HEAD --merges --oneline \
   | grep -oE 'Merge pull request #[0-9]+' | grep -oE '[0-9]+' | sort -un
 # Titles/authors/labels for those PRs (--limit: default is 30, which silently drops PRs):
-gh pr list --repo galaxyproject/loom --state merged --base main --limit 200 \
+gh pr list --repo galaxyproject/orbit --state merged --base main --limit 200 \
   --search "merged:>=$LAST_DATE" --json number,title,author,labels,mergedAt
 ```
 
@@ -156,7 +156,7 @@ gh workflow run release.yml --ref <branch>   # builds all legs; publish/publish-
 ## Phase 3 -- GATE 1: tag push  (STOP)
 
 ⛔ **Hard stop.** State plainly: pushing will run `release.yml`, which **publishes
-`@galaxyproject/loom@$NEW` to npm** (cannot be un-published) and builds the installers.
+`@galaxyproject/orbit@$NEW` to npm** (cannot be un-published) and builds the installers.
 Wait for an explicit "go".
 
 On go:
@@ -170,8 +170,8 @@ git push "$CANON" "v$NEW"                    # this fires release.yml
 Watch the run; STOP and report if it fails (do not proceed to promotion):
 
 ```bash
-RUN=$(gh run list --repo galaxyproject/loom --workflow release.yml --limit 1 --json databaseId -q '.[0].databaseId')
-gh run watch --repo galaxyproject/loom "$RUN"
+RUN=$(gh run list --repo galaxyproject/orbit --workflow release.yml --limit 1 --json databaseId -q '.[0].databaseId')
+gh run watch --repo galaxyproject/orbit "$RUN"
 ```
 
 ### If the run fails
@@ -179,7 +179,7 @@ gh run watch --repo galaxyproject/loom "$RUN"
 First check whether `publish-npm` succeeded -- that determines recovery:
 
 ```bash
-npm view @galaxyproject/loom@$NEW version 2>/dev/null   # empty/404 = NOT published
+npm view @galaxyproject/orbit@$NEW version 2>/dev/null   # empty/404 = NOT published
 ```
 
 - **A build leg failed on flaky infra** (e.g. macOS `hdiutil detach -- No such file or
@@ -208,9 +208,9 @@ rerun guidance first.) Replace its body with the curated highlights ABOVE the au
 robust for large bodies where inline `--notes` with `printf` gets fragile:
 
 ```bash
-gh release view "v$NEW" --repo galaxyproject/loom --json body -q .body > /tmp/auto.md
+gh release view "v$NEW" --repo galaxyproject/orbit --json body -q .body > /tmp/auto.md
 { printf '## Highlights\n\n%s\n\n---\n\n' "$HIGHLIGHTS"; cat /tmp/auto.md; } > /tmp/body.md
-gh release edit "v$NEW" --repo galaxyproject/loom --notes-file /tmp/body.md
+gh release edit "v$NEW" --repo galaxyproject/orbit --notes-file /tmp/body.md
 ```
 
 If anything user-facing shifted late (e.g. an installer dropped to a portable `.zip`),
@@ -224,8 +224,8 @@ attached installers in the GitHub UI first. Wait for an explicit "go".
 On go:
 
 ```bash
-gh release edit "v$NEW" --repo galaxyproject/loom --draft=false
-gh release view "v$NEW" --repo galaxyproject/loom --json url -q .url   # report the published URL
+gh release edit "v$NEW" --repo galaxyproject/orbit --draft=false
+gh release view "v$NEW" --repo galaxyproject/orbit --json url -q .url   # report the published URL
 ```
 
 npm publish already happened in `release.yml` on the tag push -- the skill does not run
@@ -238,7 +238,7 @@ The core value -- match the voice of the existing `CHANGELOG.md` entries.
 - **2-5 bullets, scaled to the release.** A patch release is 2-3; a big multi-feature release can run 5-6. User-facing benefit framing, present tense, concrete, no marketing. Group related PRs into one bullet.
 - **Keep:** new features, new commands, user-visible fixes, new model/provider support, safety/security changes users care about, notable performance wins.
 - **Drop:** CI/release-plumbing PRs, the `cut`/`bump X.Y.Z` PRs, dependency bumps (unless user-visible, e.g. "Opus 4.8 available"), pure internal refactors, docs-only and test-only PRs.
-- **Voice:** casual, direct; plain hyphens, never a Unicode em-dash (restructure instead); name user-facing things (`/compact`, `loom update`), not PR numbers.
+- **Voice:** casual, direct; plain hyphens, never a Unicode em-dash (restructure instead); name user-facing things (`/compact`, `orbit update`), not PR numbers.
 - **Always a draft:** highlights are public copy -- ALWAYS show them for human edit/approval before committing or publishing. Never publish generated copy unreviewed.
 
 ## Red flags -- STOP
@@ -257,7 +257,7 @@ The core value -- match the voice of the existing `CHANGELOG.md` entries.
 
 | Mistake | Fix |
 |---|---|
-| Push tag to the fork | Push to `$CANON` (detected as the galaxyproject/loom remote) |
+| Push tag to the fork | Push to `$CANON` (detected as the galaxyproject/orbit remote) |
 | Versions out of lockstep | Bump both via `npm version ... --prefix app`; run the lockstep check |
 | Raw commit list as notes | Distill per the editorial rules; curate the release body too |
 | Promote before CI is green | Watch the run; only `--draft=false` after green + eyeball |

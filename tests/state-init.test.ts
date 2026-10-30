@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { execFileSync } from "child_process";
-import { initSessionArtifacts, resetState } from "../extensions/loom/state";
+import { initSessionArtifacts, resetState } from "../extensions/orbit/state";
 
 function git(args: string[], cwd: string): string {
   return execFileSync("git", args, {

@@ -3,7 +3,7 @@
 A local dev server that runs the Orbit renderer in your browser instead of
 Electron. It serves the **same** renderer code (`app/src/renderer/`) through
 Vite with hot module replacement, and bridges a browser WebSocket to the
-**same** loom brain the desktop app and CLI use (`node bin/loom.js --mode rpc`).
+**same** loom brain the desktop app and CLI use (`node bin/orbit.js --mode rpc`).
 
 The main reason to use it: **HMR**. Orbit's Electron renderer has HMR disabled
 on purpose (see `app/vite.renderer.config.ts`), so the desktop dev loop means
@@ -12,7 +12,7 @@ restarting the app to see renderer changes. Here, edits under
 chat-rendering, styling, and agent-event work.
 
 It is a single-user dev convenience, not the hosted/remote deployment story.
-That separate shape (`LOOM_MODE=remote`, tool allowlists, path-gating, Docker)
+That separate shape (`ORBIT_MODE=remote`, tool allowlists, path-gating, Docker)
 lives in `docs/superpowers/specs/2026-05-09-orbit-web-remote-only-design.md`.
 
 ## Prerequisites
@@ -21,11 +21,11 @@ Same as the developer install in the root [`README.md`](../README.md):
 
 - Node 22.19+. `uv` on `PATH` is optional, same as the CLI: only the vendored
   planemo skills' `uvx` route uses it; the Galaxy tools run in-process.
-- A configured `~/.loom/config.json` with at least an LLM API key. The web
+- A configured `~/.orbit/config.json` with at least an LLM API key. The web
   server reads the exact same config as Orbit and the CLI, so if either of
   those already works, you're set. Otherwise you can fill it in from the
   Preferences panel once the UI is up.
-- Root deps installed (provides `bin/loom.js` and its runtime). The brain is
+- Root deps installed (provides `bin/orbit.js` and its runtime). The brain is
   committed JS -- no separate build step.
 
 ```bash
@@ -47,8 +47,8 @@ Open http://localhost:3000. Override the port with `PORT`:
 PORT=4000 npm run dev
 ```
 
-The working directory defaults to `~/.loom/analyses` (override with
-`defaultCwd` in `~/.loom/config.json`). The brain subprocess starts lazily on
+The working directory defaults to `~/.orbit/analyses` (override with
+`defaultCwd` in `~/.orbit/config.json`). The brain subprocess starts lazily on
 the first browser connection, so the page loads before any agent spins up.
 
 ## Using it from another device (phone, tablet)
@@ -85,14 +85,14 @@ displaces the first. It's a single-user dev tool, full stop.
 If you genuinely need it from outside your network, put something that adds its
 own authentication in front -- a VPN/mesh like Tailscale, or a tunnel
 (cloudflared/ngrok) gated by access control -- rather than opening the raw port.
-The real multi-user/remote deployment shape (`LOOM_MODE=remote`, tool
+The real multi-user/remote deployment shape (`ORBIT_MODE=remote`, tool
 allowlists, path-gating, Docker) is a separate design (spec linked above); this
 dev server is not that and shouldn't be pressed into that role.
 
 ## How it works
 
 ```
-Browser  ──(WebSocket /ws)──>  web/server.ts  ──(JSON-line stdio)──>  node bin/loom.js --mode rpc
+Browser  ──(WebSocket /ws)──>  web/server.ts  ──(JSON-line stdio)──>  node bin/orbit.js --mode rpc
    ^                                                                          |
    └──────────────────────  agent events / UI requests  ──────────────────────┘
 ```
@@ -101,8 +101,8 @@ Browser  ──(WebSocket /ws)──>  web/server.ts  ──(JSON-line stdio)─
   ahead of the renderer's `app.ts`. The shim stands in for Electron's
   preload/`contextBridge`, exposing the same `window.orbit` API but routing
   calls over a WebSocket (`/ws`) instead of IPC.
-- For each browser it spawns one `node bin/loom.js --mode rpc` subprocess --
-  identical brain (`extensions/loom`), identical agent loop, identical Galaxy
+- For each browser it spawns one `node bin/orbit.js --mode rpc` subprocess --
+  identical brain (`extensions/orbit`), identical agent loop, identical Galaxy
   tool path to Orbit and the CLI. Some control channels (config get/save,
   cwd get/set, restart, reset-session) are handled by the server directly;
   everything else forwards to the brain.
@@ -136,7 +136,7 @@ often the shim than your code.
 ## Notes
 
 - HMR watches `app/src/renderer/` and `web/`. Changes to the brain
-  (`extensions/loom/`) need a brain restart -- use the in-app restart, or
+  (`extensions/orbit/`) need a brain restart -- use the in-app restart, or
   restart the dev server.
 - `web/package.json` also has a `build` script, but the static/production build
   and the remote-only server branch are part of the design spec above, not the

@@ -18,10 +18,10 @@ import {
   withRecordCas,
   withRecordLock,
   type RecordStore,
-} from "../extensions/loom/record-store";
-import { createFileRecordStore } from "../extensions/loom/record-store-file";
-import { createPageRecordStore } from "../extensions/loom/record-store-page";
-import { setGalaxyTransport } from "../extensions/loom/galaxy-api";
+} from "../extensions/orbit/record-store";
+import { createFileRecordStore } from "../extensions/orbit/record-store-file";
+import { createPageRecordStore } from "../extensions/orbit/record-store-page";
+import { setGalaxyTransport } from "../extensions/orbit/galaxy-api";
 import { CREDENTIALS, json } from "./galaxy-test-helpers";
 
 // The contract every backend of the record store keeps. The file harness is the

@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-vi.mock("../extensions/loom/config", () => ({
+vi.mock("../extensions/orbit/config", () => ({
   loadConfig: () => ({ executionMode: "hybrid" }),
 }));
 
-import { buildGalaxyContextBlock } from "../extensions/loom/context";
+import { buildGalaxyContextBlock } from "../extensions/orbit/context";
 import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 
 let prev: Record<string, string | undefined>;

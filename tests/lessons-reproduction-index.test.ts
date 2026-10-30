@@ -3,17 +3,17 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { setupContextInjection } from "../extensions/loom/context";
+import { setupContextInjection } from "../extensions/orbit/context";
 import {
   buildReproductionLessonsContext,
   looksLikeReproduction,
   renderReproductionIndex,
-  LOOM_LESSONS_CONTEXT_TYPE,
-} from "../extensions/loom/lessons/reproduction-index";
-import { resetLessonStore } from "../extensions/loom/lessons/store";
-import { resetActivity } from "../extensions/loom/activity";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
-import type { Lesson } from "../extensions/loom/lessons/types";
+  ORBIT_LESSONS_CONTEXT_TYPE,
+} from "../extensions/orbit/lessons/reproduction-index";
+import { resetLessonStore } from "../extensions/orbit/lessons/store";
+import { resetActivity } from "../extensions/orbit/activity";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
+import type { Lesson } from "../extensions/orbit/lessons/types";
 import { lessonFile } from "./lessons-fixture";
 
 // The lesson switch is off by default; these suites are about what happens
@@ -165,12 +165,12 @@ describe("the context handler", () => {
       {},
     );
     const msgs = out.messages ?? [];
-    const idx = msgs.findIndex((m) => m.customType === LOOM_LESSONS_CONTEXT_TYPE);
+    const idx = msgs.findIndex((m) => m.customType === ORBIT_LESSONS_CONTEXT_TYPE);
     const user = msgs.findIndex((m) => m.role === "user");
     expect(idx).toBeGreaterThan(-1);
     expect(idx).toBeLessThan(user);
     const injected = msgs.filter((m) => m.role === "custom");
-    expect(injected[0].customType).toBe(LOOM_LESSONS_CONTEXT_TYPE);
+    expect(injected[0].customType).toBe(ORBIT_LESSONS_CONTEXT_TYPE);
   });
 
   it("does not stack a second copy across turns", async () => {
@@ -181,7 +181,7 @@ describe("the context handler", () => {
     );
     const second = await handler({ messages: first.messages }, {});
     expect(
-      (second.messages ?? []).filter((m) => m.customType === LOOM_LESSONS_CONTEXT_TYPE),
+      (second.messages ?? []).filter((m) => m.customType === ORBIT_LESSONS_CONTEXT_TYPE),
     ).toHaveLength(1);
   });
 
@@ -197,13 +197,15 @@ describe("the context handler", () => {
       },
       {},
     );
-    expect((out.messages ?? []).some((m) => m.customType === LOOM_LESSONS_CONTEXT_TYPE)).toBe(true);
+    expect((out.messages ?? []).some((m) => m.customType === ORBIT_LESSONS_CONTEXT_TYPE)).toBe(
+      true,
+    );
   });
 
   it("injects nothing when the session is not a reproduction", async () => {
     const handler = wireContext();
     const out = await handler({ messages: [{ role: "user", content: "align these" }] }, {});
-    expect((out.messages ?? []).some((m) => m.customType === LOOM_LESSONS_CONTEXT_TYPE)).toBe(
+    expect((out.messages ?? []).some((m) => m.customType === ORBIT_LESSONS_CONTEXT_TYPE)).toBe(
       false,
     );
   });
@@ -213,7 +215,7 @@ describe("the context handler", () => {
     try {
       const handler = wireContext();
       const out = await handler({ messages: [{ role: "user", content: "reproducing" }] }, {});
-      expect((out.messages ?? []).some((m) => m.customType === LOOM_LESSONS_CONTEXT_TYPE)).toBe(
+      expect((out.messages ?? []).some((m) => m.customType === ORBIT_LESSONS_CONTEXT_TYPE)).toBe(
         false,
       );
     } finally {

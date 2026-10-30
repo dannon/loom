@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeHandoffEligible } from "../extensions/loom/registry-eligibility";
+import { computeHandoffEligible } from "../extensions/orbit/registry-eligibility";
 import {
   checkConformity,
   effectiveParam,
@@ -8,8 +8,8 @@ import {
   NO_APPROVAL_REVISION,
   sameValue,
   type RunFacts,
-} from "../extensions/loom/registry-evaluation";
-import type { Attempt } from "../extensions/loom/registry-schema";
+} from "../extensions/orbit/registry-evaluation";
+import type { Attempt } from "../extensions/orbit/registry-schema";
 import { eligibleAttempt, makeSpec, userException } from "./registry-fixtures";
 
 const JOB = "7dd125b61b35d782";

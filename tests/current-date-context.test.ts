@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 // context.ts reads config in several blocks; stub it so the assembled-prompt
 // test is deterministic regardless of the dev machine's ~/.loom/config.json.
 const { loadConfigMock } = vi.hoisted(() => ({ loadConfigMock: vi.fn() }));
-vi.mock("../extensions/loom/config", () => ({ loadConfig: loadConfigMock }));
+vi.mock("../extensions/orbit/config", () => ({ loadConfig: loadConfigMock }));
 
-import { buildCurrentDateBlock, setupContextInjection } from "../extensions/loom/context";
+import { buildCurrentDateBlock, setupContextInjection } from "../extensions/orbit/context";
 
 describe("buildCurrentDateBlock", () => {
   it("stamps the host date from the injected clock, not a model-supplied string", () => {

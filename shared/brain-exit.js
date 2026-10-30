@@ -109,7 +109,8 @@ function badgeSummary(detail, maxChars = 160) {
 }
 
 /**
- * Drop the brain's "loom:" argv0 prefix and re-capitalize what follows.
+ * Drop the brain's "orbit:" argv0 prefix ("loom:" from an older bundle) and
+ * re-capitalize what follows.
  *
  * Essential in a terminal, where it says which program is talking; noise in a
  * GUI, where the message is already inside a labelled error card. Applied to
@@ -117,7 +118,7 @@ function badgeSummary(detail, maxChars = 160) {
  * the same window.
  */
 function stripCliPrefix(text) {
-  const stripped = text.replace(/^loom:\s*/i, "");
+  const stripped = text.replace(/^(?:orbit|loom):\s*/i, "");
   if (!stripped) return "";
   return stripped[0].toUpperCase() + stripped.slice(1);
 }

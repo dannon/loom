@@ -1,7 +1,7 @@
 /**
  * Bind-safety + WebSocket auth for the Orbit Web server.
  *
- * The WebSocket drives a real Loom agent against env-injected Galaxy/LLM
+ * The WebSocket drives a real Orbit agent against env-injected Galaxy/LLM
  * credentials, so an exposed, unauthenticated port is an open agent. These
  * pure helpers keep the server loopback-only unless the operator both binds a
  * public host AND sets a shared token -- or explicitly accepts the risk for a
@@ -36,9 +36,9 @@ export function evaluateBind(
     ok: false,
     error:
       `Refusing to bind ${host} without auth -- the WebSocket drives a live agent ` +
-      `against your injected credentials. Set LOOM_WEB_TOKEN=<secret> (clients pass ` +
+      `against your injected credentials. Set ORBIT_WEB_TOKEN=<secret> (clients pass ` +
       `it as ?token=<secret>), keep the default loopback bind, or set ` +
-      `LOOM_WEB_ALLOW_INSECURE=1 if this sits behind a trusted reverse proxy.`,
+      `ORBIT_WEB_ALLOW_INSECURE=1 if this sits behind a trusted reverse proxy.`,
   };
 }
 

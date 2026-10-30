@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setGalaxyFetchOverride } from "../extensions/loom/galaxy-api";
-import { fixtureFetch } from "../extensions/loom/galaxy-fixture";
-import { registerGalaxyHistoryGuard } from "../extensions/loom/galaxy-history-guard";
+import { setGalaxyFetchOverride } from "../extensions/orbit/galaxy-api";
+import { fixtureFetch } from "../extensions/orbit/galaxy-fixture";
+import { registerGalaxyHistoryGuard } from "../extensions/orbit/galaxy-history-guard";
 import { GALAXY } from "./galaxy-family-fixture";
 import { guardHooks } from "./galaxy-test-helpers";
 

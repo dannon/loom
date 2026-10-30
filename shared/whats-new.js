@@ -71,7 +71,7 @@ export function decideWhatsNew(all, lastSeen, running, mode) {
 
 /** GitHub release page for a tag. @param {string} version @returns {string} */
 export function releaseUrlFor(version) {
-  return `https://github.com/galaxyproject/loom/releases/tag/v${String(version).replace(/^v/, "")}`;
+  return `https://github.com/galaxyproject/orbit/releases/tag/v${String(version).replace(/^v/, "")}`;
 }
 
 /** Plain-text block for the CLI notice / /whatsnew. Pure.

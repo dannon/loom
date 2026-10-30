@@ -2,14 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { openIndexDb } from "../../extensions/loom/session-index/db";
-import { scanSessions } from "../../extensions/loom/session-index/indexer";
-import { encodeCwd } from "../../extensions/loom/session-index/cwd";
+import { openIndexDb } from "../../extensions/orbit/session-index/db";
+import { scanSessions } from "../../extensions/orbit/session-index/indexer";
+import { encodeCwd } from "../../extensions/orbit/session-index/cwd";
 import {
   searchChat,
   getSessionContext,
   findToolCalls,
-} from "../../extensions/loom/session-index/query";
+} from "../../extensions/orbit/session-index/query";
 
 function seed(sessionsDir: string, cwd: string, fileName: string, body: string) {
   const d = path.join(sessionsDir, encodeCwd(cwd));

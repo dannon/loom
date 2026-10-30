@@ -7,7 +7,7 @@ import {
   isObservationReplayEnabled,
   parseObservationReplayFile,
   resolveObservationReplayPath,
-} from "../extensions/loom/observation-replay.js";
+} from "../extensions/orbit/observation-replay.js";
 
 // The lesson switch is off by default; these suites are about what happens
 // once it is on. LOOM_LESSONS=on stands in for a config nobody wrote.

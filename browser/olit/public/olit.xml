@@ -92,7 +92,7 @@ Olit is closely aligned with Orbit, the original Galaxy AI co-scientist. Its age
 
 Orbit is suited to analyses requiring a shell or container environment, while Olit provides the same broader interaction model within a standard Galaxy session.
 
-- Orbit: https://github.com/galaxyproject/loom
+- Orbit: https://github.com/galaxyproject/orbit
 - Shared skills corpus: https://github.com/galaxyproject/galaxy-skills
 - Galaxy visualization framework: https://github.com/galaxyproject/galaxy-charts
 ]]></help>

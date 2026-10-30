@@ -7,7 +7,7 @@ const spawnMock = vi.fn();
 vi.mock("node:child_process", () => ({ spawn: (...args: unknown[]) => spawnMock(...args) }));
 vi.mock("node:fs", () => ({ existsSync: () => true }));
 
-import { createSandboxedBashOps } from "../extensions/loom/sandbox/sandbox-bash";
+import { createSandboxedBashOps } from "../extensions/orbit/sandbox/sandbox-bash";
 
 describe("createSandboxedBashOps", () => {
   beforeEach(() => spawnMock.mockReset());

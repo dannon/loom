@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import * as notebookWriter from "../extensions/loom/notebook-writer";
-import * as state from "../extensions/loom/state";
-import * as sync from "../extensions/loom/galaxy-pages-sync";
+import * as notebookWriter from "../extensions/orbit/notebook-writer";
+import * as state from "../extensions/orbit/state";
+import * as sync from "../extensions/orbit/galaxy-pages-sync";
 
-vi.mock("../extensions/loom/notebook-writer", async (importOriginal) => {
+vi.mock("../extensions/orbit/notebook-writer", async (importOriginal) => {
   const actual = await importOriginal<typeof notebookWriter>();
   return { ...actual, readNotebook: vi.fn() };
 });
-vi.mock("../extensions/loom/state");
-vi.mock("../extensions/loom/galaxy-pages-sync");
+vi.mock("../extensions/orbit/state");
+vi.mock("../extensions/orbit/galaxy-pages-sync");
 
 interface CmdDef {
   description: string;
@@ -37,7 +37,7 @@ describe("/sync command", () => {
   it("status with no binding reports unbound", async () => {
     vi.mocked(state.getNotebookPath).mockReturnValue("/work/notebook.md");
     vi.mocked(notebookWriter.readNotebook).mockResolvedValue("# No binding\n");
-    const { registerSyncCommand } = await import("../extensions/loom/sync-command");
+    const { registerSyncCommand } = await import("../extensions/orbit/sync-command");
     const { api, commands } = makeApi();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerSyncCommand(api as any);
@@ -57,7 +57,7 @@ describe("/sync command", () => {
       latestRevisionId: "r1",
       action: "created",
     });
-    const { registerSyncCommand } = await import("../extensions/loom/sync-command");
+    const { registerSyncCommand } = await import("../extensions/orbit/sync-command");
     const { api, commands } = makeApi();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerSyncCommand(api as any);
@@ -77,7 +77,7 @@ describe("/sync command", () => {
       pageId: "p1",
       latestRevisionId: "r2",
     });
-    const { registerSyncCommand } = await import("../extensions/loom/sync-command");
+    const { registerSyncCommand } = await import("../extensions/orbit/sync-command");
     const { api, commands } = makeApi();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerSyncCommand(api as any);
@@ -92,7 +92,7 @@ describe("/sync command", () => {
       pageId: "p2",
       latestRevisionId: "r3",
     });
-    const { registerSyncCommand } = await import("../extensions/loom/sync-command");
+    const { registerSyncCommand } = await import("../extensions/orbit/sync-command");
     const { api, commands } = makeApi();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerSyncCommand(api as any);
@@ -110,7 +110,7 @@ describe("/sync command", () => {
       latestRevisionId: "r7",
       action: "linked",
     });
-    const { registerSyncCommand } = await import("../extensions/loom/sync-command");
+    const { registerSyncCommand } = await import("../extensions/orbit/sync-command");
     const { api, commands } = makeApi();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerSyncCommand(api as any);
@@ -127,7 +127,7 @@ describe("/sync command", () => {
   });
 
   it("resume without a page id reports usage", async () => {
-    const { registerSyncCommand } = await import("../extensions/loom/sync-command");
+    const { registerSyncCommand } = await import("../extensions/orbit/sync-command");
     const { api, commands } = makeApi();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerSyncCommand(api as any);

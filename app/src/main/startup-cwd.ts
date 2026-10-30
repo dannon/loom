@@ -6,7 +6,7 @@
 export interface StartupCwdSources {
   /** `--cwd` CLI argument, if passed. */
   cliCwd?: string;
-  /** `LOOM_CWD` environment override, if set. */
+  /** `ORBIT_CWD` environment override, if set. */
   envCwd?: string;
   /** Persisted `config.defaultCwd` -- the last analysis directory used (#312). */
   configDefaultCwd?: string;
@@ -17,7 +17,7 @@ export interface StartupCwdSources {
 /**
  * Decide which analysis directory Orbit opens to.
  *
- * Priority: `--cwd` CLI arg > `LOOM_CWD` env > persisted `config.defaultCwd` >
+ * Priority: `--cwd` CLI arg > `ORBIT_CWD` env > persisted `config.defaultCwd` >
  * hardcoded fallback. The persisted `defaultCwd` is written by
  * AgentManager.switchCwd whenever the user changes directories in-app, so a
  * clean restart reopens the most recently used directory (#312).

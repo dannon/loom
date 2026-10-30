@@ -16,7 +16,7 @@ let sentRows: any[] = [];
 let token: string | undefined = "b".repeat(32);
 let lastFacts: any = null;
 
-vi.mock("../extensions/loom/observations-config.js", () => ({
+vi.mock("../extensions/orbit/observations-config.js", () => ({
   resolveObservationsMode: () => mode,
   describeObservationsMode: () => ({ mode, ...(override ? { override } : {}) }),
   isObservationsHardDisabled: () => hardDisabled,
@@ -28,8 +28,8 @@ vi.mock("../extensions/loom/observations-config.js", () => ({
   markAutoAcknowledged: () => markAutoAcknowledged(),
 }));
 
-vi.mock("../extensions/loom/observations.js", async () => {
-  const actual = await vi.importActual<any>("../extensions/loom/observations.js");
+vi.mock("../extensions/orbit/observations.js", async () => {
+  const actual = await vi.importActual<any>("../extensions/orbit/observations.js");
   return {
     ...actual,
     readSentLog: () => sentRows,
@@ -42,7 +42,7 @@ vi.mock("../extensions/loom/observations.js", async () => {
   };
 });
 
-vi.mock("../extensions/loom/observation-triggers.js", () => ({
+vi.mock("../extensions/orbit/observation-triggers.js", () => ({
   deliverObservation: (...a: unknown[]) => deliverObservation(...a),
   liveDeliverDeps: () => ({ mode }),
   recordObservationActivity: vi.fn(),
@@ -60,7 +60,7 @@ const {
   formatObservationsStatus,
   sentLogSummary,
   sampleObservationFacts,
-} = await import("../extensions/loom/observations-command.js");
+} = await import("../extensions/orbit/observations-command.js");
 
 function makeApi() {
   const commands = new Map<

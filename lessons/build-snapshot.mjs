@@ -30,7 +30,7 @@ export const REPO_ROOT = path.resolve(LESSONS_DIR, "..");
 export const SNAPSHOT_PATH = path.join(LESSONS_DIR, "snapshot.json");
 
 export const SNAPSHOT_SCHEMA = 1;
-export const SNAPSHOT_REPO = "galaxyproject/loom";
+export const SNAPSHOT_REPO = "galaxyproject/orbit";
 export const SNAPSHOT_LICENCE = "CC-BY-4.0";
 
 /** Past the end of its `stale_after` day, in UTC. */

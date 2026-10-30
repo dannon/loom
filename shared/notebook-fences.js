@@ -1,4 +1,4 @@
-// Fence names for the typed blocks Loom keeps in notebook.md. Shared so the
+// Fence names for the typed blocks Orbit keeps in notebook.md. Shared so the
 // brain and the Orbit renderer agree on what counts as one of our blocks.
 //
 // The product is being renamed from Loom to Orbit, and notebooks outlive any
@@ -8,7 +8,7 @@
 // whole write-side switch; upserts rewrite a matched block under it, so a
 // mixed notebook converges instead of growing duplicates.
 
-export const NOTEBOOK_FENCE_WRITE_PREFIX = "loom";
+export const NOTEBOOK_FENCE_WRITE_PREFIX = "orbit";
 
 export const NOTEBOOK_FENCE_READ_PREFIXES = Object.freeze(["loom", "orbit"]);
 

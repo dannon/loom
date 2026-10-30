@@ -252,7 +252,7 @@ describe("evals live Galaxy scenarios", () => {
   ];
   // Snapshot: allOperations is one mutable array shared by both galaxy-ops entries.
   const ops = new Set([...allOperations].map((o) => o.name));
-  const loomTools = new Set(["galaxy_read_output", "galaxy_upload_local_file"]);
+  const orbitTools = new Set(["galaxy_read_output", "galaxy_upload_local_file"]);
 
   it("no scenario is left on the galaxy-mcp path", () => {
     const dirs = fs.readdirSync(scenariosDir);
@@ -286,7 +286,7 @@ describe("evals live Galaxy scenarios", () => {
         ...(a.toolResults?.mustNotSucceed ?? []),
       ];
       expect(names.length).toBeGreaterThan(0);
-      for (const n of names) expect(ops.has(n) || loomTools.has(n), n).toBe(true);
+      for (const n of names) expect(ops.has(n) || orbitTools.has(n), n).toBe(true);
     });
   }
 

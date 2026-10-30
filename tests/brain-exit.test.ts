@@ -84,7 +84,7 @@ describe("summarizeStartupFailure", () => {
     // sentence two different ways in the same window.
     const { summary, detail } = summarizeStartupFailure(
       EX_CONFIG,
-      "loom: no LLM provider is configured.\n\n  * Open Preferences.",
+      "orbit: no LLM provider is configured.\n\n  * Open Preferences.",
     );
     expect(detail).toBe("No LLM provider is configured.\n\n  * Open Preferences.");
     expect(summary).toBe("No LLM provider is configured.");
@@ -107,7 +107,7 @@ describe("summarizeStartupFailure", () => {
     // over by "Click to open Preferences", so line one alone would strand the
     // reader mid-sentence.
     const stderr = [
-      'loom: the API key stored for provider "anthropic" could not be',
+      'orbit: the API key stored for provider "anthropic" could not be',
       "decrypted here, so no credential reached the agent.",
       "",
       "  * Export the key for this shell.",

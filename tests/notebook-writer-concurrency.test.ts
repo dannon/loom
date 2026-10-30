@@ -15,7 +15,7 @@ import {
   renderInvocationYaml,
   type InvocationYaml,
   type InvocationPollUpdate,
-} from "../extensions/loom/notebook-writer";
+} from "../extensions/orbit/notebook-writer";
 
 describe("writeNotebook + withNotebookLock", () => {
   let dir: string;

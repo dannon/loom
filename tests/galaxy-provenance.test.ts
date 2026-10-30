@@ -12,8 +12,8 @@ import {
   writeEnrichment,
   UNKNOWN,
   type ProvenanceJob,
-} from "../extensions/loom/galaxy-provenance";
-import { ulid } from "../extensions/loom/ulid";
+} from "../extensions/orbit/galaxy-provenance";
+import { ulid } from "../extensions/orbit/ulid";
 
 function job(jobId: string, over: Partial<ProvenanceJob> = {}): ProvenanceJob {
   return {

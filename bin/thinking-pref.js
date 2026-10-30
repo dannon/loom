@@ -1,18 +1,18 @@
 // Terminal "thinking block" visibility. Pi streams the model's reasoning into
-// the interactive TUI by default, which makes the loom terminal noisy. Loom
+// the interactive TUI by default, which makes the Orbit terminal noisy. Orbit
 // hides it by default and writes the resolved value to pi's `hideThinkingBlock`
-// setting (the same ~/.pi/agent/settings.json loom already manages for
+// setting (the same ~/.pi/agent/settings.json Orbit already manages for
 // `quietStartup`). That setting is global and only the interactive renderer
-// reads it, so bin/loom.js only reconciles it for interactive terminal launches.
+// reads it, so bin/orbit.js only reconciles it for interactive terminal launches.
 //
 // Override the default persistently with `ui.showThinking: true` in
-// ~/.loom/config.json; for a one-off, pi's built-in Ctrl+T toggles it live.
+// ~/.orbit/config.json; for a one-off, pi's built-in Ctrl+T toggles it live.
 //
-// Pure so it can be unit-tested; bin/loom.js supplies the config value.
+// Pure so it can be unit-tested; bin/orbit.js supplies the config value.
 
 /**
  * Resolve whether pi should hide thinking blocks in the terminal.
- * @param {{ configShowThinking?: boolean }} [opts] `ui.showThinking` from ~/.loom/config.json
+ * @param {{ configShowThinking?: boolean }} [opts] `ui.showThinking` from ~/.orbit/config.json
  * @returns {boolean} true = hide (the default); false = show (config opted in)
  */
 export function resolveHideThinking({ configShowThinking } = {}) {
@@ -20,13 +20,13 @@ export function resolveHideThinking({ configShowThinking } = {}) {
 }
 
 /**
- * Is this loom launch an interactive terminal TUI? `hideThinkingBlock` only
+ * Is this Orbit launch an interactive terminal TUI? `hideThinkingBlock` only
  * affects pi's interactive renderer, so non-interactive launches must not
  * write it (it would churn the global settings file for a setting they never
  * read): `--mode rpc` (Orbit and the web dev server), `--mode json` (evals),
  * and headless `--print` / `-p`. Gating on the mode rather than a per-spawner
  * env var means new non-interactive callers are covered automatically.
- * @param {string[]} [argv] loom's user args (process.argv.slice(2))
+ * @param {string[]} [argv] the CLI user args (process.argv.slice(2))
  * @returns {boolean}
  */
 export function isInteractiveTerminal(argv = []) {

@@ -6,7 +6,7 @@ configuration setting:
 
 - **remote** — all compute runs on Galaxy: tool jobs, user-defined tool
   jobs and workflow invocations alike. Older notebooks may say `[galaxy]`;
-  Loom reads it as `[remote]`.
+  Orbit reads it as `[remote]`.
 - **hybrid** — some steps run on Galaxy, some on this machine
 - **local** — everything runs on this machine
 
@@ -34,7 +34,7 @@ assembling tools by hand:
 3. Offer the one or two that fit in plain language, or say none do.
 4. `import_workflow_from_iwc({ trs_id })`, then invoke as below.
 
-Loom's `iwc-candidates` skill trigger appends a reminder of steps 2-3 to
+Orbit's `iwc-candidates` skill trigger appends a reminder of steps 2-3 to
 every recommend/search result.
 
 Before drafting a plan, consult Galaxy resources:
@@ -99,7 +99,7 @@ galaxy_invocation_record({
 })
 ```
 
-Loom already wrote the `loom-invocation` block itself when the submission
+Orbit already wrote the `orbit-invocation` block itself when the submission
 answered, so this normally just sets the label and the anchor on it --
 naming the plan step the run belongs to. It writes a new block only when
 nothing in the notebook carries that invocation id.
@@ -119,18 +119,18 @@ marked `- [x]`.
 
 ### The evidence gate checks that
 
-This is no longer only advice. Loom watches every `Edit`/`Write` to
+This is no longer only advice. Orbit watches every `Edit`/`Write` to
 `notebook.md`, and every Page pull that replaces it.
 
 When the approval registry holds a run for the step, the verdict is the
-registry's: Loom writes whether that run is eligible to hand off from
+registry's: Orbit writes whether that run is eligible to hand off from
 Galaxy's own answers, and nothing in the notebook changes it. Completing
 the step is refused until the run is eligible, whatever its block says,
 and so is removing or renaming the step's checkbox. Marking it `- [!]` is
 always allowed.
 
 For a run the registry doesn't know, the check is the block: a plan step
-going `- [ ]` → `- [x]` while the `loom-invocation` block bound to its
+going `- [ ]` → `- [x]` while the `orbit-invocation` block bound to its
 anchor still reads `status: in_progress` is a contradiction. That status
 is written by the poller from Galaxy job state, not by you, and the file
 is read as it stood _before_ the write, so rewriting it in the same edit
@@ -185,7 +185,7 @@ Useful verification examples:
 
 ## Automatic follow-up
 
-Loom queues a follow-up by default when a tracked job or workflow completes or
+Orbit queues a follow-up by default when a tracked job or workflow completes or
 fails, including the first job failure in a workflow that is still running.
 Check the latest notebook and user instructions before acting on a queued event.
 Verify completed outputs and investigate failures without asking the researcher
@@ -201,8 +201,8 @@ Follow-ups pause after 3 consecutive automatic turns with no user input
 notified and the next message or command resumes them. Results that arrive
 while paused are still recorded in the notebook.
 
-Automatic follow-up can be disabled with `LOOM_AUTO_RESUME=0` or
-`experiments.autoResume: false` in `~/.loom/config.json`.
+Automatic follow-up can be disabled with `ORBIT_AUTO_RESUME=0` or
+`experiments.autoResume: false` in `~/.orbit/config.json`.
 
 ## Batch SRA/ENA imports
 
@@ -230,7 +230,7 @@ the need to extract each run. Different parameters or demonstrated server/resour
 limits may justify separate batches. ENA URLs should similarly use a batched
 server-side fetch into a paired collection, with checksums when supported.
 
-Loom's `sra-import-gate` blocks sibling single-accession calls to the known IUC
+Orbit's `sra-import-gate` blocks sibling single-accession calls to the known IUC
 wrappers when history, tool version, and other settings match. It blocks the
 entire group before dispatch, gives the model a combined accession list, and
 keeps the rejected batch together during tool-error recovery. It also blocks

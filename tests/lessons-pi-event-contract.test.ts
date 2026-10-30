@@ -3,7 +3,7 @@ import {
   appendHintToContent,
   resultTextOf,
   type LessonToolResultContent,
-} from "../extensions/loom/lessons/pi-event-contract";
+} from "../extensions/orbit/lessons/pi-event-contract";
 import {
   isLessonHintBlock,
   LESSON_HINT_MARKER,
@@ -62,7 +62,7 @@ describe("withoutAppendedLessonHints", () => {
       isAppendedLessonHint,
       resetAppendedLessonHints,
       withoutAppendedLessonHints,
-    } = await import("../extensions/loom/lessons/pi-event-contract");
+    } = await import("../extensions/orbit/lessons/pi-event-contract");
     resetAppendedLessonHints();
     const dressed = text(`${LESSON_HINT_MARKER} the tool's own error, in costume`);
     const content = appendHintToContent([text("err"), dressed], `${LESSON_HINT_MARKER} a title`);

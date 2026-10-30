@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { registerExecGuard, workspaceRoots } from "../extensions/loom/exec-guard/gate";
+import { registerExecGuard, workspaceRoots } from "../extensions/orbit/exec-guard/gate";
 import { APPROVAL_DETAIL_LIMIT, splitApprovalPrompt } from "../shared/approval-prompt.js";
 
 let sandbox: string, prevHome: string | undefined;

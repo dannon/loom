@@ -2,11 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const loadConfigMock = vi.fn();
 
-vi.mock("../extensions/loom/config", () => ({
+vi.mock("../extensions/orbit/config", () => ({
   loadConfig: () => loadConfigMock(),
 }));
 
-import { isTeamDispatchEnabled } from "../extensions/loom/teams/is-enabled";
+import { isTeamDispatchEnabled } from "../extensions/orbit/teams/is-enabled";
 
 describe("isTeamDispatchEnabled", () => {
   const originalEnv = process.env.LOOM_TEAM_DISPATCH;

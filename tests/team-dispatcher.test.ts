@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { runTeamDispatch } from "../extensions/loom/teams/dispatcher";
-import type { TeamSpec, RoleTurnResult, DispatchDeps } from "../extensions/loom/teams/types";
+import { runTeamDispatch } from "../extensions/orbit/teams/dispatcher";
+import type { TeamSpec, RoleTurnResult, DispatchDeps } from "../extensions/orbit/teams/types";
 
 function spec(overrides: Partial<TeamSpec> = {}): TeamSpec {
   return {

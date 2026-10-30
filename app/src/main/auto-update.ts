@@ -1,6 +1,6 @@
 import { app, autoUpdater, BrowserWindow } from "electron";
 import { updateElectronApp, UpdateSourceType } from "update-electron-app";
-import { loadConfig } from "../../../shared/loom-config.js";
+import { loadConfig } from "../../../shared/orbit-config.js";
 import { shouldEnableAutoUpdate } from "./auto-update-policy.js";
 
 // Wires Orbit's macOS in-place auto-update via Electron's built-in autoUpdater
@@ -20,7 +20,7 @@ export function initAutoUpdate(): void {
   updateElectronApp({
     updateSource: {
       type: UpdateSourceType.ElectronPublicUpdateService,
-      repo: "galaxyproject/loom",
+      repo: "galaxyproject/orbit",
     },
     updateInterval: "1 hour",
     notifyUser: false, // we render our own banner instead of the default dialog

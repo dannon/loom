@@ -7,7 +7,7 @@ import {
   countersPath,
   readCounters,
   syncSuppressedFlags,
-} from "../extensions/loom/lessons/counters";
+} from "../extensions/orbit/lessons/counters";
 
 let dir: string;
 let file: string;
@@ -34,10 +34,10 @@ afterEach(() => {
 
 describe("countersPath", () => {
   it("lives under the state dir and ignores LOOM_LESSONS_DIR", () => {
-    expect(countersPath()).toBe(path.join(dir, "home", ".loom", "lessons", "counters.json"));
+    expect(countersPath()).toBe(path.join(dir, "home", ".orbit", "lessons", "counters.json"));
     // This is the install's own tally, not shareable content.
     process.env.LOOM_LESSONS_DIR = path.join(dir, "elsewhere");
-    expect(countersPath()).toBe(path.join(dir, "home", ".loom", "lessons", "counters.json"));
+    expect(countersPath()).toBe(path.join(dir, "home", ".orbit", "lessons", "counters.json"));
   });
 });
 

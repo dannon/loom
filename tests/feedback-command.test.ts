@@ -2,16 +2,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const submitFeedback = vi.fn();
 const appendToOutbox = vi.fn();
-vi.mock("../extensions/loom/feedback.js", () => ({
+vi.mock("../extensions/orbit/feedback.js", () => ({
   submitFeedback: (...a: unknown[]) => submitFeedback(...a),
   buildBrainSysinfo: () => ({ platform: "darwin" }),
   appendToOutbox: (...a: unknown[]) => appendToOutbox(...a),
-  readLoomVersion: () => "0.0.0-test",
+  readOrbitVersion: () => "0.0.0-test",
 }));
-vi.mock("../extensions/loom/activity.js", () => ({ getRecentActivityEvents: () => [] }));
-vi.mock("../extensions/loom/config.js", () => ({ loadConfig: () => ({ testerId: "orbit-007" }) }));
+vi.mock("../extensions/orbit/activity.js", () => ({ getRecentActivityEvents: () => [] }));
+vi.mock("../extensions/orbit/config.js", () => ({ loadConfig: () => ({ testerId: "orbit-007" }) }));
 
-const { registerFeedbackCommand } = await import("../extensions/loom/feedback-command.js");
+const { registerFeedbackCommand } = await import("../extensions/orbit/feedback-command.js");
 
 function makeApi() {
   const commands = new Map<
@@ -58,7 +58,7 @@ describe("/feedback", () => {
     await commands.get("feedback")!.handler(undefined, { hasUI: true, ui });
     expect(submitFeedback).toHaveBeenCalledOnce();
     const payload = submitFeedback.mock.calls[0][0];
-    expect(payload.source).toBe("loom-cli");
+    expect(payload.source).toBe("orbit-cli");
     expect(payload.title).toBe("My title");
     expect(ui.notify).toHaveBeenCalledWith(expect.stringContaining("Thanks"), "info");
     expect(appendToOutbox).not.toHaveBeenCalled();

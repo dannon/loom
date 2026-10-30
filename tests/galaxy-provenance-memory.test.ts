@@ -17,9 +17,9 @@ import {
   UNKNOWN,
   type AttemptSeed,
   type ProvenanceJob,
-} from "../extensions/loom/galaxy-provenance";
-import { memoryProvenanceFs } from "../extensions/loom/provenance-memory-fs";
-import { ulid } from "../extensions/loom/ulid";
+} from "../extensions/orbit/galaxy-provenance";
+import { memoryProvenanceFs } from "../extensions/orbit/provenance-memory-fs";
+import { ulid } from "../extensions/orbit/ulid";
 import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 
 const SERVER = "https://usegalaxy.org";

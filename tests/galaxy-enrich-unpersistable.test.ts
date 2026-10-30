@@ -10,8 +10,8 @@ import * as path from "path";
 
 const broken = { read: false, write: false, reads: 0 };
 
-vi.mock("../extensions/loom/galaxy-provenance", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../extensions/loom/galaxy-provenance")>();
+vi.mock("../extensions/orbit/galaxy-provenance", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../extensions/orbit/galaxy-provenance")>();
   return {
     ...actual,
     readAttemptRecord: async (...args: Parameters<typeof actual.readAttemptRecord>) => {
@@ -24,8 +24,8 @@ vi.mock("../extensions/loom/galaxy-provenance", async (importOriginal) => {
   };
 });
 
-vi.mock("../extensions/loom/notebook-writer", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../extensions/loom/notebook-writer")>();
+vi.mock("../extensions/orbit/notebook-writer", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../extensions/orbit/notebook-writer")>();
   return {
     ...actual,
     writeNotebook: async (...args: Parameters<typeof actual.writeNotebook>) => {
@@ -39,10 +39,10 @@ import {
   MAX_ENRICHMENT_ATTEMPTS,
   resetEnrichmentState,
   runEnrichmentPass,
-} from "../extensions/loom/galaxy-enrich";
-import { upsertJobBlock } from "../extensions/loom/galaxy-job-block";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
-import { ulid } from "../extensions/loom/ulid";
+} from "../extensions/orbit/galaxy-enrich";
+import { upsertJobBlock } from "../extensions/orbit/galaxy-job-block";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
+import { ulid } from "../extensions/orbit/ulid";
 
 describe("enrichment with nowhere durable to count", () => {
   let dir: string;

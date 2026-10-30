@@ -6,8 +6,8 @@ import {
   spellParamNames,
   updatePageOp,
 } from "@galaxyproject/galaxy-ops";
-import { galaxyOpsContext, setGalaxyTransport } from "../extensions/loom/galaxy-api";
-import { renderOperation, snake } from "../extensions/loom/galaxy-ops-tools";
+import { galaxyOpsContext, setGalaxyTransport } from "../extensions/orbit/galaxy-api";
+import { renderOperation, snake } from "../extensions/orbit/galaxy-ops-tools";
 import { applySectionEdit } from "../shared/markdown-sections.js";
 import { pageContentHash } from "../shared/page-content-hash.js";
 import { json, opsTool, recordGalaxy, runOp } from "./galaxy-test-helpers";

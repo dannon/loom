@@ -45,12 +45,12 @@ import {
   availabilityUpdate,
   unavailableModelLabel,
 } from "./model-entitlement.js";
-import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
+import { OrbitWidgetKey, decodeMarkdownWidget } from "../../../shared/orbit-shell-contract.js";
 import {
   ALLOWED_SKILLS_PREFIX,
   isAllowedSkillUrl,
   isBundledSkillRepo,
-} from "../../../shared/loom-config.js";
+} from "../../../shared/orbit-config.js";
 import { SKILLS_PIN } from "../../../shared/skills-pin.js";
 import {
   SCHEMA_VERSION,
@@ -807,7 +807,7 @@ galaxyStatus.addEventListener("click", () => {
 // Local sandboxes the project to local-only execution even if Galaxy is
 // configured. Cloud (default) lets the agent decide per-plan whether each
 // step routes locally or to Galaxy. The gate is prompt-level guidance from
-// the brain (see extensions/loom/context.ts), not enforced by
+// the brain (see extensions/orbit/context.ts), not enforced by
 // unregistering the Galaxy tools — flipping the toggle restarts the agent so the
 // new mode reaches the prompt.
 
@@ -2211,7 +2211,7 @@ function handleSlashCommand(text: string): boolean {
     return true;
   }
 
-  // Loom commands — pass through to agent
+  // Orbit commands — pass through to agent
   if (cmd === "plan" || cmd === "status" || cmd === "decisions" || cmd === "profiles") {
     chat.addUserMessage(text);
     promptAgent(`/${cmd}`);
@@ -3312,7 +3312,7 @@ window.orbit.onUiRequest((request) => {
     // tab now mirrors the live shell + proc-monitor streams (see below);
     // the brain-side activity.jsonl is still written for debug but no
     // longer pushed as a widget.
-    if (key === LoomWidgetKey.Notebook && lines) {
+    if (key === OrbitWidgetKey.Notebook && lines) {
       notebookLoadSeq++;
       const markdown = decodeMarkdownWidget(lines);
       artifacts.setNotebookMarkdown(markdown);
@@ -3807,7 +3807,7 @@ function renderSkillsRows(): void {
       const bundled = isBundledSkillRepo(prefsSkillsState[idx]);
       badge.textContent = bundled ? `bundled @${SKILLS_PIN.commit.slice(0, 7)}` : "";
       badge.title = bundled
-        ? `Ships inside Loom from ${SKILLS_PIN.repo}@${SKILLS_PIN.commit}` +
+        ? `Ships inside Orbit from ${SKILLS_PIN.repo}@${SKILLS_PIN.commit}` +
           `${SKILLS_PIN.commitDate ? ` (${SKILLS_PIN.commitDate})` : ""}. ` +
           `Point it at another branch or URL to fetch it live instead.`
         : "";
@@ -4419,7 +4419,7 @@ const reportConfirmation = new FeedbackConfirmation({
 const feedbackDraft = new FeedbackDraftStore();
 
 // Budget for the *encoded* body in the GitHub URL. The whole URL
-// (~"https://github.com/galaxyproject/loom/issues/new?title=…&body=…")
+// (~"https://github.com/galaxyproject/orbit/issues/new?title=…&body=…")
 // has to fit within ~8KB or the OS/browser refuses to open it. Most
 // punctuation triples in length once URL-encoded (a newline becomes
 // "%0A"), so the raw body has to be capped well below 8000 chars.
@@ -4436,7 +4436,7 @@ function openReportModal(): void {
   const draft = feedbackDraft.load();
   reportTitle.value = draft.title;
   reportBody.value = draft.body;
-  // Default ON: the primary destination is Loom's private capture store, not a
+  // Default ON: the primary destination is Orbit's private capture store, not a
   // public issue, so opt-out is fine. The user can still uncheck before sending,
   // and the public GitHub fallback (POST failure) sends text only -- no
   // diagnostics -- so this never auto-publishes logs to a public issue. The
@@ -4799,56 +4799,6 @@ window.orbit.onProcUpdate((procs) => {
   renderProcs(procs as ProcInfo[]);
 });
 
-// ── "Loom is now Orbit" banner ───────────────────────────────────────────────
-//
-// Safety net for the GitHub repo rename: main reports a move only once GitHub
-// itself says galaxyproject/loom now lives elsewhere. Dismissal sticks per new
-// release, so a later Orbit release brings it back once.
-const repoMovedCheck: Promise<Awaited<ReturnType<typeof window.orbit.checkRepoMoved>>> =
-  (async () => {
-    try {
-      return (await window.orbit.checkRepoMoved?.()) ?? null;
-    } catch {
-      return null;
-    }
-  })();
-{
-  const movedBanner = document.getElementById("moved-banner");
-  const movedLinkBtn = document.getElementById("moved-banner-link");
-  const movedDismissBtn = document.getElementById("moved-banner-dismiss");
-  const MOVED_DISMISSED_KEY = "orbit:moved-dismissed";
-
-  if (movedBanner && movedLinkBtn && movedDismissBtn) {
-    let movedReleaseUrl: string | null = null;
-    let movedKey: string | null = null;
-    movedLinkBtn.addEventListener("click", () => {
-      if (!movedReleaseUrl) return;
-      void openReleaseWithFallback(movedBanner, movedReleaseUrl, (u) =>
-        window.orbit.openReleasePage(u),
-      );
-    });
-    movedDismissBtn.addEventListener("click", () => {
-      movedBanner.classList.add("hidden");
-      clearReleaseFallback(movedBanner);
-      if (movedKey) {
-        try {
-          localStorage.setItem(MOVED_DISMISSED_KEY, movedKey);
-        } catch {}
-      }
-    });
-    void repoMovedCheck.then((moved) => {
-      if (!moved) return;
-      const key = `${moved.fullName}@${moved.latest ?? ""}`;
-      try {
-        if (localStorage.getItem(MOVED_DISMISSED_KEY) === key) return;
-      } catch {}
-      movedKey = key;
-      movedReleaseUrl = moved.releaseUrl;
-      movedBanner.classList.remove("hidden");
-    });
-  }
-}
-
 // ── Update-available banner ──────────────────────────────────────────────────
 //
 // One non-blocking check per session against the GitHub Releases API; main
@@ -4895,8 +4845,6 @@ const repoMovedCheck: Promise<Awaited<ReturnType<typeof window.orbit.checkRepoMo
 
     const showNotifyLinkBanner = async () => {
       try {
-        // Once the repo has moved, the moved banner is the better message.
-        if (await repoMovedCheck) return;
         const info = await window.orbit.checkVersion();
         if (!info || !info.hasUpdate) return;
         let dismissed: string | null = null;

@@ -1,8 +1,8 @@
 # Terminal Validation
 
-Runbook for validating Loom's CLI/runtime path without launching the Orbit shell.
+Runbook for validating Orbit's CLI/runtime path without launching the Orbit shell.
 
-The current product model: `notebook.md` in the working directory is the durable project record. Plans, decisions, and results live there as markdown sections. Galaxy invocations are tracked with `loom-invocation` fenced YAML blocks the agent rewrites in place. There are no typed plan / step / decision tools to validate; the validation is "the markdown round-trips and the agent can read its own work back".
+The current product model: `notebook.md` in the working directory is the durable project record. Plans, decisions, and results live there as markdown sections. Galaxy invocations are tracked with `orbit-invocation` fenced YAML blocks the agent rewrites in place. There are no typed plan / step / decision tools to validate; the validation is "the markdown round-trips and the agent can read its own work back".
 
 ## 1. Local checks
 
@@ -23,12 +23,12 @@ Expected:
 
 ## 2. Extension-only runtime check
 
-Load the Loom extension into a clean Pi process with no other extensions:
+Load the Orbit extension into a clean Pi process with no other extensions:
 
 ```bash
 mkdir -p /tmp/loom-validation
 cd /tmp/loom-validation
-pi --no-extensions -e /path/to/loom/extensions/loom
+pi --no-extensions -e /path/to/loom/extensions/orbit
 ```
 
 Check:
@@ -42,7 +42,7 @@ Check:
   - `/connect` -- profile picker / new-server prompt
   - `/execute`, `/run` -- "no pending step" message when the notebook is empty
 
-This isolates extension behavior from the `loom` CLI wrapper.
+This isolates extension behavior from the `orbit` CLI wrapper.
 
 ## 3. CLI wrapper check
 
@@ -51,13 +51,13 @@ Use a clean working directory:
 ```bash
 mkdir -p /tmp/loom-cli-validation
 cd /tmp/loom-cli-validation
-node /path/to/loom/bin/loom.js --provider anthropic --model claude-sonnet-4-6
+node /path/to/loom/bin/orbit.js --provider anthropic --model claude-sonnet-4-6
 ```
 
 Notes:
 
-- The brain runs the Galaxy tools in-process and registers only brc-analytics with pi's MCP layer. `loom` no longer writes MCP config; it only removes the entries older versions left in `~/.pi/agent/mcp.json`.
-- Informational wrapper commands are side-effect free: `loom --help`, `loom --version`, `loom --list-models` should not rewrite MCP config.
+- The brain runs the Galaxy tools in-process and registers only brc-analytics with pi's MCP layer. `orbit` no longer writes MCP config; it only removes the entries older versions left in `~/.pi/agent/mcp.json`.
+- Informational wrapper commands are side-effect free: `orbit --help`, `orbit --version`, `orbit --list-models` should not rewrite MCP config.
 
 Check:
 
@@ -72,13 +72,13 @@ In the same working directory:
 1. Ask the agent for a small analysis plan.
 2. Approve it. Confirm the plan section appears in `notebook.md` as `## Plan A: …`.
 3. Exit the session.
-4. Restart `loom` (or `pi --no-extensions -e …`) in the same directory.
+4. Restart `orbit` (or `pi --no-extensions -e …`) in the same directory.
 
 Expected:
 
 - session resumes with the existing notebook attached
 - `/notebook` prints the same content
-- `git log` (in the cwd) shows commits for the notebook initialization and any plan additions, **iff** the repo was created by Loom or has `git config loom.managed true`. Otherwise the notebook still updates but auto-commit stays off.
+- `git log` (in the cwd) shows commits for the notebook initialization and any plan additions, **iff** the repo was created by Orbit or has `git config loom.managed true`. Otherwise the notebook still updates but auto-commit stays off.
 
 ## 5. Minimal Galaxy flow
 
@@ -92,7 +92,7 @@ If a Galaxy server with credentials is available, run an end-to-end Galaxy step:
 Expected in the notebook after invocation:
 
 - a plan section with the routing tag (`[hybrid]` or `[remote]`)
-- a `loom-invocation` fenced block referencing the step anchor
+- a `orbit-invocation` fenced block referencing the step anchor
 - after the agent calls `galaxy_invocation_check_all` (or `/run`), the YAML status updates from `in_progress` to `completed` (or `failed`) and the matching checkbox flips
 
 That round-trip is the strongest signal that the notebook-as-state model is intact: the agent reads its own previous work, polls Galaxy, and rewrites the durable record without any external state store.

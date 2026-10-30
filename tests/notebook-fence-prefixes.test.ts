@@ -22,25 +22,25 @@ import {
   upsertSessionSummaryBlock,
   type InvocationYaml,
   type SessionSummaryYaml,
-} from "../extensions/loom/notebook-writer";
+} from "../extensions/orbit/notebook-writer";
 import {
   applyJobPollUpdate,
   findJobBlocks,
   renderJobYaml,
   upsertJobBlock,
   type JobYaml,
-} from "../extensions/loom/galaxy-job-block";
+} from "../extensions/orbit/galaxy-job-block";
 import {
   findGalaxyPageBlocks,
   renderGalaxyPageBlock,
   stripGalaxyPageBlocks,
   upsertGalaxyPageBlock,
   type GalaxyPageBindingYaml,
-} from "../extensions/loom/galaxy-page-binding";
+} from "../extensions/orbit/galaxy-page-binding";
 import {
-  galaxyMarkdownToLoom,
-  loomToGalaxyMarkdown,
-} from "../extensions/loom/galaxy-markdown-adapter";
+  galaxyMarkdownToOrbit,
+  orbitToGalaxyMarkdown,
+} from "../extensions/orbit/galaxy-markdown-adapter";
 
 const W = NOTEBOOK_FENCE_WRITE_PREFIX;
 
@@ -260,10 +260,10 @@ describe("Galaxy Pages sync path", () => {
 
   it("carries an orbit invocation fence through push and pull verbatim", () => {
     const body = `# NB\n\n${as("orbit", renderInvocationYaml(inv())).trimEnd()}\n\ntail\n`;
-    const pushed = loomToGalaxyMarkdown(body);
+    const pushed = orbitToGalaxyMarkdown(body);
     expect(pushed).not.toContain("```orbit-invocation");
     expect(pushed).toMatch(new RegExp(`^\\[${W}-invocation:v1\\]: #${W} "`, "m"));
-    expect(galaxyMarkdownToLoom(pushed)).toBe(body);
+    expect(galaxyMarkdownToOrbit(pushed)).toBe(body);
   });
 
   it("decodes a carrier labelled with either prefix", () => {
@@ -277,7 +277,7 @@ describe("Galaxy Pages sync path", () => {
         "```",
         `[${p}-invocation:v1]: #${p} "${b64}"`,
       ].join("\n");
-      expect(galaxyMarkdownToLoom(page)).toBe(`# NB\n${block}`);
+      expect(galaxyMarkdownToOrbit(page)).toBe(`# NB\n${block}`);
     }
   });
 });

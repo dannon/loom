@@ -4,15 +4,15 @@ import * as os from "os";
 import * as path from "path";
 
 const { loadConfigMock } = vi.hoisted(() => ({ loadConfigMock: vi.fn() }));
-vi.mock("../extensions/loom/config", () => ({ loadConfig: loadConfigMock }));
+vi.mock("../extensions/orbit/config", () => ({ loadConfig: loadConfigMock }));
 
 import {
   buildUserInstructionsBlock,
   buildWorkspaceInstructionsContext,
   INIT_INSTRUCTIONS_FILENAME,
   type FsLike,
-} from "../extensions/loom/user-instructions";
-import { setupContextInjection } from "../extensions/loom/context";
+} from "../extensions/orbit/user-instructions";
+import { setupContextInjection } from "../extensions/orbit/context";
 
 let root: string;
 

@@ -8,7 +8,7 @@ import gate, {
   shouldBlockTool,
   dropSymlinkedEntries,
 } from "./web-mode-gate.js";
-import { createGalaxyOpsToolSource } from "../../extensions/loom/galaxy-ops-tools.js";
+import { createGalaxyOpsToolSource } from "../../extensions/orbit/galaxy-ops-tools.js";
 
 describe("isPathAllowed", () => {
   const allowlist = ["/tmp/loom-session/notebook.md"];
@@ -288,7 +288,7 @@ describe("shouldBlockTool", () => {
   it("denies galaxy-ops' hidden upload_file, which reads a path on the host", () => {
     expect(
       shouldBlockTool("upload_file", { path: "/root/.loom/config.json" }, allowlist, cwd),
-    ).toEqual({ block: true, reason: expect.stringContaining("reads files on the Loom host") });
+    ).toEqual({ block: true, reason: expect.stringContaining("reads files on the Orbit host") });
   });
 
   it("decides every in-process Galaxy tool the brain registers", () => {

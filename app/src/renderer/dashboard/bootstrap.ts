@@ -10,7 +10,7 @@ import {
   serializeDashboardDocument,
 } from "../../../../shared/dashboard-contract.js";
 import type { DashboardDocument } from "../../../../shared/dashboard-contract.js";
-import { LoomWidgetKey, decodeJsonWidget } from "../../../../shared/loom-shell-contract.js";
+import { OrbitWidgetKey, decodeJsonWidget } from "../../../../shared/orbit-shell-contract.js";
 import { normalizeGalaxyLivePayload } from "../../../../shared/galaxy-live-contract.js";
 import type { FileNode } from "../../preload/preload.js";
 import { DashboardHost } from "./host.js";
@@ -289,7 +289,7 @@ export function initDashboard(
     typeof shell.onUiRequest === "function"
       ? shell.onUiRequest((request) => {
           if (request.method !== "setWidget") return;
-          if (request.widgetKey !== LoomWidgetKey.GalaxyLive) return;
+          if (request.widgetKey !== OrbitWidgetKey.GalaxyLive) return;
           let decoded: unknown;
           try {
             decoded = decodeJsonWidget(request.widgetLines as string[] | undefined);

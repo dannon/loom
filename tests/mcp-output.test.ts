@@ -7,9 +7,9 @@ import type {
   ToolResultEvent,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { registerMcpOutputRecovery } from "../extensions/loom/mcp-output";
-import { inspectOutput } from "../extensions/loom/galaxy-output";
-import { registerSecretRedaction } from "../extensions/loom/secret-redaction";
+import { registerMcpOutputRecovery } from "../extensions/orbit/mcp-output";
+import { inspectOutput } from "../extensions/orbit/galaxy-output";
+import { registerSecretRedaction } from "../extensions/orbit/secret-redaction";
 import { bareFamily } from "../shared/galaxy-tool-family.js";
 import { convertMcpResult } from "../node_modules/@earendil-works/pi-coding-agent/dist/extensions/mcp/tools.js";
 
@@ -21,7 +21,7 @@ async function piMcpResult(tool: string, text: string) {
   return { ...result, path };
 }
 
-vi.mock("../shared/loom-config.js", () => ({ loadConfig: () => ({}) }));
+vi.mock("../shared/orbit-config.js", () => ({ loadConfig: () => ({}) }));
 const dirs: string[] = [];
 // pi saves straight into $TMPDIR, so its files are removed one by one -- never their directory.
 const files: string[] = [];

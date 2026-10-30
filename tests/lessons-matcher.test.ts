@@ -13,9 +13,9 @@ import {
   toolCandidates,
   toolMatches,
   wordHaystack,
-} from "../extensions/loom/lessons/matcher";
-import { loadPackageLessons } from "../extensions/loom/lessons/store";
-import type { Lesson, LessonTrigger } from "../extensions/loom/lessons/types";
+} from "../extensions/orbit/lessons/matcher";
+import { loadPackageLessons } from "../extensions/orbit/lessons/store";
+import type { Lesson, LessonTrigger } from "../extensions/orbit/lessons/types";
 
 const SECTIONS = {
   symptom: "s",

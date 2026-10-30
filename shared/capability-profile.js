@@ -23,7 +23,7 @@ import { isDesktopShell, readEnv } from "./orbit-env.js";
  * @property {boolean} files a local file surface, which exec-guard jails
  * @property {"file" | "page"} notebook where the notebook lives
  * @property {boolean} network direct outbound network from the brain
- * @property {boolean} mcpServers pi's MCP layer, for the servers Loom brings
+ * @property {boolean} mcpServers pi's MCP layer, for the servers Orbit brings
  *   (brc-analytics)
  * @property {"desktop" | "terminal" | "worker"} ui the surface a human answers prompts on
  */
