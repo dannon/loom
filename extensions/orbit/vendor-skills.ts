@@ -55,7 +55,7 @@ export interface VendorManifestEntry {
 export interface VendorManifestPlugin {
   plugin: string;
   /** "local" for a plugin synced from this repo; absent for agentic-plugins. */
-  source?: string;
+  source?: "local";
   /** The repo-relative source directory of a local plugin. */
   dir?: string;
   as: string;
