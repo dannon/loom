@@ -19,6 +19,7 @@ import {
   refreshAllCatalogs,
 } from "../extensions/orbit/skills-discovery";
 import { listEnabledSkillRepos } from "../extensions/orbit/skills";
+import { readBundledCatalog } from "../extensions/orbit/vendor-skills";
 
 describe("parseFrontmatter", () => {
   it("reads name, description, when_to_use, and a surfaces list", () => {
@@ -365,8 +366,15 @@ describe("catalog cache", () => {
 });
 
 // Orbit's own skills ride along in every summary: they are not a configured repo,
-// but /skills status has to say they are there.
-const BUILT_IN_ROW = { repo: "orbit", count: 1, ok: true, bundled: true, builtIn: true };
+// but /skills status has to say they are there. The count comes from the real
+// catalog, so staging another skill doesn't break tests about something else.
+const BUILT_IN_ROW = {
+  repo: "orbit",
+  count: readBundledCatalog()?.orbit?.length,
+  ok: true,
+  bundled: true,
+  builtIn: true,
+};
 
 describe("refreshAllCatalogs", () => {
   let tmp: string;
