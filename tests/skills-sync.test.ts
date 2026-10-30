@@ -20,7 +20,10 @@ import {
   REPO_BLOB_BASE,
   applyTransforms,
   assertProposedHome,
+  assertNoTargetCollisions,
   checkLocalPlugin,
+  checkLocalPlugins,
+  collectPlugin,
   checkVendored,
   declaredTargets,
   buildCatalogEntries,
@@ -872,5 +875,110 @@ describe("assertProposedHome", () => {
     const read = (f: { target: string }) =>
       f.target.endsWith("SKILL.md") ? skill("  proposed_home: x\n") : "no frontmatter";
     expect(() => assertProposedHome(plugin, files, read)).not.toThrow();
+  });
+});
+
+describe("local plugin wiring", () => {
+  // A temp repo root with one staging skill, vendored under the same `skills/`
+  // prefix galaxy-skills uses -- the shape the real manifest entry has.
+  let root: string;
+  let vendor: string;
+  const plugin = {
+    plugin: "orbit-skills",
+    source: "local",
+    dir: "skills",
+    repo: "orbit",
+    as: "skills",
+    router: "catalog",
+    transforms: [],
+    why: "staging",
+    include: ["**"],
+    exclude: ["README.md"],
+  };
+  const skillText = (meta = "  proposed_home: galaxy-skills\n") =>
+    `---\nname: one\ndescription: d\nmetadata:\n  surfaces: [loom]\n${meta}---\nbody\n`;
+  const write = (rel: string, text: string) => {
+    mkdirSync(join(root, rel, ".."), { recursive: true });
+    writeFileSync(join(root, rel), text);
+  };
+  const collect = () =>
+    collectPlugin(plugin, {
+      root: join(root, "skills"),
+      available: listLocalFiles("skills", { repoRoot: root, vendorDir: vendor }),
+      prefix: "skills",
+      upstream: null,
+    });
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "local-plugin-"));
+    vendor = join(root, "extensions", "orbit", "vendor", "skills");
+    mkdirSync(vendor, { recursive: true });
+    write("skills/README.md", "rules");
+    write("skills/one/SKILL.md", skillText());
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  it("records a local plugin with its dir, no upstream, and repo-relative sources", () => {
+    const { record, catalog, entries } = collect();
+    expect(record).toMatchObject({ plugin: "orbit-skills", source: "local", dir: "skills" });
+    expect(record.upstream).toBeNull();
+    expect(catalog.map((e: { path: string }) => e.path)).toEqual(["skills/one/SKILL.md"]);
+    expect(entries.map((e: { target: string; source: string }) => [e.target, e.source])).toEqual([
+      ["skills/one/SKILL.md", "skills/one/SKILL.md"],
+    ]);
+    expect(entries[0].sha256).toBe(sha256(skillText()));
+  });
+
+  it("refuses a staging skill that names no proposed_home", () => {
+    write("skills/one/SKILL.md", skillText(""));
+    expect(() => collect()).toThrow(/must name where it should move/);
+  });
+
+  it("fails when a staged skill and its upstream copy both vendor the same file", () => {
+    const local = collect();
+    const upstream = {
+      record: { plugin: "galaxy-skills" },
+      entries: [{ target: "skills/one/SKILL.md" }],
+    };
+    expect(() => assertNoTargetCollisions([upstream, local])).toThrow(
+      /"galaxy-skills" and "orbit-skills" both vendor skills\/one\/SKILL\.md/,
+    );
+  });
+
+  describe("checkLocalPlugins", () => {
+    const manifest = { plugins: [{ plugin: "galaxy-skills" }, plugin] };
+    const recorded = () =>
+      collect().entries.map((e: { target: string; sha256: string }) => ({
+        target: e.target,
+        plugin: "orbit-skills",
+        sha256: e.sha256,
+      }));
+    const run = (rec: ReturnType<typeof recorded>) =>
+      checkLocalPlugins(manifest, rec, { repoRoot: root, vendorDir: vendor });
+
+    it("is clean right after a sync", () => {
+      expect(run(recorded())).toEqual([]);
+    });
+
+    it("catches an edit, a new file and a deleted one", () => {
+      const rec = recorded();
+      write("skills/one/SKILL.md", skillText() + "edited\n");
+      write("skills/two/SKILL.md", skillText());
+      expect(run(rec).map((f) => f.kind)).toEqual(["hash-mismatch", "missing"]);
+      rmSync(join(root, "skills", "one"), { recursive: true });
+      expect(run(rec).map((f) => f.kind)).toEqual(["missing", "orphaned"]);
+    });
+
+    it("reports a missing or emptied directory instead of throwing", () => {
+      const rec = recorded();
+      rmSync(join(root, "skills", "one"), { recursive: true });
+      expect(run(rec)).toEqual([
+        { kind: "missing", message: 'plugin "orbit-skills": include "**" matched nothing' },
+      ]);
+      rmSync(join(root, "skills"), { recursive: true });
+      expect(run(rec)).toEqual([
+        { kind: "missing", message: 'local skills dir "skills" does not exist' },
+      ]);
+    });
   });
 });
