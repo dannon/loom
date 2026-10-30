@@ -18,6 +18,15 @@
  * `LOOM_AGENTIC_PLUGINS_DIR=/path/to/agentic-plugins` reads a local checkout
  * instead of fetching, for iterating on both repos at once. It does not check
  * that the checkout is at the pinned commit, so never commit the result of one.
+ * A checkout that is at the pin is also the way to re-sync offline.
+ *
+ * A plugin entry with `"source": "local"` is the exception to all of the above:
+ * its files come from `dir` in this repo (Orbit's built-in skills under
+ * `skills/`), not from agentic-plugins. They go through the same selection,
+ * transforms and catalog as everything else, so nothing downstream can tell
+ * them apart, but their provenance is this repo's own history -- so they record
+ * no upstream, and `--check` compares them against their source directly,
+ * which it can do offline.
  *
  * Transforms are declared per plugin and applied to markdown on the way in, so
  * the vendored copy is deliberately not byte-identical to upstream and `--check`
@@ -53,6 +62,8 @@ const GENERATED = new Set([VENDOR_MANIFEST_NAME, VENDOR_CATALOG_NAME]);
 
 /** The product-surface id Orbit claims. A skill opts in with `metadata.surfaces: [loom]`. */
 const SURFACE_ID = "loom";
+
+const LOCAL_SOURCE = "local";
 
 // agentic-plugins follows the plugin layout every harness reads: skill content
 // for a plugin lives under `plugins/<name>/skills/`. Include and exclude
@@ -725,6 +736,78 @@ export function listFiles(dir) {
   return out.sort();
 }
 
+/**
+ * The files of a local plugin, as slash-separated paths relative to its `dir`.
+ *
+ * A working-tree walk rather than `git ls-files`, because a skill being written
+ * has to sync before it is committed; `--check` on the committed result is the
+ * gate. Dotfiles are skipped, and anything that is not a regular file is
+ * refused for the same reason `listCommittedFiles` refuses a symlink.
+ */
+export function listLocalFiles(dir, { repoRoot = REPO_ROOT, vendorDir = VENDOR_DIR } = {}) {
+  const abs = path.resolve(repoRoot, dir);
+  if (abs === repoRoot || !abs.startsWith(repoRoot + path.sep)) {
+    throw new Error(`local skills dir "${dir}" is not inside the repository`);
+  }
+  if (
+    abs === vendorDir ||
+    abs.startsWith(vendorDir + path.sep) ||
+    vendorDir.startsWith(abs + path.sep)
+  ) {
+    throw new Error(`local skills dir "${dir}" overlaps the vendor tree`);
+  }
+  const top = lstatOrNull(abs);
+  if (!top?.isDirectory()) throw new Error(`local skills dir "${dir}" does not exist`);
+  const out = [];
+  const walk = (sub) => {
+    for (const entry of fs.readdirSync(path.join(abs, sub), { withFileTypes: true })) {
+      if (entry.name.startsWith(".")) continue;
+      const rel = sub ? `${sub}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) walk(rel);
+      else if (entry.isFile()) out.push(rel);
+      else throw new Error(`${dir}/${rel}: not a regular file; refusing to vendor it`);
+    }
+  };
+  walk("");
+  return out.sort();
+}
+
+/**
+ * Whether the vendored copy of a local plugin still matches its source. The
+ * checks in `checkVendored` only see the vendor side, so without this an edit
+ * under `skills/` that was never re-synced would pass CI and never ship.
+ *
+ * @param {object} args
+ * @param {string} args.plugin the plugin name
+ * @param {string} args.dir its source dir, for messages
+ * @param {{source: string, target: string}[]} args.selected what the entry selects from the source now
+ * @param {{target: string, plugin: string, sha256: string}[]} args.recorded every entry in the vendored manifest
+ * @param {(source: string) => string | null} args.hashOfSource hash of a source file, transformed as the sync would
+ * @returns {{kind: string, message: string}[]}
+ */
+export function checkLocalPlugin({ plugin, dir, selected, recorded, hashOfSource }) {
+  const failures = [];
+  const mine = new Map(recorded.filter((f) => f.plugin === plugin).map((f) => [f.target, f]));
+  for (const file of selected) {
+    const entry = mine.get(file.target);
+    if (!entry) {
+      failures.push({ kind: "missing", message: `${dir}/${file.source}: not vendored yet` });
+      continue;
+    }
+    mine.delete(file.target);
+    if (hashOfSource(file.source) !== entry.sha256) {
+      failures.push({
+        kind: "hash-mismatch",
+        message: `${dir}/${file.source}: changed since the last sync`,
+      });
+    }
+  }
+  for (const target of mine.keys()) {
+    failures.push({ kind: "orphaned", message: `${target}: vendored but its source is gone` });
+  }
+  return failures;
+}
+
 function readManifestText() {
   return fs.readFileSync(MANIFEST_PATH, "utf-8");
 }
@@ -820,29 +903,39 @@ async function sync() {
     // a stale manifest beside it reports as four hash mismatches rather than as
     // "the last sync did not finish".
     for (const plugin of manifest.plugins) {
-      const prefix = `plugins/${plugin.plugin}/${PLUGIN_SKILLS_ROOT}`;
-      const root = path.join(source.dir, "plugins", plugin.plugin, PLUGIN_SKILLS_ROOT);
-      if (!fs.existsSync(root)) {
-        throw new Error(`plugin "${plugin.plugin}" has no ${PLUGIN_SKILLS_ROOT}/ directory`);
+      const local = plugin.source === LOCAL_SOURCE;
+      const prefix = local ? plugin.dir : `plugins/${plugin.plugin}/${PLUGIN_SKILLS_ROOT}`;
+      const root = local
+        ? path.resolve(REPO_ROOT, plugin.dir)
+        : path.join(source.dir, "plugins", plugin.plugin, PLUGIN_SKILLS_ROOT);
+      const fromOf = (f) => `${prefix}/${f.source}`;
+      let committed;
+      if (local) {
+        committed = listLocalFiles(plugin.dir);
+      } else {
+        if (!fs.existsSync(root)) {
+          throw new Error(`plugin "${plugin.plugin}" has no ${PLUGIN_SKILLS_ROOT}/ directory`);
+        }
+        committed = listCommittedFiles(source.dir, source.rev, prefix);
       }
-      const committed = listCommittedFiles(source.dir, source.rev, prefix);
       if (committed.length === 0) {
         throw new Error(`plugin "${plugin.plugin}" has no committed files under ${prefix}`);
       }
       plugins.push({
         plugin: plugin.plugin,
+        ...(local ? { source: LOCAL_SOURCE, dir: plugin.dir } : {}),
         as: plugin.as ?? "",
         repo: plugin.repo,
         router: plugin.router ?? "never",
         transforms: plugin.transforms ?? [],
         why: plugin.why,
-        upstream: readUpstreamPin(source.dir, plugin.plugin),
+        upstream: local ? null : readUpstreamPin(source.dir, plugin.plugin),
       });
 
       const pluginFiles = selectFiles(plugin, committed);
       const transformed = new Map(
         pluginFiles.map((f) => {
-          const from = `plugins/${plugin.plugin}/${PLUGIN_SKILLS_ROOT}/${f.source}`;
+          const from = fromOf(f);
           const bytes = fs.readFileSync(path.join(root, f.source));
           // Everything vendored is prose or JSON. Reading a binary as UTF-8
           // would replace every invalid sequence, hash the damage as if it were
@@ -888,7 +981,7 @@ async function sync() {
         }
         byTarget.set(file.target, plugin.plugin);
 
-        const from = `plugins/${plugin.plugin}/${PLUGIN_SKILLS_ROOT}/${file.source}`;
+        const from = fromOf(file);
         const text = transformed.get(file.target);
         entries.push({
           target: file.target,
@@ -1106,6 +1199,33 @@ function check() {
       }
     },
   });
+
+  for (const plugin of manifest.plugins.filter((p) => p.source === LOCAL_SOURCE)) {
+    const root = path.resolve(REPO_ROOT, plugin.dir);
+    let selected;
+    try {
+      selected = selectFiles(plugin, listLocalFiles(plugin.dir));
+    } catch (err) {
+      failures.push({ kind: "missing", message: err instanceof Error ? err.message : String(err) });
+      continue;
+    }
+    failures.push(
+      ...checkLocalPlugin({
+        plugin: plugin.plugin,
+        dir: plugin.dir,
+        selected,
+        recorded: vendored.files,
+        hashOfSource: (source) => {
+          try {
+            const text = fs.readFileSync(path.join(root, source), "utf-8");
+            return sha256(applyTransforms(text, source, plugin.transforms ?? []));
+          } catch {
+            return null;
+          }
+        },
+      }),
+    );
+  }
 
   // The pin module is generated outside the vendor tree entirely, so the only
   // thing tying it to the manifest is this comparison.

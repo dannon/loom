@@ -129,6 +129,17 @@ describe("skills_fetch source selection", () => {
     expect(String(fetchSpy.mock.calls[0][0])).toContain("galaxyproject/foundry");
   });
 
+  it("says plainly when the build ships nothing under a reserved name", async () => {
+    writeConfig([DEFAULT_REPO]);
+    const res = await call(await skillsFetch(), {
+      repo: "orbit",
+      path: "skills/galaxy-data-libraries/SKILL.md",
+    });
+    expect(res.content[0].text).toContain('ships nothing under "orbit"');
+    expect(res.details?.error).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("does not let the reserved name reach the skills mirror", async () => {
     writeConfig([DEFAULT_REPO]);
     const res = await call(await skillsFetch(), {

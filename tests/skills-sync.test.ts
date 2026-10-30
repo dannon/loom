@@ -19,11 +19,13 @@ import { readVendorManifest, vendorSkillsDir } from "../extensions/orbit/vendor-
 import {
   REPO_BLOB_BASE,
   applyTransforms,
+  checkLocalPlugin,
   checkVendored,
   declaredTargets,
   buildCatalogEntries,
   findJsonStringSpans,
   listCommittedFiles,
+  listLocalFiles,
   matchesPattern,
   parseFrontmatter,
   rewriteLocalPaths,
@@ -736,5 +738,86 @@ describe("applyJsonTransforms nesting", () => {
   it("leaves a nested body alone when it has no links to strip", () => {
     const nested = JSON.stringify({ command: { body: "ordinary prose" } });
     expect(applyTransforms(nested, "x.json", ["strip-wiki-links"])).toBe(nested);
+  });
+});
+
+describe("listLocalFiles", () => {
+  let root: string;
+  let vendor: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "local-skills-"));
+    vendor = join(root, "extensions", "orbit", "vendor", "skills");
+    mkdirSync(vendor, { recursive: true });
+    mkdirSync(join(root, "skills", "one", "references"), { recursive: true });
+    writeFileSync(join(root, "skills", "README.md"), "rules");
+    writeFileSync(join(root, "skills", "one", "SKILL.md"), "skill");
+    writeFileSync(join(root, "skills", "one", "references", "notes.md"), "notes");
+    writeFileSync(join(root, "skills", ".DS_Store"), "junk");
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+  const list = (dir: string) => listLocalFiles(dir, { repoRoot: root, vendorDir: vendor });
+
+  it("lists the working tree, uncommitted files included, and skips dotfiles", () => {
+    expect(list("skills")).toEqual(["README.md", "one/SKILL.md", "one/references/notes.md"]);
+  });
+
+  it("refuses a symlink rather than vendoring whatever it points at", () => {
+    symlinkSync(join(root, "skills", "one", "SKILL.md"), join(root, "skills", "one", "alias.md"));
+    expect(() => list("skills")).toThrow(/alias\.md: not a regular file/);
+  });
+
+  it("refuses a dir outside the repository, or the repository itself", () => {
+    expect(() => list("../elsewhere")).toThrow(/not inside the repository/);
+    expect(() => list(".")).toThrow(/not inside the repository/);
+  });
+
+  it("refuses a dir that overlaps the vendor tree in either direction", () => {
+    expect(() => list("extensions/orbit/vendor/skills/x")).toThrow(/overlaps the vendor tree/);
+    expect(() => list("extensions")).toThrow(/overlaps the vendor tree/);
+  });
+
+  it("refuses a dir that does not exist", () => {
+    expect(() => list("nope")).toThrow(/does not exist/);
+  });
+});
+
+describe("checkLocalPlugin", () => {
+  const selected = [{ source: "one/SKILL.md", target: "skills/one/SKILL.md" }];
+  const recorded = [
+    { target: "skills/one/SKILL.md", plugin: "orbit-skills", sha256: "aaa" },
+    // Another plugin's file at a neighbouring path is none of this check's business.
+    { target: "skills/udt-authoring/SKILL.md", plugin: "galaxy-skills", sha256: "zzz" },
+  ];
+  const check = (over: Partial<Parameters<typeof checkLocalPlugin>[0]> = {}) =>
+    checkLocalPlugin({
+      plugin: "orbit-skills",
+      dir: "skills",
+      selected,
+      recorded,
+      hashOfSource: () => "aaa",
+      ...over,
+    });
+
+  it("passes when every source matches what was vendored", () => {
+    expect(check()).toEqual([]);
+  });
+
+  it("catches a source edited without a re-sync", () => {
+    expect(check({ hashOfSource: () => "bbb" })).toEqual([
+      { kind: "hash-mismatch", message: "skills/one/SKILL.md: changed since the last sync" },
+    ]);
+  });
+
+  it("catches a new source file that was never synced", () => {
+    const more = [...selected, { source: "two/SKILL.md", target: "skills/two/SKILL.md" }];
+    expect(check({ selected: more })).toEqual([
+      { kind: "missing", message: "skills/two/SKILL.md: not vendored yet" },
+    ]);
+  });
+
+  it("catches a vendored file whose source was deleted", () => {
+    expect(check({ selected: [] })).toEqual([
+      { kind: "orphaned", message: "skills/one/SKILL.md: vendored but its source is gone" },
+    ]);
   });
 });

@@ -65,6 +65,10 @@ cd app && npm start
   a manifest bump moves both shells; rebuild the browser and commit its `core/skills.lock.json`.
   Orbit's system-prompt goldens carry the skills catalog too, so a bump that changes a description
   also needs `npx vitest run -u tests/system-prompt-surface.test.ts`.
+- Orbit's own built-in skills live in `skills/` (the `orbit` repo to `skills_fetch`) and are
+  vendored into the same tree by the same sync -- edit them there, never in `vendor/`, then re-sync.
+  `skills/README.md` has the authoring rules and how a skill moves upstream. The browser shell does
+  not pick them up yet.
 
 ## Validation bias
 
