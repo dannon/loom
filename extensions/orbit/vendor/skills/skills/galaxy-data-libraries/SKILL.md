@@ -40,7 +40,9 @@ curl -s -H "x-api-key: $GALAXY_API_KEY" "$GALAXY_URL/api/libraries"
   the notebook or chat.
 - Public libraries also answer without the key; restricted ones need it. When a library the user
   can see in the UI comes back missing or 403, the key is the first suspect.
-- Pipe through `python3 -c` or `jq` to print only the fields you need. Folder listings are verbose.
+- Use `jq` to print only the fields you need; folder listings are verbose. Without `jq`, save the
+  response with `-o` and read the file with `python3`. Never pipe `curl` into `python3` (or any
+  interpreter): Orbit's command guard refuses that outright, whatever the approval mode.
 
 ## Ids: the part that goes wrong
 
@@ -64,7 +66,11 @@ The folder endpoint needs the `F`. Without it Galaxy answers "Invalid library fo
 ```bash
 # Libraries, with the folder to start from
 curl -s -H "x-api-key: $GALAXY_API_KEY" "$GALAXY_URL/api/libraries" \
-  | python3 -c 'import json,sys; [print(l["id"], l["root_folder_id"], l["name"]) for l in json.load(sys.stdin)]'
+  | jq -r '.[] | [.id, .root_folder_id, .name] | @tsv'
+
+# The same without jq: save it, then read the file
+curl -s -H "x-api-key: $GALAXY_API_KEY" "$GALAXY_URL/api/libraries" -o libraries.json
+python3 -c 'import json; [print(l["id"], l["root_folder_id"], l["name"]) for l in json.load(open("libraries.json"))]'
 
 # One folder's contents
 curl -s -H "x-api-key: $GALAXY_API_KEY" \
