@@ -871,6 +871,21 @@ describe("assertProposedHome", () => {
     );
   });
 
+  it("refuses a non-string proposed_home", () => {
+    expect(() =>
+      assertProposedHome(plugin, files, () => skill("  proposed_home: [galaxy-skills]\n")),
+    ).toThrow(/proposed_home/);
+    expect(() => assertProposedHome(plugin, files, () => skill("  proposed_home: 3\n"))).toThrow(
+      /proposed_home/,
+    );
+  });
+
+  it("says so when the frontmatter is not valid YAML, rather than blaming proposed_home", () => {
+    expect(() =>
+      assertProposedHome(plugin, files, () => "---\nname: [unclosed\n---\nbody\n"),
+    ).toThrow(/skills\/one\/SKILL\.md: frontmatter is not valid YAML/);
+  });
+
   it("only looks at SKILL.md files", () => {
     const read = (f: { target: string }) =>
       f.target.endsWith("SKILL.md") ? skill("  proposed_home: x\n") : "no frontmatter";

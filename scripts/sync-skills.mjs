@@ -412,20 +412,32 @@ function toSurfaces(v) {
 }
 
 /**
+ * The raw frontmatter object of a markdown file, or `data: null` when it has
+ * none. `error` is set when there is a frontmatter block that YAML refuses, so
+ * a caller that needs a field can say why it is missing.
+ */
+function readFrontmatterData(text) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(String(text ?? ""));
+  if (!m) return { data: null };
+  let data;
+  try {
+    data = parseYaml(m[1]);
+  } catch (err) {
+    return { data: null, error: err instanceof Error ? err.message : String(err) };
+  }
+  return { data: data && typeof data === "object" ? data : null };
+}
+
+const isSkillFile = (target) => target === "SKILL.md" || target.endsWith("/SKILL.md");
+
+/**
  * A port of the runtime's `parseFrontmatter`. The sync runs under plain node and
  * cannot import the TypeScript one, so the two are kept honest by a test that
  * runs both over the same inputs, including every vendored SKILL.md.
  */
 export function parseFrontmatter(text) {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
-  if (!m) return {};
-  let data;
-  try {
-    data = parseYaml(m[1]);
-  } catch {
-    return {};
-  }
-  if (!data || typeof data !== "object") return {};
+  const { data } = readFrontmatterData(text);
+  if (!data) return {};
   const fm = {};
   if (typeof data.name === "string") fm.name = data.name;
   if (typeof data.description === "string") fm.description = data.description;
@@ -448,7 +460,7 @@ export function parseFrontmatter(text) {
 export function buildCatalogEntries(plugin, files, readText) {
   const entries = [];
   for (const file of files) {
-    if (file.target !== "SKILL.md" && !file.target.endsWith("/SKILL.md")) continue;
+    if (!isSkillFile(file.target)) continue;
     const fm = parseFrontmatter(readText(file));
     if (!fm.name || !fm.description) {
       throw new Error(`${file.target}: SKILL.md has no name or description in its frontmatter`);
@@ -481,14 +493,10 @@ export function buildCatalogEntries(plugin, files, readText) {
  */
 export function assertProposedHome(plugin, files, readText) {
   for (const file of files) {
-    if (file.target !== "SKILL.md" && !file.target.endsWith("/SKILL.md")) continue;
-    const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(readText(file));
-    let home;
-    try {
-      home = m ? parseYaml(m[1])?.metadata?.proposed_home : undefined;
-    } catch {
-      home = undefined;
-    }
+    if (!isSkillFile(file.target)) continue;
+    const { data, error } = readFrontmatterData(readText(file));
+    if (error) throw new Error(`${file.target}: frontmatter is not valid YAML (${error})`);
+    const home = data?.metadata?.proposed_home;
     if (typeof home !== "string" || !home.trim()) {
       throw new Error(
         `${file.target}: a staging skill in "${plugin.plugin}" must name where it should move, ` +
