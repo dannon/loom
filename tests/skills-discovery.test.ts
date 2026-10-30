@@ -17,6 +17,8 @@ import {
   refreshCatalog,
   skillsCacheDir,
   refreshAllCatalogs,
+  catalogSummary,
+  resetStagingShadowWarning,
 } from "../extensions/orbit/skills-discovery";
 import { listEnabledSkillRepos } from "../extensions/orbit/skills";
 import { readBundledCatalog } from "../extensions/orbit/vendor-skills";
@@ -466,11 +468,17 @@ describe("refreshAllCatalogs", () => {
       }),
       "utf-8",
     );
-    vi.spyOn(console, "warn").mockImplementation(() => {});
+    resetStagingShadowWarning();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 404 })));
     const summary = await refreshAllCatalogs();
     expect(summary.map((r) => r.repo)).toEqual(["orbit"]);
     expect(summary[0].staging).toBeUndefined();
+    // It wins, but not quietly -- and only once per session, however many
+    // surfaces ask.
+    catalogSummary();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(/configured repo named "orbit" replaces/);
   });
 });
 

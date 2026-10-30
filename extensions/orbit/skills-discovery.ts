@@ -305,6 +305,11 @@ export interface CatalogRefreshResult {
 
 let warnedShadowedStaging = false;
 
+/** The shadowing warning fires once per process; tests that assert it reset it first. */
+export function resetStagingShadowWarning(): void {
+  warnedShadowedStaging = false;
+}
+
 /**
  * Orbit's staging skills, when this session offers them: the package holds
  * some and no configured repo has taken the name. A configured `orbit` repo is
