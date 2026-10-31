@@ -94,14 +94,15 @@ describe("PendingPrompts", () => {
     // Held during a drain: not yet written anywhere, so no exit can fail it.
     const heldId = prompts.track(held);
 
-    prompts.abandon(oldBrain, "Agent stopped");
+    expect(prompts.abandon(oldBrain)).toBe(1);
 
-    expect(onOld).toHaveBeenCalledExactlyOnceWith("Agent stopped");
+    // Quietly: a stop is not a failure (#564); the "stopped" status resets the UI.
+    expect(onOld).toHaveBeenCalledExactlyOnceWith(null);
     expect(onNew).not.toHaveBeenCalled();
     expect(held).not.toHaveBeenCalled();
 
     prompts.sent(prompt(heldId), newBrain);
-    prompts.abandon(newBrain, null);
+    expect(prompts.abandon(newBrain)).toBe(2);
     expect(onNew).toHaveBeenCalledExactlyOnceWith(null);
     expect(held).toHaveBeenCalledExactlyOnceWith(null);
   });
@@ -120,7 +121,25 @@ describe("PendingPrompts", () => {
     prompts.sent(forged, {});
     expect(settle).not.toHaveBeenCalled();
 
-    prompts.abandon(brain, "Agent stopped");
-    expect(settle).toHaveBeenCalledExactlyOnceWith("Agent stopped");
+    prompts.abandon(brain);
+    expect(settle).toHaveBeenCalledExactlyOnceWith(null);
+  });
+
+  it("drops a disconnected client's prompts without answering them", () => {
+    const prompts = new PendingPrompts();
+    const brain = {};
+    const gone = vi.fn();
+    const stays = vi.fn();
+    const goneId = prompts.track(gone, "socket-a");
+    const staysId = prompts.track(stays, "socket-b");
+    prompts.sent(prompt(goneId), brain);
+    prompts.sent(prompt(staysId), brain);
+
+    prompts.forget("socket-a");
+    prompts.observe(promptResponse(goneId, { success: false, error: "late" }));
+    expect(gone).not.toHaveBeenCalled();
+    // Nothing left to settle for the dropped one when its brain goes away.
+    expect(prompts.abandon(brain)).toBe(1);
+    expect(stays).toHaveBeenCalledExactlyOnceWith(null);
   });
 });

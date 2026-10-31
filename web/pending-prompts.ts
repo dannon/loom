@@ -14,6 +14,10 @@
  * was written to, not the one running when the browser asked: a prompt held
  * while a restart drains belongs to the replacement, and the outgoing brain's
  * exit must not fail it.
+ *
+ * There is no time bound: pi answers "handled" only once an extension command
+ * has finished, and a command can sit on a dialog for as long as the user
+ * takes. The renderer never awaits the call, so a long wait blocks nothing.
  */
 
 /** `null` when the brain took the prompt, its reason when it did not. */
@@ -21,6 +25,7 @@ export type PromptSettle = (error: string | null) => void;
 
 interface Entry {
   settle: PromptSettle;
+  client?: unknown;
   owner?: unknown;
 }
 
@@ -28,10 +33,10 @@ export class PendingPrompts {
   private entries = new Map<string, Entry>();
   private counter = 0;
 
-  /** Hold a prompt open; send the returned id to the brain with it. */
-  track(settle: PromptSettle): string {
+  /** Hold `client`'s prompt open; send the returned id to the brain with it. */
+  track(settle: PromptSettle, client?: unknown): string {
     const id = `web_prompt_${++this.counter}`;
-    this.entries.set(id, { settle });
+    this.entries.set(id, { settle, client });
     return id;
   }
 
@@ -59,12 +64,25 @@ export class PendingPrompts {
   }
 
   /**
-   * `owner` is gone and will answer nothing more. `error` null settles its
-   * prompts quietly, for when the exit has already been reported in the chat.
+   * `owner` is gone and will answer nothing more. Its prompts settle quietly:
+   * a stop or restart is not a failure (#564), and a crash is already in the
+   * chat. Returns how many settled.
    */
-  abandon(owner: unknown, error: string | null): void {
+  abandon(owner: unknown): number {
+    let settled = 0;
     for (const [id, entry] of this.entries) {
-      if (entry.owner !== undefined && entry.owner === owner) this.finish(id, error);
+      if (entry.owner !== undefined && entry.owner === owner) {
+        this.finish(id, null);
+        settled++;
+      }
+    }
+    return settled;
+  }
+
+  /** `client` went away; nobody is left to answer, so drop its prompts. */
+  forget(client: unknown): void {
+    for (const [id, entry] of this.entries) {
+      if (entry.client === client) this.entries.delete(id);
     }
   }
 

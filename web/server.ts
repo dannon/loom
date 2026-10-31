@@ -308,17 +308,14 @@ function startCore(opts: { fresh?: boolean } = {}): void {
   });
 
   // On close, not exit: exit can come before readline has handed over the
-  // brain's last lines, and a refusal among them would be lost to "Agent
-  // stopped". A crash settles quietly -- its detail is already in the chat, and
-  // a second chat error would reset the status summary to a bare "error".
-  proc.on("close", (code) => {
-    pendingPrompts.abandon(proc, code !== 0 && code !== null ? null : "Agent stopped");
-  });
+  // brain's last lines, and a refusal among them would be lost. The exit
+  // handler has already sent the status that resets the turn UI.
+  proc.on("close", () => pendingPrompts.abandon(proc));
 
   coreProcess.on("error", (err) => {
     log("loom error:", err.message);
     coreProcess = null;
-    pendingPrompts.abandon(proc, err.message);
+    pendingPrompts.abandon(proc);
     sendEvent("agent:status", "error", err.message);
   });
 
@@ -332,8 +329,10 @@ function stopCore(): void {
     coreProcess.stdout?.removeAllListeners();
     coreProcess.stderr?.removeAllListeners();
     coreProcess.kill("SIGTERM");
-    // Its listeners are gone, so the exit handler won't settle these.
-    pendingPrompts.abandon(coreProcess, "Agent stopped");
+    // Its listeners are gone, so the exit handler won't settle these or send
+    // the "stopped" that takes a waiting prompt or a running turn off "thinking".
+    pendingPrompts.abandon(coreProcess);
+    sendEvent("agent:status", "stopped");
     coreProcess = null;
   }
 }
@@ -692,8 +691,9 @@ wss.on("connection", (socket) => {
     if (channel === "agent:prompt") {
       // Answer only once the brain has: a refused prompt rejects the browser's
       // call, which is how the renderer learns to show the refusal.
-      const promptId = pendingPrompts.track((error) =>
-        error === null ? respond(id, null) : respondError(id, error),
+      const promptId = pendingPrompts.track(
+        (error) => (error === null ? respond(id, null) : respondError(id, error)),
+        socket,
       );
       sendToCore({
         ...agentPromptPayload(
@@ -728,6 +728,7 @@ wss.on("connection", (socket) => {
   socket.on("close", () => {
     log("browser disconnected");
     activeSocket = null;
+    pendingPrompts.forget(socket);
   });
 
   // A prompt can settle after its socket has gone; the shim already rejected
