@@ -905,6 +905,8 @@ describe("a plain chat approval of the one pending proposal", () => {
     expect(out.action).toBe("transform");
     expect(out.text.startsWith(text)).toBe(true);
     expect(out.text).toContain(`[Orbit: approved ${id} (attempt `);
+    // Without the id on the record call, the run never binds to this approval.
+    expect(out.text).toContain(`proposalId: "${id}"`);
   });
 
   it("ignores text the model's own extensions sent, and input while streaming", async () => {

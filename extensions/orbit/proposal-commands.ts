@@ -930,7 +930,9 @@ export function registerProposalCommands(pi: ExtensionAPI, deps: ProposalDeps = 
     });
     if (r.attemptId) {
       return note(
-        `approved ${id} (attempt ${r.attemptId}) from this message. Submit exactly that run now; do not ask for /approve.`,
+        `approved ${id} (attempt ${r.attemptId}) from this message. Submit exactly that run now with ` +
+          `the Galaxy tools, then record it with galaxy_job_record (or galaxy_invocation_record for a ` +
+          `workflow), passing proposalId: "${id}". Do not ask for /approve.`,
       );
     }
     if (r.declined)
