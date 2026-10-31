@@ -45,7 +45,7 @@ const LOOM_BRIDGING = {
 };
 
 // Parameters are the tools Orbit registers: root's galaxy-ops, rendered by the default source with
-// Loom's bridges in.
+// Orbit's bridges in.
 const orbitTools = createGalaxyOpsToolSource().tools();
 const upstreamParams = new Map(
   orbitTools.map((tool) => [

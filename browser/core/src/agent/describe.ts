@@ -344,7 +344,7 @@ export async function describe(layout: DescribeLayout, flavor: AgentFlavor) {
     providers: await providers(),
     follow_ups: followUps(),
     skills: skills(
-      join(repo, "extensions", "loom", "vendor", "skills"),
+      join(repo, "extensions", "orbit", "vendor", "skills"),
       join(repo, "scripts", "skills.manifest.json"),
     ),
     // The record is a Galaxy page made on its first write; there is no tool to open it.
