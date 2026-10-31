@@ -18,7 +18,8 @@
  * has to come from somewhere neither the agent nor the renderer can write.
  *
  * **What would have to be built.** The shell would have to resolve
- * `LOOM_HTML_SANDBOX` / `config.experiments.htmlSandbox` in a process the agent
+ * `ORBIT_HTML_SANDBOX` (`readEnv("HTML_SANDBOX")`, so `LOOM_HTML_SANDBOX` still
+ * works) / `config.experiments.htmlSandbox` in a process the agent
  * cannot write to, and hand the answer to the renderer over a channel the page
  * cannot forge -- the preload bridge in Electron, the socket handshake in the
  * web shell. That is main-process work and it is deliberately not done here,
@@ -32,7 +33,7 @@
  */
 
 /** The env var / config key a shell would map onto the flag, when one does. */
-export const HTML_SANDBOX_ENV = "LOOM_HTML_SANDBOX";
+export const HTML_SANDBOX_ENV = "ORBIT_HTML_SANDBOX";
 
 /**
  * Test-only override, so the drawing code below the flag stays exercised.
