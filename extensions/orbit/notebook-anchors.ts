@@ -31,6 +31,8 @@
  * call for that anchor validate against a record we wrote ourselves.
  */
 
+import { closesFence, isIndentedCodeLine, matchFenceOpen } from "../../shared/notebook-fences.js";
+
 /** `{#some-id}` -- same shape `evidence-gate.ts` reads off a step line. */
 const ANCHOR = /\{#([^}]+)\}/g;
 /** Non-global twin, for the one place that only asks whether there is one. */
@@ -43,19 +45,6 @@ const ANY_H2 = /^ {0,3}##\s+/;
 /** A plan step checkbox line, with its optional leading ordinal. */
 const STEP_LINE = /^\s*-\s+\[[ xX!]\]\s+(.*)$/;
 const STEP_ORDINAL = /^(\d+)\.\s*/;
-
-/**
- * A fence opener: up to three spaces of indent, optionally behind a list
- * marker, then three or more backticks or tildes.
- *
- * The list-marker branch is not pedantry. `- ```plan` opens a fence inside a
- * list item, and a scanner that only looks for a fence at the start of a line
- * walks straight past it and collects every anchor in the quoted plan that
- * follows.
- */
-const FENCE_OPEN = /^ {0,3}(?:(?:[-*+]|\d{1,9}[.)])\s+)?(`{3,}|~{3,})/;
-/** Four spaces (or a tab) of indent is an indented code block, not prose. */
-const INDENTED_CODE = /^(?: {4}|\t)/;
 
 /** How many anchors a rejection names before it starts summarizing. */
 const MAX_LISTED_ANCHORS = 20;
@@ -102,21 +91,15 @@ export function slugifyHeading(text: string): string {
  * rest of the file.
  */
 function* proseLines(content: string): Generator<string> {
-  let fence: { marker: string; length: number } | null = null;
+  let fence: { char: string; length: number } | null = null;
   for (const line of content.split("\n")) {
     if (fence) {
-      const close = line.match(/^ {0,3}(`{3,}|~{3,})\s*$/);
-      if (close && close[1][0] === fence.marker && close[1].length >= fence.length) {
-        fence = null;
-      }
+      if (closesFence(line, fence)) fence = null;
       continue;
     }
-    if (INDENTED_CODE.test(line)) continue;
-    const open = line.match(FENCE_OPEN);
-    if (open) {
-      fence = { marker: open[1][0], length: open[1].length };
-      continue;
-    }
+    if (isIndentedCodeLine(line)) continue;
+    fence = matchFenceOpen(line);
+    if (fence) continue;
     yield line;
   }
 }
