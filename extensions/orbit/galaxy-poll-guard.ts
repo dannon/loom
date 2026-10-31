@@ -21,7 +21,7 @@ function underWorker(): boolean {
 }
 
 const WORKER_REFUSAL =
-  "Not checked again: Galaxy is still working on this, and Loom is already watching it in the background and will report back when it finishes. No Galaxy request was sent. Give the user a short progress update, continue other ready work, or end this turn if waiting is all that remains.";
+  "Not checked again: Galaxy is still working on this, and Orbit is already watching it in the background and will report back when it finishes. No Galaxy request was sent. Give the user a short progress update, continue other ready work, or end this turn if waiting is all that remains.";
 
 const monitorCadence = () =>
   underWorker()

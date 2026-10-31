@@ -957,7 +957,8 @@ describe("Orbit on pi-host", () => {
   it("switches to a second conversation with its own page and back, through quiesce and settle", async () => {
     ledger.phase = "switch";
     const { setRecordStore } = await import("../../../../extensions/orbit/record-store");
-    const { createPageRecordStore } = await import("../../../../extensions/orbit/record-store-page");
+    const { createPageRecordStore } =
+      await import("../../../../extensions/orbit/record-store-page");
     const { galaxyBackgroundIdle } = await import("../../../../extensions/orbit/galaxy-reconcile");
     const { getNotebookPath } = await import("../../../../extensions/orbit/state");
     const first = conversation;
@@ -1011,10 +1012,10 @@ describe("Orbit on pi-host", () => {
     ledger.phase = "shutdown";
     await host.shutdown("quit");
     // The shutdown summary went up as a carrier Galaxy accepts, and reads back as the fence.
-    expect(page1).toMatch(/^\[loom-session:v1\]: #loom "/m);
+    expect(page1).toMatch(/^\[orbit-session:v1\]: #orbit "/m);
     const { galaxyMarkdownToOrbit } =
       await import("../../../../extensions/orbit/galaxy-markdown-adapter");
-    expect(galaxyMarkdownToOrbit(page1)).toContain("```loom-session");
+    expect(galaxyMarkdownToOrbit(page1)).toContain("```orbit-session");
   });
 
   it("ran every handler without a missing ctx member", () => {

@@ -6,8 +6,11 @@ import { artifactsOf, type Artifact } from "./artifacts/kinds";
 
 import { DEFAULT_BRAND, followUpMark, type Brand } from "./agent/brand";
 
-/** Orbit's brain marks its follow-ups with its own product name, not the flavor's. */
-const ORBIT_FOLLOW_UP = /^\[Loom automatic Galaxy follow-up\]/;
+/**
+ * Orbit's brain marks its follow-ups with its own product name, not the flavor's; a conversation
+ * saved before the rename carries the old one.
+ */
+const ORBIT_FOLLOW_UP = /^\[(?:Orbit|Loom) automatic Galaxy follow-up\]/;
 import { EMPTY_REPLY } from "./agent/markers";
 import { usageTotals } from "./agent/saved";
 import type { ChatPanel } from "../../../app/src/renderer/chat/chat-panel";

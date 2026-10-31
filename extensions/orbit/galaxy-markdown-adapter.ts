@@ -120,7 +120,7 @@ const CARRIER_LINE_RE = new RegExp(`^${CARRIER_BODY}$`);
  * ```galaxy block was authored by a human and is preserved verbatim -- stripping
  * those unconditionally was silent data loss on pull. The one exception: a human
  * ```galaxy block sitting directly above a typed block, with no blank line between,
- * looks like Loom's and is dropped on read. Under a page record that read follows
+ * looks like Orbit's and is dropped on read. Under a page record that read follows
  * every write, not just a pull.
  */
 function stripOrbitGalaxyDirectiveBlocks(body: string): string {

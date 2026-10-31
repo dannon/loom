@@ -90,6 +90,6 @@
     "info | Progress: inspecting available Galaxy tools.",
     "info | Progress: working with Galaxy.",
     "info | Reconcile: no history is bound to this analysis yet.",
-    "info | 🔬 Loom Status\n\n🟢 Galaxy: http://galaxy.test\n\n📓 Notebook: <tmp>/notebook.md"
+    "info | 🔬 Orbit Status\n\n🟢 Galaxy: http://galaxy.test\n\n📓 Notebook: <tmp>/notebook.md"
   ]
 }

@@ -86,10 +86,12 @@ describe("a restored conversation renders a step the way it ended", () => {
 });
 
 describe("what the user sees of messages written for the model", () => {
-  it("shows Orbit's automatic follow-up as a line too", () => {
+  it.each(["Orbit", "Loom"])("shows Orbit's automatic follow-up as a line too (%s)", (name) => {
     const { chat, hooks, view: v } = view();
     v.apply([
-      snapshot([user("[Loom automatic Galaxy follow-up] The background poller observed these.")]),
+      snapshot([
+        user(`[${name} automatic Galaxy follow-up] The background poller observed these.`),
+      ]),
     ]);
     expect(chat.addUserMessage).not.toHaveBeenCalled();
     expect(hooks.info).toHaveBeenCalledWith("Checking the Galaxy results that just landed.");

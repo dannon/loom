@@ -92,7 +92,7 @@
     },
     {
       "name": "galaxy_invocation_record",
-      "description": "Name the plan step a Galaxy workflow invocation belongs to. The harness\nrecords the run; you name the step it belongs to. Loom already wrote a `loom-invocation`\nblock the moment invoke_workflow returned, so this normally just sets `label` and\n`notebook_anchor` on the block already carrying that id -- the run is pollable either way.\nIf no block carries the id (a submission Loom could not see, such as one made from inside\ncode mode), this creates one. Both arguments are checked before anything is written: the\nanchor must resolve in notebook.md, and the invocation id must exist on the Galaxy server.",
+      "description": "Name the plan step a Galaxy workflow invocation belongs to. The harness\nrecords the run; you name the step it belongs to. Orbit already wrote a `loom-invocation`\nblock the moment invoke_workflow returned, so this normally just sets `label` and\n`notebook_anchor` on the block already carrying that id -- the run is pollable either way.\nIf no block carries the id (a submission Orbit could not see, such as one made from inside\ncode mode), this creates one. Both arguments are checked before anything is written: the\nanchor must resolve in notebook.md, and the invocation id must exist on the Galaxy server.",
       "parameters": [
         "invocationId",
         "label",
@@ -103,7 +103,7 @@
     },
     {
       "name": "galaxy_job_record",
-      "description": "Name the plan step a Galaxy TOOL run belongs to, the same way\ngalaxy_invocation_record does for a workflow. The harness records the run; you name the step\nit belongs to. Loom already wrote a `loom-job` block the moment run_tool returned, so\nthis normally just sets `label` and `notebook_anchor` on the block already carrying that\njob id -- the poller is watching it either way. If no block carries the id, this creates one.\nBoth arguments are checked before anything is written: the anchor must resolve in notebook.md,\nand the job id must exist on the Galaxy server. `toolId` is used only when creating.",
+      "description": "Name the plan step a Galaxy TOOL run belongs to, the same way\ngalaxy_invocation_record does for a workflow. The harness records the run; you name the step\nit belongs to. Orbit already wrote a `loom-job` block the moment run_tool returned, so\nthis normally just sets `label` and `notebook_anchor` on the block already carrying that\njob id -- the poller is watching it either way. If no block carries the id, this creates one.\nBoth arguments are checked before anything is written: the anchor must resolve in notebook.md,\nand the job id must exist on the Galaxy server. `toolId` is used only when creating.",
       "parameters": [
         "jobId",
         "label",
@@ -428,7 +428,7 @@
     },
     {
       "name": "lesson_propose",
-      "description": "Propose ONE lesson drawn from what happened in this session, for the user to\napprove. The user always sees the draft and decides; nothing is written without that.\n\nOnly call this when the user asked -- they typed /lesson, or Loom told you they corrected you and\nthey then said yes to writing it down. Never call it on your own initiative: an unasked call is\nrefused and recorded.\n\nA lesson is for what you only catch by knowing the science or the data: a silently wrong result,\na sanity range that makes a silent failure visible, a choice and when it flips, a data-source\nquirk, or what it actually takes to reproduce a published analysis. If a validator, a schema or a\nbetter error message could catch it, it belongs upstream instead -- say so and do not call this.\n\nNothing identifying goes in a lesson: no paths, URLs, hostnames of private servers, ids, emails or\ncopied data values. If the draft fails the schema you get the violations back and may fix them\nand call once more.",
+      "description": "Propose ONE lesson drawn from what happened in this session, for the user to\napprove. The user always sees the draft and decides; nothing is written without that.\n\nOnly call this when the user asked -- they typed /lesson, or Orbit told you they corrected you and\nthey then said yes to writing it down. Never call it on your own initiative: an unasked call is\nrefused and recorded.\n\nA lesson is for what you only catch by knowing the science or the data: a silently wrong result,\na sanity range that makes a silent failure visible, a choice and when it flips, a data-source\nquirk, or what it actually takes to reproduce a published analysis. If a validator, a schema or a\nbetter error message could catch it, it belongs upstream instead -- say so and do not call this.\n\nNothing identifying goes in a lesson: no paths, URLs, hostnames of private servers, ids, emails or\ncopied data values. If the draft fails the schema you get the violations back and may fix them\nand call once more.",
       "parameters": [
         "applies_to",
         "cues",
@@ -537,7 +537,7 @@
     },
     {
       "name": "loom_propose",
-      "description": "Propose one concrete Galaxy run -- a tool, workflow or user-defined tool with its\nexact inputs and parameters -- for the user to approve. The harness fetches the target's template from\nGalaxy and checks your proposal against it (dataset slots, required inputs, parameter names) before\nanything is written; if something is wrong you get the list of problems and nothing is written. On\nsuccess it writes a loom-proposal block to the notebook and returns a proposal id and a table.\nShow the user that table and ask them to type /approve <proposal-id>. You cannot approve it yourself.\nGive every parameter you set a rationale. Leave version unset to take what Galaxy resolves.",
+      "description": "Propose one concrete Galaxy run -- a tool, workflow or user-defined tool with its\nexact inputs and parameters -- for the user to approve. The harness fetches the target's template from\nGalaxy and checks your proposal against it (dataset slots and their formats, required inputs, parameter names) before\nanything is written; if something is wrong you get the list of problems and nothing is written. On\nsuccess it writes a loom-proposal block to the notebook and returns a proposal id and a table.\nShow the user that table and ask them to type /approve <proposal-id>. You cannot approve it yourself.\nGive every parameter you set a rationale. Leave version unset to take what Galaxy resolves.\nA tool's dataset input also takes a collection (src hdca): on a one-dataset input it runs once per\nelement, on a multiple input it takes them all in one job.",
       "parameters": [
         "history_id",
         "inputs",
@@ -649,7 +649,7 @@
     },
     {
       "name": "skills_fetch",
-      "description": "Load operational know-how from a skills repo. The system\nprompt's \"Skills repositories\" section lists the repos and the canonical paths\ninside each; a repo marked bundled there is read from the package, and any other\nis fetched and cached locally for 24h. If `repo` is omitted, the first enabled\nrepo is used (typically `galaxy-skills`).\n\n`repo: \"foundry\"` reads Galaxy workflow reference material bundled\nwith Loom, always offline. It is deliberately absent from the router, so its\npaths are not listed there: a hint names the exact file when it becomes\nrelevant, and a wrong path answers with the entry points that do exist.",
+      "description": "Load operational know-how from a skills repo. The system\nprompt's \"Skills repositories\" section lists the repos and the canonical paths\ninside each; a repo marked bundled there is read from the package, and any other\nis fetched and cached locally for 24h. If `repo` is omitted, the first enabled\nrepo is used (typically `galaxy-skills`).\n\n`repo: \"foundry\"` reads Galaxy workflow reference material bundled\nwith Orbit, always offline. It is deliberately absent from the router, so its\npaths are not listed there: a hint names the exact file when it becomes\nrelevant, and a wrong path answers with the entry points that do exist.",
       "parameters": [
         "path",
         "repo"
