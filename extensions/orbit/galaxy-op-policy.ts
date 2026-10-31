@@ -283,7 +283,7 @@ function unrenderable(field: string, text: unknown, pageId?: unknown): string | 
   if (!problem) return undefined;
   if (pageId !== undefined && recordPageStore(pageId) && TYPED_FENCE.test(String(text))) {
     return (
-      `Refused: ${field} holds one of the record's typed blocks (a \`\`\`loom-... fence). ` +
+      `Refused: ${field} holds one of the record's typed blocks (a \`\`\`orbit-... fence). ` +
       `Orbit writes those itself; leave them out of update_page, and record a run with ` +
       `galaxy_job_record or galaxy_invocation_record instead.`
     );
