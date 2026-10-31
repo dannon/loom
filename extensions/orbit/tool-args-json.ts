@@ -31,7 +31,7 @@ function typesOf(schema: Schema): string[] {
       : [];
 }
 
-// $ref is not followed: no Loom or galaxy-ops schema uses one, and an unresolved reference
+// $ref is not followed: no Orbit or galaxy-ops schema uses one, and an unresolved reference
 // accepts nothing this walker can see, so it is left for pi to judge.
 function isOpen(schema: Schema): boolean {
   return (
