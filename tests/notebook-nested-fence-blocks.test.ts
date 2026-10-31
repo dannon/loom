@@ -195,7 +195,7 @@ describe("outerCodeLines", () => {
   });
 
   it("reads a list-item fence and an info string with a backtick per CommonMark", () => {
-    expect(outerCodeLines(["- ~~~", "x", "  ~~~"])).toEqual([true, true, true]);
+    expect(outerCodeLines(["- ~~~", "  x", "  ~~~"])).toEqual([true, true, true]);
     expect(outerCodeLines(["```a`b", "x"])).toEqual([false, false]);
   });
 });
@@ -325,6 +325,28 @@ describe("blocks quoted inside outer Markdown code are not live", () => {
       expect(findInvocationBlocks(out).map((b) => b.status)).toEqual(["completed"]);
       expect(out.match(/^```orbit-invocation$/gm)).toHaveLength(1);
     }
+  });
+
+  it("an opener indented by accident, with its body flush, is still the real record", () => {
+    const lines = block(renderInvocationYaml(inv())).split("\n");
+    for (const indent of ["    ", "\t"]) {
+      const content = `- Step one\n\n${indent}${lines[0]}\n${lines.slice(1).join("\n")}\n`;
+      expect(findInvocationBlocks(content).map((b) => b.invocationId)).toEqual(["inv-real"]);
+      const out = upsertInvocationBlock(content, inv({ status: "completed" }));
+      expect(findInvocationBlocks(out).map((b) => b.status)).toEqual(["completed"]);
+      expect(out.match(/```orbit-invocation$/gm)).toHaveLength(1);
+    }
+  });
+
+  it("a fence opened in a list item ends with the item", () => {
+    const real = block(renderInvocationYaml(inv()));
+    const content = `- ~~~md\n  quoted\n\n${real}\n~~~\n`;
+    expect(findInvocationBlocks(content).map((b) => b.invocationId)).toEqual(["inv-real"]);
+    const out = upsertInvocationBlock(content, inv({ status: "completed" }));
+    expect(out.match(/^```orbit-invocation$/gm)).toHaveLength(1);
+    // Indented to the item's content, a quoted block is still inside it.
+    const quoted = `- ~~~md\n${real.replace(/^/gm, "  ")}\n  ~~~\n`;
+    expect(outerCodeLines(quoted.split("\n")).slice(0, 5).every(Boolean)).toBe(true);
   });
 
   it("the plan parser does not let a quoted step overwrite a real one", () => {

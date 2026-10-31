@@ -44,7 +44,7 @@ function isAnyNotebookFenceOpen(line) {
 // backticks or tildes. The optional list marker is there because `- ```plan`
 // opens a fence inside a list item, and a scanner that only looks at the start
 // of the line walks straight past it into the quoted content.
-const FENCE_OPEN = /^ {0,3}(?:(?:[-*+]|\d{1,9}[.)])\s+)?(`{3,}|~{3,})(.*)$/;
+const FENCE_OPEN = /^( {0,3}(?:[-*+]|\d{1,9}[.)])\s+| {0,3})(`{3,}|~{3,})(.*)$/;
 const FENCE_CLOSE_LINE = /^ {0,3}(`{3,}|~{3,})\s*$/;
 /** Four spaces (or a tab) of indent is an indented code block. */
 const INDENTED_CODE = /^(?: {4}|\t)/;
@@ -53,15 +53,23 @@ const INDENTED_CODE = /^(?: {4}|\t)/;
  * The marker a line opens a fence with, or null. A backtick fence's info string
  * cannot hold a backtick, so "```x``` is code" is a paragraph, not a fence.
  *
+ * `itemIndent` is the content indent of the list item a fence opens in, or 0.
+ *
  * @param {string} line
- * @returns {{ char: string; length: number } | null}
+ * @returns {{ char: string; length: number; itemIndent: number } | null}
  */
 export function matchFenceOpen(line) {
   // `.` stops at a CR, so a CRLF notebook would otherwise open no fences at all.
   const m = line.replace(/\r$/, "").match(FENCE_OPEN);
   if (!m) return null;
-  if (m[1][0] === "`" && m[2].includes("`")) return null;
-  return { char: m[1][0], length: m[1].length };
+  if (m[2][0] === "`" && m[3].includes("`")) return null;
+  const itemIndent = /[-*+.)]/.test(m[1]) ? m[1].length : 0;
+  return { char: m[2][0], length: m[2].length, itemIndent };
+}
+
+/** A non-blank line indented less than `indent`, which ends a list item. */
+function isOutdented(line, indent) {
+  return line.trim() !== "" && line.length - line.trimStart().length < indent;
 }
 
 /**
@@ -82,6 +90,23 @@ export function closesFence(line, fence) {
 /** @param {string} line @returns {boolean} */
 export function isIndentedCodeLine(line) {
   return INDENTED_CODE.test(line);
+}
+
+/**
+ * One of our openers indented by accident while its body stays flush, the way
+ * every writer emits a body. CommonMark calls the opener line code, but every
+ * scanner read it as a record before fences were tracked, and masking it now
+ * would hide that record and turn its next write into a duplicate. A quoted
+ * indented example indents its body too, so it is not mistaken for one.
+ *
+ * @param {readonly string[]} lines
+ * @param {number} i
+ * @returns {boolean}
+ */
+function isStrayIndentedOpener(lines, i) {
+  if (!isAnyNotebookFenceOpen(lines[i])) return false;
+  const next = lines[i + 1];
+  return next !== undefined && (/^[a-z0-9_]+:/.test(next) || next.trim() === "```");
 }
 
 /**
@@ -110,7 +135,7 @@ export function outerCodeLines(lines) {
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    if (isIndentedCodeLine(line)) {
+    if (isIndentedCodeLine(line) && !isStrayIndentedOpener(lines, i)) {
       masked[i] = true;
       i++;
       continue;
@@ -131,9 +156,21 @@ export function outerCodeLines(lines) {
     }
     const bareBackticks = fence.char === "`" && fence.length === 3;
     let end = i + 1;
+    let itemEnded = false;
     while (end < lines.length && !closesFence(lines[end], fence)) {
       if (bareBackticks && isAnyNotebookFenceOpen(lines[end])) break;
+      // A fence opened in a list item ends with the item, at the first line
+      // not indented to its content; what follows is back at the top level.
+      if (fence.itemIndent && isOutdented(lines[end], fence.itemIndent)) {
+        itemEnded = true;
+        break;
+      }
       end++;
+    }
+    if (itemEnded) {
+      for (let li = i; li < end; li++) masked[li] = true;
+      i = end;
+      continue;
     }
     if (end >= lines.length || !closesFence(lines[end], fence)) {
       i++;
