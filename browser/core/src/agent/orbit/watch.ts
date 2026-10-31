@@ -24,8 +24,8 @@ import {
   type Tx,
 } from "@earendil-works/pi-durable";
 
-import type { PollOptions, TickResult } from "../../../../../extensions/loom/galaxy-poller";
-import type { TerminalEvent } from "../../../../../extensions/loom/submission-ledger";
+import type { PollOptions, TickResult } from "../../../../../extensions/orbit/galaxy-poller";
+import type { TerminalEvent } from "../../../../../extensions/orbit/submission-ledger";
 import { FollowUps, heldBy } from "../documents";
 import { pollDelay, type Settled } from "../watch";
 

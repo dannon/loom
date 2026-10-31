@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { buildHistoryBindingBlock, setupContextInjection } from "../extensions/loom/context";
-import { setGalaxyTransport } from "../extensions/loom/galaxy-api";
-import { getCurrentHistoryId, resetState, setCurrentHistoryId } from "../extensions/loom/state";
+import { buildHistoryBindingBlock, setupContextInjection } from "../extensions/orbit/context";
+import { setGalaxyTransport } from "../extensions/orbit/galaxy-api";
+import { getCurrentHistoryId, resetState, setCurrentHistoryId } from "../extensions/orbit/state";
 import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 
 const json = (body: unknown, status = 200) =>

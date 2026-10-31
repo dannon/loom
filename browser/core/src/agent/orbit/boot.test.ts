@@ -12,7 +12,7 @@ const json = (body: unknown) =>
 async function boot(capabilities: string[], withShell = false) {
   vi.resetModules();
   const { bootOrbit } = await import("./boot");
-  const { createMemoryLedger } = await import("../../../../../extensions/loom/submission-ledger");
+  const { createMemoryLedger } = await import("../../../../../extensions/orbit/submission-ledger");
   const shell = withShell ? await shellPieces(capabilities) : {};
   return bootOrbit({
     capabilities,
@@ -30,7 +30,7 @@ async function shellPieces(capabilities: string[]) {
   const { galaxyTools } = await import("../galaxy-tools");
   const { pythonTool } = await import("../python");
   const { processTools } = await import("../processes");
-  const { galaxyOpsEntry } = await import("../../../../../extensions/loom/galaxy-ops-tools");
+  const { galaxyOpsEntry } = await import("../../../../../extensions/orbit/galaxy-ops-tools");
   const host = {
     clients: () => ({}) as never,
     conversation: () => undefined,
@@ -61,9 +61,9 @@ describe("the Orbit worker's boot", () => {
 
   it("declares no writing tool under a read grant", async () => {
     const { host } = await boot(["llm", "read"]);
-    const { ORBIT_WRITING_TOOLS } = await import("../../../../../extensions/loom/galaxy-grant");
+    const { ORBIT_WRITING_TOOLS } = await import("../../../../../extensions/orbit/galaxy-grant");
     const { registeredGalaxyTools } =
-      await import("../../../../../extensions/loom/galaxy-tool-source");
+      await import("../../../../../extensions/orbit/galaxy-tool-source");
     for (const tool of registeredGalaxyTools()) {
       expect(tool.annotations?.readOnlyHint, tool.name).toBe(true);
     }

@@ -11,9 +11,9 @@
 import { Type } from "@earendil-works/pi-ai";
 import type { ConversationId } from "@earendil-works/pi-durable";
 
-import type { GalaxyExtra } from "../../../../../extensions/loom/galaxy-ops-tools";
-import { wrapGalaxyTool } from "../../../../../extensions/loom/galaxy-tool-wrap";
-import type { GalaxyTool } from "../../../../../extensions/loom/galaxy-tool-source";
+import type { GalaxyExtra } from "../../../../../extensions/orbit/galaxy-ops-tools";
+import { wrapGalaxyTool } from "../../../../../extensions/orbit/galaxy-tool-wrap";
+import type { GalaxyTool } from "../../../../../extensions/orbit/galaxy-tool-source";
 import {
   claim,
   fail,

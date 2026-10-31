@@ -1,5 +1,5 @@
 /**
- * Does Orbit's brain (extensions/loom) load and register in a worker at all? Boots it the way the
+ * Does Orbit's brain (extensions/orbit) load and register in a worker at all? Boots it the way the
  * flag worker does (bootOrbit), opens the session registry and writes and re-reads one attempt,
  * then posts { ok, mode } or { ok: false, error }. Built and loaded by scripts/preflight-orbit.mjs and
  * e2e/orbit-preflight-drive.cjs; nothing ships it.
@@ -7,13 +7,13 @@
  * The conformance test (pi-host.orbit.test.ts) boots the same brain under Node, where process.pid,
  * Buffer and the builtins all exist. This is what it can't see: the bundle and the worker realm.
  */
-import { setRecordStore } from "../../../../../extensions/loom/record-store";
-import { createPageRecordStore } from "../../../../../extensions/loom/record-store-page";
+import { setRecordStore } from "../../../../../extensions/orbit/record-store";
+import { createPageRecordStore } from "../../../../../extensions/orbit/record-store-page";
 import {
   closeSessionRegistry,
   openSessionRegistry,
-} from "../../../../../extensions/loom/registry-runtime";
-import { createMemoryLedger } from "../../../../../extensions/loom/submission-ledger";
+} from "../../../../../extensions/orbit/registry-runtime";
+import { createMemoryLedger } from "../../../../../extensions/orbit/submission-ledger";
 import { bootOrbit } from "./boot";
 
 const SERVER = "http://galaxy.invalid";

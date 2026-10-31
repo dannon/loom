@@ -8,31 +8,31 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
-vi.mock("../extensions/loom/galaxy-api.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../extensions/loom/galaxy-api.js")>()),
+vi.mock("../extensions/orbit/galaxy-api.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../extensions/orbit/galaxy-api.js")>()),
   getGalaxyConfig: vi.fn(() => ({ url: "https://galaxy.test", apiKey: "k" })),
   galaxyGetInvocation: vi.fn(),
   galaxyGetJobDetails: vi.fn(),
 }));
 
-import { galaxyGetInvocation, galaxyGetJobDetails } from "../extensions/loom/galaxy-api.js";
-import { findJobBlocks, renderJobYaml } from "../extensions/loom/galaxy-job-block";
+import { galaxyGetInvocation, galaxyGetJobDetails } from "../extensions/orbit/galaxy-api.js";
+import { findJobBlocks, renderJobYaml } from "../extensions/orbit/galaxy-job-block";
 import {
   pollGalaxyNow,
   startGalaxyPoller,
   stopGalaxyPoller,
-} from "../extensions/loom/galaxy-poller";
-import { findInvocationBlocks, renderInvocationYaml } from "../extensions/loom/notebook-writer";
-import { setRecordStore, type RecordStore } from "../extensions/loom/record-store";
-import { createFileRecordStore } from "../extensions/loom/record-store-file";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+} from "../extensions/orbit/galaxy-poller";
+import { findInvocationBlocks, renderInvocationYaml } from "../extensions/orbit/notebook-writer";
+import { setRecordStore, type RecordStore } from "../extensions/orbit/record-store";
+import { createFileRecordStore } from "../extensions/orbit/record-store-file";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 import {
   createMemoryLedger,
   setSubmissionLedger,
   submissionLedger,
   terminalEventKey,
-} from "../extensions/loom/submission-ledger";
-import { checkInvocations } from "../extensions/loom/tools";
+} from "../extensions/orbit/submission-ledger";
+import { checkInvocations } from "../extensions/orbit/tools";
 
 const mockJob = vi.mocked(galaxyGetJobDetails);
 const mockInv = vi.mocked(galaxyGetInvocation);

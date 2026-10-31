@@ -6,11 +6,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createGalaxyOpsToolSource } from "../../../../../extensions/loom/galaxy-ops-tools";
+import { createGalaxyOpsToolSource } from "../../../../../extensions/orbit/galaxy-ops-tools";
 import {
   registerGalaxyTools,
   setGalaxyToolSource,
-} from "../../../../../extensions/loom/galaxy-tool-source";
+} from "../../../../../extensions/orbit/galaxy-tool-source";
 import { fenced, registerArtifactKinds } from "../../artifacts/kinds";
 import type { Artifact } from "../tool";
 import { registerBrowserLayers, registerFlavorLayers } from "./layers";

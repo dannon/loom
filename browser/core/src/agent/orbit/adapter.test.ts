@@ -8,12 +8,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ConversationId } from "@earendil-works/pi-durable";
 
 // Capture installs the ledger's dispatch pins when it loads, as it does when the brain registers.
-import "../../../../../extensions/loom/galaxy-submission-capture";
-import { setNotebookPath, resetState } from "../../../../../extensions/loom/state";
+import "../../../../../extensions/orbit/galaxy-submission-capture";
+import { setNotebookPath, resetState } from "../../../../../extensions/orbit/state";
 import {
   setSubmissionLedger,
   submissionLedger,
-} from "../../../../../extensions/loom/submission-ledger";
+} from "../../../../../extensions/orbit/submission-ledger";
 import { Outcome, type AgentTool, type Artifact, type Binding } from "../tool";
 import { adaptTool, galaxyExtras, granted, type ShellToolHost } from "./adapter";
 

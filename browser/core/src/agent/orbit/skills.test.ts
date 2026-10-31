@@ -9,7 +9,7 @@ import {
   readBundledCatalog,
   readBundledRepoFile,
   setVendorSkillsSource,
-} from "../../../../../extensions/loom/vendor-skills";
+} from "../../../../../extensions/orbit/vendor-skills";
 import { ownSkillFiles, vendorSkills } from "./skills";
 
 const SKILL = `---

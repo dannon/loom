@@ -1,6 +1,6 @@
 /**
  * The agent worker under VITE_ORBIT_BRAIN=orbit: the page protocol worker.ts speaks, answered by
- * Orbit's brain (extensions/loom) on pi-host instead of the browser's own. The runtime (model,
+ * Orbit's brain (extensions/orbit) on pi-host instead of the browser's own. The runtime (model,
  * compaction, storage, conversations) is the same Runtime; what differs is the brain installed in
  * it and that every conversation change goes through pi's session lifecycle.
  *
@@ -17,25 +17,25 @@ import {
   type Storage,
 } from "@earendil-works/pi-durable";
 
-import { galaxyOpsEntry } from "../../../../../extensions/loom/galaxy-ops-tools";
-import { registeredGalaxyTools } from "../../../../../extensions/loom/galaxy-tool-source";
-import { createPage, listHistoryPages } from "../../../../../extensions/loom/galaxy-pages-api";
-import { pollGalaxyNow } from "../../../../../extensions/loom/galaxy-poller";
-import { galaxyBackgroundIdle } from "../../../../../extensions/loom/galaxy-reconcile";
-import { captureLateSubmission } from "../../../../../extensions/loom/galaxy-submission-capture";
-import { isSubmissionTool } from "../../../../../extensions/loom/galaxy-submission";
+import { galaxyOpsEntry } from "../../../../../extensions/orbit/galaxy-ops-tools";
+import { registeredGalaxyTools } from "../../../../../extensions/orbit/galaxy-tool-source";
+import { createPage, listHistoryPages } from "../../../../../extensions/orbit/galaxy-pages-api";
+import { pollGalaxyNow } from "../../../../../extensions/orbit/galaxy-poller";
+import { galaxyBackgroundIdle } from "../../../../../extensions/orbit/galaxy-reconcile";
+import { captureLateSubmission } from "../../../../../extensions/orbit/galaxy-submission-capture";
+import { isSubmissionTool } from "../../../../../extensions/orbit/galaxy-submission";
 import {
   addRecordStore,
   installedRecordStoreFor,
   setRecordStore,
-} from "../../../../../extensions/loom/record-store";
-import { setCurrentHistoryId } from "../../../../../extensions/loom/state";
+} from "../../../../../extensions/orbit/record-store";
+import { setCurrentHistoryId } from "../../../../../extensions/orbit/state";
 import {
   createMemoryLedger,
   submissionLedger,
   type SubmissionLedger,
-} from "../../../../../extensions/loom/submission-ledger";
-import { createPageRecordStore } from "../../../../../extensions/loom/record-store-page";
+} from "../../../../../extensions/orbit/submission-ledger";
+import { createPageRecordStore } from "../../../../../extensions/orbit/record-store-page";
 import { registerArtifactKinds } from "../../artifacts/kinds";
 import { DEFAULT_BRAND, noteTag, type Brand } from "../brand";
 import { Binding, FollowUps, heldBy } from "../documents";

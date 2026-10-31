@@ -163,7 +163,7 @@ describe("the Orbit worker", { timeout: 30_000 }, () => {
     // The page shows the conversation from a snapshot on.
     expect(seen("events")[0]).toMatchObject({ events: [{ type: "snapshot" }] });
     // The brain's history defaults go to the conversation's, past session_start's reset.
-    const { getCurrentHistoryId } = await import("../../../../../extensions/loom/state");
+    const { getCurrentHistoryId } = await import("../../../../../extensions/orbit/state");
     expect(getCurrentHistoryId()).toBe("h1");
   });
 
@@ -217,7 +217,7 @@ describe("the Orbit worker", { timeout: 30_000 }, () => {
 
   it("keeps each conversation's approvals in its own registry, so /pending never shows another's", async () => {
     const { send, seen } = await worker([]);
-    const { getSessionRegistry } = await import("../../../../../extensions/loom/registry-runtime");
+    const { getSessionRegistry } = await import("../../../../../extensions/orbit/registry-runtime");
     const first = getSessionRegistry()!;
     expect(first.store.mode).toBe("writer");
     send({ type: "reset" });
@@ -306,9 +306,9 @@ describe("the Orbit worker", { timeout: 30_000 }, () => {
     expect(snapshots()).toHaveLength(1);
     release!();
     await vi.waitFor(() => expect(snapshots()).toHaveLength(2), { timeout: 10_000 });
-    const { galaxyMarkdownToLoom } =
-      await import("../../../../../extensions/loom/galaxy-markdown-adapter");
-    expect(galaxyMarkdownToLoom(fake.pages.get(first)!.content)).toContain(`job_id: ${JOB}`);
+    const { galaxyMarkdownToOrbit } =
+      await import("../../../../../extensions/orbit/galaxy-markdown-adapter");
+    expect(galaxyMarkdownToOrbit(fake.pages.get(first)!.content)).toContain(`job_id: ${JOB}`);
     // The new conversation got no page of its own from it.
     expect(fake.pages.size).toBe(1);
     expect(new Set(fake.puts)).toEqual(new Set([first]));
@@ -324,9 +324,9 @@ describe("the Orbit worker", { timeout: 30_000 }, () => {
       ["llm", "read", "write"],
       { poll_ms: 5 },
     );
-    const { galaxyMarkdownToLoom } =
-      await import("../../../../../extensions/loom/galaxy-markdown-adapter");
-    const record = () => galaxyMarkdownToLoom([...fake.pages.values()][0]?.content ?? "");
+    const { galaxyMarkdownToOrbit } =
+      await import("../../../../../extensions/orbit/galaxy-markdown-adapter");
+    const record = () => galaxyMarkdownToOrbit([...fake.pages.values()][0]?.content ?? "");
     send({ type: "submit", text: "run cat on it" });
     await vi.waitFor(() => expect(record()).toContain(`job_id: ${JOB}`), { timeout: 10_000 });
     fake.job.state = "ok";
@@ -352,12 +352,12 @@ describe("the Orbit worker", { timeout: 30_000 }, () => {
       ["llm", "read", "write"],
       { poll_ms: 5 },
     );
-    const { galaxyMarkdownToLoom } =
-      await import("../../../../../extensions/loom/galaxy-markdown-adapter");
+    const { galaxyMarkdownToOrbit } =
+      await import("../../../../../extensions/orbit/galaxy-markdown-adapter");
     send({ type: "submit", text: "run cat on it" });
     await vi.waitFor(() => expect(fake.pages.size).toBe(1), { timeout: 10_000 });
     const [left] = [...fake.pages.keys()];
-    const record = () => galaxyMarkdownToLoom(fake.pages.get(left)!.content);
+    const record = () => galaxyMarkdownToOrbit(fake.pages.get(left)!.content);
     await vi.waitFor(() => expect(prompts).toHaveLength(2), { timeout: 10_000 });
     // The job finishes while the tick asking about it is held mid-poll.
     const release = fake.holdJobs();
@@ -389,12 +389,12 @@ describe("the Orbit worker", { timeout: 30_000 }, () => {
       ["llm", "read", "write"],
       { poll_ms: 5 },
     );
-    const { galaxyMarkdownToLoom } =
-      await import("../../../../../extensions/loom/galaxy-markdown-adapter");
+    const { galaxyMarkdownToOrbit } =
+      await import("../../../../../extensions/orbit/galaxy-markdown-adapter");
     send({ type: "submit", text: "run cat on it" });
     await vi.waitFor(() => expect(fake.pages.size).toBe(1), { timeout: 10_000 });
     const [left] = [...fake.pages.keys()];
-    const record = () => galaxyMarkdownToLoom(fake.pages.get(left)!.content);
+    const record = () => galaxyMarkdownToOrbit(fake.pages.get(left)!.content);
     await vi.waitFor(() => expect(record()).toContain(`job_id: ${JOB}`), { timeout: 10_000 });
     await vi.waitFor(() => expect(prompts).toHaveLength(2), { timeout: 10_000 });
     send({ type: "reset" });

@@ -7,21 +7,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { setGalaxyTransport } from "../extensions/loom/galaxy-api";
-import { findJobBlocks } from "../extensions/loom/galaxy-job-block";
-import { listAttemptRecords } from "../extensions/loom/galaxy-provenance";
-import { resetReconcileState, runReconcile } from "../extensions/loom/galaxy-reconcile";
+import { setGalaxyTransport } from "../extensions/orbit/galaxy-api";
+import { findJobBlocks } from "../extensions/orbit/galaxy-job-block";
+import { listAttemptRecords } from "../extensions/orbit/galaxy-provenance";
+import { resetReconcileState, runReconcile } from "../extensions/orbit/galaxy-reconcile";
 import {
   handleSubmissionResult,
   pinnedDispatch,
   recoverSubmissions,
   registerSubmissionCapture,
   resetSubmissionCapture,
-} from "../extensions/loom/galaxy-submission-capture";
-import { GALAXY_DEADLINE_MS } from "../extensions/loom/galaxy-tool-wrap";
-import { NotebookChangedError, setRecordStore } from "../extensions/loom/record-store";
-import { createFileRecordStore } from "../extensions/loom/record-store-file";
-import { resetState, setNotebookPath } from "../extensions/loom/state";
+} from "../extensions/orbit/galaxy-submission-capture";
+import { GALAXY_DEADLINE_MS } from "../extensions/orbit/galaxy-tool-wrap";
+import { NotebookChangedError, setRecordStore } from "../extensions/orbit/record-store";
+import { createFileRecordStore } from "../extensions/orbit/record-store-file";
+import { resetState, setNotebookPath } from "../extensions/orbit/state";
 import {
   createMemoryLedger,
   setSubmissionLedger,
@@ -29,7 +29,7 @@ import {
   terminalEventKey,
   type LedgerState,
   type SubmissionLedger,
-} from "../extensions/loom/submission-ledger";
+} from "../extensions/orbit/submission-ledger";
 import { GALAXY } from "./galaxy-family-fixture";
 import { CREDENTIALS, guardHooks, json, recordGalaxy, runOp } from "./galaxy-test-helpers";
 
@@ -376,9 +376,9 @@ describe("capture's side of the ledger", () => {
     const ledger = submissionLedger();
 
     vi.resetModules();
-    const fresh = await import("../extensions/loom/galaxy-submission-capture");
-    const freshLedger = await import("../extensions/loom/submission-ledger");
-    const freshState = await import("../extensions/loom/state");
+    const fresh = await import("../extensions/orbit/galaxy-submission-capture");
+    const freshLedger = await import("../extensions/orbit/submission-ledger");
+    const freshState = await import("../extensions/orbit/state");
     freshLedger.setSubmissionLedger(ledger);
     freshState.setNotebookPath(analysis());
 

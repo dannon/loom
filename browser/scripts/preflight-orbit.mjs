@@ -5,7 +5,7 @@
  * Builds core/src/agent/orbit/preflight.html through the production config with
  * VITE_ORBIT_BRAIN=orbit, checks the worker bundle for Node-only packages that got past the
  * aliases, prints its size, then runs it in a realm with only browser-worker globals
- * (orbit-worker-realm.mjs). The worker boots extensions/loom on pi-host and writes and re-reads a
+ * (orbit-worker-realm.mjs). The worker boots extensions/orbit on pi-host and writes and re-reads a
  * registry attempt, and posts { ok, mode, tools }. Exits non-zero on any failure.
  *
  * e2e/orbit-preflight-drive.cjs loads the same page in a real browser, built and dev.

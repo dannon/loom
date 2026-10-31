@@ -15,8 +15,8 @@ import {
 } from "@earendil-works/pi-durable";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { PollOptions, TickResult } from "../../../../../extensions/loom/galaxy-poller";
-import type { TerminalEvent } from "../../../../../extensions/loom/submission-ledger";
+import type { PollOptions, TickResult } from "../../../../../extensions/orbit/galaxy-poller";
+import type { TerminalEvent } from "../../../../../extensions/orbit/submission-ledger";
 import { text } from "../fake-model";
 import { agentModels } from "../model";
 import { resolve } from "../providers";

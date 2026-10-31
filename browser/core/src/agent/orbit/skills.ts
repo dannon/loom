@@ -7,16 +7,16 @@
  * targets: a repo Orbit doesn't ship is fetched from GitHub, and there's no repo to fetch these
  * from. The core's own notebook skill isn't carried: it teaches the browser brain's record tools.
  */
-import catalog from "../../../../../extensions/loom/vendor/skills/_catalog.json";
-import manifest from "../../../../../extensions/loom/vendor/skills/_manifest.json";
-import type { SkillEntry } from "../../../../../extensions/loom/skills-discovery";
-import type { VendorSkillsSource } from "../../../../../extensions/loom/vendor-skills";
+import catalog from "../../../../../extensions/orbit/vendor/skills/_catalog.json";
+import manifest from "../../../../../extensions/orbit/vendor/skills/_manifest.json";
+import type { SkillEntry } from "../../../../../extensions/orbit/skills-discovery";
+import type { VendorSkillsSource } from "../../../../../extensions/orbit/vendor-skills";
 import { SKILLS_SURFACE_ID } from "../../../../../shared/skills-router.js";
 import { parseFrontmatter } from "../skills";
 
-const ROOT = "../../../../../extensions/loom/vendor/skills/";
+const ROOT = "../../../../../extensions/orbit/vendor/skills/";
 
-const BODIES = import.meta.glob("../../../../../extensions/loom/vendor/skills/**/*", {
+const BODIES = import.meta.glob("../../../../../extensions/orbit/vendor/skills/**/*", {
   query: "?url",
   import: "default",
   eager: true,

@@ -122,7 +122,7 @@ export function defines(settings: Partial<Env> = {}): Record<string, string> {
 export type Brain = "browser" | "orbit";
 
 /**
- * Which brain the agent worker boots: the browser's own runtime, or Orbit's (extensions/loom)
+ * Which brain the agent worker boots: the browser's own runtime, or Orbit's (extensions/orbit)
  * behind pi-host. Read from the environment here rather than in defines(settings), because a
  * build passes no settings and the flag has to reach the bundle Galaxy serves.
  */
@@ -139,7 +139,7 @@ const shim = (name: string) =>
 const ROOT_MODULES = fileURLToPath(new URL("../../node_modules", import.meta.url));
 
 /**
- * What Orbit's brain imports that a worker doesn't have. extensions/loom reaches Node only behind
+ * What Orbit's brain imports that a worker doesn't have. extensions/orbit reaches Node only behind
  * the capability profile, which the worker installs with no shell and no files, so these stand in
  * for modules nothing should call: a call throws and names itself. Vite's worker block has no
  * resolve of its own, so this set is global under the flag; the page imports no Node builtins.

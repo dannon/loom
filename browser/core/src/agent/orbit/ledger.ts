@@ -9,7 +9,7 @@ import {
   createMemoryLedger,
   type LedgerState,
   type SubmissionLedger,
-} from "../../../../../extensions/loom/submission-ledger";
+} from "../../../../../extensions/orbit/submission-ledger";
 
 /** Where a ledger's state is kept: one text file. */
 export interface LedgerFile {
