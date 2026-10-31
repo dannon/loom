@@ -10,6 +10,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { searchForWorkspaceRoot, type Plugin, type UserConfig } from "vite";
 
+import { readEnv as readOrbitEnv } from "../../shared/orbit-env.js";
 import { defaultEndpoint, PROVIDERS } from "./src/agent/providers";
 
 const DEFAULTS = {
@@ -74,7 +75,8 @@ async function llmTargets(): Promise<Record<string, { root: string; path: string
 /** The commit this bundle was built from; a deployed copy cannot be identified without it. */
 function buildCommit(): string {
   // Pinned when two builds are compared byte for byte (scripts/compare-default-bundle.mjs).
-  if (process.env.LOOM_BUILD_COMMIT !== undefined) return process.env.LOOM_BUILD_COMMIT;
+  const pinned = readOrbitEnv("BUILD_COMMIT");
+  if (pinned !== undefined) return pinned;
   try {
     return execFileSync("git", ["rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim();
   } catch {
@@ -106,7 +108,7 @@ export function defines(settings: Partial<Env> = {}): Record<string, string> {
     "process.env.credentials": JSON.stringify(settings.GALAXY_KEY ? "omit" : "include"),
     "process.env.build_commit": JSON.stringify(buildCommit()),
     "process.env.build_built": JSON.stringify(
-      process.env.LOOM_BUILD_TIME ?? new Date().toISOString(),
+      readOrbitEnv("BUILD_TIME") ?? new Date().toISOString(),
     ),
     // Dev only: route the agent through the /llm proxy above, which attaches the key.
     "process.env.llm_base_url": JSON.stringify(

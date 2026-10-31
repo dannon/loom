@@ -3,7 +3,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { defines, orbitBrain, orbitBrowserVite } from "../vite";
 
-const ENV = ["VITE_ORBIT_BRAIN", "LOOM_BUILD_COMMIT", "LOOM_BUILD_TIME"] as const;
+const ENV = [
+  "VITE_ORBIT_BRAIN",
+  "ORBIT_BUILD_COMMIT",
+  "ORBIT_BUILD_TIME",
+  "LOOM_BUILD_COMMIT",
+  "LOOM_BUILD_TIME",
+] as const;
 const saved = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
 
 afterEach(() => {
@@ -46,11 +52,16 @@ describe("the Orbit brain flag", () => {
 });
 
 describe("build stamps", () => {
-  it("are pinned by LOOM_BUILD_COMMIT and LOOM_BUILD_TIME, for byte comparisons", () => {
-    process.env.LOOM_BUILD_COMMIT = "pinned";
-    process.env.LOOM_BUILD_TIME = "2000-01-01T00:00:00.000Z";
+  it("are pinned by ORBIT_BUILD_COMMIT and ORBIT_BUILD_TIME, for byte comparisons", () => {
+    process.env.ORBIT_BUILD_COMMIT = "pinned";
+    process.env.ORBIT_BUILD_TIME = "2000-01-01T00:00:00.000Z";
     const d = defines();
     expect(d["process.env.build_commit"]).toBe('"pinned"');
     expect(d["process.env.build_built"]).toBe('"2000-01-01T00:00:00.000Z"');
+  });
+
+  it("still take the LOOM_ spelling", () => {
+    process.env.LOOM_BUILD_COMMIT = "legacy";
+    expect(defines()["process.env.build_commit"]).toBe('"legacy"');
   });
 });

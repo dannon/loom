@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Is the default (flag-off) bundle byte for byte what it was? Builds Olit at a base ref and at the
- * working tree, both with pinned build stamps (LOOM_BUILD_COMMIT, LOOM_BUILD_TIME), and compares
+ * working tree, both with pinned build stamps (ORBIT_BUILD_COMMIT, ORBIT_BUILD_TIME), and compares
  * every emitted .js file.
  *
  *   node scripts/compare-default-bundle.mjs [base-ref]    (default: HEAD)
@@ -15,11 +15,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeEnv } from "../../shared/orbit-env.js";
 
 const browser = fileURLToPath(new URL("..", import.meta.url));
 const repo = path.resolve(browser, "..");
 const base = process.argv[2] ?? "HEAD";
-const STAMPS = { LOOM_BUILD_COMMIT: "pinned", LOOM_BUILD_TIME: "2000-01-01T00:00:00.000Z" };
+const STAMPS = { BUILD_COMMIT: "pinned", BUILD_TIME: "2000-01-01T00:00:00.000Z" };
 const LOCKS = ["package-lock.json", "browser/package-lock.json"];
 
 const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" });
@@ -37,7 +38,9 @@ for (const lock of LOCKS) {
 
 /** Build Olit in `root` with the flag unset; return { relative path: contents } for every .js. */
 function build(root) {
-  const env = { ...process.env, ...STAMPS };
+  // Both spellings: a base from before the rename reads only LOOM_*.
+  const env = { ...process.env };
+  for (const [name, value] of Object.entries(STAMPS)) writeEnv(env, name, value);
   delete env.VITE_ORBIT_BRAIN;
   const run = spawnSync("npm", ["run", "build"], {
     cwd: path.join(root, "browser"),
@@ -63,7 +66,7 @@ function build(root) {
   return files;
 }
 
-/** The stamps a base without LOOM_BUILD_* embeds, rewritten to the pinned values. */
+/** The stamps a base without pinnable build stamps embeds, rewritten to the pinned values. */
 function normalize(files, short) {
   const ISO = /"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z"/g;
   // Content hashes in file names follow the stamps, and the page names the worker by its hash.
@@ -75,8 +78,8 @@ function normalize(files, short) {
     Object.entries(files).map(([name, data]) => {
       let text = data
         .toString("latin1")
-        .replaceAll(`"${short}"`, `"${STAMPS.LOOM_BUILD_COMMIT}"`)
-        .replace(ISO, `"${STAMPS.LOOM_BUILD_TIME}"`);
+        .replaceAll(`"${short}"`, `"${STAMPS.BUILD_COMMIT}"`)
+        .replace(ISO, `"${STAMPS.BUILD_TIME}"`);
       for (const [from, to] of renames) text = text.replaceAll(from, to);
       return [name.replace(HASHED, "-HASH$1"), Buffer.from(text, "latin1")];
     }),
