@@ -135,7 +135,7 @@ describe("typed blocks on a page", () => {
     const stored = galaxy.pages.get("p1")!;
     expect(pageContentProblem(stored)).toBeUndefined();
     for (const kind of ["invocation", "job", "session", "udt", "proposal"]) {
-      expect(stored).toContain(`[loom-${kind}:v1]: #loom "`);
+      expect(stored).toContain(`[orbit-${kind}:v1]: #orbit "`);
     }
     expect(await store.read()).toEqual({ content: FENCED, version: pageContentHash(stored) });
     // The version is the page as Galaxy holds it, so a guarded write against it goes through.
@@ -255,7 +255,7 @@ describe("a conversation with no page yet", () => {
     galaxy.pages.set("p1", "# Analysis\n");
     const bound = createPageRecordStore({ key: store.key, pageId: "p1" });
     expect(await shutDown(bound.key, () => setRecordStore(bound))).toBe("written");
-    expect(galaxy.pages.get("p1")).toContain("[loom-session:v1]");
+    expect(galaxy.pages.get("p1")).toContain("[orbit-session:v1]");
   });
 });
 

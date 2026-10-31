@@ -195,7 +195,7 @@ describe("the startup greeting", () => {
   const greeted = ({ sendUserMessage, notify }: Awaited<ReturnType<typeof start>>) =>
     sendUserMessage.mock.calls.length + notify.mock.calls.length > 0;
 
-  beforeEach(() => vi.stubEnv("LOOM_FRESH_SESSION", undefined));
+  beforeEach(() => vi.stubEnv("ORBIT_FRESH_SESSION", undefined));
 
   it("is sent on the desktop, including on a /resume, which carries no --continue", async () => {
     expect(greeted(await start(true, { type: "session_start", reason: "startup" }))).toBe(true);
