@@ -12,6 +12,21 @@ function profileConfig(profile: { url: string; apiKey?: string; apiKeyEncrypted?
 const ENV_PAIR = { GALAXY_URL: "https://cwic.example", GALAXY_API_KEY: "env-key" };
 
 describe("resolveGalaxyCredentials", () => {
+  it("hands back the server root whichever source pasted the API root", () => {
+    const fromEnv = resolveGalaxyCredentials({
+      config: null,
+      env: { GALAXY_URL: "cwic.example/api/", GALAXY_API_KEY: "env-key" },
+      prefer: "env",
+    });
+    expect(fromEnv?.url).toBe("https://cwic.example");
+    const fromProfile = resolveGalaxyCredentials({
+      config: profileConfig({ url: "https://eu.example/api", apiKey: "eu-key" }),
+      env: {},
+      prefer: "profile",
+    });
+    expect(fromProfile?.url).toBe("https://eu.example");
+  });
+
   it("lets an exported pair override a plaintext profile when env is preferred", () => {
     const creds = resolveGalaxyCredentials({
       config: profileConfig({ url: "https://eu.example", apiKey: "eu-key" }),

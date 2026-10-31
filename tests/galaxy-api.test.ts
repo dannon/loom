@@ -117,6 +117,30 @@ describe("galaxyCredentials and the transport", () => {
     expect(isGalaxyFetchOverridden()).toBe(false);
   });
 
+  it("reaches /api once when the configured URL is the API root", async () => {
+    process.env.GALAXY_URL = "galaxy.example/api/";
+    process.env.GALAXY_API_KEY = "k";
+    const seen: string[] = [];
+    setGalaxyTransport({
+      fetch: async (url) => {
+        seen.push(url);
+        return new Response(JSON.stringify({ version_major: "26.1" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    resetGalaxyOpsVersion();
+    expect(getGalaxyConfig()!.url).toBe("https://galaxy.example");
+    await galaxyGet("/whoami");
+    await galaxyOpsContext()!.galaxyVersion!();
+    resetGalaxyOpsVersion();
+    expect(seen).toEqual([
+      "https://galaxy.example/api/whoami",
+      "https://galaxy.example/api/version",
+    ]);
+  });
+
   it("keeps setGalaxyFetchOverride a fixture", () => {
     setGalaxyFetchOverride(async () => new Response("{}"));
     expect(isGalaxyFetchOverridden()).toBe(true);
