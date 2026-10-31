@@ -27,18 +27,16 @@ import { normalizeGalaxyUrl } from "./galaxy-url.js";
  * @returns {import("./galaxy-credentials.js").GalaxyCredentials | null}
  */
 export function resolveGalaxyCredentials({ config, profileApiKey, env, prefer }) {
-  const envUrl = env?.GALAXY_URL?.trim();
+  const envUrl = normalizeGalaxyUrl(env?.GALAXY_URL ?? "");
   const envKey = env?.GALAXY_API_KEY?.trim();
-  const fromEnv =
-    envUrl && envKey ? { url: normalizeGalaxyUrl(envUrl), apiKey: envKey, source: "env" } : null;
+  const fromEnv = envUrl && envKey ? { url: envUrl, apiKey: envKey, source: "env" } : null;
 
   const active = config?.galaxy?.active;
   const profile = active ? config?.galaxy?.profiles?.[active] : undefined;
   const key = profileApiKey === undefined ? profile?.apiKey : profileApiKey;
+  const profileUrl = normalizeGalaxyUrl(profile?.url ?? "");
   const fromProfile =
-    profile?.url && key
-      ? { url: normalizeGalaxyUrl(profile.url), apiKey: key, source: "profile" }
-      : null;
+    profileUrl && key ? { url: profileUrl, apiKey: key, source: "profile" } : null;
 
   return prefer === "profile" ? (fromProfile ?? fromEnv) : (fromEnv ?? fromProfile);
 }

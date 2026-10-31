@@ -114,7 +114,8 @@ export function getGalaxyConfig(): GalaxyConfig | null {
   // Every request goes through here, galaxy-ops' included, so this is where a
   // scheme-less host or a pasted `/api` root has to be caught, whatever the
   // shell or transport handed over.
-  return { url: normalizeGalaxyUrl(url), apiKey };
+  const normalized = normalizeGalaxyUrl(url);
+  return normalized ? { url: normalized, apiKey } : null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -27,6 +27,15 @@ describe("resolveGalaxyCredentials", () => {
     expect(fromProfile?.url).toBe("https://eu.example");
   });
 
+  it("doesn't let an exported URL that names no host beat a working profile", () => {
+    const creds = resolveGalaxyCredentials({
+      config: profileConfig({ url: "https://eu.example", apiKey: "eu-key" }),
+      env: { GALAXY_URL: "https://", GALAXY_API_KEY: "env-key" },
+      prefer: "env",
+    });
+    expect(creds).toEqual({ url: "https://eu.example", apiKey: "eu-key", source: "profile" });
+  });
+
   it("lets an exported pair override a plaintext profile when env is preferred", () => {
     const creds = resolveGalaxyCredentials({
       config: profileConfig({ url: "https://eu.example", apiKey: "eu-key" }),

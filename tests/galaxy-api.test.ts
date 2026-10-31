@@ -31,6 +31,12 @@ describe("getGalaxyConfig", () => {
     expect(getGalaxyConfig()).toBeNull();
   });
 
+  it("returns null when the URL names no host", () => {
+    process.env.GALAXY_URL = "https://?x=1";
+    process.env.GALAXY_API_KEY = "key";
+    expect(getGalaxyConfig()).toBeNull();
+  });
+
   it("returns null when only URL is set", () => {
     process.env.GALAXY_URL = "https://usegalaxy.org";
     delete process.env.GALAXY_API_KEY;
