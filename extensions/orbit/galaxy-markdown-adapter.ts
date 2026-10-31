@@ -31,6 +31,7 @@ import {
   NOTEBOOK_FENCE_READ_PREFIXES,
   NOTEBOOK_FENCE_WRITE_PREFIX,
   isNotebookFenceOpen,
+  outerCodeLines,
 } from "../../shared/notebook-fences.js";
 
 const FENCE_CLOSE = "```";
@@ -214,12 +215,16 @@ export async function orbitToGalaxyMarkdownRich(
   validators: DirectiveValidators,
 ): Promise<string> {
   const lines = body.split("\n");
+  const quoted = outerCodeLines(lines);
   const out: string[] = [];
   let i = 0;
   while (i < lines.length) {
     const kind = carriedKindOf(lines[i]);
     if (kind) {
-      const directive = kind === "session" ? null : DIRECTIVES[kind];
+      // A block quoted in an example is still carried, since Galaxy rejects a
+      // page with an `orbit-*` fence line anywhere in it, but it gets no
+      // directive: that would show the example on Galaxy as a real run.
+      const directive = kind === "session" || quoted[i] ? null : DIRECTIVES[kind];
       let end = i + 1;
       let id: string | null = null;
       while (end < lines.length && lines[end].trim() !== FENCE_CLOSE) {

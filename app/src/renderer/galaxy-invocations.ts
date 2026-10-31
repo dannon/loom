@@ -12,7 +12,7 @@
  */
 
 import { galaxyArtifactUrl } from "../../../shared/galaxy-artifact-links.js";
-import { isNotebookFenceOpen } from "../../../shared/notebook-fences.js";
+import { isNotebookFenceOpen, outerCodeLines } from "../../../shared/notebook-fences.js";
 
 export interface Invocation {
   invocationId: string;
@@ -164,13 +164,15 @@ interface RawBlock {
  * scanner (scanFencedBlocks): the body is `key: value` lines and nothing else,
  * and the close is an exact ```. Anything else -- a run of four backticks,
  * another opener, a line of prose, end of file -- means this is not a block.
+ * An opener quoted inside an outer fence or indented code is not one either.
  */
 function readBlocks(content: string, kind: "invocation" | "job"): RawBlock[] {
   const out: RawBlock[] = [];
   const lines = content.split(/\r?\n/);
+  const quoted = outerCodeLines(lines);
   let i = 0;
   while (i < lines.length) {
-    if (!isNotebookFenceOpen(lines[i], kind)) {
+    if (quoted[i] || !isNotebookFenceOpen(lines[i], kind)) {
       i++;
       continue;
     }

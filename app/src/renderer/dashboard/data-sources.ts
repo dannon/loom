@@ -13,7 +13,7 @@
 import { parseInvocationBlocks } from "../galaxy-invocations.js";
 import type { FileNode } from "../../preload/preload.js";
 import type { GalaxyLivePayload } from "../../../../shared/galaxy-live-contract.js";
-import { isNotebookFenceOpen } from "../../../../shared/notebook-fences.js";
+import { isNotebookFenceOpen, outerCodeLines } from "../../../../shared/notebook-fences.js";
 import type {
   ActivityEvent,
   DashboardJob,
@@ -277,9 +277,10 @@ function unquote(value: string): string {
 export function parseJobBlocks(content: string): DashboardJob[] {
   const out: DashboardJob[] = [];
   const lines = content.split(/\r?\n/);
+  const quoted = outerCodeLines(lines);
   let i = 0;
   while (i < lines.length) {
-    if (!isNotebookFenceOpen(lines[i], "job")) {
+    if (quoted[i] || !isNotebookFenceOpen(lines[i], "job")) {
       i++;
       continue;
     }

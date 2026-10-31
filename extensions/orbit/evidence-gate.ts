@@ -122,6 +122,7 @@ import { findInvocationBlocks, type InvocationYaml } from "./notebook-writer";
 import { findJobBlocks, type JobYaml } from "./galaxy-job-block";
 import { attemptOwns, readAttemptRecordSync } from "./galaxy-provenance";
 import { collectCheckboxSteps } from "./notebook-anchors";
+import { closesFence, matchFenceOpen } from "../../shared/notebook-fences.js";
 import { computeHandoffEligible, type Attempt, type Registry } from "./registry";
 import { NO_APPROVAL_REVISION } from "./registry-evaluation";
 import { getSessionRegistry, sessionView } from "./registry-runtime";
@@ -185,7 +186,7 @@ function normalizeTitle(raw: string): string {
 export function parsePlanSteps(content: string): Map<string, PlanStep> {
   const out = new Map<string, PlanStep>();
   let inPlan = false;
-  let inFence = false;
+  let fence: { char: string; length: number } | null = null;
   let planKey = "";
   for (const line of content.split("\n")) {
     // Fenced content is quoted, not asserted. A plan section that shows an
@@ -195,12 +196,16 @@ export function parsePlanSteps(content: string): Map<string, PlanStep> {
     // -- flip the step and paste a pending copy of it in a fence below, and the
     // completion vanished from the post-image. Also the honest reading: the
     // `loom-invocation` blocks are fenced too, and nothing in one is a plan
-    // step.
-    if (/^\s*(```|~~~)/.test(line)) {
-      inFence = !inFence;
+    // step. The fence closes only on its own marker: a ``` inside a ~~~ example
+    // toggled the old tracking off and exposed the quoted steps after it. Any
+    // indent opens one, as before: steps nest, so a fence under a list item is
+    // still a quote.
+    if (fence) {
+      if (closesFence(line.trimStart(), fence)) fence = null;
       continue;
     }
-    if (inFence) continue;
+    fence = matchFenceOpen(line.trimStart());
+    if (fence) continue;
     const heading = line.match(PLAN_HEADING);
     if (heading) {
       inPlan = true;

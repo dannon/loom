@@ -27,7 +27,7 @@
  * stays shell-neutral.
  */
 
-import { isNotebookFenceOpen } from "../../../shared/notebook-fences.js";
+import { isNotebookFenceOpen, outerCodeLines } from "../../../shared/notebook-fences.js";
 
 const BINDING_FENCE_CLOSE = "```";
 
@@ -50,9 +50,10 @@ function unescape(value: string): string {
 export function parseGalaxyHistoryBindings(content: string): GalaxyHistoryBinding[] {
   const out: GalaxyHistoryBinding[] = [];
   const lines = content.split("\n");
+  const quoted = outerCodeLines(lines);
   let i = 0;
   while (i < lines.length) {
-    if (isNotebookFenceOpen(lines[i], "galaxy-page")) {
+    if (!quoted[i] && isNotebookFenceOpen(lines[i], "galaxy-page")) {
       const start = i + 1;
       let end = start;
       while (end < lines.length && lines[end].trim() !== BINDING_FENCE_CLOSE) end++;

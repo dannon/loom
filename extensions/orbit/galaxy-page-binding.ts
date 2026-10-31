@@ -41,6 +41,7 @@
 import {
   isNotebookFenceOpen,
   notebookFenceOpen,
+  outerCodeLines,
   replaceNotebookBlocks,
 } from "../../shared/notebook-fences.js";
 
@@ -94,9 +95,10 @@ export function renderGalaxyPageBlock(binding: GalaxyPageBindingYaml): string {
 export function findGalaxyPageBlocks(content: string): GalaxyPageBindingYaml[] {
   const result: GalaxyPageBindingYaml[] = [];
   const lines = content.split("\n");
+  const quoted = outerCodeLines(lines);
   let i = 0;
   while (i < lines.length) {
-    if (isNotebookFenceOpen(lines[i], "galaxy-page")) {
+    if (!quoted[i] && isNotebookFenceOpen(lines[i], "galaxy-page")) {
       const start = i + 1;
       let end = start;
       while (end < lines.length && lines[end].trim() !== BINDING_FENCE_CLOSE) {
@@ -166,9 +168,10 @@ interface GalaxyPageBlockRange {
 function findGalaxyPageBlockRanges(content: string): GalaxyPageBlockRange[] {
   const result: GalaxyPageBlockRange[] = [];
   const lines = content.split("\n");
+  const quoted = outerCodeLines(lines);
   let i = 0;
   while (i < lines.length) {
-    if (isNotebookFenceOpen(lines[i], "galaxy-page")) {
+    if (!quoted[i] && isNotebookFenceOpen(lines[i], "galaxy-page")) {
       const start = i;
       let end = start + 1;
       let pageId: string | null = null;

@@ -18,6 +18,7 @@ import {
 import {
   isNotebookFenceOpen,
   notebookFenceOpen,
+  outerCodeLines,
   replaceNotebookBlocks,
 } from "../../shared/notebook-fences.js";
 import {
@@ -768,9 +769,10 @@ interface SessionSummaryBlockRange {
 function findSessionSummaryBlockRanges(content: string): SessionSummaryBlockRange[] {
   const result: SessionSummaryBlockRange[] = [];
   const lines = content.split("\n");
+  const quoted = outerCodeLines(lines);
   let i = 0;
   while (i < lines.length) {
-    if (isNotebookFenceOpen(lines[i], "session")) {
+    if (!quoted[i] && isNotebookFenceOpen(lines[i], "session")) {
       const start = i;
       let end = start + 1;
       while (end < lines.length && lines[end].trim() !== SESSION_FENCE_CLOSE) {
@@ -794,9 +796,10 @@ function findSessionSummaryBlockRanges(content: string): SessionSummaryBlockRang
 export function findSessionSummaryBlocks(content: string): SessionSummaryYaml[] {
   const result: SessionSummaryYaml[] = [];
   const lines = content.split("\n");
+  const quoted = outerCodeLines(lines);
   let i = 0;
   while (i < lines.length) {
-    if (isNotebookFenceOpen(lines[i], "session")) {
+    if (!quoted[i] && isNotebookFenceOpen(lines[i], "session")) {
       const start = i + 1;
       let end = start;
       while (end < lines.length && lines[end].trim() !== SESSION_FENCE_CLOSE) {

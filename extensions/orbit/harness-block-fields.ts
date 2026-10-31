@@ -33,7 +33,12 @@
  * read back here from the raw line, which both parsers hand over untouched.
  */
 
-import { isNotebookFenceOpen, type NotebookFenceKind } from "../../shared/notebook-fences.js";
+import {
+  NOTEBOOK_FENCE_KINDS,
+  isNotebookFenceOpen,
+  outerCodeLines,
+  type NotebookFenceKind,
+} from "../../shared/notebook-fences.js";
 
 export type SubmittedBy = "harness" | "agent" | "unknown";
 export type EnrichmentState = "pending" | "complete" | "unavailable";
@@ -223,14 +228,7 @@ function isOneLine(value: string): boolean {
  * an unterminated `loom-job` opener swallows an appended `loom-invocation`
  * just as well as another job block would.
  */
-const ORBIT_FENCE_KINDS: readonly NotebookFenceKind[] = [
-  "invocation",
-  "job",
-  "udt",
-  "session",
-  "galaxy-page",
-  "proposal",
-];
+const ORBIT_FENCE_KINDS = NOTEBOOK_FENCE_KINDS;
 
 const FENCE_CLOSE = "```";
 
@@ -286,13 +284,17 @@ export interface FenceRange {
  * blocks are and exactly the check that refuses the ambiguous case. The block
  * is then invisible rather than rewritable: a fresh one is appended ahead of
  * the orphan and the user's lines stay put.
+ *
+ * An opener quoted inside outer Markdown code (see `outerCodeLines`) opens
+ * nothing: it is documentation about a block, not a record.
  */
 export function scanFencedBlocks(lines: readonly string[], kind: NotebookFenceKind): FenceRange[] {
   const ranges: FenceRange[] = [];
+  const quoted = outerCodeLines(lines);
   let i = 0;
   while (i < lines.length) {
     // Either fence prefix opens one: notebooks outlive the Loom -> Orbit rename.
-    if (!isNotebookFenceOpen(lines[i], kind)) {
+    if (quoted[i] || !isNotebookFenceOpen(lines[i], kind)) {
       i++;
       continue;
     }
@@ -349,7 +351,9 @@ export function appendIndexOutsideOpenFence(lines: readonly string[]): number {
   for (const kind of ORBIT_FENCE_KINDS) {
     for (const range of scanFencedBlocks(lines, kind)) closed.add(range.start);
   }
+  const quoted = outerCodeLines(lines);
   for (let i = 0; i < lines.length; i++) {
+    if (quoted[i]) continue;
     const opensBlock = ORBIT_FENCE_KINDS.some((kind) => isNotebookFenceOpen(lines[i], kind));
     if (opensBlock && !closed.has(i)) return i;
   }
