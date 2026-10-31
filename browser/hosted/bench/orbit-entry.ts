@@ -1,6 +1,6 @@
 /**
  * The boot path of pi-host.orbit.test.ts, without vitest: the browser capability profile, the
- * seams installed as objects, pi-host, extensions/loom, and a pi-durable harness on MemoryStorage.
+ * seams installed as objects, pi-host, extensions/orbit, and a pi-durable harness on MemoryStorage.
  * Everything Orbit needs is a static import here, so importing this module is the "module load"
  * phase and boot() is everything after it.
  */
@@ -16,14 +16,14 @@ import { agentModels } from "../../core/src/agent/model";
 import { createPiHost, type HostNote } from "../../core/src/agent/pi-host";
 import { resolve as resolveTarget } from "../../core/src/agent/providers";
 import { LOOP } from "../../core/src/agent/runtime";
-import loom from "../../../extensions/loom/index";
-import { setGalaxyTransport } from "../../../extensions/loom/galaxy-api";
-import { createGalaxyOpsToolSource } from "../../../extensions/loom/galaxy-ops-tools";
-import { setGalaxyToolSource } from "../../../extensions/loom/galaxy-tool-source";
-import { setRecordStore } from "../../../extensions/loom/record-store";
-import { createPageRecordStore } from "../../../extensions/loom/record-store-page";
-import { setInstructionSource } from "../../../extensions/loom/user-instructions";
-import { setVendorSkillsSource } from "../../../extensions/loom/vendor-skills";
+import orbit from "../../../extensions/orbit/index";
+import { setGalaxyTransport } from "../../../extensions/orbit/galaxy-api";
+import { createGalaxyOpsToolSource } from "../../../extensions/orbit/galaxy-ops-tools";
+import { setGalaxyToolSource } from "../../../extensions/orbit/galaxy-tool-source";
+import { setRecordStore } from "../../../extensions/orbit/record-store";
+import { createPageRecordStore } from "../../../extensions/orbit/record-store-page";
+import { setInstructionSource } from "../../../extensions/orbit/user-instructions";
+import { setVendorSkillsSource } from "../../../extensions/orbit/vendor-skills";
 import { setCapabilityProfile } from "../../../shared/capability-profile.js";
 import { setConfigSource } from "../../../shared/config-source.js";
 
@@ -133,7 +133,7 @@ export async function boot(options: BootOptions, marks: Marks): Promise<BootResu
       { scope: "global", path: "shell://instructions", content: "Be brief.", truncated: false },
     ],
   });
-  const vendor = join(options.repo, "extensions", "loom", "vendor", "skills");
+  const vendor = join(options.repo, "extensions", "orbit", "vendor", "skills");
   const manifest = JSON.parse(fs.readFileSync(join(vendor, "_manifest.json"), "utf8")) as {
     files: Array<{ target: string }>;
   };
@@ -172,7 +172,7 @@ export async function boot(options: BootOptions, marks: Marks): Promise<BootResu
   const api: ExtensionAPI = host.api;
   api.on("agent_start", () => void (runs.started += 1));
   api.on("agent_settled", () => void (runs.settled += 1));
-  loom(api);
+  orbit(api);
   const extension = host.seal();
   marks.registered = now();
 

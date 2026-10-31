@@ -14,6 +14,7 @@ import { registerStorageConformance } from "@earendil-works/pi-durable/testing";
 import pg from "pg";
 import { PgBoss } from "pg-boss";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { readEnv } from "../../../../shared/orbit-env.js";
 import {
   LeaseLostError,
   PostgresStorage,
@@ -24,7 +25,7 @@ import {
 } from "./postgres-storage";
 
 // The spike's dedicated database; the step-0 task reserves this name for these tests.
-const DATABASE = process.env.LOOM_STEP0_STORAGE_DB ?? "loom_step0_storage";
+const DATABASE = readEnv("STEP0_STORAGE_DB") ?? "loom_step0_storage";
 const connection = { host: process.env.PGHOST ?? "/tmp", port: 5432, database: DATABASE };
 const context = BACKGROUND_CONTEXT;
 

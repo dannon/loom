@@ -51,7 +51,7 @@ const SIZES = (args.get("n") ?? "1,4,16").split(",").map(Number);
 const RUNS = Number(args.get("runs") ?? 5);
 const GC = args.get("gc") === "1";
 
-// The galaxy-ops copy extensions/loom resolves to is the root one; its Node entry gets the
+// The galaxy-ops copy extensions/orbit resolves to is the root one; its Node entry gets the
 // browser entry in its place, as the test's vi.mock does and the worker bundler's "browser"
 // condition would.
 const GALAXY_OPS = join(REPO, "node_modules", "@galaxyproject", "galaxy-ops", "dist");
@@ -208,7 +208,7 @@ const ROWS: Array<[string, keyof WorkerReport["marks"], keyof WorkerReport["mark
   ["thread start (spawn -> first line)", "spawn", "workerStart"],
   ["module load (import of the entry)", "workerStart", "loaded"],
   ["  seams installed", "loaded", "seams"],
-  ["  host + extensions/loom registered", "seams", "registered"],
+  ["  host + extensions/orbit registered", "seams", "registered"],
   ["  Harness.open + conversation + attach", "registered", "opened"],
   ["  session_start + resume", "opened", "started"],
   ["host/harness open (sum of the four)", "loaded", "started"],

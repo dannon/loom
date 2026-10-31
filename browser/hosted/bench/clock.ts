@@ -29,7 +29,7 @@ export interface Marks {
   /** import() of the Orbit entry resolved. */
   loaded?: number;
   seams?: number;
-  /** createPiHost, extensions/loom registered, sealed. */
+  /** createPiHost, extensions/orbit registered, sealed. */
   registered?: number;
   /** Harness.open, createConversation, host.attach. */
   opened?: number;

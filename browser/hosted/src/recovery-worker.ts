@@ -56,7 +56,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   return text("ok");
 };
 
-const VENDOR = join(data.repo, "extensions", "loom", "vendor", "skills");
+const VENDOR = join(data.repo, "extensions", "orbit", "vendor", "skills");
 const vendorCatalog: unknown = JSON.parse(fs.readFileSync(join(VENDOR, "_catalog.json"), "utf8"));
 const vendorManifest = JSON.parse(fs.readFileSync(join(VENDOR, "_manifest.json"), "utf8")) as {
   files: Array<{ target: string }>;

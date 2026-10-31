@@ -1,7 +1,7 @@
 /**
  * The Orbit seams the hosted workers install, served by worker/bundle.ts as one virtual module.
  * Typed loosely on purpose: the brain's sources typecheck under the root project, and pulling
- * extensions/loom into this workspace's program would check them under the wrong config.
+ * extensions/orbit into this workspace's program would check them under the wrong config.
  */
 declare module "orbit-brain" {
   type Seam<T> = (next: T | null) => void;

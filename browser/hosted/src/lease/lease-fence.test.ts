@@ -25,6 +25,7 @@ import { isMainThread, Worker } from "node:worker_threads";
 import { build, type Plugin } from "esbuild";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { readEnv } from "../../../../shared/orbit-env.js";
 
 import { LEASE_LOST_EXIT_CODE, LeaseFence, leaseLostIn } from "./lease-fence";
 import {
@@ -44,26 +45,26 @@ import {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..", "..", "..");
-const LOOM = join(REPO, "extensions", "loom");
+const ORBIT_DIR = join(REPO, "extensions", "orbit");
 const SHARED = join(REPO, "shared");
 // The step-0 task reserves this database for this experiment.
-const DATABASE = process.env.LOOM_STEP0_FENCE_DB ?? "loom_step0_fence";
+const DATABASE = readEnv("STEP0_FENCE_DB") ?? "loom_step0_fence";
 // Outside os.tmpdir() so the bundle's bare `pg` import resolves to this workspace's copy.
 const OUT = join(HERE, "..", "..", ".scratch", "lease-fence");
 
 // ── the worker bundle: recovery-bundle.ts's seams, for this entry ───────────────────────────────
 
 const ORBIT_BRAIN = `
-export { default as loom } from "${LOOM}/index.ts";
+export { default as loom } from "${ORBIT_DIR}/index.ts";
 export { setCapabilityProfile } from "${SHARED}/capability-profile.js";
 export { setConfigSource } from "${SHARED}/config-source.js";
-export { setInstructionSource } from "${LOOM}/user-instructions.ts";
-export { setVendorSkillsSource } from "${LOOM}/vendor-skills.ts";
-export { setGalaxyTransport } from "${LOOM}/galaxy-api.ts";
-export { setRecordStore } from "${LOOM}/record-store.ts";
-export { createPageRecordStore } from "${LOOM}/record-store-page.ts";
-export { setGalaxyToolSource } from "${LOOM}/galaxy-tool-source.ts";
-export { createGalaxyOpsToolSource } from "${LOOM}/galaxy-ops-tools.ts";
+export { setInstructionSource } from "${ORBIT_DIR}/user-instructions.ts";
+export { setVendorSkillsSource } from "${ORBIT_DIR}/vendor-skills.ts";
+export { setGalaxyTransport } from "${ORBIT_DIR}/galaxy-api.ts";
+export { setRecordStore } from "${ORBIT_DIR}/record-store.ts";
+export { createPageRecordStore } from "${ORBIT_DIR}/record-store-page.ts";
+export { setGalaxyToolSource } from "${ORBIT_DIR}/galaxy-tool-source.ts";
+export { createGalaxyOpsToolSource } from "${ORBIT_DIR}/galaxy-ops-tools.ts";
 `;
 const INERT = `
 const inert = () => new Proxy(function () {}, {
@@ -82,7 +83,7 @@ const seams: Plugin = {
     b.onLoad({ filter: /.*/, namespace: "orbit" }, () => ({
       contents: ORBIT_BRAIN,
       loader: "ts",
-      resolveDir: LOOM,
+      resolveDir: ORBIT_DIR,
     }));
     b.onResolve({ filter: /^(chokidar|better-sqlite3)$/ }, (args) => ({
       path: args.path,
@@ -90,7 +91,7 @@ const seams: Plugin = {
     }));
     b.onLoad({ filter: /.*/, namespace: "inert" }, () => ({ contents: INERT, loader: "js" }));
     b.onResolve({ filter: /^@galaxyproject\/galaxy-ops$/ }, (args) =>
-      args.importer.startsWith(LOOM) || args.importer.startsWith(SHARED)
+      args.importer.startsWith(ORBIT_DIR) || args.importer.startsWith(SHARED)
         ? { path: join(REPO, "node_modules/@galaxyproject/galaxy-ops/dist/index.browser.js") }
         : undefined,
     );

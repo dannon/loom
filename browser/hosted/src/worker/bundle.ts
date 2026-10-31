@@ -12,23 +12,23 @@ import { build, type BuildOptions, type Plugin } from "esbuild";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO = resolve(HERE, "..", "..", "..", "..");
-const LOOM = join(REPO, "extensions", "loom");
+const ORBIT_DIR = join(REPO, "extensions", "orbit");
 const SHARED = join(REPO, "shared");
-const VENDOR = join(LOOM, "vendor", "skills");
+const VENDOR = join(ORBIT_DIR, "vendor", "skills");
 
 /** The same seams pi-host.orbit.test.ts imports one by one, as a single module. */
 const ORBIT_BRAIN = `
-export { default as loom } from "${LOOM}/index.ts";
+export { default as loom } from "${ORBIT_DIR}/index.ts";
 export { setCapabilityProfile } from "${SHARED}/capability-profile.js";
 export { setConfigSource } from "${SHARED}/config-source.js";
-export { setInstructionSource } from "${LOOM}/user-instructions.ts";
-export { setVendorSkillsSource } from "${LOOM}/vendor-skills.ts";
-export { setGalaxyTransport } from "${LOOM}/galaxy-api.ts";
-export { setRecordStore } from "${LOOM}/record-store.ts";
-export { createPageRecordStore } from "${LOOM}/record-store-page.ts";
-export { setGalaxyToolSource } from "${LOOM}/galaxy-tool-source.ts";
-export { createGalaxyOpsToolSource } from "${LOOM}/galaxy-ops-tools.ts";
-export { createMemoryOutputStore, setGalaxyOutputStore } from "${LOOM}/galaxy-output-store.ts";
+export { setInstructionSource } from "${ORBIT_DIR}/user-instructions.ts";
+export { setVendorSkillsSource } from "${ORBIT_DIR}/vendor-skills.ts";
+export { setGalaxyTransport } from "${ORBIT_DIR}/galaxy-api.ts";
+export { setRecordStore } from "${ORBIT_DIR}/record-store.ts";
+export { createPageRecordStore } from "${ORBIT_DIR}/record-store-page.ts";
+export { setGalaxyToolSource } from "${ORBIT_DIR}/galaxy-tool-source.ts";
+export { createGalaxyOpsToolSource } from "${ORBIT_DIR}/galaxy-ops-tools.ts";
+export { createMemoryOutputStore, setGalaxyOutputStore } from "${ORBIT_DIR}/galaxy-output-store.ts";
 `;
 
 // Anything Orbit reaches on these stand-ins answers with more of itself; nothing in this profile
@@ -65,7 +65,7 @@ const seams: Plugin = {
     b.onLoad({ filter: /.*/, namespace: "orbit" }, () => ({
       contents: ORBIT_BRAIN,
       loader: "ts",
-      resolveDir: LOOM,
+      resolveDir: ORBIT_DIR,
     }));
     b.onResolve({ filter: /^orbit-vendor-skills$/ }, () => ({ path: "orbit-vendor-skills", namespace: "vendor" }));
     b.onLoad({ filter: /.*/, namespace: "vendor" }, () => ({ contents: vendorSkills(), loader: "js" }));
@@ -74,10 +74,10 @@ const seams: Plugin = {
       namespace: "inert",
     }));
     b.onLoad({ filter: /.*/, namespace: "inert" }, () => ({ contents: INERT, loader: "js" }));
-    // From extensions/loom the bare specifier finds the root package's Node entry; the worker
+    // From extensions/orbit the bare specifier finds the root package's Node entry; the worker
     // shell's bundler picks the browser entry, which pi-host.orbit.test.ts mocks in the same way.
     b.onResolve({ filter: /^@galaxyproject\/galaxy-ops$/ }, (args) =>
-      args.importer.startsWith(LOOM) || args.importer.startsWith(SHARED)
+      args.importer.startsWith(ORBIT_DIR) || args.importer.startsWith(SHARED)
         ? { path: join(REPO, "node_modules/@galaxyproject/galaxy-ops/dist/index.browser.js") }
         : undefined,
     );
@@ -121,7 +121,7 @@ export async function nodeEdges(entry: string): Promise<string[]> {
   const edges = new Set<string>();
   for (const [input, { imports }] of Object.entries(result.metafile!.inputs)) {
     const file = resolve(input);
-    if (!file.startsWith(LOOM) && !file.startsWith(SHARED)) continue;
+    if (!file.startsWith(ORBIT_DIR) && !file.startsWith(SHARED)) continue;
     for (const { path, external } of imports) {
       if (external) edges.add(`${file.slice(REPO.length + 1)} -> ${path.replace(/^node:/, "")}`);
     }
