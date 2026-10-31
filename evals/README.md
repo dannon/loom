@@ -273,8 +273,9 @@ called. Two twins seed `prop-eva001` and check the approval itself:
 (json mode has no dialog, hence `--yes`), and
 `execution-after-chat-approve-tools` approves in plain chat with
 `ORBIT_EVAL_CHAT_APPROVAL=1`, so that approval stands in for `--yes` where json
-mode has no dialog (outside an eval it never does), and assert the
-`proposal.approved` row with `confirmed_by: "chat"`. Both use
+mode has no dialog (outside an eval it never does). Each asserts the
+`proposal.approved` row with its own `confirmed_by` (`"--yes"` for the slash
+twin, `"chat"` for the chat one). Both use
 `activity.ordered` to fail a run whose `run_tool` call (its `tool.start` row)
 came before the `proposal.approved` row, since approval does not yet block
 submission.
