@@ -32,8 +32,11 @@
  * survives a round trip instead of losing it.
  */
 
-/** The env var / config key a shell would map onto the flag, when one does. */
-export const HTML_SANDBOX_ENV = "ORBIT_HTML_SANDBOX";
+/**
+ * The env name a shell would map onto the flag, when one does. Unprefixed,
+ * because readEnv() adds ORBIT_ (falling back to LOOM_) itself.
+ */
+export const HTML_SANDBOX_ENV = "HTML_SANDBOX";
 
 /**
  * Test-only override, so the drawing code below the flag stays exercised.
