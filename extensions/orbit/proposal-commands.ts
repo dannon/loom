@@ -910,7 +910,7 @@ export function registerProposalCommands(pi: ExtensionAPI, deps: ProposalDeps = 
     if (classifyChatApproval(event.text, mine[0]) !== "approve") return pass;
     const note = (line: string) => ({
       action: "transform" as const,
-      text: `${event.text}\n\n[Loom: ${line}]`,
+      text: `${event.text}\n\n[Orbit: ${line}]`,
       images: event.images,
     });
     // One this session revoked still waits on an approval, so it makes "go ahead" ambiguous too.

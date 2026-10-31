@@ -904,7 +904,7 @@ describe("a plain chat approval of the one pending proposal", () => {
     ]);
     expect(out.action).toBe("transform");
     expect(out.text.startsWith(text)).toBe(true);
-    expect(out.text).toContain(`[Loom: approved ${id} (attempt `);
+    expect(out.text).toContain(`[Orbit: approved ${id} (attempt `);
   });
 
   it("ignores text the model's own extensions sent, and input while streaming", async () => {
@@ -945,7 +945,7 @@ describe("a plain chat approval of the one pending proposal", () => {
     const h = load();
     const id = await h.propose({ step_anchor: "plan-a-step-2" });
     const out = (await h.input("Go ahead and run it.")) as { text: string };
-    expect(out.text).toContain(`[Loom: approved ${id} (attempt `);
+    expect(out.text).toContain(`[Orbit: approved ${id} (attempt `);
     expect(liveApproval(session!.store.snapshot(), id)).toBeDefined();
   });
 
@@ -972,7 +972,7 @@ describe("a plain chat approval of the one pending proposal", () => {
     await revokeCommand(deps(), a);
     const id = await h.propose({ step_anchor: "plan-a-step-2" });
     const out = (await h.input("Go ahead and run it.")) as { text: string };
-    expect(out.text).toContain(`[Loom: approved ${id} (attempt `);
+    expect(out.text).toContain(`[Orbit: approved ${id} (attempt `);
   });
 
   it("never approves a proposal this session did not write", async () => {
@@ -1006,7 +1006,7 @@ describe("a plain chat approval of the one pending proposal", () => {
     const out = (await h.input("Go ahead and run it.")) as { text: string };
     expect(approvals()).toEqual([]);
     expect(liveApproval(session!.store.snapshot(), id)).toBeUndefined();
-    expect(out.text).toContain("[Loom: not approved");
+    expect(out.text).toContain("[Orbit: not approved");
     expect(out.text).toContain(`/approve ${id}`);
   });
 
@@ -1041,7 +1041,7 @@ describe("a plain chat approval of the one pending proposal", () => {
     snapshot = { ...snapshot, body: { ...(snapshot.body as object), inputs: [] } };
     const out = (await h.input("Go ahead.")) as { text: string };
     expect(approvals()).toEqual([]);
-    expect(out.text).toContain("[Loom: not approved");
+    expect(out.text).toContain("[Orbit: not approved");
   });
 
   it("leaves input alone with nothing pending or no approval in it", async () => {
