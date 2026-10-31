@@ -165,8 +165,8 @@ describe("a notice from the server", () => {
     worker.say({ type: "notice", text: "The sign-in service is down.", level: "error" });
     expect(container.textContent).toContain("Waiting for your other conversation.");
     // ChatPanel draws an error as an assistant line in the error colour.
-    const errors = Array.from(container.querySelectorAll<HTMLElement>(".message.assistant")).filter((e) =>
-      e.style.color.includes("--error"),
+    const errors = Array.from(container.querySelectorAll<HTMLElement>(".message.assistant")).filter(
+      (e) => e.style.color.includes("--error"),
     );
     expect(errors.map((e) => e.textContent)).toEqual(["The sign-in service is down."]);
   });
