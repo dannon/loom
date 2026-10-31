@@ -31,7 +31,6 @@ import {
   registerGalaxyTools,
   registeredGalaxyTools,
   setGalaxyToolSource,
-  type GalaxyTool,
 } from "../extensions/orbit/galaxy-tool-source";
 import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
 import { CREDENTIALS, json, recordGalaxy } from "./galaxy-test-helpers";
