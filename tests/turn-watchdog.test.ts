@@ -365,6 +365,38 @@ describe("TurnWatchdog", () => {
     expect(onTimeout).toHaveBeenCalledTimes(1);
   });
 
+  it("times a compaction again once the dialog that paused it is answered", () => {
+    const onTimeout = vi.fn();
+    const watchdog = new TurnWatchdog({
+      timeoutMs: TIMEOUT,
+      compactionTimeoutMs: TIMEOUT * 20,
+      onTimeout,
+    });
+    watchdog.promptSent();
+    watchdog.observe("compaction_start");
+    watchdog.observe("extension_ui_request", "confirm");
+    vi.advanceTimersByTime(TIMEOUT * 60);
+    expect(onTimeout).not.toHaveBeenCalled();
+
+    // The brain says nothing until compaction_end, so only the answer can lift the pause.
+    watchdog.dialogAnswered();
+    vi.advanceTimersByTime(TIMEOUT * 20 - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onTimeout).toHaveBeenCalledWith("compaction");
+  });
+
+  it("stays paused when a dialog is answered while a tool is still running", () => {
+    const { watchdog, onTimeout } = make();
+    watchdog.promptSent();
+    watchdog.observe("tool_execution_start");
+    watchdog.observe("extension_ui_request", "confirm");
+    watchdog.dialogAnswered();
+
+    vi.advanceTimersByTime(TIMEOUT * 5);
+    expect(onTimeout).not.toHaveBeenCalled();
+  });
+
   it("keeps a compaction armed when a prompt sent during it starts no turn", () => {
     const onTimeout = vi.fn();
     const watchdog = new TurnWatchdog({

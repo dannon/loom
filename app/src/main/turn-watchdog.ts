@@ -140,6 +140,19 @@ export class TurnWatchdog {
     }
   }
 
+  /**
+   * The user answered a dialog. Mid-compaction the brain emits nothing until
+   * compaction_end, so this is the only signal that lifts the dialog's pause;
+   * the ceiling starts over, as after sleep. Mid-tool the tool keeps running,
+   * so the pause holds until tool_execution_end.
+   */
+  dialogAnswered(): void {
+    if (!this.compacting || !this.paused) return;
+    this.paused = false;
+    this.restartCompactionClock();
+    this.arm();
+  }
+
   /** The turn is over (or never started); stop watching it. A running compaction stays timed. */
   stop(): void {
     this.active = false;

@@ -628,6 +628,8 @@ export class AgentManager {
     // for a silent stall. Other commands (abort, set_model, ...) don't.
     if (obj.type === "prompt") {
       this.watchdog.promptSent();
+    } else if (obj.type === "extension_ui_response") {
+      this.watchdog.dialogAnswered();
     }
   }
 

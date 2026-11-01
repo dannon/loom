@@ -339,6 +339,39 @@ describe("AgentManager", () => {
       }
     });
 
+    it("times a compaction again once the dialog that paused it is answered (#616)", async () => {
+      vi.useFakeTimers();
+      try {
+        const proc = makeProcess(101);
+        spawnMock.mockReturnValue(proc);
+        const { AgentManager, COMPACTION_SILENCE_TIMEOUT_MS } =
+          await import("../app/src/main/agent.js");
+        const window = {
+          isDestroyed: () => false,
+          setTitle: vi.fn(),
+          webContents: { send: vi.fn() },
+        };
+        const manager = new AgentManager(window as any, "/analysis");
+        manager.start();
+        const aborts = () =>
+          proc.stdin.write.mock.calls.filter(([line]) => /"type":"abort"/.test(line as string));
+
+        manager.send({ type: "prompt", message: "Keep going" });
+        lineHandler?.(JSON.stringify({ type: "compaction_start", reason: "threshold" }));
+        lineHandler?.(
+          JSON.stringify({ type: "extension_ui_request", id: "ui1", method: "confirm" }),
+        );
+        vi.advanceTimersByTime(COMPACTION_SILENCE_TIMEOUT_MS * 2);
+        expect(aborts()).toHaveLength(0);
+
+        manager.send({ type: "extension_ui_response", id: "ui1", confirmed: true });
+        vi.advanceTimersByTime(COMPACTION_SILENCE_TIMEOUT_MS);
+        expect(aborts()).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("drops a crashed brain's compaction before the silent restart", async () => {
       vi.useFakeTimers();
       try {
