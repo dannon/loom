@@ -7,6 +7,7 @@
  * documentation instead of the real block.
  */
 
+import { marked } from "marked";
 import { describe, expect, it } from "vitest";
 import { outerCodeLines } from "../shared/notebook-fences.js";
 import {
@@ -170,9 +171,9 @@ describe("outerCodeLines", () => {
     expect(outerCodeLines(tilde)).toEqual([true, true, true, true, false]);
   });
 
-  it("does not let a plain ``` fence hide one of our blocks it cannot be quoting", () => {
+  it("masks a plain ``` fence up to its first bare close, opener and all", () => {
     const lines = ["```text", "```orbit-invocation", "invocation_id: x", "```", "after"];
-    expect(outerCodeLines(lines).every((m) => !m)).toBe(true);
+    expect(outerCodeLines(lines)).toEqual([true, true, true, true, false]);
   });
 
   it("opens fences in a CRLF notebook", () => {
@@ -315,15 +316,19 @@ describe("blocks quoted inside outer Markdown code are not live", () => {
     expect(listNotebookAnchors(quotedStep.replace(/\n/g, "\r\n"))).not.toContain("quoted-step");
   });
 
-  it("a stray fence before a real block does not hide it", () => {
+  it("a block behind a stray fence is code, and a write appends a live one", () => {
+    // Markdown renders it inside the stray fence, so treating it as live would
+    // rewrite text the reader sees as code.
     const real = block(renderInvocationYaml(inv()));
     const doubleClose = `${block(renderJobYaml(job()))}\n\`\`\`\n\nSome prose.\n\n${real}\n`;
     const unclosed = `\`\`\`python\nx = 1\n\n${real}\n`;
     for (const content of [doubleClose, unclosed]) {
-      expect(findInvocationBlocks(content).map((b) => b.invocationId)).toEqual(["inv-real"]);
+      expect(findInvocationBlocks(content)).toEqual([]);
       const out = upsertInvocationBlock(content, inv({ status: "completed" }));
+      expect(out.startsWith(content.trimEnd())).toBe(true);
       expect(findInvocationBlocks(out).map((b) => b.status)).toEqual(["completed"]);
-      expect(out.match(/^```orbit-invocation$/gm)).toHaveLength(1);
+      const again = upsertInvocationBlock(out, inv({ status: "failed" }));
+      expect(again.match(/^```orbit-invocation$/gm)).toHaveLength(2);
     }
   });
 
@@ -336,6 +341,88 @@ describe("blocks quoted inside outer Markdown code are not live", () => {
       expect(findInvocationBlocks(out).map((b) => b.status)).toEqual(["completed"]);
       expect(out.match(/```orbit-invocation$/gm)).toHaveLength(1);
     }
+  });
+
+  it("a blank first body line does not hide an opener indented by accident", () => {
+    const lines = block(renderInvocationYaml(inv())).split("\n");
+    for (const indent of ["    ", "\t"]) {
+      for (const blanks of ["\n", "\n\n"]) {
+        const content = `- Step one\n\n${indent}${lines[0]}${blanks}${lines.slice(1).join("\n")}\n`;
+        expect(findInvocationBlocks(content).map((b) => b.invocationId)).toEqual(["inv-real"]);
+        const out = upsertInvocationBlock(content, inv({ status: "completed" }));
+        expect(findInvocationBlocks(out).map((b) => b.status)).toEqual(["completed"]);
+        expect(out.match(/```orbit-invocation$/gm)).toHaveLength(1);
+      }
+    }
+  });
+
+  it("an unclosed fence on a list item's continuation line ends with the item", () => {
+    const real = block(renderInvocationYaml(inv()));
+    for (const item of [
+      "- step one\n  ```\n  code\n",
+      "- step one\n\n  ```\n  code\n\n",
+      "- step one\nlazy text\n  ```\n  code\n",
+    ]) {
+      const content = `${item}Next paragraph.\n\n${real}\n`;
+      expect((marked.parse(content) as string).match(/language-orbit-invocation/g)).toHaveLength(1);
+      expect(findInvocationBlocks(content).map((b) => b.invocationId)).toEqual(["inv-real"]);
+      const out = upsertInvocationBlock(content, inv({ status: "completed" }));
+      expect(out.match(/^```orbit-invocation$/gm)).toHaveLength(1);
+    }
+  });
+
+  it("a top-level fence indented 1-3 spaces is not a list item, as Markdown renders it", () => {
+    const example = block(renderInvocationYaml(inv())).split("\n");
+    const real = block(renderInvocationYaml(inv()));
+    for (const pad of [" ", "  ", "   "]) {
+      for (const quoted of [
+        [`${pad}\`\`\`\`text`, ...example, `${pad}\`\`\`\``],
+        [`${pad}\`\`\`text`, ...example.slice(0, -1), "```"],
+      ]) {
+        const content = `# Notes\n\n${quoted.join("\n")}\n\n${real}\n`;
+        // Marked renders one live block, the real one; the example is code.
+        expect((marked.parse(content) as string).match(/language-orbit-invocation/g)).toHaveLength(
+          1,
+        );
+        expect(findInvocationBlocks(content)).toHaveLength(1);
+        const out = upsertInvocationBlock(content, inv({ status: "completed" }));
+        expect(out.startsWith(`# Notes\n\n${quoted.join("\n")}\n`)).toBe(true);
+        expect(findInvocationBlocks(out).map((b) => b.status)).toEqual(["completed"]);
+      }
+    }
+  });
+
+  it("an indented opener with no fields does not take the next ``` as its close", () => {
+    const real = block(renderInvocationYaml(inv()));
+    const content = `    \`\`\`orbit-invocation\n\n\`\`\`\nx = 1\n\`\`\`\n\n${real}\n`;
+    expect(findInvocationBlocks(content).map((b) => b.invocationId)).toEqual(["inv-real"]);
+  });
+
+  it("a closed three-backtick example is code, as Markdown renders it", async () => {
+    const example = block(renderInvocationYaml(inv({ invocationId: "inv-example" }))).split("\n");
+    // The example's own close is the outer fence's close; there is only one.
+    const quoted = ["```text", ...example.slice(0, -1), "```"].join("\n");
+    const content = `# Notes\n\n${quoted}\n\n${block(renderInvocationYaml(inv()))}\n`;
+    expect(findInvocationBlocks(content).map((b) => b.invocationId)).toEqual(["inv-real"]);
+    expect(parseInvocationBlocks(content).map((b) => b.invocationId)).toEqual(["inv-real"]);
+    const out = upsertInvocationBlock(
+      content,
+      inv({ invocationId: "inv-example", status: "completed" }),
+    );
+    expect(out.startsWith(content.trimEnd())).toBe(true);
+    expect(findInvocationBlocks(out).map((b) => b.invocationId)).toEqual([
+      "inv-real",
+      "inv-example",
+    ]);
+    const asked: string[] = [];
+    const spy = {
+      isValid: async (id: string) => {
+        asked.push(id);
+        return true;
+      },
+    };
+    await orbitToGalaxyMarkdownRich(content, { invocation: spy, job: spy });
+    expect(asked).toEqual(["inv-real"]);
   });
 
   it("a fence opened in a list item ends with the item", () => {

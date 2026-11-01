@@ -72,6 +72,18 @@ function isOutdented(line, indent) {
   return line.trim() !== "" && line.length - line.trimStart().length < indent;
 }
 
+const LIST_ITEM = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+(?=\S)/;
+
+/**
+ * A flush line that only continues the paragraph above it. CommonMark keeps
+ * it in the list item, so a fence on the item's next line is still the item's.
+ */
+function isLazyLine(lines, i) {
+  const prev = lines[i - 1];
+  if (prev === undefined || prev.trim() === "" || isIndentedCodeLine(prev)) return false;
+  return ![prev, lines[i]].some((l) => matchFenceOpen(l) || isAnyNotebookFenceOpen(l));
+}
+
 /**
  * Whether `line` closes a fence opened with `fence`: same character, at least
  * as long, nothing after it. A symmetric "any fence line toggles" rule gets
@@ -105,8 +117,12 @@ export function isIndentedCodeLine(line) {
  */
 function isStrayIndentedOpener(lines, i) {
   if (!isAnyNotebookFenceOpen(lines[i])) return false;
-  const next = lines[i + 1];
-  return next !== undefined && (/^[a-z0-9_]+:/.test(next) || next.trim() === "```");
+  // Blank lines are body too, so the first one decides nothing. A bare close
+  // does not count: an empty block is no record, and taking that ``` as its
+  // close would turn the user's next ``` into an opener.
+  let next = i + 1;
+  while (next < lines.length && lines[next].trim() === "") next++;
+  return next < lines.length && /^[a-z0-9_]+:/.test(lines[next]);
 }
 
 /**
@@ -120,21 +136,28 @@ function isStrayIndentedOpener(lines, i) {
  * Our own blocks are walked with the block scanners' rules, not CommonMark's,
  * in two places. An opener's extent ends at the next fence close or at the
  * next opener, whichever comes first, so an unterminated block never hides the
- * real block after it. And a stray fence must not take the records after it
- * out of reach of the poller, or every write after it appends a duplicate, so
- * two shapes of outer fence mask nothing: one that never closes, and a plain
- * ``` one with one of our openers inside it. The second cannot be quoting that
- * block -- the block's own closing ``` would end it -- so it is a fence someone
- * forgot to close, or an extra close after a block, followed by a real record.
+ * real block after it. And an outer fence that never closes masks nothing:
+ * hiding to EOF would take every later record out of reach of the poller and
+ * turn each write into a duplicate append.
+ *
+ * A plain ``` fence with one of our openers inside it is still outer code. It
+ * ends at the first bare ```, so the opener and its fields sit inside it, and
+ * that is how Markdown renders it -- whether it is a three-backtick example or
+ * a stray fence before a real record, the reader sees code, so we do too.
  *
  * @param {readonly string[]} lines
  * @returns {boolean[]} true for each line inside outer code
  */
 export function outerCodeLines(lines) {
   const masked = new Array(lines.length).fill(false);
+  // Content indent of the list item the walk is in, or 0 at the top level.
+  let listIndent = 0;
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
+    const item = line.match(LIST_ITEM);
+    if (item) listIndent = item[0].length;
+    else if (isOutdented(line, listIndent) && !isLazyLine(lines, i)) listIndent = 0;
     if (isIndentedCodeLine(line) && !isStrayIndentedOpener(lines, i)) {
       masked[i] = true;
       i++;
@@ -154,14 +177,15 @@ export function outerCodeLines(lines) {
       i++;
       continue;
     }
-    const bareBackticks = fence.char === "`" && fence.length === 3;
+    // A fence on an item's continuation line is in the item too; one merely
+    // indented 1-3 spaces at the top level is not, and runs to its close.
+    const itemIndent = fence.itemIndent || listIndent;
     let end = i + 1;
     let itemEnded = false;
     while (end < lines.length && !closesFence(lines[end], fence)) {
-      if (bareBackticks && isAnyNotebookFenceOpen(lines[end])) break;
       // A fence opened in a list item ends with the item, at the first line
       // not indented to its content; what follows is back at the top level.
-      if (fence.itemIndent && isOutdented(lines[end], fence.itemIndent)) {
+      if (itemIndent && isOutdented(lines[end], itemIndent)) {
         itemEnded = true;
         break;
       }
