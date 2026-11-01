@@ -5,9 +5,13 @@ const spawnMock = vi.fn();
 // Capture the readline "line" handler so tests can feed brain stdout events
 // through handleLine() (the real one is wired in start()).
 let lineHandler: ((line: string) => void) | null = null;
-const createInterfaceMock = vi.fn(() => ({
+// Per-stdout handlers, so a test can feed lines from a brain that already exited.
+const lineHandlers = new Map<unknown, (line: string) => void>();
+const createInterfaceMock = vi.fn((opts: { input: unknown }) => ({
   on: (event: string, cb: (line: string) => void) => {
-    if (event === "line") lineHandler = cb;
+    if (event !== "line") return;
+    lineHandler = cb;
+    lineHandlers.set(opts.input, cb);
   },
 }));
 const existsSyncMock = vi.fn(() => false);
@@ -80,6 +84,7 @@ describe("AgentManager", () => {
     spawnMock.mockReset();
     createInterfaceMock.mockClear();
     lineHandler = null;
+    lineHandlers.clear();
     existsSyncMock.mockReset();
     existsSyncMock.mockReturnValue(false);
     readdirSyncMock.mockReset();
@@ -359,6 +364,55 @@ describe("AgentManager", () => {
         manager.send({ type: "prompt", message: "hello again" });
         vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS + 1);
         expect(errorEvents(window)).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("ignores stdout a crashed brain flushes after its exit (#616)", async () => {
+      vi.useFakeTimers();
+      try {
+        const first = makeProcess(101);
+        const second = makeProcess(202);
+        spawnMock.mockReturnValueOnce(first).mockReturnValueOnce(second);
+        const { AgentManager, TURN_SILENCE_TIMEOUT_MS } = await import("../app/src/main/agent.js");
+        const window = {
+          isDestroyed: () => false,
+          setTitle: vi.fn(),
+          webContents: { send: vi.fn() },
+        };
+        const manager = new AgentManager(window as any, "/analysis");
+        manager.start();
+        const firstLine = lineHandlers.get(first.stdout)!;
+        const reply = manager.sendCommand({ type: "get_state" });
+        const sent = JSON.parse(first.stdin.write.mock.calls.at(-1)![0]);
+
+        first.emit("exit", 1, null);
+        await expect(reply).rejects.toThrow("Agent exited");
+        firstLine(JSON.stringify({ type: "response", id: sent.id, success: true, data: {} }));
+        // Node can deliver buffered stdout after 'exit', before and after the restart.
+        firstLine(JSON.stringify({ type: "compaction_start", reason: "threshold" }));
+        vi.advanceTimersByTime(200);
+        expect(spawnMock).toHaveBeenCalledTimes(2);
+        firstLine(JSON.stringify({ type: "compaction_start", reason: "threshold" }));
+        const firstStderr = (first.stderr as { on: ReturnType<typeof vi.fn> }).on.mock.calls.find(
+          ([event]) => event === "data",
+        )![1] as (chunk: Buffer) => void;
+        firstStderr(Buffer.from("old brain's last words\n"));
+        expect(manager.getStderr()).not.toContain("old brain");
+        expect(
+          window.webContents.send.mock.calls.filter(
+            ([channel, data]) =>
+              channel === "agent:event" && (data as { type?: string }).type === "compaction_start",
+          ),
+        ).toHaveLength(0);
+        const errorsBefore = errorEvents(window).length;
+
+        manager.send({ type: "prompt", message: "Try again" });
+        vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS + 1);
+        const errors = errorEvents(window).slice(errorsBefore);
+        expect(errors).toHaveLength(1);
+        expect((errors[0][1] as { message?: string }).message).toMatch(/stopped responding/i);
       } finally {
         vi.useRealTimers();
       }

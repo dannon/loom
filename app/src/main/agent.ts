@@ -455,23 +455,29 @@ export class AgentManager {
       }
     }
 
-    const rl = createInterface({
-      input: this.process.stdout!,
-      terminal: false,
-    });
-
-    rl.on("line", (line) => this.handleLine(line));
-
-    this.process.stderr?.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      this.stderr = appendStderr(this.stderr, text);
-      log("stderr:", text.trimEnd());
-    });
-
     // Capture the spawned process so the exit handler doesn't clobber a newer one
     // (race: stop() spawns a new process, then the OLD process's exit fires later
     // and wipes this.process to null even though the new one is alive).
     const spawnedProcess = this.process;
+
+    const rl = createInterface({
+      input: spawnedProcess.stdout!,
+      terminal: false,
+    });
+
+    // Node can flush a crashed brain's stdout after 'exit'; a late compaction_start
+    // from it would put the replacement's watchdog into compaction mode (#616).
+    rl.on("line", (line) => {
+      if (this.process === spawnedProcess) this.handleLine(line);
+    });
+
+    spawnedProcess.stderr?.on("data", (chunk: Buffer) => {
+      const text = chunk.toString();
+      log("stderr:", text.trimEnd());
+      // Late stderr from a dead brain must not land in its replacement's crash summary.
+      if (this.process && this.process !== spawnedProcess) return;
+      this.stderr = appendStderr(this.stderr, text);
+    });
 
     spawnedProcess.on("exit", (code, signal) => {
       log("agent exited, code:", code, "signal:", signal, "pid:", spawnedProcess.pid);
@@ -482,6 +488,11 @@ export class AgentManager {
       this.process = null;
       // The crash-restart path below never reaches setStatus's reset().
       this.watchdog.brainExited();
+      // Its stdout is no longer read, so nothing else would ever settle these.
+      for (const pending of this.pendingResponses.values()) {
+        pending.reject(new Error("Agent exited"));
+      }
+      this.pendingResponses.clear();
 
       // Clean exit (intentional stop, or normal termination).
       if (code === 0 || code === null) {
