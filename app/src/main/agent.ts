@@ -131,8 +131,9 @@ const NODE_BIN = resolveNodeBin();
 export type AgentStatus = "running" | "stopped" | "error";
 
 /**
- * Rejection for commands still in flight when stop() kills the brain. Typed so
- * callers can tell a stop they (or a restart) asked for apart from a failure.
+ * Rejection for commands still in flight when the brain goes away, whether
+ * stop() killed it or it exited on its own. Typed so callers can tell it apart
+ * from a failure: the status change or the stall watchdog reports the outcome.
  */
 export class AgentStoppedError extends Error {
   constructor() {
@@ -489,10 +490,9 @@ export class AgentManager {
       // The crash-restart path below never reaches setStatus's reset().
       this.watchdog.brainExited();
       // Its stdout is no longer read, so nothing else would ever settle these.
-      for (const pending of this.pendingResponses.values()) {
-        pending.reject(new Error("Agent exited"));
-      }
-      this.pendingResponses.clear();
+      // Settle them as a stop (#564): a clean exit resets the turn UI through
+      // the "stopped" status, and after a crash the watchdog reports the lost turn.
+      this.rejectPendingResponses();
 
       // Clean exit (intentional stop, or normal termination).
       if (code === 0 || code === null) {
@@ -605,6 +605,10 @@ export class AgentManager {
     }
     this.pinnedSessionFile = null;
     this.setStatus("stopped");
+    this.rejectPendingResponses();
+  }
+
+  private rejectPendingResponses(): void {
     for (const [id, pending] of this.pendingResponses) {
       log("rejecting pending response:", id);
       pending.reject(new AgentStoppedError());

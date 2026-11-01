@@ -388,7 +388,7 @@ describe("AgentManager", () => {
         const sent = JSON.parse(first.stdin.write.mock.calls.at(-1)![0]);
 
         first.emit("exit", 1, null);
-        await expect(reply).rejects.toThrow("Agent exited");
+        await expect(reply).rejects.toThrow("Agent stopped");
         firstLine(JSON.stringify({ type: "response", id: sent.id, success: true, data: {} }));
         // Node can deliver buffered stdout after 'exit', before and after the restart.
         firstLine(JSON.stringify({ type: "compaction_start", reason: "threshold" }));
