@@ -67,6 +67,7 @@ import type { ProviderAuthCaps } from "../../../shared/provider-auth-caps.js";
 import { splitApprovalPrompt } from "../../../shared/approval-prompt.js";
 import { openReleaseWithFallback, clearReleaseFallback } from "./update-banner.js";
 import { createModalClaim } from "./ext-modal-claim.js";
+import { createDialogAttention } from "./ext-modal-attention.js";
 
 declare global {
   interface Window {
@@ -3089,6 +3090,10 @@ const extAcceptBtn = document.getElementById("ext-accept") as HTMLButtonElement;
 const extDenyBtn = document.getElementById("ext-deny") as HTMLButtonElement;
 
 const claimExtModal = createModalClaim();
+const extModalEl = extOverlay.querySelector(".modal") as HTMLElement;
+const attendExtModal = createDialogAttention({
+  banner: document.getElementById("dialog-waiting")!,
+});
 
 function hideExtModal(): void {
   extOverlay.classList.add("hidden");
@@ -3113,6 +3118,7 @@ function openExtInput(id: string, title: string, placeholder?: string): void {
   extConfirmBtn.classList.remove("hidden");
   extConfirmBtn.textContent = "OK";
   extOverlay.classList.remove("hidden");
+  const unattend = attendExtModal(extModalEl);
   setTimeout(() => extInputEl.focus(), 0);
 
   const respond = (value: string | undefined) => {
@@ -3134,6 +3140,7 @@ function openExtInput(id: string, title: string, placeholder?: string): void {
   const onCancel = () => respond(undefined);
   const cleanup = () => {
     release();
+    unattend();
     extInputEl.removeEventListener("keydown", onKey);
     extConfirmBtn.removeEventListener("click", onOk);
     extCancelBtn.removeEventListener("click", onCancel);
@@ -3157,6 +3164,7 @@ function openExtSelect(id: string, title: string, options: string[]): void {
   extDetailEl.classList.toggle("hidden", !detail);
   extOptionsEl.classList.remove("hidden");
   extOverlay.classList.remove("hidden");
+  const unattend = attendExtModal(extModalEl);
 
   const respond = (value: string | undefined) => {
     window.orbit.respondToUiRequest(id, value === undefined ? { cancelled: true } : { value });
@@ -3181,6 +3189,7 @@ function openExtSelect(id: string, title: string, options: string[]): void {
   };
   const cleanup = () => {
     release();
+    unattend();
     extCancelBtn.removeEventListener("click", onCancel);
     document.removeEventListener("keydown", onKey);
   };
@@ -3205,6 +3214,7 @@ function openExtConfirm(id: string, title: string, message: string): void {
   extAcceptBtn.classList.remove("hidden");
   extDenyBtn.classList.remove("hidden");
   extOverlay.classList.remove("hidden");
+  const unattend = attendExtModal(extModalEl);
 
   const respond = (confirmed: boolean | undefined) => {
     window.orbit.respondToUiRequest(
@@ -3225,6 +3235,7 @@ function openExtConfirm(id: string, title: string, message: string): void {
   };
   const cleanup = () => {
     release();
+    unattend();
     extAcceptBtn.removeEventListener("click", onYes);
     extDenyBtn.removeEventListener("click", onNo);
     extCancelBtn.removeEventListener("click", onCancel);

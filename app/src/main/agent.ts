@@ -20,6 +20,7 @@ import { noLocalShellSpawnExtras } from "./local-shell.js";
 import { TurnWatchdog } from "./turn-watchdog.js";
 import { promptStartsNoTurn } from "../../../shared/handled-prompt.js";
 import { formatWindowTitle } from "./window-title.js";
+import { requestAttentionFor } from "./ui-attention.js";
 import { isOAuthOnlyProvider } from "./oauth-handler.js";
 import { DESKTOP_SHELL_KIND, readEnv, writeEnv } from "../../../shared/orbit-env.js";
 
@@ -756,6 +757,7 @@ export class AgentManager {
       // drops pending work, and leaves the restored session idle. Forward the
       // notice; newly cached direct tools load on the next explicit restart.
       this.window.webContents.send("agent:ui-request", data);
+      requestAttentionFor(this.window, data);
       return;
     }
 

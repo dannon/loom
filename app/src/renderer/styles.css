@@ -1623,6 +1623,18 @@ body.platform-darwin #files-title {
   position: relative;
 }
 
+/* A dialog the brain is blocked on (#611). Sits under the modal's scrim, so
+   it reads as the reason the composer is waiting, not as a second prompt. */
+.dialog-waiting {
+  padding: 6px 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--text-bright);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .queued-panel {
   background: var(--bg-surface);
   border: 1px solid var(--border-strong);
