@@ -937,7 +937,13 @@ export function rollUpInvocationJobs(inv: InvocationDetail): InvocationJobRollup
         if (!isTerminalJobState(job.state)) activeOther++;
       }
     }
-    if (stepJobs > 0 && stepJobs === stepOk) completedSteps++;
+    // A step that runs no job (a workflow input, a step mapped over an empty
+    // collection) is done once Galaxy has scheduled it. A subworkflow step also
+    // has no job of its own, but its work is still going until the subworkflow
+    // finishes, so it isn't counted that way.
+    const doneWithoutJobs =
+      stepJobs === 0 && invStep.state === "scheduled" && !invStep.subworkflow_invocation_id;
+    if ((stepJobs > 0 && stepJobs === stepOk) || doneWithoutJobs) completedSteps++;
   }
   return {
     summary,

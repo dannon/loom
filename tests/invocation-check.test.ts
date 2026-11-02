@@ -5,7 +5,7 @@ import { join } from "path";
 import { resetState, setNotebookPath } from "../extensions/orbit/state";
 import { renderInvocationYaml, type InvocationYaml } from "../extensions/orbit/notebook-writer";
 import * as galaxyApi from "../extensions/orbit/galaxy-api";
-import { checkInvocations } from "../extensions/orbit/tools";
+import { checkInvocations, rollUpInvocationJobs } from "../extensions/orbit/tools";
 import { foldInvocationState } from "../app/src/renderer/dashboard/widgets/jobs";
 
 function invocation(overrides: Partial<InvocationYaml> = {}): InvocationYaml {
@@ -376,5 +376,37 @@ describe("checkInvocations completion predicate", () => {
 
     expect(entry.autoAction).toBe("failed");
     expect(notebook).toContain("status: failed");
+  });
+});
+
+describe("rollUpInvocationJobs step count", () => {
+  const step = (
+    order: number,
+    jobStates: string[],
+    extra: { state?: string; subworkflow_invocation_id?: string } = {},
+  ) => ({
+    id: `step-${order}`,
+    order_index: order,
+    state: extra.state ?? "scheduled",
+    subworkflow_invocation_id: extra.subworkflow_invocation_id ?? null,
+    jobs: jobStates.map((s, i) => ({ id: `job-${order}-${i}`, state: s })),
+  });
+
+  it("counts a step that runs no job as done once Galaxy has scheduled it", () => {
+    const rollup = rollUpInvocationJobs({
+      id: "inv-1",
+      state: "scheduled",
+      steps: [
+        step(0, []), // a workflow input
+        step(1, []), // a parameter input
+        step(2, ["ok"]),
+        step(3, ["ok", "ok", "ok"]), // mapped over a collection
+        step(4, ["ok", "running"]),
+        step(5, [], { state: "new" }), // not scheduled yet
+        step(6, [], { subworkflow_invocation_id: "sub-1" }), // its work runs in the subworkflow
+      ],
+    } as never);
+    expect(rollup.completedSteps).toBe(4);
+    expect(rollup.totalJobs).toBe(6);
   });
 });
