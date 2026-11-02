@@ -8,7 +8,7 @@ const { handlers, openPath } = vi.hoisted(() => ({
   openPath: vi.fn(),
 }));
 // Electron is installed under app/, not the root test package.
-vi.mock("../app/node_modules/electron/index.js", () => ({
+vi.mock("electron", () => ({
   BrowserWindow: {},
   shell: { openPath },
   ipcMain: {

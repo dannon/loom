@@ -27,8 +27,9 @@ vi.mock("node:readline", () => ({
   }),
 }));
 
-// Electron is installed under app/, not the root test package.
-vi.mock("../app/node_modules/electron/index.js", () => ({
+// Electron is installed under app/, not the root test package; mock the bare
+// specifier so this still loads when only root deps are installed (publish-npm).
+vi.mock("electron", () => ({
   app: { isPackaged: false, getVersion: () => "0.0.0", getPath: () => "/tmp" },
   safeStorage: {
     isEncryptionAvailable: () => false,
