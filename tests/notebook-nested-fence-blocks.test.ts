@@ -356,6 +356,33 @@ describe("blocks quoted inside outer Markdown code are not live", () => {
     }
   });
 
+  it("the close of an opener indented by accident does not hide the next record", () => {
+    // Marked never saw the indented opener as a fence, so it reads that block's
+    // bare close as an opener and runs it to the next record's close.
+    const [opener, ...body] = block(renderInvocationYaml(inv({ invocationId: "inv-a" }))).split(
+      "\n",
+    );
+    const next = block(renderInvocationYaml(inv({ invocationId: "inv-b" })));
+    for (const [lead, indent] of [
+      ["- Step one\n\n", "    "],
+      ["- Step one\n\n", "\t"],
+      ["- a\n\n", "      "],
+      ["# Notes\n\nSome prose.\n\n", "    "],
+    ]) {
+      const content = `${lead}${indent}${opener}\n${body.join("\n")}\n\n- Step two\n\n${next}\n`;
+      expect(findInvocationBlocks(content).map((b) => b.invocationId)).toEqual(["inv-a", "inv-b"]);
+      const out = upsertInvocationBlock(
+        content,
+        inv({ invocationId: "inv-b", status: "completed" }),
+      );
+      expect(out.match(/```orbit-invocation$/gm)).toHaveLength(2);
+      expect(findInvocationBlocks(out).map((b) => [b.invocationId, b.status])).toEqual([
+        ["inv-a", "in_progress"],
+        ["inv-b", "completed"],
+      ]);
+    }
+  });
+
   it("an unclosed fence on a list item's continuation line ends with the item", () => {
     const real = block(renderInvocationYaml(inv()));
     for (const item of [

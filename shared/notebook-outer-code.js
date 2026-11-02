@@ -38,6 +38,11 @@ function isAnyNotebookFenceOpen(line) {
  *   and followed by a flush `key:` body, the way every writer emits a body. A
  *   quoted indented example indents its body too, so it is not mistaken for one.
  *
+ * When marked ends one of our blocks before the close the block scanners find
+ * (the indented opener above, or a list item that ends under it), marked reads
+ * that close as an opener of its own. The lexing resumes after the close
+ * instead, so the next record is not hidden behind it.
+ *
  * @param {readonly string[]} lines
  * @returns {boolean[]} true for each line inside outer code
  */
@@ -89,7 +94,15 @@ function maskCode(tokens, first, doc) {
     // Masking nothing is what main did everywhere.
     if (!raw.every((r, k) => doc.lines[start + k]?.trimEnd().endsWith(r.trim()))) continue;
     if (token.codeBlockStyle === "indented") {
-      if (!isStrayIndentedOpener(raw, doc, end)) doc.masked.fill(true, start, end + 1);
+      if (!isStrayIndentedOpener(raw, doc, end)) {
+        doc.masked.fill(true, start, end + 1);
+        continue;
+      }
+      // Marked never saw this opener as a fence, so it reads the block's close
+      // as an opener and would hide the next record behind it. Resume after
+      // the close the block scanners end it at.
+      const close = scannerClose(doc.lines, end + 1);
+      if (close !== null) return close + 1;
       continue;
     }
     const fence = /** @type {RegExpMatchArray} */ (raw[0].match(/^ *(`{3,}|~{3,})/));
@@ -100,7 +113,14 @@ function maskCode(tokens, first, doc) {
     if ((!closed && end >= doc.last) || (ours && raw.slice(1).some(isAnyNotebookFenceOpen))) {
       return start + 1;
     }
-    if (!ours) doc.masked.fill(true, start, end + 1);
+    if (!ours) {
+      doc.masked.fill(true, start, end + 1);
+      continue;
+    }
+    // A list item can end one of ours before its close; marked then reads that
+    // close as an opener and would hide the next record behind it.
+    const close = scannerClose(doc.lines, start + 1);
+    if (close !== null && close > end) return close + 1;
   }
   return null;
 }
@@ -117,4 +137,18 @@ function isStrayIndentedOpener(raw, doc, end) {
   let next = end + 1;
   while (next < doc.lines.length && doc.lines[next].trim() === "") next++;
   return next < doc.lines.length && /^[a-z0-9_]+:/.test(doc.lines[next]);
+}
+
+/**
+ * The line a block scanner closes a block on: its body is blank or `key:`
+ * lines, then a bare ```. Mirrors `scanFencedBlocks`.
+ *
+ * @param {readonly string[]} lines
+ * @param {number} from the first body line
+ * @returns {number | null}
+ */
+function scannerClose(lines, from) {
+  let i = from;
+  while (i < lines.length && (lines[i].trim() === "" || /^[a-z0-9_]+:/.test(lines[i]))) i++;
+  return i < lines.length && lines[i].trim() === "```" ? i : null;
 }
