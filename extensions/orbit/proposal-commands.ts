@@ -81,6 +81,13 @@ import {
   type TemplateFetcher,
 } from "./registry-templates";
 import { getCurrentHistoryId, getNotebookPath, onNotebookChange } from "./state";
+import { insertBeforeLastUser } from "./transient-context";
+import {
+  approvalStatusText,
+  ORBIT_APPROVAL_STATUS_TYPE,
+  ORBIT_APPROVAL_WAITING_TYPE,
+  type ApprovalStatus,
+} from "./approval-status";
 
 /** Everything the propose/approve flow reads from the session, so tests can supply it. */
 export interface ProposalDeps {
@@ -94,6 +101,8 @@ export interface ProposalDeps {
   /** ISO timestamp. */
   now: () => string;
   random: (n: number) => Uint8Array;
+  /** Told about approvals a notebook change just revoked. */
+  onDriftRevoked?: (drift: Drift[]) => void;
 }
 
 export const defaultDeps: ProposalDeps = {
@@ -180,6 +189,7 @@ export function checkProposalDrift(deps: ProposalDeps, content: string): Drift[]
       ...(written.has(d.attemptId) ? {} : { recorded: "in memory; registry not writable" }),
     });
   }
+  if (fresh.length > 0) deps.onDriftRevoked?.(fresh);
   if (fresh.length > 0 && nb)
     void clearEchoes(
       nb,
@@ -420,6 +430,12 @@ function locate(content: string, id: string): ProposalBlock | string {
 export interface ApproveOptions {
   /** Shown the harness-rendered table; resolves to the user's answer. Absent = no dialog. */
   confirm?: (title: string, message: string) => Promise<boolean>;
+  /**
+   * Where the approval stands, once it gets as far as the confirm step: waiting
+   * on the dialog, then approved or not. Every waiting status is settled, by
+   * exactly one later status.
+   */
+  onStatus?: (status: ApprovalStatus) => void;
   signal?: AbortSignal;
 }
 
@@ -497,11 +513,32 @@ export async function approveCommand(
     formatsUnchecked.length > 0
       ? `\n\nFormats not checked:\n- ${formatsUnchecked.join("\n- ")}`
       : "";
+  // From here on every return settles the status, so a model that heard
+  // "waiting" never keeps believing it.
+  const standing = () => liveApproval(sessionView(session), id)?.attempt_id;
+  const notApprovedStatus = (reason: string): ApprovalStatus => {
+    const live = standing();
+    return { id, state: "not_approved", reason, ...(live ? { standing: live } : {}) };
+  };
+  const notApproved = (reply: CommandReply, reason: string): CommandReply => {
+    opts.onStatus?.(notApprovedStatus(reason));
+    return reply;
+  };
   if (opts.confirm) {
-    const confirmed = await opts.confirm(
-      `Approve ${id}?`,
-      `${table}${templateNote}${formatNote}\n\nThis freezes exactly the above.`,
-    );
+    const live = standing();
+    opts.onStatus?.({ id, state: "awaiting_confirmation", ...(live ? { standing: live } : {}) });
+    let confirmed = false;
+    let reason = "the dialog closed without an answer.";
+    try {
+      confirmed = await opts.confirm(
+        `Approve ${id}?`,
+        `${table}${templateNote}${formatNote}\n\nThis freezes exactly the above.`,
+      );
+      reason = "the user declined or dismissed the dialog.";
+    } finally {
+      // Also when the dialog throws (a stale context), not just on "No".
+      if (!confirmed) opts.onStatus?.(notApprovedStatus(reason));
+    }
     if (!confirmed) return { level: "info", message: `Not approved; ${id} is still pending.` };
   } else if (!yes) {
     // No dialog to show the table in. Approving anyway would record consent to
@@ -525,10 +562,13 @@ export async function approveCommand(
     typeof again === "string" ||
     canonicalJson(again.proposal) !== canonicalJson(proposal)
   ) {
-    return {
-      level: "warning",
-      message: `Not approved: ${id} changed in the notebook while it was being approved. Look at it again and re-run /approve.`,
-    };
+    return notApproved(
+      {
+        level: "warning",
+        message: `Not approved: ${id} changed in the notebook while it was being approved. Look at it again and re-run /approve.`,
+      },
+      "it changed in the notebook while it was being approved.",
+    );
   }
 
   let result: ReturnType<typeof approveProposal>;
@@ -541,14 +581,25 @@ export async function approveCommand(
     });
   } catch (err) {
     // Typically the lock was taken over mid-approval; the store is read-only now.
-    return { level: "warning", message: `Not approved: ${(err as Error).message}.` };
+    const reason = `${(err as Error).message}.`;
+    return notApproved({ level: "warning", message: `Not approved: ${reason}` }, reason);
   }
   if (!result.ok) {
-    return { level: "warning", message: `Not approved:\n- ${result.problems.join("\n- ")}` };
+    return notApproved(
+      { level: "warning", message: `Not approved:\n- ${result.problems.join("\n- ")}` },
+      `${result.problems.join("; ")}.`,
+    );
   }
   if (result.unchanged) {
+    opts.onStatus?.({ id, state: "already_approved", attemptId: result.attemptId });
     return { level: "info", message: `${id} is already approved (attempt ${result.attemptId}).` };
   }
+  opts.onStatus?.({
+    id,
+    state: "approved",
+    attemptId: result.attemptId,
+    specRevision: result.specRevision,
+  });
 
   activity(deps, "proposal.approved", "user", {
     proposal_id: id,
@@ -603,7 +654,11 @@ export function approvedRunPrompt(id: string): string {
   );
 }
 
-export async function revokeCommand(deps: ProposalDeps, args: string): Promise<CommandReply> {
+export async function revokeCommand(
+  deps: ProposalDeps,
+  args: string,
+  onStatus?: (status: ApprovalStatus) => void,
+): Promise<CommandReply> {
   const m = args.match(PROPOSAL_ARG);
   if (!m) return { level: "info", message: "Usage: /revoke <proposal-id>" };
   const id = m[1];
@@ -627,6 +682,7 @@ export async function revokeCommand(deps: ProposalDeps, args: string): Promise<C
       reason: "user",
     });
   }
+  onStatus?.({ id, state: "revoked" });
   const nb = deps.notebookPath();
   if (nb) void clearEchoes(nb, [id]);
   return {
@@ -739,7 +795,19 @@ function toolText(text: string, details: Record<string, unknown>) {
   return { content: [{ type: "text" as const, text }], details };
 }
 
-export function registerProposalCommands(pi: ExtensionAPI, deps: ProposalDeps = defaultDeps): void {
+export function registerProposalCommands(
+  pi: ExtensionAPI,
+  baseDeps: ProposalDeps = defaultDeps,
+): void {
+  // An edit revokes an approval as surely as /revoke does, and the model has to
+  // hear about it as much, or an earlier "approved" record stands.
+  const deps: ProposalDeps = {
+    ...baseDeps,
+    onDriftRevoked: (drift) => {
+      const byId = new Map(drift.map((d) => [d.proposalId, d.reason]));
+      for (const [id, reason] of byId) recordStatus({ id, state: "revoked", drift: reason });
+    },
+  };
   onNotebookChange((content) => {
     checkProposalDrift(deps, content);
   });
@@ -839,6 +907,42 @@ element, on a multiple input it takes them all in one job.`,
     },
   });
 
+  // Outcomes go in the transcript, since a slash command starts no turn and the
+  // model would otherwise answer from what it last saw. triggerTurn: false
+  // queues them behind a running turn instead of steering it.
+  const recordStatus = (status: ApprovalStatus) => {
+    pi.sendMessage(
+      {
+        customType: ORBIT_APPROVAL_STATUS_TYPE,
+        content: approvalStatusText(status),
+        display: false,
+      },
+      { triggerTurn: false },
+    );
+  };
+
+  // A dialog that's open right now is current state, not history: it rides each
+  // LLM call (a turn can run while the dialog waits) and never lands in the
+  // transcript, where a crash mid-dialog would leave it "waiting" for good.
+  let dialogSeq = 0;
+  const waiting = new Map<number, ApprovalStatus>();
+  pi.on("context", async (event) => {
+    // Nothing to strip first: this hook's note is never sent, so never persisted.
+    const messages = [...event.messages];
+    if (waiting.size === 0) return { messages };
+    // One note per proposal; a re-run's dialog is the one that counts.
+    const notes = new Map([...waiting.values()].map((st) => [st.id, st]));
+    const msg = {
+      role: "custom" as const,
+      customType: ORBIT_APPROVAL_WAITING_TYPE,
+      content: [...notes.values()].map(approvalStatusText).join("\n"),
+      display: false,
+      timestamp: Date.now(),
+    };
+    insertBeforeLastUser(messages, msg);
+    return { messages };
+  });
+
   const reply = (ctx: ExtensionContext, r: CommandReply) => {
     try {
       ctx.ui.notify(r.message, r.level);
@@ -853,7 +957,26 @@ element, on a multiple input it takes them all in one job.`,
       const confirm = ctx.hasUI
         ? (title: string, message: string) => ctx.ui.confirm(title, message)
         : undefined;
-      const r = await approveCommand(deps, args ?? "", { confirm });
+      // Each /approve's own dialog, so one superseded by a re-run can't clear
+      // the newer one's "waiting".
+      let open: number | undefined;
+      const onStatus = (status: ApprovalStatus) => {
+        if (status.state === "awaiting_confirmation") {
+          open = ++dialogSeq;
+          waiting.set(open, status);
+          return;
+        }
+        if (open !== undefined) waiting.delete(open);
+        open = undefined;
+        recordStatus(status);
+      };
+      let r: CommandReply;
+      try {
+        r = await approveCommand(deps, args ?? "", { confirm, onStatus });
+      } finally {
+        // Settling is approveCommand's job; this holds if a step it doesn't catch throws.
+        if (open !== undefined) waiting.delete(open);
+      }
       reply(ctx, r);
       // A slash command starts no turn, so without this the approved run waits
       // for the user's next message. Only the user's /approve reaches here.
@@ -869,7 +992,7 @@ element, on a multiple input it takes them all in one job.`,
   pi.registerCommand("revoke", {
     description: "Revoke the approval of a Galaxy run proposal: /revoke <proposal-id>",
     handler: async (args: string | undefined, ctx: ExtensionContext) => {
-      reply(ctx, await revokeCommand(deps, args ?? ""));
+      reply(ctx, await revokeCommand(deps, args ?? "", recordStatus));
     },
   });
 

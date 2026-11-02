@@ -59,6 +59,7 @@ import {
   verificationBlock,
 } from "../../shared/prompt-blocks.js";
 import { galaxyToolFamily } from "./galaxy-tool-source";
+import { insertBeforeLastUser } from "./transient-context";
 import {
   buildReproductionLessonsContext,
   ORBIT_LESSONS_CONTEXT_TYPE,
@@ -885,30 +886,17 @@ export function setupContextInjection(pi: ExtensionAPI): void {
         ),
     );
 
-    // Insert project-data messages just BEFORE the current user turn rather
-    // than at the very end. This content is agent-writable or arrives with the
-    // project directory, so it must not occupy the final, highest-attention
-    // slot where a model is most prone to treat it as the operative
-    // instruction -- the user's actual request stays last. Falls back to
-    // appending when there's no user turn yet.
-    const insert = (customType: string, content: string) => {
-      const msg = {
+    // Project data goes just BEFORE the current user turn rather than at the
+    // very end, where a model is most prone to treat it as the operative
+    // instruction -- the user's actual request stays last.
+    const insert = (customType: string, content: string) =>
+      insertBeforeLastUser(messages, {
         role: "custom" as const,
         customType,
         content,
         display: false,
         timestamp: Date.now(),
-      };
-      let lastUser = -1;
-      for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].role === "user") {
-          lastUser = i;
-          break;
-        }
-      }
-      if (lastUser === -1) messages.push(msg);
-      else messages.splice(lastUser, 0, msg);
-    };
+      });
 
     // Lessons first, furthest from the user's turn: an index of titles written
     // by other people is the weakest claim on attention of the three.
