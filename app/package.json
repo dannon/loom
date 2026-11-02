@@ -1,7 +1,7 @@
 {
   "name": "orbit",
   "productName": "Orbit",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Electron desktop shell for the Orbit agent runtime (Galaxy bioinformatics)",
   "license": "MIT",
   "main": ".vite/build/main.js",

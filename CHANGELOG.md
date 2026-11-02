@@ -4,7 +4,7 @@ Notable, user-facing changes to Orbit (called Loom before 0.9). Each release lis
 highlights; the full commit-level notes live on the GitHub release pages. Add a
 new `## [<version>] - <date>` block with a `### Highlights` list at release time.
 
-## [Unreleased]
+## [0.9.0] - 2026-11-02
 
 ### Highlights
 
@@ -15,6 +15,13 @@ new `## [<version>] - <date>` block with a `### Highlights` list at release time
 - The CLI's `/orbit` hand-off command is now `/desktop`; `/orbit` still works for now
 - Orbit can now ship staging skills -- skills it needs before they have a permanent home upstream -- alongside the galaxy-skills catalog, under `skills_fetch({ repo: "orbit" })`. The first, `galaxy-data-libraries`, teaches the agent to browse a Galaxy data library and run tools on its datasets in place instead of copying them into a history
 - `GALAXY_URL=... GALAXY_API_KEY=... orbit` now reaches that server even when a different Galaxy profile is saved; before, the saved profile's URL won. The URL and key always come from the same place now, which fixes a case where a key exported for one server was sent to the saved profile's server instead. Setting just one of the two is ignored, with a warning
+- Orbit can ask before it runs: the agent proposes a Galaxy run, `/approve` signs off and submits it right away, `/revoke` takes an approval back, and `/pending` shows what's waiting. Proposals can map over collections and check dataset formats before anything is submitted
+- Lessons: when something goes wrong, the agent can propose a lesson and you keep it with `/lesson`. A kept lesson comes back on its own when the same situation shows up again, and you can search them any time
+- Desktop: offline English dictation into the composer, drop a file on the composer to insert its path, and open files in the system viewer from the context menu
+- Orbit runs on pi 1.4 and uses pi's built-in MCP support; `mcp.json` is backed up before it's migrated. Custom endpoints can run without an API key, Ollama is no longer offered, and refusals from OpenAI and ChatGPT-account models are explained instead of dumped as raw JSON
+- Fewer silent stalls: an empty model reply no longer ends a run with nothing said, questions survive model retries, Galaxy follow-ups survive pauses, a stop you asked for no longer shows as an error, and the web shell shows a prompt the brain rejected
+- Galaxy: a pasted server URL ending in `/api` works, finished workflows count their input steps so progress reaches the full step count, and the default BRC Analytics MCP points at production
+- Safety: Orbit refuses Galaxy writes into a history owned by another account, treats pi's credential store like the other credential stores, and blocks local-file uploads in remote mode
 
 ## [0.8.0] - 2026-09-28
 

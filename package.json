@@ -1,6 +1,6 @@
 {
   "name": "@galaxyproject/orbit",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "type": "module",
   "description": "AI co-scientist for Galaxy bioinformatics, built on Pi.dev",
   "keywords": [
