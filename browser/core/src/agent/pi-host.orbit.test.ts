@@ -516,8 +516,9 @@ describe("Orbit on pi-host", () => {
       // policy's shown-page reset (session_start) and the Galaxy version capture (session_start,
       // tool_result), which is where observations get the Galaxy version. The empty-completion
       // check adds three (session_start, input, agent_end). The history guard's owner lookup
-      // forgets the signed-in user on session_start.
-      on: 71 + 7 + 1 + 2 + 3 + 1,
+      // forgets the signed-in user on session_start. /approve's waiting note rides each call
+      // (context) while its dialog is open.
+      on: 71 + 7 + 1 + 2 + 3 + 1 + 1,
       // Orbit's own tools; the Galaxy family (the browser entry's 42 operations, the shell's three
       // extras, and Orbit's list_jobs and get_job_logs bridges); galaxy_read_output beside it; and
       // the probe. mcp_read_output is MCP-only.
