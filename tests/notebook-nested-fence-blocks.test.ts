@@ -419,6 +419,30 @@ describe("blocks quoted inside outer Markdown code are not live", () => {
     }
   });
 
+  it("a top-level opener indented by accident stays live, though marked calls it code", () => {
+    // Inside a list item marked reads the opener as a fence of ours; only at
+    // top level after a paragraph does it become an indented code block.
+    const [opener, ...body] = block(renderInvocationYaml(inv())).split("\n");
+    for (const indent of ["    ", "\t"]) {
+      for (const blanks of ["\n", "\n\n"]) {
+        const content = `# Notes\n\nSome prose.\n\n${indent}${opener}${blanks}${body.join("\n")}\n`;
+        expect((marked.parse(content) as string).match(/language-orbit-invocation/g)).toBeNull();
+        expect(findInvocationBlocks(content).map((b) => b.invocationId)).toEqual(["inv-real"]);
+        const out = upsertInvocationBlock(content, inv({ status: "completed" }));
+        expect(findInvocationBlocks(out).map((b) => b.status)).toEqual(["completed"]);
+        expect(out.match(/```orbit-invocation$/gm)).toHaveLength(1);
+      }
+    }
+  });
+
+  it("an indented opener followed by prose is still code", () => {
+    const real = block(renderInvocationYaml(inv()));
+    const [opener] = real.split("\n");
+    const lines = `# Notes\n\n    ${opener}\nnot a key line\n\n${real}\n`.split("\n");
+    expect(outerCodeLines(lines)[2]).toBe(true);
+    expect(findInvocationBlocks(lines.join("\n")).map((b) => b.invocationId)).toEqual(["inv-real"]);
+  });
+
   it("an indented opener with no fields does not take the next ``` as its close", () => {
     const real = block(renderInvocationYaml(inv()));
     const content = `    \`\`\`orbit-invocation\n\n\`\`\`\nx = 1\n\`\`\`\n\n${real}\n`;
