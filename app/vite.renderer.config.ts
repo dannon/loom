@@ -17,6 +17,9 @@ export default defineConfig({
     emptyOutDir: true,
   },
   plugins: [react()],
+  // shared/notebook-outer-code.js imports marked from outside app/, which
+  // would otherwise bundle the root copy next to the renderer's own.
+  resolve: { dedupe: ["marked"] },
   server: {
     port: 5199,
     strictPort: false,

@@ -27,7 +27,8 @@
  * stays shell-neutral.
  */
 
-import { isNotebookFenceOpen, outerCodeLines } from "../../../shared/notebook-fences.js";
+import { isNotebookFenceOpen } from "../../../shared/notebook-fences.js";
+import { outerCodeLines } from "../../../shared/notebook-outer-code.js";
 
 const BINDING_FENCE_CLOSE = "```";
 

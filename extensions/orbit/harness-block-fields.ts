@@ -36,9 +36,9 @@
 import {
   NOTEBOOK_FENCE_KINDS,
   isNotebookFenceOpen,
-  outerCodeLines,
   type NotebookFenceKind,
 } from "../../shared/notebook-fences.js";
+import { outerCodeLines } from "../../shared/notebook-outer-code.js";
 
 export type SubmittedBy = "harness" | "agent" | "unknown";
 export type EnrichmentState = "pending" | "complete" | "unavailable";

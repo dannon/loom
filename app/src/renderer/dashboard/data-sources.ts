@@ -13,7 +13,8 @@
 import { parseInvocationBlocks } from "../galaxy-invocations.js";
 import type { FileNode } from "../../preload/preload.js";
 import type { GalaxyLivePayload } from "../../../../shared/galaxy-live-contract.js";
-import { isNotebookFenceOpen, outerCodeLines } from "../../../../shared/notebook-fences.js";
+import { isNotebookFenceOpen } from "../../../../shared/notebook-fences.js";
+import { outerCodeLines } from "../../../../shared/notebook-outer-code.js";
 import type {
   ActivityEvent,
   DashboardJob,

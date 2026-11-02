@@ -9,7 +9,7 @@
 
 import { marked } from "marked";
 import { describe, expect, it } from "vitest";
-import { outerCodeLines } from "../shared/notebook-fences.js";
+import { outerCodeLines } from "../shared/notebook-outer-code.js";
 import {
   appendBlock,
   findInvocationBlocks,
@@ -473,5 +473,84 @@ describe("blocks quoted inside outer Markdown code are not live", () => {
     const quoted = ["~~~", "```orbit-proposal", "proposal_id: p-example", "```", "~~~"].join("\n");
     const ids = (c: string) => findProposalBlocks(c).map((p) => p.proposalId);
     expect(ids(`${quoted}\n\n${real}\n`)).toEqual(["p-real"]);
+  });
+});
+
+describe("outer code is what marked renders as code", () => {
+  const live = (content: string) =>
+    (marked.parse(content) as string).match(/language-orbit-invocation/g)?.length ?? 0;
+  const real = block(renderInvocationYaml(inv()));
+  const example = block(renderInvocationYaml(inv({ status: "completed" })));
+  const indent = (text: string, pad: string) => text.replace(/^/gm, pad);
+
+  it("a heading ends a list, so a fence after it is top-level code", () => {
+    // The example carries the real record's id. Read as live, the upsert
+    // rewrites the example and deletes the real block as its duplicate.
+    const content = `- item\n# Heading\n  \`\`\`\`text\n${example}\n  \`\`\`\`\n\n${real}\n`;
+    expect(live(content)).toBe(1);
+    expect(findInvocationBlocks(content).map((b) => b.status)).toEqual(["in_progress"]);
+    const out = upsertInvocationBlock(content, inv({ summary: "aligned" }));
+    expect(out).toContain(`  \`\`\`\`text\n${example}\n  \`\`\`\`\n`);
+    expect(findInvocationBlocks(out).map((b) => b.summary)).toEqual(["aligned"]);
+  });
+
+  it("examples nested in list items and blockquotes stay code", () => {
+    const content = [
+      "- outer",
+      "  - inner",
+      "",
+      indent(`\`\`\`\`text\n${example}\n\`\`\`\``, "    "),
+      "",
+      "> 1. quoted step",
+      ">",
+      ">    ~~~",
+      indent(example, ">    "),
+      ">    ~~~",
+      "",
+      "1. step",
+      "",
+      indent(`~~~md\n${example}\n~~~`, "   "),
+      "",
+      real,
+      "",
+    ].join("\n");
+    expect(live(content)).toBe(1);
+    expect(findInvocationBlocks(content).map((b) => b.status)).toEqual(["in_progress"]);
+    const out = upsertInvocationBlock(content, inv({ summary: "aligned" }));
+    expect(out.startsWith(content.slice(0, content.indexOf(real)))).toBe(true);
+    expect(findInvocationBlocks(out).map((b) => b.summary)).toEqual(["aligned"]);
+  });
+
+  it("a block of ours inside a list item is still live, as it was before masking", () => {
+    const content = `- step one\n\n${indent(real, "  ")}\n`;
+    expect(live(content)).toBe(1);
+    expect(outerCodeLines(content.split("\n")).some(Boolean)).toBe(false);
+  });
+
+  it("maps marked's lines back onto a CRLF notebook", () => {
+    const lf = [
+      "- item",
+      "# Heading",
+      "  ````text",
+      example,
+      "  ````",
+      "",
+      "> quote",
+      "> ~~~",
+      "> x",
+      "> ~~~",
+      "",
+      "\tindented",
+      "",
+      real,
+      "",
+    ].join("\n");
+    const crlf = lf.replace(/\n/g, "\r\n");
+    const mask = outerCodeLines(lf.split("\n"));
+    expect(outerCodeLines(crlf.split("\n"))).toEqual(mask);
+    expect(outerCodeLines(crlf.split("\r\n"))).toEqual(mask);
+    expect(mask.filter(Boolean)).toHaveLength(example.split("\n").length + 2 + 3 + 1);
+    // The renderer reads CRLF notebooks; the brain's line scanners never have.
+    expect(parseInvocationBlocks(crlf).map((b) => b.status)).toEqual(["in_progress"]);
   });
 });

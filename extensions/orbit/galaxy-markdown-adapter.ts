@@ -31,8 +31,8 @@ import {
   NOTEBOOK_FENCE_READ_PREFIXES,
   NOTEBOOK_FENCE_WRITE_PREFIX,
   isNotebookFenceOpen,
-  outerCodeLines,
 } from "../../shared/notebook-fences.js";
+import { outerCodeLines } from "../../shared/notebook-outer-code.js";
 
 const FENCE_CLOSE = "```";
 const GALAXY_FENCE_OPEN = "```galaxy";

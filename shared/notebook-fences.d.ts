@@ -6,12 +6,9 @@ export const NOTEBOOK_FENCE_READ_PREFIXES: readonly string[];
 export function notebookFenceOpen(kind: NotebookFenceKind): string;
 export const NOTEBOOK_FENCE_KINDS: readonly NotebookFenceKind[];
 export function isNotebookFenceOpen(line: string, kind: NotebookFenceKind): boolean;
-export function matchFenceOpen(
-  line: string,
-): { char: string; length: number; itemIndent: number } | null;
+export function matchFenceOpen(line: string): { char: string; length: number } | null;
 export function closesFence(line: string, fence: { char: string; length: number }): boolean;
 export function isIndentedCodeLine(line: string): boolean;
-export function outerCodeLines(lines: readonly string[]): boolean[];
 export function replaceNotebookBlocks(
   content: string,
   ranges: ReadonlyArray<{ start: number; end: number }>,

@@ -41,9 +41,9 @@
 import {
   isNotebookFenceOpen,
   notebookFenceOpen,
-  outerCodeLines,
   replaceNotebookBlocks,
 } from "../../shared/notebook-fences.js";
+import { outerCodeLines } from "../../shared/notebook-outer-code.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Type
