@@ -196,6 +196,15 @@ describe("outerCodeLines", () => {
     expect(outerCodeLines(lines).every((m) => !m)).toBe(true);
   });
 
+  it("resumes after an unterminated block of ours, so a quoted example after it stays code", () => {
+    // Marked runs the orphan to the quoted example's close; without the restart
+    // the ~~~ fence is never seen and the example goes live.
+    const quoted = block(renderInvocationYaml(inv({ status: "completed" })));
+    const real = block(renderInvocationYaml(inv()));
+    const content = `\`\`\`orbit-job\njob_id: orphan\n\n~~~\n${quoted}\n~~~\n\n${real}\n`;
+    expect(findInvocationBlocks(content).map((b) => b.status)).toEqual(["in_progress"]);
+  });
+
   it("reads a list-item fence and an info string with a backtick per CommonMark", () => {
     expect(outerCodeLines(["- ~~~", "  x", "  ~~~"])).toEqual([true, true, true]);
     expect(outerCodeLines(["```a`b", "x"])).toEqual([false, false]);
