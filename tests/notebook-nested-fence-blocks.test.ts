@@ -332,6 +332,12 @@ describe("blocks quoted inside outer Markdown code are not live", () => {
     expect(listNotebookAnchors(content)).toContain("align");
   });
 
+  it("an anchor in indented code is not an anchor", () => {
+    const anchors = listNotebookAnchors("Text\n\n    - [ ] x {#ind}\n\n- [ ] y {#ok}\n");
+    expect(anchors).toContain("ok");
+    expect(anchors).not.toContain("ind");
+  });
+
   it("a block behind a stray fence is code, and a write appends a live one", () => {
     // Markdown renders it inside the stray fence, so treating it as live would
     // rewrite text the reader sees as code.
