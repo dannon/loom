@@ -184,7 +184,8 @@ describe("outerCodeLines", () => {
 
   it("masks nothing for an outer fence that never closes", () => {
     const real = block(renderInvocationYaml(inv())).split("\n");
-    const lines = ["~~~~", "stray", "", ...real];
+    // Every written notebook ends in a newline, so the fence runs to a trailing blank.
+    const lines = ["~~~~", "stray", "", ...real, ""];
     expect(outerCodeLines(lines).every((m) => !m)).toBe(true);
     expect(findInvocationBlocks(lines.join("\n")).map((b) => b.invocationId)).toEqual(["inv-real"]);
   });
