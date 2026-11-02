@@ -171,6 +171,16 @@ describe("outerCodeLines", () => {
     expect(outerCodeLines(tilde)).toEqual([true, true, true, true, false]);
   });
 
+  it("answers from the lines' content, not a cached array", () => {
+    const lines = ["~~~", "x", "~~~", "after"];
+    const first = outerCodeLines(lines);
+    first[0] = false;
+    expect(outerCodeLines(lines)).toEqual([true, true, true, false]);
+    lines[0] = "prose";
+    lines[2] = "prose";
+    expect(outerCodeLines(lines)).toEqual([false, false, false, false]);
+  });
+
   it("masks a plain ``` fence up to its first bare close, opener and all", () => {
     const lines = ["```text", "```orbit-invocation", "invocation_id: x", "```", "after"];
     expect(outerCodeLines(lines)).toEqual([true, true, true, true, false]);

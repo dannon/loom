@@ -47,6 +47,20 @@ function isAnyNotebookFenceOpen(line) {
  * @returns {boolean[]} true for each line inside outer code
  */
 export function outerCodeLines(lines) {
+  // One upsert asks about the same notebook about ten times. Keyed on content,
+  // not the array, since callers build and edit their own line arrays.
+  const key = lines.join("\n");
+  if (memo.lines !== lines.length || memo.key !== key) {
+    memo = { key, lines: lines.length, masked: computeOuterCodeLines(lines) };
+  }
+  return memo.masked.slice();
+}
+
+/** @type {{ key: string | null; lines: number; masked: boolean[] }} */
+let memo = { key: null, lines: -1, masked: [] };
+
+/** @param {readonly string[]} lines @returns {boolean[]} */
+function computeOuterCodeLines(lines) {
   const masked = new Array(lines.length).fill(false);
   // Marked reads a lone CR as a line break too; blank it so its lines stay ours.
   const clean = lines.map((l) => l.replace(/\r$/, "").replace(/\r/g, " "));
