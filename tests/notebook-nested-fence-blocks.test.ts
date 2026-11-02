@@ -326,6 +326,12 @@ describe("blocks quoted inside outer Markdown code are not live", () => {
     expect(listNotebookAnchors(quotedStep.replace(/\n/g, "\r\n"))).not.toContain("quoted-step");
   });
 
+  it("a backtick in a ``` info string makes a paragraph, so later steps stay visible", () => {
+    const content = "## Plan A: x\n\n```js``` is the language\n\n- [x] Align {#align}\n";
+    expect(parsePlanSteps(content).get("#align")?.state).toBe("x");
+    expect(listNotebookAnchors(content)).toContain("align");
+  });
+
   it("a block behind a stray fence is code, and a write appends a live one", () => {
     // Markdown renders it inside the stray fence, so treating it as live would
     // rewrite text the reader sees as code.
