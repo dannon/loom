@@ -65,6 +65,22 @@ export function kindOfEnvelope(
 }
 
 /**
+ * The kind a galaxy-ops "connection" failure really is when Galaxy answered it with a 4xx.
+ *
+ * galaxy-ops calls every status but 401/403/404 a connection failure, so a 400 for an id that
+ * doesn't exist went down the retry path with the acceptance-unknown advice. A 4xx is Galaxy's
+ * definite answer, so it's the model's input to fix; 408 and 429 are the two that a later retry
+ * can actually change.
+ */
+export function permanentHttpKind(err: unknown): "validation" | undefined {
+  if (!(err instanceof Error) || (err as { kind?: unknown }).kind !== "connection") return;
+  const { http, status } = err as { http?: { status?: unknown }; status?: unknown };
+  const code = typeof http?.status === "number" ? http.status : status;
+  if (typeof code !== "number" || code < 400 || code > 499) return;
+  return code === 408 || code === 429 ? undefined : "validation";
+}
+
+/**
  * `details.galaxy.kind` when an in-process call recorded one, else the text classifier's reading.
  * A failed in-process op always records the key, null when its errorKind has no recovery advice:
  * Galaxy's own message can quote a wire phrase ("request timed out") the text classifier would

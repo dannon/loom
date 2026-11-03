@@ -220,8 +220,8 @@ describe("galaxyRecoveryHint", () => {
       ["saved response"],
     ],
     [
-      // galaxy-ops reports a 400 as a connection failure, so the advice must send the model to
-      // the message rather than straight to "unreachable".
+      // A dropped call can still be a rejected argument (an extra's 400, a malformed reply), so
+      // the advice must send the model to the message rather than straight to "unreachable".
       "a dropped read gets retry-once advice, not the timeout's narrowing",
       "get_history_details",
       "dropped",

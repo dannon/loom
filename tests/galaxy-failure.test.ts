@@ -4,9 +4,11 @@ import {
   galaxyFailureKind,
   kindOfEnvelope,
   classifyGalaxyFailure,
+  permanentHttpKind,
   transportCode,
   type GalaxyFailureKind,
 } from "../extensions/orbit/galaxy-failure";
+import { GalaxyConnectionError, classifyHttp } from "@galaxyproject/galaxy-ops";
 import { runGalaxyCall, wrapGalaxyTool } from "../extensions/orbit/galaxy-tool-wrap";
 import type { GalaxyTool } from "../extensions/orbit/galaxy-tool-source";
 import { bareFamily } from "../shared/galaxy-tool-family.js";
@@ -20,6 +22,26 @@ describe("kindOfEnvelope", () => {
     expect(kindOfEnvelope("auth")).toBe("auth");
     for (const kind of ["not_found", "validation", "version", "job_failed", "unknown", undefined])
       expect(kindOfEnvelope(kind)).toBeUndefined();
+  });
+});
+
+describe("permanentHttpKind", () => {
+  it.each([400, 409, 422])(
+    "reads a %i galaxy-ops called a connection failure as validation",
+    (s) => {
+      expect(permanentHttpKind(classifyHttp(s, { err_msg: "nope" }))).toBe("validation");
+    },
+  );
+
+  it.each([408, 429, 500, 502, 504])("leaves a %i on the retry path", (s) => {
+    expect(permanentHttpKind(classifyHttp(s, { err_msg: "nope" }))).toBeUndefined();
+  });
+
+  it("leaves a request that never got a reply, and anything that isn't a connection failure", () => {
+    expect(permanentHttpKind(new GalaxyConnectionError("fetch failed"))).toBeUndefined();
+    expect(permanentHttpKind(classifyHttp(404, {}))).toBeUndefined();
+    expect(permanentHttpKind(Object.assign(new Error("x"), { status: 400 }))).toBeUndefined();
+    expect(permanentHttpKind(undefined)).toBeUndefined();
   });
 });
 

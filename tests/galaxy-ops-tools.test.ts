@@ -300,6 +300,40 @@ describe("running an operation", () => {
     expect(result.details.galaxy.kind).toBeNull();
   });
 
+  // #645: a 400 for a collection that doesn't exist was reported as a dropped connection, so
+  // the model got retry advice and the retry budget went on a question Galaxy had answered.
+  it("reports a Galaxy 4xx as a validation failure with no recovery kind", async () => {
+    const body = {
+      err_msg: "History dataset collection association not found",
+      err_code: 400008,
+    };
+    recordGalaxy(() => json(body, 400));
+    const result = await toolFromOperation(op("get_collection_details")).execute(
+      "c1",
+      { collection_id: "9787c80789a9018e" },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({ success: false, errorKind: "validation" });
+    expect(result.structuredContent.message).toContain("collection association not found");
+    expect(result.details.galaxy.kind).toBeNull();
+  });
+
+  it.each([429, 502])("keeps a %i a connection failure", async (status) => {
+    recordGalaxy(() => json({ err_msg: "busy" }, status));
+    const result = await toolFromOperation(op("get_collection_details")).execute(
+      "c1",
+      { collection_id: "9787c80789a9018e" },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    expect(result.structuredContent).toMatchObject({ success: false, errorKind: "connection" });
+    expect(result.details.galaxy.kind).toBe("dropped");
+  });
+
   it("runs a policy's check, around and refused hooks", async () => {
     const seen = recordGalaxy(({ path }) =>
       path.endsWith("/contents") ? json({ err_msg: "nope" }, 400) : json([]),
