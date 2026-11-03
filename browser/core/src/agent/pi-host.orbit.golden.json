@@ -11,6 +11,7 @@
     "extensions/orbit/feedback.ts -> fs",
     "extensions/orbit/galaxy-fixture.ts -> fs",
     "extensions/orbit/galaxy-live-source.ts -> node:fs/promises",
+    "extensions/orbit/galaxy-op-policy-local.ts -> node:fs/promises",
     "extensions/orbit/galaxy-upload-tus.ts -> fs",
     "extensions/orbit/galaxy-upload-tus.ts -> tus-js-client",
     "extensions/orbit/galaxy-upload.ts -> @earendil-works/pi-tui",

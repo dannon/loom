@@ -5,6 +5,7 @@
  */
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { bareFamily, type GalaxyToolFamily } from "../../shared/galaxy-tool-family.js";
+import { LOCAL_GALAXY_OP_POLICY } from "./galaxy-op-policy-local";
 import { createGalaxyOpsToolSource } from "./galaxy-ops-tools";
 
 /** pi's own tool shape; the shim registers exactly this. */
@@ -46,7 +47,7 @@ export function installedGalaxyToolSource(): GalaxyToolSource | null {
  * index.ts.
  */
 export function registerGalaxyTools(pi: ExtensionAPI): GalaxyToolFamily {
-  const source = installed ?? createGalaxyOpsToolSource();
+  const source = installed ?? createGalaxyOpsToolSource({ policies: LOCAL_GALAXY_OP_POLICY });
   const tools = source.tools();
   const companions = source.companions?.() ?? [];
   // pi keeps the last definition under a name, so a second one would silently
