@@ -36,7 +36,10 @@ describe("extension module identity under pi's loader", () => {
       const loads = moduleLoads(entry, SIMULATE_WIN32);
       expect(Object.keys(loads).length).toBeGreaterThan(0);
       const duplicated = Object.entries(loads).filter(([, n]) => n > 1);
-      expect(duplicated).toEqual([]);
+      expect(
+        duplicated,
+        "a module was imported as both ./x and ./x.js; import relative .ts files without .js (#649)",
+      ).toEqual([]);
     },
     60_000,
   );
