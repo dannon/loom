@@ -33,7 +33,8 @@ import {
   type GalaxyTool,
 } from "../extensions/orbit/galaxy-tool-source";
 import { profileFromEnv, setCapabilityProfile } from "../shared/capability-profile.js";
-import { CREDENTIALS, json, recordGalaxy } from "./galaxy-test-helpers";
+import { registerGalaxyRecovery } from "../extensions/orbit/galaxy-recovery";
+import { CREDENTIALS, guardHooks, json, recordGalaxy } from "./galaxy-test-helpers";
 
 const ROOT = join(__dirname, "..");
 // galaxy-ops' own zod (4.x): root resolves zod 3, which renders these fields wrongly.
@@ -319,6 +320,25 @@ describe("running an operation", () => {
     expect(result.structuredContent).toMatchObject({ success: false, errorKind: "validation" });
     expect(result.structuredContent.message).toContain("collection association not found");
     expect(result.details.galaxy.kind).toBeNull();
+  });
+
+  it("gives a mutation's 4xx no recovery hint, so nothing tells the model to replay it", async () => {
+    recordGalaxy(() => json({ err_msg: "Invalid tag", err_code: 400008 }, 400));
+    const result = await toolFromOperation(op("update_history")).execute(
+      "c1",
+      { history_id: "9787c80789a9018e", tags: ["bad tag"] },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    expect(result.structuredContent).toMatchObject({ success: false, errorKind: "validation" });
+    const fire = guardHooks(registerGalaxyRecovery);
+    const after = fire("tool_result", {
+      toolName: "update_history",
+      input: { history_id: "9787c80789a9018e" },
+      ...result,
+    });
+    expect(JSON.stringify(after?.content ?? result.content)).not.toContain("Galaxy recovery]");
   });
 
   it.each([429, 502])("keeps a %i a connection failure", async (status) => {
