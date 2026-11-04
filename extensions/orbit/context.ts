@@ -23,8 +23,8 @@ import {
   type SkillEntry,
 } from "./skills-discovery";
 import { findGalaxyPageBlocks } from "./galaxy-page-binding";
-import { isLocalExecDisabled, isLocalShellDisabled } from "./local-exec.js";
-import { galaxyCredentials } from "./galaxy-api.js";
+import { isLocalExecDisabled, isLocalShellDisabled } from "./local-exec";
+import { galaxyCredentials } from "./galaxy-api";
 import { resolveWorkspaceStateDirName, type WorkspaceStateDirName } from "./workspace-state-dir";
 import { SRA_IMPORT_GUIDANCE } from "./sra-import-gate";
 import { galaxyRecoveryGuidance } from "./galaxy-recovery";
@@ -37,7 +37,7 @@ import {
   buildWorkspaceInstructionsContext,
   discoverInstructionFiles,
   takeShadowNotices,
-} from "./user-instructions.js";
+} from "./user-instructions";
 import { readEnv } from "../../shared/orbit-env.js";
 import { excerptHeadTail } from "../../shared/record-excerpt.js";
 import { renderSkillsRouter } from "../../shared/skills-router.js";

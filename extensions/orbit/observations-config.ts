@@ -23,9 +23,9 @@
 
 import fs from "node:fs";
 import { randomBytes } from "node:crypto";
-import { getConfigPath, loadConfig, saveConfig } from "./config.js";
+import { getConfigPath, loadConfig, saveConfig } from "./config";
 import { envNames } from "../../shared/orbit-env.js";
-import { describeLessonsSwitch, LESSONS_OFF_POINTER } from "./lessons/enabled.js";
+import { describeLessonsSwitch, LESSONS_OFF_POINTER } from "./lessons/enabled";
 
 export type ObservationsMode = "off" | "ask" | "auto";
 

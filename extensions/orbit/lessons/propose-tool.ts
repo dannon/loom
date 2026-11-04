@@ -35,8 +35,8 @@ import {
   LIMITS,
   PROPOSABLE_NAMESPACES,
 } from "../../../shared/lesson-rules.js";
-import type { LessonProposalInput } from "./compose.js";
-import { proposeLesson, type ProposeUiContext } from "./propose.js";
+import type { LessonProposalInput } from "./compose";
+import { proposeLesson, type ProposeUiContext } from "./propose";
 
 export const LESSON_PROPOSE_TOOL_NAME = "lesson_propose";
 

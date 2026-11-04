@@ -5,8 +5,8 @@ import {
   SCHEMA_VERSION,
 } from "../../shared/feedback-contract.js";
 import type { FeedbackPayload, FeedbackSysinfo } from "../../shared/feedback-contract.js";
-import { loadConfig, getConfigDir } from "./config.js";
-import { loadProfiles } from "./profiles.js";
+import { loadConfig, getConfigDir } from "./config";
+import { loadProfiles } from "./profiles";
 import { appendFileSync, readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";

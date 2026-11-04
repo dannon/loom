@@ -25,9 +25,9 @@
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { appendActivityEvent } from "./activity.js";
-import { getNotebookPath } from "./state.js";
-import { recordStore } from "./record-store.js";
+import { appendActivityEvent } from "./activity";
+import { getNotebookPath } from "./state";
+import { recordStore } from "./record-store";
 import {
   currentRegistryView,
   grantEvidenceOverride,
@@ -35,10 +35,10 @@ import {
   resolveMode,
   resolveStepKey,
   type PlanStep,
-} from "./evidence-gate.js";
-import type { Registry } from "./registry.js";
-import { NO_APPROVAL_REVISION } from "./registry-evaluation.js";
-import { getSessionRegistry, type SessionRegistry } from "./registry-runtime.js";
+} from "./evidence-gate";
+import type { Registry } from "./registry";
+import { NO_APPROVAL_REVISION } from "./registry-evaluation";
+import { getSessionRegistry, type SessionRegistry } from "./registry-runtime";
 
 const USAGE =
   "Usage: /override <step-key> <reason>  (e.g. /override plan-a-step-2 job finished, block is stale)";
