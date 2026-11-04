@@ -12,6 +12,9 @@ const ENTRIES = [
   "extensions/cli-update/index.ts",
   "extensions/whats-new/index.ts",
 ];
+// On Windows the real resolver already splits spellings, so run it unpatched
+// there; CI's windows-latest leg is then the one check against the real thing.
+const SIMULATE_WIN32 = process.platform !== "win32";
 
 function moduleLoads(entry: string, simulateWin32: boolean): Record<string, number> {
   const args = [FIXTURE, entry, ...(simulateWin32 ? ["--simulate-win32"] : [])];
@@ -22,7 +25,7 @@ describe("extension module identity under pi's loader", () => {
   it.each(ENTRIES)(
     "evaluates each module of %s once with Windows-style resolution",
     (entry) => {
-      const loads = moduleLoads(entry, true);
+      const loads = moduleLoads(entry, SIMULATE_WIN32);
       expect(Object.keys(loads).length).toBeGreaterThan(0);
       const duplicated = Object.entries(loads).filter(([, n]) => n > 1);
       expect(duplicated).toEqual([]);
@@ -35,11 +38,13 @@ describe("extension module identity under pi's loader", () => {
   it("still splits a module imported as both ./b and ./b.js (simulation has teeth)", () => {
     const control = "tests/fixtures/mixed-specifiers/index.ts";
     const b = "tests/fixtures/mixed-specifiers/b.ts";
-    expect(moduleLoads(control, false)[b]).toBe(1);
-    expect(moduleLoads(control, true)[b]).toBe(2);
+    if (SIMULATE_WIN32) expect(moduleLoads(control, false)[b]).toBe(1);
+    expect(moduleLoads(control, SIMULATE_WIN32)[b]).toBe(2);
   }, 60_000);
 
   it("loads state.ts exactly once for the orbit extension", () => {
-    expect(moduleLoads("extensions/orbit/index.ts", true)["extensions/orbit/state.ts"]).toBe(1);
+    expect(
+      moduleLoads("extensions/orbit/index.ts", SIMULATE_WIN32)["extensions/orbit/state.ts"],
+    ).toBe(1);
   }, 60_000);
 });
