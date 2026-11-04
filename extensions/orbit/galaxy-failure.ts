@@ -5,7 +5,7 @@
  * deadline fired, so the wrapper records the kind on `details.galaxy.kind` and the guards read
  * that first. A shell's extras record no kind, so their failures are read by their wording.
  */
-import type { GalaxyErrorKind } from "@galaxyproject/galaxy-ops";
+import { GalaxyConnectionError, type GalaxyErrorKind } from "@galaxyproject/galaxy-ops";
 import type { GalaxyToolFamily } from "../../shared/galaxy-tool-family.js";
 import { record } from "./galaxy-output";
 
@@ -64,20 +64,23 @@ export function kindOfEnvelope(
   return undefined;
 }
 
+const IWC_ORIGIN = "https://iwc.galaxyproject.org/";
+
 /**
  * The kind a galaxy-ops "connection" failure really is when Galaxy answered it with a 4xx.
  *
  * galaxy-ops calls every status but 401/403/404 a connection failure, so a 400 for an id that
- * doesn't exist went down the retry path with the acceptance-unknown advice. A 4xx is Galaxy's
- * definite answer, so it's the model's input to fix; 408 and 429 are the two that a later retry
- * can actually change.
+ * doesn't exist went down the retry path with the acceptance-unknown advice. A 4xx from Galaxy is
+ * its definite answer, so it's the model's input to fix; 408 and 429 are the two that a later
+ * retry can actually change. The IWC manifest comes from GitHub Pages, not Galaxy, and a 4xx
+ * there (a rate limit, a moved file) isn't anything the model's input caused.
  */
 export function permanentHttpKind(err: unknown): "validation" | undefined {
-  if (!(err instanceof Error) || (err as { kind?: unknown }).kind !== "connection") return;
-  const { http, status } = err as { http?: { status?: unknown }; status?: unknown };
-  const code = typeof http?.status === "number" ? http.status : status;
-  if (typeof code !== "number" || code < 400 || code > 499) return;
-  return code === 408 || code === 429 ? undefined : "validation";
+  if (!(err instanceof GalaxyConnectionError)) return;
+  const { status, http } = err as GalaxyConnectionError & { http?: { url?: unknown } };
+  if (typeof status !== "number" || status < 400 || status > 499) return;
+  if (typeof http?.url === "string" && http.url.startsWith(IWC_ORIGIN)) return;
+  return status === 408 || status === 429 ? undefined : "validation";
 }
 
 /**

@@ -43,6 +43,13 @@ describe("permanentHttpKind", () => {
     expect(permanentHttpKind(Object.assign(new Error("x"), { status: 400 }))).toBeUndefined();
     expect(permanentHttpKind(undefined)).toBeUndefined();
   });
+
+  it("leaves a 4xx from the IWC manifest, which isn't Galaxy answering", () => {
+    const err = Object.assign(new GalaxyConnectionError("IWC manifest fetch failed: 403", 403), {
+      http: { status: 403, url: "https://iwc.galaxyproject.org/workflow_manifest.json" },
+    });
+    expect(permanentHttpKind(err)).toBeUndefined();
+  });
 });
 
 /** The shape undici throws: a bare TypeError with the reason on cause. */
