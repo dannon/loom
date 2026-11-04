@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -73,6 +73,18 @@ describe("download_dataset destination", () => {
     expect(result.structuredContent).toMatchObject({ success: false, errorKind: "validation" });
     expect(result.structuredContent.message).toContain(`directory ${blocker} does not exist`);
   });
+
+  it.each(["~/reads.fastqsanger", "$HOME/data/reads.fastqsanger", "${HOME}/reads.fastqsanger"])(
+    "refuses %s rather than making a literal ./~ the exec guard never checked",
+    async (filePath) => {
+      const seen = dataset();
+      const result = await download(localTool(), filePath);
+      expect(seen).toEqual([]);
+      expect(result.structuredContent).toMatchObject({ success: false, errorKind: "validation" });
+      expect(result.structuredContent.message).toContain("absolute or workspace-relative");
+      for (const dir of ["~", "$HOME", "${HOME}"]) expect(existsSync(dir)).toBe(false);
+    },
+  );
 
   it("leaves a metadata-only download alone", async () => {
     expect(await downloadDestination({ dataset_id: DATASET })).toBeUndefined();

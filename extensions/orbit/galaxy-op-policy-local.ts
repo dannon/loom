@@ -14,6 +14,14 @@ import { GALAXY_OP_POLICY, type GalaxyOpArgs, type GalaxyOpPolicy } from "./gala
 export async function downloadDestination(args: GalaxyOpArgs): Promise<string | undefined> {
   const filePath = args.file_path;
   if (typeof filePath !== "string" || filePath.length === 0) return undefined;
+  // Nothing here expands ~ or $HOME, but the exec guard does when it rules on the path, so
+  // making the directory would write under a literal ./~ the guard never looked at.
+  if (/^(?:~|\$\{?HOME\}?)(?:\/|$)/.test(filePath)) {
+    return (
+      `Refused: file_path ${filePath} starts with a home-directory shorthand, which isn't ` +
+      `expanded here. Nothing was downloaded. Use an absolute or workspace-relative path.`
+    );
+  }
   const dir = dirname(filePath);
   try {
     await mkdir(dir, { recursive: true });
