@@ -30,7 +30,16 @@ describe("extension module identity under pi's loader", () => {
     60_000,
   );
 
+  // If a jiti or pi bump moves the .js -> .ts fallback off Module._resolveFilename,
+  // the simulation goes inert and every case above passes whatever the spelling.
+  it("still splits a module imported as both ./b and ./b.js (simulation has teeth)", () => {
+    const control = "tests/fixtures/mixed-specifiers/index.ts";
+    const b = "tests/fixtures/mixed-specifiers/b.ts";
+    expect(moduleLoads(control, false)[b]).toBe(1);
+    expect(moduleLoads(control, true)[b]).toBe(2);
+  }, 60_000);
+
   it("loads state.ts exactly once for the orbit extension", () => {
-    expect(moduleLoads("extensions/orbit/index.ts", true)["orbit/state.ts"]).toBe(1);
+    expect(moduleLoads("extensions/orbit/index.ts", true)["extensions/orbit/state.ts"]).toBe(1);
   }, 60_000);
 });

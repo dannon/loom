@@ -1,5 +1,6 @@
 // Loads one extension entry the way pi does (its own jiti, moduleCache: false)
-// and prints how many times each extensions/ module was evaluated, as JSON.
+// and prints how many times each of this repo's .ts modules was evaluated, as
+// JSON keyed by repo-relative path. node_modules is out of scope.
 //
 // With moduleCache off, jiti's only dedupe is a per-load cache keyed by the
 // resolved filename string. A `./x` specifier resolves through mlly, which
@@ -7,7 +8,7 @@
 // x.ts misses mlly and falls back to Node's require.resolve, which on Windows
 // spells it with backslashes. Same file, two keys, two module instances (#649).
 // `--simulate-win32` reproduces that on POSIX by making Node's resolver spell
-// extensions/ paths differently (a harmless `./` segment) from mlly.
+// repo paths differently (a harmless `./` segment) from mlly.
 //
 // Run as a child process so vitest's own module hooks stay out of the way.
 
@@ -18,14 +19,16 @@ import { fileURLToPath } from "url";
 
 const [entry, flag] = process.argv.slice(2);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const extensionsDir = path.join(repoRoot, "extensions") + path.sep;
+const rootPrefix = repoRoot + path.sep;
+const nodeModules = path.sep + "node_modules" + path.sep;
+const inScope = (file) => file.startsWith(rootPrefix) && !file.includes(nodeModules);
 
 if (flag === "--simulate-win32") {
   const resolve = Module._resolveFilename;
   Module._resolveFilename = function (...args) {
     const resolved = resolve.apply(this, args);
-    return resolved.startsWith(extensionsDir)
-      ? extensionsDir + "." + path.sep + resolved.slice(extensionsDir.length)
+    return inScope(resolved)
+      ? rootPrefix + "." + path.sep + resolved.slice(rootPrefix.length)
       : resolved;
   };
 }
@@ -37,8 +40,8 @@ const readFileSync = fs.readFileSync;
 fs.readFileSync = function (file, ...rest) {
   if (typeof file === "string" && file.endsWith(".ts")) {
     const canonical = path.resolve(file);
-    if (canonical.startsWith(extensionsDir)) {
-      const key = path.relative(extensionsDir, canonical).split(path.sep).join("/");
+    if (inScope(canonical)) {
+      const key = path.relative(repoRoot, canonical).split(path.sep).join("/");
       loads[key] = (loads[key] ?? 0) + 1;
     }
   }
