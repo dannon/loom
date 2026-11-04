@@ -1,4 +1,5 @@
 import { execFileSync } from "child_process";
+import * as fs from "fs";
 import * as path from "path";
 import { describe, expect, it } from "vitest";
 
@@ -6,11 +7,18 @@ import { describe, expect, it } from "vitest";
 // twice under pi's loader, so session_start set the notebook path on one copy
 // of state.ts and loom_propose read the other. See the fixture for the why.
 const FIXTURE = path.join(__dirname, "fixtures", "jiti-module-loads.mjs");
+const REPO_ROOT = path.join(__dirname, "..");
+// Every extensions/<name>/index.ts (bin/orbit.js loads them all), plus the
+// gate web/server.ts adds in remote mode, so a new extension can't slip past.
 const ENTRIES = [
-  "extensions/orbit/index.ts",
-  "extensions/orbit-handoff/index.ts",
-  "extensions/cli-update/index.ts",
-  "extensions/whats-new/index.ts",
+  ...fs
+    .readdirSync(path.join(REPO_ROOT, "extensions"), { withFileTypes: true })
+    .filter(
+      (d) =>
+        d.isDirectory() && fs.existsSync(path.join(REPO_ROOT, "extensions", d.name, "index.ts")),
+    )
+    .map((d) => `extensions/${d.name}/index.ts`),
+  "web/extensions/web-mode-gate.ts",
 ];
 // On Windows the real resolver already splits spellings, so run it unpatched
 // there; CI's windows-latest leg is then the one check against the real thing.
