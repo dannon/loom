@@ -19,6 +19,14 @@
  * a single id that always resolves. A test that mocks "electron" then really
  * does replace what the module under test imported, in either install state.
  *
+ * The exported names are exactly the ones app/src imports from "electron" at
+ * runtime -- no more, so an unused export can't drift, and no fewer, so a
+ * module that reaches a new one gets the error below rather than `undefined`.
+ * Type-only imports (IpcMain, IpcMainInvokeEvent) are erased before they get
+ * here and still come from Electron's own types, which is why none are
+ * re-declared: tsconfig.json excludes tests/, so anything declared here would
+ * be checked by nothing.
+ *
  * Nothing here emulates Electron. A test that reaches a real Electron API has
  * a missing mock, so these throw and say so rather than returning a plausible
  * value and failing somewhere less obvious. Tests that only need the import to
@@ -79,7 +87,19 @@ export const webUtils = stub("webUtils", ["getPathForFile"]);
 
 export const Menu = stub("Menu", ["buildFromTemplate", "setApplicationMenu"]);
 
-export const nativeTheme = { shouldUseDarkColors: false, ...stub("nativeTheme", ["on"]) };
+export const nativeImage = stub("nativeImage", [
+  "createFromPath",
+  "createFromBuffer",
+  "createFromDataURL",
+  "createEmpty",
+]);
+
+export const protocol = stub("protocol", [
+  "handle",
+  "unhandle",
+  "registerSchemesAsPrivileged",
+  "registerFileProtocol",
+]);
 
 /** Constructed by main.ts; a test that builds a window needs its own mock. */
 export class BrowserWindow {
@@ -93,7 +113,3 @@ export class BrowserWindow {
     return unavailable("BrowserWindow.fromWebContents");
   }
 }
-
-export type IpcMain = typeof ipcMain;
-export type IpcMainInvokeEvent = unknown;
-export type WebContents = unknown;
