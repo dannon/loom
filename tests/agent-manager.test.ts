@@ -39,15 +39,14 @@ vi.mock("node:os", () => ({
 }));
 
 // app/src/main/agent.ts → secure-config.ts imports `electron` at module top.
-// Without this stub the test only resolves when `app/node_modules/electron`
-// is present, which means CI or a fresh clone has to install app/ deps
-// before the root `vitest` can even start. Stub the small surface area we
-// transitively use; safeStorageAvailable() reads isEncryptionAvailable().
+// vitest.config.ts aliases that specifier so it resolves from both sides to
+// one id (see tests/stubs/electron.ts) and this factory replaces it. Stub the
+// small surface area we transitively use; safeStorageAvailable() reads
+// isEncryptionAvailable().
 vi.mock("electron", () => ({
   // agent.ts imports `app` and reads `app?.isPackaged`; false routes it to the
   // dev resolution paths (no packaged bundle). Without this export vitest
-  // throws "No 'app' export is defined on the 'electron' mock" in a clean
-  // checkout where app/node_modules/electron isn't installed.
+  // throws "No 'app' export is defined on the 'electron' mock".
   app: { isPackaged: false },
   safeStorage: {
     isEncryptionAvailable: () => false,

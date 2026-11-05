@@ -7,7 +7,10 @@ const { handlers, openPath } = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   openPath: vi.fn(),
 }));
-// Electron is installed under app/, not the root test package.
+// Electron belongs to app/, not to the root test package, so the two sides
+// spell the same import differently; vitest.config.ts aliases the specifier
+// to one id so this factory really does replace what files-handler.ts
+// imported. See tests/stubs/electron.ts.
 vi.mock("electron", () => ({
   BrowserWindow: {},
   shell: { openPath },
