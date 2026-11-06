@@ -50,7 +50,12 @@ describe("extension module identity under pi's loader", () => {
     const control = "tests/fixtures/mixed-specifiers/index.ts";
     const b = "tests/fixtures/mixed-specifiers/b.ts";
     if (SIMULATE_WIN32) expect(moduleLoads(control, false)[b]).toBe(1);
-    expect(moduleLoads(control, SIMULATE_WIN32)[b]).toBe(2);
+    expect(
+      moduleLoads(control, SIMULATE_WIN32)[b],
+      SIMULATE_WIN32
+        ? "the win32 simulation no longer splits ./b from ./b.js; jiti or pi moved the .js -> .ts fallback"
+        : "the real Windows resolver no longer splits ./b from ./b.js; jiti may now normalize paths",
+    ).toBe(2);
   }, 60_000);
 
   it("loads state.ts exactly once for the orbit extension", () => {
