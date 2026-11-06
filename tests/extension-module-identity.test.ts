@@ -58,4 +58,29 @@ describe("extension module identity under pi's loader", () => {
       moduleLoads("extensions/orbit/index.ts", SIMULATE_WIN32)["extensions/orbit/state.ts"],
     ).toBe(1);
   }, 60_000);
+
+  // The load test only sees a split once both spellings meet in one graph, so
+  // a lone new `./x.js` would pass until someone else imports `./x`. Catch it here.
+  it("never spells a relative .ts import with .js", () => {
+    const specifier = /(?:\bfrom|\bimport)\s*\(?\s*["'](\.{1,2}\/[^"']+)\.js["']/g;
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, d.name);
+        if (d.isDirectory()) {
+          if (d.name !== "node_modules" && d.name !== "vendor") walk(full);
+        } else if (d.name.endsWith(".ts")) {
+          for (const [, base] of fs.readFileSync(full, "utf-8").matchAll(specifier)) {
+            const target = path.resolve(dir, base);
+            if (!fs.existsSync(`${target}.js`) && fs.existsSync(`${target}.ts`)) {
+              offenders.push(`${path.relative(REPO_ROOT, full)}: ${base}.js`);
+            }
+          }
+        }
+      }
+    };
+    walk(path.join(REPO_ROOT, "extensions"));
+    walk(path.join(REPO_ROOT, "web", "extensions"));
+    expect(offenders, "import relative .ts files without .js (#649)").toEqual([]);
+  });
 });
