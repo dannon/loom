@@ -38,11 +38,11 @@ import { isLessonsEnabled } from "./enabled";
 import * as path from "path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readEnv } from "../../../shared/orbit-env.js";
-import { appendActivityEvent } from "../activity.js";
-import { getNotebookPath } from "../state.js";
-import { resolveReplayPath } from "../submission-replay.js";
-import type { LessonProposalInput } from "./compose.js";
-import { armLessonProposal, disarmLessonProposal, proposeLesson } from "./propose.js";
+import { appendActivityEvent } from "../activity";
+import { getNotebookPath } from "../state";
+import { resolveReplayPath } from "../submission-replay";
+import type { LessonProposalInput } from "./compose";
+import { armLessonProposal, disarmLessonProposal, proposeLesson } from "./propose";
 
 export function isLessonProposalReplayEnabled(): boolean {
   return !!readEnv("LESSON_PROPOSAL_REPLAY")?.trim();

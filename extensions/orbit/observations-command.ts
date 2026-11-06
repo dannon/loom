@@ -21,9 +21,9 @@ import {
   observationsModeChangeBlocker,
   peekInstallToken,
   setObservationsMode,
-} from "./observations-config.js";
-import type { ObservationsMode, ObservationsModeState } from "./observations-config.js";
-import { LESSONS_OFF_POINTER } from "./lessons/enabled.js";
+} from "./observations-config";
+import type { ObservationsMode, ObservationsModeState } from "./observations-config";
+import { LESSONS_OFF_POINTER } from "./lessons/enabled";
 import {
   SENT_LOG_FILE,
   appendSentLog,
@@ -35,19 +35,19 @@ import {
   readSentLog,
   removeFromObservationOutbox,
   retractObservation,
-} from "./observations.js";
-import type { ObservationFacts, ObservationSentEntry } from "./observations.js";
+} from "./observations";
+import type { ObservationFacts, ObservationSentEntry } from "./observations";
 import {
   deliverObservation,
   lastObservationFacts,
   liveDeliverDeps,
   localWriteWarning,
-} from "./observation-triggers.js";
+} from "./observation-triggers";
 import {
   PRIVACY_STATEMENT,
   PURPOSE_STATEMENT,
   renderObservationForConfirm,
-} from "./observation-ui.js";
+} from "./observation-ui";
 import { scanObservationForLeaks, validateObservation } from "../../shared/observation-contract.js";
 
 export const OBSERVATIONS_USAGE =

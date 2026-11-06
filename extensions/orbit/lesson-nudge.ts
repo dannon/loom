@@ -16,8 +16,8 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isLessonsEnabled } from "./lessons/enabled";
-import { getActivityEvents, onActivityChange, type ActivityEvent } from "./activity.js";
-import { armLessonProposal } from "./lessons/propose.js";
+import { getActivityEvents, onActivityChange, type ActivityEvent } from "./activity";
+import { armLessonProposal } from "./lessons/propose";
 
 export const NUDGE_CUSTOM_TYPE = "loom-lesson-proposal-nudge";
 

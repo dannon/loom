@@ -30,7 +30,7 @@
  */
 
 import * as path from "path";
-import { getNotebookPath } from "./state.js";
+import { getNotebookPath } from "./state";
 import {
   findInvocationBlocks,
   NotebookChangedError,
@@ -38,23 +38,23 @@ import {
   statNotebook,
   withNotebookLock,
   writeNotebook,
-} from "./notebook-writer.js";
-import { checkInvocations, isInvocationLive } from "./tools.js";
+} from "./notebook-writer";
+import { checkInvocations, isInvocationLive } from "./tools";
 import {
   getGalaxyConfig,
   galaxyGetInvocation,
   galaxyGetJobDetails,
   sameGalaxyServer,
-} from "./galaxy-api.js";
-import { buildResumePrompt, isResumableOutcome, type GalaxyFollowUp } from "./auto-resume.js";
+} from "./galaxy-api";
+import { buildResumePrompt, isResumableOutcome, type GalaxyFollowUp } from "./auto-resume";
 import {
   applyJobPollUpdate,
   findJobBlocks,
   isTerminalJobState,
   jobStatusFromGalaxyState,
   type JobYaml,
-} from "./galaxy-job-block.js";
-import { appendActivityEvent } from "./activity.js";
+} from "./galaxy-job-block";
+import { appendActivityEvent } from "./activity";
 
 // 15s — ~4 polls/min × a few in-flight invocations stays well under
 // usegalaxy.org's per-user rate budget while still feeling live. Background

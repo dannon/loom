@@ -21,7 +21,7 @@ import {
   validateObservation,
 } from "../../shared/observation-contract.js";
 import type { Observation } from "../../shared/observation-contract.js";
-import type { ObservationsMode } from "./observations-config.js";
+import type { ObservationsMode } from "./observations-config";
 
 /**
  * Why anyone would say yes. The confirm leads with this because the privacy

@@ -27,9 +27,9 @@ import * as fs from "fs";
 import { isLessonsEnabled, LESSONS_OFF_POINTER } from "./enabled";
 import * as path from "path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { appendActivityEvent } from "../activity.js";
-import { readOrbitVersion } from "../feedback.js";
-import { getNotebookPath } from "../state.js";
+import { appendActivityEvent } from "../activity";
+import { readOrbitVersion } from "../feedback";
+import { getNotebookPath } from "../state";
 import {
   PROPOSABLE_NAMESPACES,
   TRIGGER_KEYS,
@@ -38,11 +38,7 @@ import {
   parseLesson,
   validateLessonMarkdown,
 } from "../../../shared/lesson-rules.js";
-import {
-  composeLessonMarkdown,
-  renderProposalPreview,
-  type LessonProposalInput,
-} from "./compose.js";
+import { composeLessonMarkdown, renderProposalPreview, type LessonProposalInput } from "./compose";
 import {
   draftFilePath,
   lessonFilePath,
@@ -50,7 +46,7 @@ import {
   readLessonFile,
   writeNoClobber,
   writeOverwrite,
-} from "./paths.js";
+} from "./paths";
 
 export const ACTIVITY_SOURCE = "lesson-command";
 

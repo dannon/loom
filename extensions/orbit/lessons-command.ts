@@ -10,13 +10,9 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import {
-  describeLessonsSwitch,
-  isLessonsHardDisabled,
-  setLessonsEnabled,
-} from "./lessons/enabled.js";
-import { resetLessonStore } from "./lessons/store.js";
-import { describeObservationsMode } from "./observations-config.js";
+import { describeLessonsSwitch, isLessonsHardDisabled, setLessonsEnabled } from "./lessons/enabled";
+import { resetLessonStore } from "./lessons/store";
+import { describeObservationsMode } from "./observations-config";
 
 export const LESSONS_USAGE = "Usage: /lessons [status | on | off]";
 

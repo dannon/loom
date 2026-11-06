@@ -9,13 +9,13 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { piAgentDir } from "./agent-dir.js";
+import { piAgentDir } from "./agent-dir";
 import {
   discoverInstructionFiles,
   INIT_INSTRUCTIONS_FILENAME,
   INSTRUCTIONS_FILENAMES,
   type InstructionFile,
-} from "./user-instructions.js";
+} from "./user-instructions";
 
 /**
  * Shown in the terminal after `init`, deliberately NOT written into the file.
