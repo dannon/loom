@@ -7,7 +7,7 @@ import {
   hasBodyChanged,
   createPageSyncEngine,
   type PageSyncDeps,
-} from "./galaxy-page-sync.js";
+} from "./galaxy-page-sync";
 
 describe("parsePageSyncMode", () => {
   it("is auto only for the exact 'auto' value", () => {
