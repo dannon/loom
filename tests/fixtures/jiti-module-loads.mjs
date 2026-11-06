@@ -1,6 +1,7 @@
 // Loads one extension entry the way pi does (its own jiti, moduleCache: false)
 // and prints how many times each of this repo's .ts modules was evaluated, as
-// JSON keyed by repo-relative path. node_modules is out of scope.
+// JSON keyed by repo-relative path on a final `@@module-loads ` line.
+// node_modules is out of scope.
 //
 // With moduleCache off, jiti's only dedupe is a per-load cache keyed by the
 // resolved filename string. A `./x` specifier resolves through mlly, which
@@ -57,7 +58,7 @@ const jiti = createJiti(import.meta.url, { moduleCache: false });
 
 jiti
   .import(path.join(repoRoot, entry), { default: true })
-  .then(() => process.stdout.write(JSON.stringify(loads)))
+  .then(() => process.stdout.write(`\n@@module-loads ${JSON.stringify(loads)}\n`))
   .catch((err) => {
     console.error(err);
     process.exit(1);

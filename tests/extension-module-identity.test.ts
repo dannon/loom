@@ -24,9 +24,15 @@ const ENTRIES = [
 // there; CI's windows-latest leg is then the one check against the real thing.
 const SIMULATE_WIN32 = process.platform !== "win32";
 
+// The fixture tags its result so stray import-time output can't break the parse.
+const RESULT_TAG = "@@module-loads ";
+
 function moduleLoads(entry: string, simulateWin32: boolean): Record<string, number> {
   const args = [FIXTURE, entry, ...(simulateWin32 ? ["--simulate-win32"] : [])];
-  return JSON.parse(execFileSync(process.execPath, args, { encoding: "utf-8" }));
+  const stdout = execFileSync(process.execPath, args, { encoding: "utf-8" });
+  const at = stdout.lastIndexOf(RESULT_TAG);
+  if (at < 0) throw new Error(`fixture printed no ${RESULT_TAG.trim()} line:\n${stdout}`);
+  return JSON.parse(stdout.slice(at + RESULT_TAG.length));
 }
 
 describe("extension module identity under pi's loader", () => {
