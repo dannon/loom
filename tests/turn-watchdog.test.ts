@@ -326,6 +326,45 @@ describe("TurnWatchdog", () => {
     expect(onTimeout).not.toHaveBeenCalled();
   });
 
+  it("counts the compaction limit from compaction_start, not from the last event", () => {
+    const onTimeout = vi.fn();
+    const watchdog = new TurnWatchdog({
+      timeoutMs: TIMEOUT,
+      compactionTimeoutMs: TIMEOUT * 20,
+      onTimeout,
+    });
+    watchdog.observe("compaction_start");
+    vi.advanceTimersByTime(TIMEOUT * 15);
+    // A user poking at a wedged compaction must not keep postponing the cancel.
+    watchdog.promptSent();
+    watchdog.observe("response");
+    watchdog.stop();
+
+    vi.advanceTimersByTime(TIMEOUT * 5 - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onTimeout).toHaveBeenCalledWith("compaction");
+  });
+
+  it("doesn't count system sleep against the compaction limit", () => {
+    const onTimeout = vi.fn();
+    const watchdog = new TurnWatchdog({
+      timeoutMs: TIMEOUT,
+      compactionTimeoutMs: TIMEOUT * 20,
+      onTimeout,
+    });
+    watchdog.observe("compaction_start");
+    vi.advanceTimersByTime(TIMEOUT * 15);
+    watchdog.suspend();
+    vi.advanceTimersByTime(TIMEOUT * 100);
+    watchdog.resume();
+
+    vi.advanceTimersByTime(TIMEOUT * 20 - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a compaction armed when a prompt sent during it starts no turn", () => {
     const onTimeout = vi.fn();
     const watchdog = new TurnWatchdog({

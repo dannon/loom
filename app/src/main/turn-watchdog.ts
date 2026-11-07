@@ -55,6 +55,8 @@ export class TurnWatchdog {
   // timed, even with no turn in flight: pi runs its post-turn threshold
   // compaction after agent_end, and a manual /compact has no turn either.
   private compacting = false;
+  // A fixed ceiling, so prompts typed at a wedged compaction can't postpone it.
+  private compactionStartedAt = 0;
   // Power state is independent of tool/modal waits and survives stop(). Brain
   // events can still arrive after the OS announces suspend; none may rearm us.
   private suspended = false;
@@ -65,6 +67,7 @@ export class TurnWatchdog {
   promptSent(): void {
     // A fresh user prompt means the machine is awake. Clearing here keeps a
     // dropped powerMonitor `resume` from disabling the watchdog for good.
+    if (this.suspended) this.restartCompactionClock();
     this.suspended = false;
     this.active = true;
     this.paused = false;
@@ -81,6 +84,7 @@ export class TurnWatchdog {
   resume(): void {
     if (!this.suspended) return;
     this.suspended = false;
+    this.restartCompactionClock();
     this.arm();
   }
 
@@ -93,6 +97,7 @@ export class TurnWatchdog {
   observe(eventType: string, uiMethod?: string): void {
     if (eventType === "compaction_start" || eventType === "compaction_end") {
       this.compacting = eventType === "compaction_start";
+      if (this.compacting) this.compactionStartedAt = Date.now();
       if (eventType === "compaction_end") this.paused = false;
       this.arm();
       return;
@@ -158,12 +163,22 @@ export class TurnWatchdog {
     this.stop();
   }
 
+  // Sleep is excluded from the compaction ceiling as it is from the silence window.
+  private restartCompactionClock(): void {
+    if (this.compacting) this.compactionStartedAt = Date.now();
+  }
+
   private arm(): void {
     this.clearTimer();
     if (!(this.active || this.compacting) || this.paused || this.suspended) return;
     const stalled = this.compacting ? "compaction" : "turn";
-    const timeoutMs = this.compacting ? this.config.compactionTimeoutMs : this.config.timeoutMs;
-    if (timeoutMs === undefined) return;
+    const limitMs = this.compacting ? this.config.compactionTimeoutMs : this.config.timeoutMs;
+    if (limitMs === undefined) return;
+    // The compaction ceiling counts from compaction_start; anything that re-arms
+    // meanwhile (a handled command, a queued prompt) gets only what's left.
+    const timeoutMs = this.compacting
+      ? Math.max(0, limitMs - (Date.now() - this.compactionStartedAt))
+      : limitMs;
     this.timer = setTimeout(() => {
       this.timer = null;
       this.active = false;
