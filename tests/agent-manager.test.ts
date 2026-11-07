@@ -302,6 +302,68 @@ describe("AgentManager", () => {
       }
     });
 
+    it("gives a compaction its own limit and says so when it fires (#603)", async () => {
+      vi.useFakeTimers();
+      try {
+        const proc = makeProcess(101);
+        spawnMock.mockReturnValue(proc);
+        const { AgentManager, TURN_SILENCE_TIMEOUT_MS, COMPACTION_SILENCE_TIMEOUT_MS } =
+          await import("../app/src/main/agent.js");
+        const window = {
+          isDestroyed: () => false,
+          setTitle: vi.fn(),
+          webContents: { send: vi.fn() },
+        };
+        const manager = new AgentManager(window as any, "/analysis");
+        manager.start();
+
+        manager.send({ type: "prompt", message: "keep going" });
+        lineHandler?.(JSON.stringify({ type: "compaction_start", reason: "threshold" }));
+        vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS * 2);
+        expect(errorEvents(window)).toHaveLength(0);
+
+        vi.advanceTimersByTime(COMPACTION_SILENCE_TIMEOUT_MS);
+        const errors = errorEvents(window);
+        expect(errors).toHaveLength(1);
+        const message = (errors[0][1] as { message?: string }).message;
+        expect(message).toMatch(/summariz/i);
+        expect(message).not.toMatch(/two minutes/);
+        expect(proc.stdin.write).toHaveBeenCalledWith(expect.stringMatching(/"type":"abort"/));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("drops a crashed brain's compaction before the silent restart", async () => {
+      vi.useFakeTimers();
+      try {
+        const first = makeProcess(101);
+        const second = makeProcess(202);
+        spawnMock.mockReturnValueOnce(first).mockReturnValueOnce(second);
+        const { AgentManager, TURN_SILENCE_TIMEOUT_MS } = await import("../app/src/main/agent.js");
+        const window = {
+          isDestroyed: () => false,
+          setTitle: vi.fn(),
+          webContents: { send: vi.fn() },
+        };
+        const manager = new AgentManager(window as any, "/analysis");
+        manager.start();
+
+        manager.send({ type: "prompt", message: "keep going" });
+        lineHandler?.(JSON.stringify({ type: "compaction_start", reason: "threshold" }));
+        first.emit("exit", 1, null);
+        vi.advanceTimersByTime(200);
+        expect(spawnMock).toHaveBeenCalledTimes(2);
+
+        // The replacement brain isn't compacting, so its prompt is back on 120s.
+        manager.send({ type: "prompt", message: "hello again" });
+        vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS + 1);
+        expect(errorEvents(window)).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it.each([
       ["a handled command", { success: true, data: { disposition: "handled" } }],
       ["a rejected prompt", { success: false, error: "Preflight failed" }],

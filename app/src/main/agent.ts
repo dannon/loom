@@ -25,11 +25,21 @@ import { DESKTOP_SHELL_KIND, readEnv, writeEnv } from "../../../shared/orbit-env
 
 /**
  * How long the brain may stay completely silent mid-turn before Orbit treats the
- * turn as stalled and recovers the UI (#185). Generous on purpose: tool runs and
- * UI modals and system sleep are excluded by the watchdog. A waking system gets
- * a fresh window so the provider connection has time to recover.
+ * turn as stalled and recovers the UI (#185). Generous on purpose: tool runs,
+ * UI modals, context compaction and system sleep are excluded by the watchdog.
+ * A waking system gets a fresh window so the provider connection has time to
+ * recover.
  */
 export const TURN_SILENCE_TIMEOUT_MS = 120_000;
+
+/**
+ * The same backstop while pi compacts, which streams nothing until it's done.
+ * The #603 reporter measured about an hour per compaction on a 212K llama.cpp
+ * server (re-reading the history, then decoding the summary at ~17 tok/s), so
+ * this leaves room for that and only catches a summary request that has truly
+ * hung.
+ */
+export const COMPACTION_SILENCE_TIMEOUT_MS = 2 * 60 * 60_000;
 
 const PROVIDER_ENV_MAP: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
@@ -209,7 +219,8 @@ export class AgentManager {
     this.cwd = cwd;
     this.watchdog = new TurnWatchdog({
       timeoutMs: TURN_SILENCE_TIMEOUT_MS,
-      onTimeout: () => this.handleTurnStalled(),
+      compactionTimeoutMs: COMPACTION_SILENCE_TIMEOUT_MS,
+      onTimeout: (stalled) => this.handleTurnStalled(stalled),
     });
     this.refreshWindowTitle();
   }
@@ -469,6 +480,8 @@ export class AgentManager {
         return;
       }
       this.process = null;
+      // The crash-restart path below never reaches setStatus's reset().
+      this.watchdog.brainExited();
 
       // Clean exit (intentional stop, or normal termination).
       if (code === 0 || code === null) {
@@ -676,7 +689,7 @@ export class AgentManager {
     if (status === "stopped" || status === "error") {
       this.turnActive = false;
       // The process is gone; never let a pending watchdog fire against it.
-      this.watchdog.stop();
+      this.watchdog.reset();
     }
     log("status:", status, message || "");
     if (!this.window.isDestroyed()) {
@@ -691,15 +704,21 @@ export class AgentManager {
    * turn done, and best-effort tell the brain to abort so its streaming state
    * clears and the next prompt isn't queued behind a dead turn.
    */
-  private handleTurnStalled(): void {
-    log("turn stalled: no brain activity for", TURN_SILENCE_TIMEOUT_MS, "ms");
+  private handleTurnStalled(stalled: "turn" | "compaction"): void {
+    const limitMs =
+      stalled === "compaction" ? COMPACTION_SILENCE_TIMEOUT_MS : TURN_SILENCE_TIMEOUT_MS;
+    log(`${stalled} stalled: no brain activity for`, limitMs, "ms");
     this.turnActive = false;
     if (!this.window.isDestroyed()) {
       this.window.webContents.send("agent:event", {
         type: "error",
         message:
-          "The assistant stopped responding for two minutes, so Orbit cancelled " +
-          "the request. Please try again.",
+          stalled === "compaction"
+            ? `Summarizing the conversation to free up context took more than ` +
+              `${Math.round(limitMs / 60_000)} minutes, so Orbit cancelled it. ` +
+              "Please try again."
+            : "The assistant stopped responding for two minutes, so Orbit cancelled " +
+              "the request. Please try again.",
       });
     }
     // Best-effort: unstick pi's streaming state so the next prompt runs. If the
@@ -725,7 +744,7 @@ export class AgentManager {
 
     // Any line from the brain is a sign of life: reset/pause/disarm the stall
     // watchdog before we act on (or early-return from) this event.
-    this.watchdog.observe(type);
+    this.watchdog.observe(type, (data as { method?: string }).method);
 
     // send() armed the watchdog for this prompt, but a handled command or a
     // rejected prompt means no turn follows -- left armed, it would report a
