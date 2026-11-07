@@ -481,6 +481,44 @@ describe("blocks quoted inside outer Markdown code are not live", () => {
     expect(findInvocationBlocks(content).map((b) => b.invocationId)).toEqual(["inv-real"]);
   });
 
+  it("the close of a block whose opener was lost does not hide the next record", () => {
+    // Seen in a real notebook: a summary block lost its opener, and marked read
+    // the orphaned close as an opener running to the binding's close.
+    const binding = block(renderGalaxyPageBlock(page()));
+    const content = [
+      "### Cost",
+      "",
+      "Total Galaxy compute cost: **$2.82**",
+      "summary: ",
+      "total_steps: 23",
+      "",
+      "failed_jobs: 0",
+      "last_polled_at: 2026-06-04T21:24:18.489Z",
+      "```",
+      "",
+      binding,
+      "",
+    ].join("\n");
+    expect(findGalaxyPageBlocks(content).map((b) => b.pageId)).toEqual(["page-real"]);
+    const out = upsertGalaxyPageBlock(content, page({ lastSyncedRevision: "rev-2" }));
+    expect(out.match(/^```orbit-galaxy-page$/gm)).toHaveLength(1);
+    expect(findGalaxyPageBlocks(out).map((b) => b.lastSyncedRevision)).toEqual(["rev-2"]);
+  });
+
+  it("a plain ``` example after ordinary prose still masks the block it quotes", () => {
+    const quoted = block(renderGalaxyPageBlock(page({ pageId: "page-example" })));
+    const content = `A binding looks like:\n\`\`\`\n${quoted}\n\`\`\`\n`;
+    expect(outerCodeLines(content.split("\n"))[2]).toBe(true);
+    expect(findGalaxyPageBlocks(content)).toEqual([]);
+  });
+
+  it("accepts that key-like prose before a plain ``` example leaves the quoted block live", () => {
+    // The price of reading a bare ``` after `key:` lines as an orphaned close.
+    const quoted = block(renderGalaxyPageBlock(page({ pageId: "page-example" })));
+    const content = `note: a binding looks like\n\`\`\`\n${quoted}\n\`\`\`\n`;
+    expect(findGalaxyPageBlocks(content).map((b) => b.pageId)).toEqual(["page-example"]);
+  });
+
   it("a closed three-backtick example is code, as Markdown renders it", async () => {
     const example = block(renderInvocationYaml(inv({ invocationId: "inv-example" }))).split("\n");
     // The example's own close is the outer fence's close; there is only one.

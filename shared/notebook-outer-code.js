@@ -37,6 +37,10 @@ function isAnyNotebookFenceOpen(line) {
  * - One of our openers indented by accident, alone in its indented code block
  *   and followed by a flush `key:` body, the way every writer emits a body. A
  *   quoted indented example indents its body too, so it is not mistaken for one.
+ * - A bare ``` right after flush `key:` lines is a close whose opener was
+ *   lost, not an opener: it opens nothing and the lexing resumes after it.
+ *   Prose that happens to read as `key:` lines before a plain ``` example
+ *   leaves the block of ours it quotes live; that is the accepted cost.
  *
  * When marked ends one of our blocks before the close the block scanners find
  * (the indented opener above, or a list item that ends under it), marked reads
@@ -127,6 +131,8 @@ function maskCode(tokens, first, doc) {
     if ((!closed && end >= doc.last) || (ours && raw.slice(1).some(isAnyNotebookFenceOpen))) {
       return start + 1;
     }
+    // A bare ``` right after a `key:` body is a close whose opener was lost.
+    if (!ours && raw[0].trim() === "```" && followsKeyLines(doc.lines, start)) return start + 1;
     if (!ours) {
       doc.masked.fill(true, start, end + 1);
       continue;
@@ -151,6 +157,22 @@ function isStrayIndentedOpener(raw, doc, end) {
   let next = end + 1;
   while (next < doc.lines.length && doc.lines[next].trim() === "") next++;
   return next < doc.lines.length && /^[a-z0-9_]+:/.test(doc.lines[next]);
+}
+
+/**
+ * Whether `line` follows a block body: flush `key:` lines, blank lines among
+ * them, as in `scannerClose`.
+ *
+ * @param {readonly string[]} lines
+ * @param {number} line
+ */
+function followsKeyLines(lines, line) {
+  let i = line - 1;
+  let keys = 0;
+  for (; i >= 0 && (lines[i].trim() === "" || /^[a-z0-9_]+:/.test(lines[i])); i--) {
+    if (lines[i].trim() !== "") keys++;
+  }
+  return keys > 0;
 }
 
 /**
