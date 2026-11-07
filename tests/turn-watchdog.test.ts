@@ -444,6 +444,26 @@ describe("TurnWatchdog", () => {
     expect(onTimeout).not.toHaveBeenCalled();
   });
 
+  it("gives the next prompt the normal window after a compaction stall with no compaction_end", () => {
+    const onTimeout = vi.fn();
+    const watchdog = new TurnWatchdog({
+      timeoutMs: TIMEOUT,
+      compactionTimeoutMs: TIMEOUT * 20,
+      onTimeout,
+    });
+    watchdog.promptSent();
+    watchdog.observe("compaction_start");
+    vi.advanceTimersByTime(TIMEOUT * 20);
+    expect(onTimeout).toHaveBeenCalledWith("compaction");
+
+    // The abort never landed, so the user retries against the same wedged brain.
+    watchdog.promptSent();
+    vi.advanceTimersByTime(TIMEOUT - 1);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    expect(onTimeout).toHaveBeenLastCalledWith("turn");
+  });
+
   it("forgets a compaction when the brain process goes away", () => {
     const { watchdog, onTimeout } = make();
     watchdog.promptSent();
