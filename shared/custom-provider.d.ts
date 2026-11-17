@@ -39,6 +39,22 @@ export function syncCustomProviderModelsFile(
   providerName: string,
   entry: LlmProviderConfig,
 ): ModelsConfig;
+
+export const CONTEXT_WINDOW_DECLARED_SHARE: number;
+export function declaredContextWindow(serverWindow: number): number;
+export function parseReportedContextWindow(body: unknown, modelId: string): number | undefined;
+export const CONTEXT_WINDOW_PROBE_TIMEOUT_MS: number;
+export function probeEndpointContextWindow(
+  entry: LlmProviderConfig | undefined,
+  apiKey: string | undefined,
+  opts?: { fetchImpl?: typeof fetch; timeoutMs?: number },
+): Promise<number | undefined>;
+/** A usable hand-set `contextWindow` wins; otherwise the endpoint is asked. */
+export function resolveServerContextWindow(
+  entry: LlmProviderConfig | undefined,
+  apiKey: string | undefined,
+  opts?: { fetchImpl?: typeof fetch; timeoutMs?: number },
+): Promise<{ contextWindow?: number; source?: "config" | "endpoint" }>;
 export function resolveActiveLlmApiKey(
   entry: LlmProviderConfig | undefined,
   env: NodeJS.ProcessEnv | Record<string, string | undefined>,

@@ -54,28 +54,128 @@ export function normalizeEndpointApi(value) {
  * see) and the model is registered for selection; the key is supplied
  * separately at runtime.
  *
- * The context window is a guess either way -- the endpoint is not asked and
- * generally will not say. 128K mirrors the defaults used for the existing local
- * litellm setup; an Anthropic-shaped endpoint gets 200K because every Claude
- * model in service carries at least that, and under-declaring makes pi compact
- * a conversation that had room left. Both clear the 50K picker floor and the
- * 16K assertion floor, so neither hides the model (#418) or trips the
- * "window too small" message (#419).
+ * `entry.contextWindow` is what the server actually holds, when we know it --
+ * set by hand, or filled in from the endpoint (see resolveServerContextWindow).
+ * It is declared minus a margin; see declaredContextWindow.
+ *
+ * Without one the window is a guess. 128K mirrors the defaults used for the
+ * existing local litellm setup; an Anthropic-shaped endpoint gets 200K because
+ * every Claude model in service carries at least that, and under-declaring
+ * makes pi compact a conversation that had room left. Both clear the 50K
+ * picker floor and the 16K assertion floor, so neither hides the model (#418)
+ * or trips the "window too small" message (#419). The guess is wrong for any
+ * local server started with a smaller window, and there it wedges the
+ * session: pi never compacts, and once the history passes the real window
+ * every prompt fails, compaction included (#603).
  */
 export function synthesizeModelDef(entry) {
   if (!entry.model) {
     throw new Error("custom provider entry requires a model id to synthesize a model def");
   }
   const api = normalizeEndpointApi(entry.api);
+  const serverWindow = positiveInt(entry.contextWindow);
   return {
     id: entry.model,
     name: entry.model,
     reasoning: false,
     input: ["text"],
-    contextWindow: api === "anthropic-messages" ? 200000 : 128000,
+    contextWindow: serverWindow
+      ? declaredContextWindow(serverWindow)
+      : api === "anthropic-messages"
+        ? 200000
+        : 128000,
     maxTokens: 16384,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   };
+}
+
+function positiveInt(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 1
+    ? Math.floor(value)
+    : undefined;
+}
+
+/**
+ * Share of a server's real window that we declare to pi.
+ *
+ * pi compacts once its count passes the declared window minus its reserve,
+ * but between provider usage reports that count is a chars/4 estimate, which
+ * runs low against local tokenizers on code and JSON, and the compaction
+ * request needs room of its own. Declaring the full window let a 64K
+ * llama.cpp server overflow before compaction could fit; about 52K declared
+ * compacted cleanly, which is what 80% gives (#603).
+ */
+export const CONTEXT_WINDOW_DECLARED_SHARE = 0.8;
+
+export function declaredContextWindow(serverWindow) {
+  // pi drops a provider whose model declares a zero window.
+  return Math.max(1, Math.floor(serverWindow * CONTEXT_WINDOW_DECLARED_SHARE));
+}
+
+/**
+ * Pull the served context window for `modelId` out of an OpenAI-style
+ * `/models` body, or undefined when the server doesn't say.
+ *
+ * Only fields that mean "the window this server will accept" count:
+ *   - llama.cpp's `meta.n_ctx` is the per-slot window it was started with.
+ *     Its `meta.n_ctx_train`, and the `context_length` its router mode lists,
+ *     are the model's training length, which is exactly the over-declaration
+ *     this exists to stop.
+ *   - vLLM's `max_model_len` is the engine's configured limit.
+ * Ollama and LM Studio list only ids on their OpenAI-compatible `/models`
+ * (LM Studio's native API reports the model's maximum, not the loaded
+ * window), so they get the fallback, or `contextWindow` on the entry.
+ */
+export function parseReportedContextWindow(body, modelId) {
+  const data = Array.isArray(body?.data) ? body.data : [];
+  const card = data.find((m) => m && m.id === modelId) ?? (data.length === 1 ? data[0] : undefined);
+  if (!card) return undefined;
+  return positiveInt(card.meta?.n_ctx) ?? positiveInt(card.max_model_len);
+}
+
+/** Long enough for a LAN box, short enough not to stall a launch on a dead one. */
+export const CONTEXT_WINDOW_PROBE_TIMEOUT_MS = 3000;
+
+/**
+ * Ask an OpenAI-compatible endpoint how large a window it serves. Best-effort
+ * and never throws: any failure means "unknown" and the caller falls back.
+ *
+ * Anthropic-shaped gateways aren't asked; their model list has no window
+ * field we could check against a real server.
+ */
+export async function probeEndpointContextWindow(
+  entry,
+  apiKey,
+  { fetchImpl = globalThis.fetch, timeoutMs = CONTEXT_WINDOW_PROBE_TIMEOUT_MS } = {},
+) {
+  try {
+    if (!entry?.baseUrl || !entry.model) return undefined;
+    if (normalizeEndpointApi(entry.api) !== "openai-completions") return undefined;
+    const url = `${String(entry.baseUrl).replace(/\/+$/, "")}/models`;
+    const res = await fetchImpl(url, {
+      headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
+      // Never carry the key across a redirect we didn't ask for.
+      redirect: "error",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return undefined;
+    return parseReportedContextWindow(await res.json(), entry.model);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The window a custom endpoint serves, and where that came from. A hand-set
+ * `contextWindow` wins, since it's how Ollama and LM Studio (which don't
+ * report one) get theirs; anything else asks the endpoint. Empty when neither
+ * knows, and the entry then gets the default.
+ */
+export async function resolveServerContextWindow(entry, apiKey, opts) {
+  const configured = positiveInt(entry?.contextWindow);
+  if (configured) return { contextWindow: configured, source: "config" };
+  const reported = await probeEndpointContextWindow(entry, apiKey, opts);
+  return reported ? { contextWindow: reported, source: "endpoint" } : {};
 }
 
 /**

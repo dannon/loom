@@ -42,19 +42,19 @@ import {
   shapeForMode,
   submitObservation,
   withheldReason,
-} from "./observations.js";
+} from "./observations";
 import type {
   ObservationFacts,
   ObservationProblems,
   ObservationShape,
   SubmitObservationResult,
-} from "./observations.js";
-import { getOrCreateInstallToken, resolveObservationsMode } from "./observations-config.js";
-import type { ObservationsMode } from "./observations-config.js";
-import { onEvidenceDecision } from "./evidence-gate.js";
-import { appendActivityEvent } from "./activity.js";
-import { getNotebookPath } from "./state.js";
-import { confirmObservation, describeObservation } from "./observation-ui.js";
+} from "./observations";
+import { getOrCreateInstallToken, resolveObservationsMode } from "./observations-config";
+import type { ObservationsMode } from "./observations-config";
+import { onEvidenceDecision } from "./evidence-gate";
+import { appendActivityEvent } from "./activity";
+import { getNotebookPath } from "./state";
+import { confirmObservation, describeObservation } from "./observation-ui";
 import type { GalaxyToolFamily } from "../../shared/galaxy-tool-family.js";
 
 export const RETRY_LOOP_THRESHOLD = 3;

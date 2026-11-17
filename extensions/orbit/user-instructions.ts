@@ -16,7 +16,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { piAgentDir } from "./agent-dir.js";
+import { piAgentDir } from "./agent-dir";
 
 /** Looked up in this order in each directory; the first one with content wins.
  *  LOOM.md stays readable indefinitely so existing users never have to rename. */

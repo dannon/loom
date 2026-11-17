@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import * as http from "http";
+import type { AddressInfo } from "net";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   ACTIVE_LLM_API_KEY_ENV,
@@ -13,6 +15,10 @@ import {
   mergeCustomProviderIntoModelsConfig,
   syncCustomProviderModelsFile,
   resolveActiveLlmApiKey,
+  declaredContextWindow,
+  parseReportedContextWindow,
+  probeEndpointContextWindow,
+  resolveServerContextWindow,
 } from "../shared/custom-provider.js";
 
 describe("isCustomProvider", () => {
@@ -293,6 +299,219 @@ describe("an anthropic-messages endpoint loads through pi's ModelRegistry", () =
     expect(model).toMatchObject({
       api: "anthropic-messages",
       baseUrl: "https://gateway.example/argoapi",
+    });
+  });
+});
+
+// Shapes copied from each server's source: llama.cpp tools/server
+// get_res_model_info and its router listing, vLLM's ModelCard, Ollama's
+// openai.Model.
+const LLAMA_CPP_MODELS = {
+  object: "list",
+  data: [
+    {
+      id: "qwen3-30b-a3b",
+      object: "model",
+      owned_by: "llamacpp",
+      meta: { vocab_type: 2, n_vocab: 151936, n_ctx: 65536, n_ctx_train: 262144, n_embd: 2048 },
+    },
+  ],
+};
+
+describe("parseReportedContextWindow (#603)", () => {
+  it("reads llama.cpp's served window, not its training length", () => {
+    expect(parseReportedContextWindow(LLAMA_CPP_MODELS, "qwen3-30b-a3b")).toBe(65536);
+  });
+
+  it("ignores a training length on its own -- that is the over-declaration", () => {
+    const older = { data: [{ id: "m", meta: { n_ctx_train: 131072 } }] };
+    const router = { data: [{ id: "m", context_length: 262144 }] };
+    expect(parseReportedContextWindow(older, "m")).toBeUndefined();
+    expect(parseReportedContextWindow(router, "m")).toBeUndefined();
+  });
+
+  it("reads vLLM's max_model_len for the configured model", () => {
+    const vllm = {
+      data: [
+        { id: "other", max_model_len: 8192 },
+        { id: "Qwen/Qwen3-8B", max_model_len: 40960 },
+      ],
+    };
+    expect(parseReportedContextWindow(vllm, "Qwen/Qwen3-8B")).toBe(40960);
+  });
+
+  it("returns undefined for servers that list only ids (Ollama, LM Studio)", () => {
+    const ollama = {
+      object: "list",
+      data: [{ id: "qwen3:30b", object: "model", owned_by: "library" }],
+    };
+    expect(parseReportedContextWindow(ollama, "qwen3:30b")).toBeUndefined();
+  });
+
+  it("takes a single-model server's window even when its id doesn't match", () => {
+    // A plain llama-server lists its --alias or GGUF path, rarely the name
+    // typed into Orbit.
+    expect(parseReportedContextWindow(LLAMA_CPP_MODELS, "whatever-i-typed")).toBe(65536);
+  });
+
+  it("does not borrow another model's window from a multi-model list", () => {
+    const list = { data: [{ id: "a", max_model_len: 8192 }, { id: "b" }] };
+    expect(parseReportedContextWindow(list, "c")).toBeUndefined();
+    expect(parseReportedContextWindow(null, "c")).toBeUndefined();
+  });
+});
+
+describe("declaring a known window (#603)", () => {
+  it("declares the server's window minus the tokenizer margin", () => {
+    // A 64K server needed about 52K declared to compact cleanly.
+    expect(declaredContextWindow(65536)).toBe(52428);
+    const def = synthesizeModelDef({
+      baseUrl: "http://box:8080/v1",
+      model: "q",
+      contextWindow: 65536,
+    });
+    expect(def.contextWindow).toBe(52428);
+  });
+
+  it("never declares a zero window, which pi would reject", () => {
+    expect(declaredContextWindow(1)).toBe(1);
+    expect(
+      parseReportedContextWindow({ data: [{ id: "m", max_model_len: 0.5 }] }, "m"),
+    ).toBeUndefined();
+  });
+
+  it("takes the window from the entry when the server can't report it", () => {
+    const def = synthesizeModelDef({
+      baseUrl: "http://box:11434/v1",
+      model: "q",
+      contextWindow: 32768,
+    });
+    expect(def.contextWindow).toBe(26214);
+  });
+
+  it("threads the window through to models.json", () => {
+    const merged = mergeCustomProviderIntoModelsConfig({}, "openai-compatible", {
+      baseUrl: "http://box:8080/v1",
+      model: "q",
+      contextWindow: 65536,
+    });
+    expect(merged.providers?.["openai-compatible"]?.models).toEqual([
+      expect.objectContaining({ contextWindow: 52428 }),
+    ]);
+  });
+});
+
+describe("resolveServerContextWindow (#603)", () => {
+  const entry = { baseUrl: "http://box:8080/v1", model: "qwen3-30b-a3b" };
+  const reports = () =>
+    vi.fn(async () => new Response(JSON.stringify(LLAMA_CPP_MODELS), { status: 200 }));
+
+  it("takes a hand-set window without asking the endpoint", async () => {
+    const fetchImpl = reports();
+    await expect(
+      resolveServerContextWindow({ ...entry, contextWindow: 32768 }, "k", { fetchImpl }),
+    ).resolves.toEqual({ contextWindow: 32768, source: "config" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("asks the endpoint when the hand-set window isn't a usable number", async () => {
+    for (const contextWindow of ["65536", -1, 0]) {
+      const fetchImpl = reports();
+      await expect(
+        resolveServerContextWindow({ ...entry, contextWindow } as never, "k", { fetchImpl }),
+      ).resolves.toEqual({ contextWindow: 65536, source: "endpoint" });
+    }
+  });
+
+  it("reports neither when the endpoint doesn't say", async () => {
+    const fetchImpl = vi.fn(async () => new Response("nope", { status: 401 }));
+    await expect(resolveServerContextWindow(entry, "k", { fetchImpl })).resolves.toEqual({});
+  });
+});
+
+describe("probeEndpointContextWindow (#603)", () => {
+  const entry = { baseUrl: "http://box:8080/v1/", model: "qwen3-30b-a3b" };
+  const okFetch = (body: unknown) =>
+    vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
+
+  it("asks /models with the key and returns the served window", async () => {
+    const fetchImpl = okFetch(LLAMA_CPP_MODELS);
+    await expect(probeEndpointContextWindow(entry, "sk-local", { fetchImpl })).resolves.toBe(65536);
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("http://box:8080/v1/models");
+    expect(init.headers).toEqual({ authorization: "Bearer sk-local" });
+    expect(init.redirect).toBe("error");
+  });
+
+  it("falls back (undefined) on an error status, bad JSON, or a network failure", async () => {
+    const status = vi.fn(async () => new Response("nope", { status: 401 }));
+    const badJson = vi.fn(async () => new Response("not json", { status: 200 }));
+    const down = vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    });
+    for (const fetchImpl of [status, badJson, down]) {
+      await expect(probeEndpointContextWindow(entry, "k", { fetchImpl })).resolves.toBeUndefined();
+    }
+  });
+
+  it("does not ask an anthropic-messages gateway", async () => {
+    const fetchImpl = okFetch(LLAMA_CPP_MODELS);
+    const argo = { baseUrl: "https://gw", model: "claudeopus5", api: "anthropic-messages" };
+    await expect(probeEndpointContextWindow(argo, "k", { fetchImpl })).resolves.toBeUndefined();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  describe("against a real socket", () => {
+    let server: http.Server;
+    let base: string;
+    let handler: (req: http.IncomingMessage, res: http.ServerResponse) => void;
+    beforeEach(async () => {
+      server = http.createServer((req, res) => handler(req, res));
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
+    });
+    afterEach(async () => {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    });
+
+    it("reads a llama.cpp-shaped reply", async () => {
+      handler = (req, res) => {
+        expect(req.url).toBe("/v1/models");
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(LLAMA_CPP_MODELS));
+      };
+      await expect(
+        probeEndpointContextWindow({ baseUrl: base, model: "qwen3-30b-a3b" }, undefined),
+      ).resolves.toBe(65536);
+    });
+
+    it("won't follow a redirect with the key attached", async () => {
+      // Same origin, so a followed redirect would keep the header and succeed.
+      const followed: (string | undefined)[] = [];
+      handler = (req, res) => {
+        if (req.url === "/v1/models") {
+          res.writeHead(302, { location: "/elsewhere" });
+          res.end();
+          return;
+        }
+        followed.push(req.headers.authorization);
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(LLAMA_CPP_MODELS));
+      };
+      await expect(
+        probeEndpointContextWindow({ baseUrl: base, model: "q" }, "secret"),
+      ).resolves.toBeUndefined();
+      expect(followed).toEqual([]);
+    });
+
+    it("gives up on a server that never answers", async () => {
+      handler = () => {
+        /* hang */
+      };
+      await expect(
+        probeEndpointContextWindow({ baseUrl: base, model: "q" }, undefined, { timeoutMs: 50 }),
+      ).resolves.toBeUndefined();
     });
   });
 });

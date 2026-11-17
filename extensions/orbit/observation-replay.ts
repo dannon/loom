@@ -26,18 +26,18 @@ import * as fs from "fs";
 import * as path from "path";
 import { readEnv } from "../../shared/orbit-env.js";
 import { normalizeSignature } from "../../shared/observation-contract.js";
-import { appendActivityEvent } from "./activity.js";
-import { getNotebookPath } from "./state.js";
-import { galaxyToolFamily } from "./galaxy-tool-source.js";
-import { resolveObservationsMode } from "./observations-config.js";
-import { shapeForMode } from "./observations.js";
+import { appendActivityEvent } from "./activity";
+import { getNotebookPath } from "./state";
+import { galaxyToolFamily } from "./galaxy-tool-source";
+import { resolveObservationsMode } from "./observations-config";
+import { shapeForMode } from "./observations";
 import {
   buildAndRecordObservation,
   decideToolResultObservation,
   factsForToolResult,
   newTriggerState,
   recordObservationActivity,
-} from "./observation-triggers.js";
+} from "./observation-triggers";
 
 /** Valid-shaped and obviously synthetic, so a replayed row can't look real. */
 export const DRY_RUN_INSTALL_TOKEN = "0".repeat(32);

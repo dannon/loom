@@ -51,12 +51,12 @@ import {
   getGalaxyConfig,
   sameGalaxyServer,
   type GalaxyHistorySummary,
-} from "./galaxy-api.js";
-import { findGalaxyPageBlocks } from "./galaxy-page-binding.js";
-import { findJobBlocks } from "./galaxy-job-block.js";
-import { findInvocationBlocks } from "./notebook-writer.js";
-import { setPollTickHook } from "./galaxy-poller.js";
-import { getDashboardPath, readDashboardDocument } from "./dashboard-store.js";
+} from "./galaxy-api";
+import { findGalaxyPageBlocks } from "./galaxy-page-binding";
+import { findJobBlocks } from "./galaxy-job-block";
+import { findInvocationBlocks } from "./notebook-writer";
+import { setPollTickHook } from "./galaxy-poller";
+import { getDashboardPath, readDashboardDocument } from "./dashboard-store";
 import { capabilityProfile } from "../../shared/capability-profile.js";
 
 /** The only Galaxy reads this source is allowed to make. Anything not built by

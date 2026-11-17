@@ -123,7 +123,7 @@ function maskConfig(cfg: OrbitConfig): MaskedOrbitConfig {
  * Reconcile the renderer-supplied config against what's on disk, encrypting
  * any newly-supplied plaintext secrets and preserving unchanged ones.
  */
-function reconcileIncomingConfig(incoming: Record<string, unknown>): OrbitConfig {
+export function reconcileIncomingConfig(incoming: Record<string, unknown>): OrbitConfig {
   const current = loadConfig();
   const canEncrypt = safeStorageAvailable();
   const out: OrbitConfig = { ...current, ...(incoming as OrbitConfig) };
@@ -165,6 +165,7 @@ function reconcileIncomingConfig(incoming: Record<string, unknown>): OrbitConfig
         model?: string;
         baseUrl?: string;
         api?: string;
+        contextWindow?: number;
       } = {};
       // Preserve existing model if the incoming entry doesn't carry one --
       // a partial save (e.g. rotate-just-the-key) shouldn't wipe the model.
@@ -174,6 +175,14 @@ function reconcileIncomingConfig(incoming: Record<string, unknown>): OrbitConfig
       else if (existing?.baseUrl) entry.baseUrl = existing.baseUrl;
       if (p.api !== undefined) entry.api = p.api;
       else if (existing?.api) entry.api = existing.api;
+      // Preferences has no field for this, so a hand-set window would be
+      // dropped by every save. It describes one server, so it doesn't follow
+      // the entry to a new base URL (#603).
+      const sameServer = (a?: string, b?: string) =>
+        (a ?? "").trim().replace(/\/+$/, "") === (b ?? "").trim().replace(/\/+$/, "");
+      if (existing?.contextWindow && sameServer(entry.baseUrl, existing.baseUrl)) {
+        entry.contextWindow = existing.contextWindow;
+      }
       if (rawKey === UNCHANGED_SECRET || rawKey === undefined) {
         if (existing?.apiKeyEncrypted) entry.apiKeyEncrypted = existing.apiKeyEncrypted;
         else if (existing?.apiKey) entry.apiKey = existing.apiKey;

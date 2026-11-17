@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
-import { galaxyGetMostRecentHistory } from "./galaxy-api.js";
+import { galaxyGetMostRecentHistory } from "./galaxy-api";
 
 describe("galaxyGetMostRecentHistory", () => {
   const origFetch = global.fetch;
@@ -42,7 +42,7 @@ describe("galaxyGetMostRecentHistory", () => {
 
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import { galaxyGet, galaxyPost } from "./galaxy-api.js";
+import { galaxyGet, galaxyPost } from "./galaxy-api";
 
 describe("galaxy API redirect handling", () => {
   const KEY = "SEKRET-CANARY-123";

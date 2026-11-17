@@ -26,6 +26,14 @@ export interface LlmProviderConfig {
    * (`https://host`, and the client appends `/v1/messages`).
    */
   api?: string;
+  /**
+   * The window the endpoint's server actually holds, in tokens -- e.g. the
+   * `-c` a llama.cpp server or the `num_ctx` an Ollama model was started with.
+   * Needed only for servers that don't report it on `/models` (llama.cpp and
+   * vLLM do). Orbit declares 80% of it to pi; see declaredContextWindow.
+   * Ignored unless `baseUrl` is set.
+   */
+  contextWindow?: number;
 }
 
 export interface OrbitConfig {

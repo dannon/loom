@@ -12,14 +12,14 @@
 import fs from "node:fs";
 import { isLessonsEnabled, LESSONS_OFF_POINTER } from "./lessons/enabled";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { getConfigPath, loadConfig, saveConfig, type OrbitConfig } from "./config.js";
+import { getConfigPath, loadConfig, saveConfig, type OrbitConfig } from "./config";
 import { parseLesson, validateLessonMarkdown } from "../../shared/lesson-rules.js";
 import {
   armLessonProposal,
   commitDraft,
   registerLessonArmingLifecycle,
   type ProposeUiContext,
-} from "./lessons/propose.js";
+} from "./lessons/propose";
 import {
   lessonFilePath,
   listDrafts,
@@ -28,13 +28,13 @@ import {
   readLessonFile,
   type LocalLesson,
   type ReadResult,
-} from "./lessons/paths.js";
-import { registerLessonProposeTool } from "./lessons/propose-tool.js";
+} from "./lessons/paths";
+import { registerLessonProposeTool } from "./lessons/propose-tool";
 import {
   isLessonProposalReplayEnabled,
   registerLessonProposalReplay,
-} from "./lessons/propose-replay.js";
-import { registerLessonNudge } from "./lesson-nudge.js";
+} from "./lessons/propose-replay";
+import { registerLessonNudge } from "./lesson-nudge";
 
 const USAGE = [
   "Usage: /lesson                  draft a lesson from this session, for you to approve",

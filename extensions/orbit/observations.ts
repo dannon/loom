@@ -59,20 +59,20 @@ import {
   writeSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
-import type { ObservationsMode } from "./observations-config.js";
+import type { ObservationsMode } from "./observations-config";
 import { join } from "node:path";
 import { release } from "node:os";
-import { getConfigDir } from "./config.js";
-import { readOrbitVersion } from "./feedback.js";
-import { loadProfiles } from "./profiles.js";
-import { galaxyCredentials } from "./galaxy-api.js";
+import { getConfigDir } from "./config";
+import { readOrbitVersion } from "./feedback";
+import { loadProfiles } from "./profiles";
+import { galaxyCredentials } from "./galaxy-api";
 import { isWsl } from "../../shared/wsl.js";
 import type { GalaxyToolFamily } from "../../shared/galaxy-tool-family.js";
 import {
   GALAXY_BUILTIN_TOOL_IDS,
   GALAXY_DATATYPES,
   GALAXY_MCP_TOOLS,
-} from "./observation-allowlists.js";
+} from "./observation-allowlists";
 import { envNames, isDesktopShell, readEnv } from "../../shared/orbit-env.js";
 
 // -----------------------------------------------------------------------------

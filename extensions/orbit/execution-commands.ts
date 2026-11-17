@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getNotebookPath, setCurrentStepAnchor } from "./state.js";
-import { checkPreconditions, renderFailures } from "./init-gate.js";
-import { buildStepLessonNote } from "./lesson-hint.js";
+import { getNotebookPath, setCurrentStepAnchor } from "./state";
+import { checkPreconditions, renderFailures } from "./init-gate";
+import { buildStepLessonNote } from "./lesson-hint";
 
 /**
  * Plan/execution commands. Plans live as markdown sections in `notebook.md`;

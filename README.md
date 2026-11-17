@@ -595,6 +595,8 @@ An optional `api` field picks the wire format. It defaults to `openai-completion
 
 **The two shapes want different base URLs**, because their clients append different paths. An `openai-completions` URL includes the version segment (`https://host/v1`); an `anthropic-messages` URL stops at the host (`https://host`) because the client adds `/v1/messages` itself. A `/v1` in the wrong place is a 404 against a URL that looks correct.
 
+**Context window.** Orbit asks an `openai-completions` endpoint for the window it serves: llama.cpp reports it on `/models` as `meta.n_ctx`, vLLM as `max_model_len`. It declares 80% of that to Pi, so compaction starts while the summary still fits. Ollama and LM Studio don't report a window on their OpenAI-compatible API, and an endpoint that doesn't answer gets the 128K default (200K for `anthropic-messages`). If your server runs a smaller window than that, set it yourself with `"contextWindow": 65536` on the entry. Use the number the server was started with (llama.cpp's `-c`, Ollama's `num_ctx`); Orbit applies the same 80%. Below about 64K there's little room left once Orbit's baseline prompt and tool schemas are in, so a 32K server overflows after a turn or two.
+
 ### Standing instructions (`ORBIT.md`)
 
 Preferences you'd otherwise repeat every session belong in a `ORBIT.md` file,

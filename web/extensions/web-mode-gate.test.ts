@@ -7,8 +7,8 @@ import gate, {
   isPathAllowed,
   shouldBlockTool,
   dropSymlinkedEntries,
-} from "./web-mode-gate.js";
-import { createGalaxyOpsToolSource } from "../../extensions/orbit/galaxy-ops-tools.js";
+} from "./web-mode-gate";
+import { createGalaxyOpsToolSource } from "../../extensions/orbit/galaxy-ops-tools";
 
 describe("isPathAllowed", () => {
   const allowlist = ["/tmp/loom-session/notebook.md"];

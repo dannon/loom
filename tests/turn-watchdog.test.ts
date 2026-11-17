@@ -229,4 +229,159 @@ describe("TurnWatchdog", () => {
     vi.advanceTimersByTime(TIMEOUT * 10);
     expect(onTimeout).toHaveBeenCalledTimes(1);
   });
+  it("stays quiet across a compaction that streams nothing for minutes (#603)", () => {
+    const { watchdog, onTimeout } = make();
+    watchdog.promptSent();
+    watchdog.observe("compaction_start");
+
+    vi.advanceTimersByTime(TIMEOUT * 10);
+    expect(onTimeout).not.toHaveBeenCalled();
+
+    // Back to waiting on the model -- a full silence window applies again.
+    watchdog.observe("compaction_end");
+    vi.advanceTimersByTime(TIMEOUT - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the compaction limit when other events arrive mid-compaction", () => {
+    const onTimeout = vi.fn();
+    const watchdog = new TurnWatchdog({
+      timeoutMs: TIMEOUT,
+      compactionTimeoutMs: TIMEOUT * 20,
+      onTimeout,
+    });
+    watchdog.promptSent();
+    watchdog.observe("compaction_start");
+    // pi can append entries or surface a modal from a session_before_compact hook.
+    watchdog.observe("entry_appended");
+    watchdog.observe("extension_ui_request");
+    watchdog.observe("message_update");
+
+    vi.advanceTimersByTime(TIMEOUT * 10);
+
+    expect(onTimeout).not.toHaveBeenCalled();
+  });
+
+  it("still catches a compaction that hangs past its own limit", () => {
+    const onTimeout = vi.fn();
+    const watchdog = new TurnWatchdog({
+      timeoutMs: TIMEOUT,
+      compactionTimeoutMs: TIMEOUT * 20,
+      onTimeout,
+    });
+    watchdog.promptSent();
+    watchdog.observe("compaction_start");
+
+    vi.advanceTimersByTime(TIMEOUT * 20 - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a compaction that started between turns off the turn limit", () => {
+    // A manual /compact runs with no prompt in flight; a prompt sent while it
+    // is still going must not start a 120s countdown against it.
+    const { watchdog, onTimeout } = make();
+    watchdog.observe("compaction_start");
+    watchdog.promptSent();
+
+    vi.advanceTimersByTime(TIMEOUT * 10);
+    expect(onTimeout).not.toHaveBeenCalled();
+
+    watchdog.observe("compaction_end");
+    vi.advanceTimersByTime(TIMEOUT);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it("watches an automatic compaction that pi runs after agent_end", () => {
+    // pi emits agent_end and only then runs its post-turn threshold check, so
+    // the compaction it starts has no turn in flight.
+    const onTimeout = vi.fn();
+    const watchdog = new TurnWatchdog({
+      timeoutMs: TIMEOUT,
+      compactionTimeoutMs: TIMEOUT * 20,
+      onTimeout,
+    });
+    watchdog.promptSent();
+    watchdog.observe("agent_end");
+    watchdog.observe("compaction_start");
+
+    vi.advanceTimersByTime(TIMEOUT * 20);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it("stands down when a compaction between turns ends", () => {
+    const onTimeout = vi.fn();
+    const watchdog = new TurnWatchdog({
+      timeoutMs: TIMEOUT,
+      compactionTimeoutMs: TIMEOUT * 20,
+      onTimeout,
+    });
+    watchdog.observe("compaction_start");
+    watchdog.observe("compaction_end");
+
+    vi.advanceTimersByTime(TIMEOUT * 40);
+    expect(onTimeout).not.toHaveBeenCalled();
+  });
+
+  it("keeps a compaction armed when a prompt sent during it starts no turn", () => {
+    const onTimeout = vi.fn();
+    const watchdog = new TurnWatchdog({
+      timeoutMs: TIMEOUT,
+      compactionTimeoutMs: TIMEOUT * 20,
+      onTimeout,
+    });
+    watchdog.observe("compaction_start");
+    watchdog.promptSent();
+    // A handled slash command: AgentManager stands the turn down.
+    watchdog.stop();
+
+    vi.advanceTimersByTime(TIMEOUT * 20);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it("isn't paused by a status update that lands during a compaction", () => {
+    // Orbit clears its Galaxy tool label 3s after the tool ends, which can be
+    // inside the summary that follows. Nothing answers a setStatus.
+    const onTimeout = vi.fn();
+    const watchdog = new TurnWatchdog({
+      timeoutMs: TIMEOUT,
+      compactionTimeoutMs: TIMEOUT * 20,
+      onTimeout,
+    });
+    watchdog.promptSent();
+    watchdog.observe("compaction_start");
+    watchdog.observe("extension_ui_request", "setStatus");
+
+    vi.advanceTimersByTime(TIMEOUT * 20);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it("still pauses for a dialog, and a status update doesn't end a tool's pause", () => {
+    const { watchdog, onTimeout } = make();
+    watchdog.promptSent();
+    watchdog.observe("extension_ui_request", "confirm");
+    vi.advanceTimersByTime(TIMEOUT * 5);
+    expect(onTimeout).not.toHaveBeenCalled();
+
+    watchdog.observe("message_update");
+    watchdog.observe("tool_execution_start");
+    watchdog.observe("extension_ui_request", "setStatus");
+    vi.advanceTimersByTime(TIMEOUT * 5);
+    expect(onTimeout).not.toHaveBeenCalled();
+  });
+
+  it("forgets a compaction when the brain process goes away", () => {
+    const { watchdog, onTimeout } = make();
+    watchdog.promptSent();
+    watchdog.observe("compaction_start");
+    watchdog.reset();
+
+    watchdog.promptSent();
+    vi.advanceTimersByTime(TIMEOUT);
+
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+  });
 });

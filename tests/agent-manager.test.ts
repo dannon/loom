@@ -39,15 +39,14 @@ vi.mock("node:os", () => ({
 }));
 
 // app/src/main/agent.ts → secure-config.ts imports `electron` at module top.
-// Without this stub the test only resolves when `app/node_modules/electron`
-// is present, which means CI or a fresh clone has to install app/ deps
-// before the root `vitest` can even start. Stub the small surface area we
-// transitively use; safeStorageAvailable() reads isEncryptionAvailable().
+// vitest.config.ts aliases that specifier so it resolves from both sides to
+// one id (see tests/stubs/electron.ts) and this factory replaces it. Stub the
+// small surface area we transitively use; safeStorageAvailable() reads
+// isEncryptionAvailable().
 vi.mock("electron", () => ({
   // agent.ts imports `app` and reads `app?.isPackaged`; false routes it to the
   // dev resolution paths (no packaged bundle). Without this export vitest
-  // throws "No 'app' export is defined on the 'electron' mock" in a clean
-  // checkout where app/node_modules/electron isn't installed.
+  // throws "No 'app' export is defined on the 'electron' mock".
   app: { isPackaged: false },
   safeStorage: {
     isEncryptionAvailable: () => false,
@@ -298,6 +297,68 @@ describe("AgentManager", () => {
         expect(proc.stdin.write).toHaveBeenCalledWith(expect.stringMatching(/"type":"abort"/));
         // Turn is no longer considered active after recovery.
         expect(manager.getStatusSnapshot().turnActive).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("gives a compaction its own limit and says so when it fires (#603)", async () => {
+      vi.useFakeTimers();
+      try {
+        const proc = makeProcess(101);
+        spawnMock.mockReturnValue(proc);
+        const { AgentManager, TURN_SILENCE_TIMEOUT_MS, COMPACTION_SILENCE_TIMEOUT_MS } =
+          await import("../app/src/main/agent.js");
+        const window = {
+          isDestroyed: () => false,
+          setTitle: vi.fn(),
+          webContents: { send: vi.fn() },
+        };
+        const manager = new AgentManager(window as any, "/analysis");
+        manager.start();
+
+        manager.send({ type: "prompt", message: "keep going" });
+        lineHandler?.(JSON.stringify({ type: "compaction_start", reason: "threshold" }));
+        vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS * 2);
+        expect(errorEvents(window)).toHaveLength(0);
+
+        vi.advanceTimersByTime(COMPACTION_SILENCE_TIMEOUT_MS);
+        const errors = errorEvents(window);
+        expect(errors).toHaveLength(1);
+        const message = (errors[0][1] as { message?: string }).message;
+        expect(message).toMatch(/summariz/i);
+        expect(message).not.toMatch(/two minutes/);
+        expect(proc.stdin.write).toHaveBeenCalledWith(expect.stringMatching(/"type":"abort"/));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("drops a crashed brain's compaction before the silent restart", async () => {
+      vi.useFakeTimers();
+      try {
+        const first = makeProcess(101);
+        const second = makeProcess(202);
+        spawnMock.mockReturnValueOnce(first).mockReturnValueOnce(second);
+        const { AgentManager, TURN_SILENCE_TIMEOUT_MS } = await import("../app/src/main/agent.js");
+        const window = {
+          isDestroyed: () => false,
+          setTitle: vi.fn(),
+          webContents: { send: vi.fn() },
+        };
+        const manager = new AgentManager(window as any, "/analysis");
+        manager.start();
+
+        manager.send({ type: "prompt", message: "keep going" });
+        lineHandler?.(JSON.stringify({ type: "compaction_start", reason: "threshold" }));
+        first.emit("exit", 1, null);
+        vi.advanceTimersByTime(200);
+        expect(spawnMock).toHaveBeenCalledTimes(2);
+
+        // The replacement brain isn't compacting, so its prompt is back on 120s.
+        manager.send({ type: "prompt", message: "hello again" });
+        vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS + 1);
+        expect(errorEvents(window)).toHaveLength(1);
       } finally {
         vi.useRealTimers();
       }
