@@ -26,6 +26,7 @@ import {
   type AnyOperation,
 } from "@galaxyproject/galaxy-ops";
 import { getJobDetailsBridge, getJobLogsBridge, listJobsBridge } from "./galaxy-job-ops";
+import { permanentHttpKind } from "./galaxy-failure";
 import { GALAXY_OP_POLICY, type GalaxyOpArgs, type GalaxyOpPolicy } from "./galaxy-op-policy";
 import { inspectOutput, type OutputQuery } from "./galaxy-output";
 import { galaxyOutputStore } from "./galaxy-output-store";
@@ -190,7 +191,23 @@ export function toolFromOperation(
             joined.throwIfAborted();
             const parsed = sent === undefined ? upfront : parseInput(op, inputOf(sent));
             if (!parsed.ok) return invalid(parsed.message);
-            return runWithEnvelope(op, parsed.input as never, ctx);
+            // runWithEnvelope keeps only the error's kind, and galaxy-ops calls a 400 a connection
+            // failure; watching the op's own throw keeps the status Galaxy answered with.
+            let thrown: unknown;
+            const watched: AnyOperation = {
+              ...op,
+              run: async (input, opCtx) => {
+                try {
+                  return await op.run(input, opCtx);
+                } catch (error) {
+                  thrown = error;
+                  throw error;
+                }
+              },
+            };
+            const env = await runWithEnvelope(watched, parsed.input as never, ctx);
+            const kind = env.success === false ? permanentHttpKind(thrown) : undefined;
+            return kind ? { ...env, errorKind: kind } : env;
           };
           const env = policy?.around
             ? await policy.around(run, params, { signal: joined })
