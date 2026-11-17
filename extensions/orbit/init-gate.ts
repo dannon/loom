@@ -16,10 +16,10 @@
  *   resolve with the user before invoking anything.
  */
 
-import { getNotebookPath, getCurrentHistoryId } from "./state.js";
-import { recordStore } from "./record-store.js";
-import { isLocalShellDisabled } from "./local-exec.js";
-import { getGalaxyConfig } from "./galaxy-api.js";
+import { getNotebookPath, getCurrentHistoryId } from "./state";
+import { recordStore } from "./record-store";
+import { isLocalShellDisabled } from "./local-exec";
+import { getGalaxyConfig } from "./galaxy-api";
 
 export type Routing = "local" | "hybrid" | "remote" | "unknown";
 

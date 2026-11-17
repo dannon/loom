@@ -18,7 +18,7 @@
  * actually pulls a body.
  */
 
-import { parseMostRecentPlan } from "../init-gate.js";
+import { parseMostRecentPlan } from "../init-gate";
 import { recordStore } from "../record-store";
 import { getNotebookPath } from "../state";
 import { isLessonsEnabled } from "./enabled";

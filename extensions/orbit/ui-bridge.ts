@@ -13,7 +13,7 @@ import {
   getNotebookPath,
   getNotebookWidgetMode,
   setNotebookWidgetMode,
-} from "./state.js";
+} from "./state";
 import { OrbitWidgetKey, encodeMarkdownWidget } from "../../shared/orbit-shell-contract.js";
 
 export function setupUIBridge(pi: ExtensionAPI): void {

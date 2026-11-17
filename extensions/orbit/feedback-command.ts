@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { submitFeedback, buildBrainSysinfo, appendToOutbox, readOrbitVersion } from "./feedback.js";
-import { getRecentActivityEvents } from "./activity.js";
-import { loadConfig } from "./config.js";
+import { submitFeedback, buildBrainSysinfo, appendToOutbox, readOrbitVersion } from "./feedback";
+import { getRecentActivityEvents } from "./activity";
+import { loadConfig } from "./config";
 import {
   CLI_FEEDBACK_SOURCE,
   SCHEMA_VERSION,

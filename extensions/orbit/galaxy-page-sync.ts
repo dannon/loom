@@ -1,5 +1,5 @@
-import { stripUntrustedMarkers } from "./galaxy-pages-sync.js";
-import { stripGalaxyPageBlocks } from "./galaxy-page-binding.js";
+import { stripUntrustedMarkers } from "./galaxy-pages-sync";
+import { stripGalaxyPageBlocks } from "./galaxy-page-binding";
 import { readEnv } from "../../shared/orbit-env.js";
 
 export function parsePageSyncMode(env: NodeJS.ProcessEnv): "auto" | "off" {
@@ -28,11 +28,11 @@ export function hasBodyChanged(prev: string | null, next: string): boolean {
   return prev !== next;
 }
 
-import { getNotebookPath, onNotebookChange } from "./state.js";
-import { readNotebook } from "./notebook-writer.js";
-import { getGalaxyConfig, galaxyGetMostRecentHistory } from "./galaxy-api.js";
-import { pushNotebookToGalaxy, resumeGalaxyPage } from "./galaxy-pages-sync.js";
-import { listHistoryPages } from "./galaxy-pages-api.js";
+import { getNotebookPath, onNotebookChange } from "./state";
+import { readNotebook } from "./notebook-writer";
+import { getGalaxyConfig, galaxyGetMostRecentHistory } from "./galaxy-api";
+import { pushNotebookToGalaxy, resumeGalaxyPage } from "./galaxy-pages-sync";
+import { listHistoryPages } from "./galaxy-pages-api";
 
 export interface PageSyncDeps {
   mode: "auto" | "off";

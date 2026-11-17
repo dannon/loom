@@ -30,6 +30,7 @@ import { pickChannel } from "../shared/version-compare.js";
 import {
   isCustomProvider,
   syncCustomProviderModelsFile,
+  resolveServerContextWindow,
   resolveActiveLlmApiKey,
   ENDPOINT_APIS,
   DEFAULT_ENDPOINT_API,
@@ -283,10 +284,28 @@ if (
 
 // Custom endpoint: register it in ~/.pi/agent/models.json so pi can resolve
 // --provider/--model. The key is NOT written here; it's supplied at runtime via
-// --api-key below.
+// --api-key below. Ask the endpoint for its window first: declaring more than
+// the server holds means pi never compacts in time, and the session wedges
+// once the history passes the real window (#603).
 if (!isInformationalCommand && activeLlmProvider && isCustomProvider(activeLlmConfig)) {
+  const { contextWindow } = await resolveServerContextWindow(
+    activeLlmConfig,
+    resolveActiveLlmApiKey(activeLlmConfig, process.env),
+  );
+  // Silently falling back is how #603 happened, and a server that wasn't up
+  // yet or wanted a key we didn't have looks exactly the same afterwards.
+  if (!contextWindow && activeLlmConfig.api !== "anthropic-messages") {
+    console.error(
+      `orbit: provider "${activeLlmProvider}" didn't report its context window on /models, ` +
+        `so Orbit is assuming 128K. If the server holds less, set "contextWindow" on the ` +
+        `provider entry in ~/.orbit/config.json.`,
+    );
+  }
   try {
-    syncCustomProviderModelsFile(join(agentDir, "models.json"), activeLlmProvider, activeLlmConfig);
+    syncCustomProviderModelsFile(join(agentDir, "models.json"), activeLlmProvider, {
+      ...activeLlmConfig,
+      contextWindow,
+    });
   } catch (err) {
     // A rejected `api` is a config problem the user has to fix, not a transient
     // one: limping on would leave models.json without the provider and surface

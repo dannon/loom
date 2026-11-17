@@ -27,8 +27,11 @@ vi.mock("node:readline", () => ({
   }),
 }));
 
-// Electron is installed under app/, not the root test package; mock the bare
-// specifier so this still loads when only root deps are installed (publish-npm).
+// Electron belongs to app/, not to the root test package. Mocking the bare
+// specifier is not enough on its own -- it resolves from tests/, while
+// agent.ts resolves it from app/node_modules -- so vitest.config.ts aliases
+// "electron" to one id that resolves whether or not app/ deps are installed.
+// See tests/stubs/electron.ts.
 vi.mock("electron", () => ({
   app: { isPackaged: false, getVersion: () => "0.0.0", getPath: () => "/tmp" },
   safeStorage: {

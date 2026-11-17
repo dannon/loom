@@ -11,16 +11,37 @@
  * This watchdog is the shell-side backstop: while a prompt is in flight it arms a
  * silence timer, resets it on every byte of brain activity, and fires if the
  * brain goes completely silent for `timeoutMs`. It deliberately pauses for the
- * whole tool-execution window and while a UI modal is open, since those are
- * legitimate long/indefinite waits rather than a stalled provider call. System
- * sleep is excluded too; waking starts a fresh silence window for recovery.
+ * whole tool-execution window, while a UI modal is open, and across a context
+ * compaction, since those are legitimate long/indefinite waits rather than a
+ * stalled provider call. System sleep is excluded too; waking starts a fresh
+ * silence window for recovery.
  */
 export interface TurnWatchdogConfig {
   /** How long the brain may stay silent mid-turn before we treat it as stalled. */
   timeoutMs: number;
-  /** Invoked when a turn stalls. The watchdog is already disarmed when this runs. */
-  onTimeout: () => void;
+  /**
+   * Silence allowed while pi compacts. It emits nothing between
+   * compaction_start and compaction_end, so this has to cover the whole
+   * summary request; it still exists because that request can hang too.
+   * Omit to wait out a compaction indefinitely.
+   */
+  compactionTimeoutMs?: number;
+  /**
+   * Invoked when a turn or compaction stalls, saying which limit ran out. The
+   * watchdog is already disarmed when this runs.
+   */
+  onTimeout: (stalled: "turn" | "compaction") => void;
 }
+
+// pi's RPC UI calls that expect no reply. Only the dialogs (select, confirm,
+// input, editor) leave the brain waiting on the user.
+const FIRE_AND_FORGET_UI_METHODS = new Set([
+  "notify",
+  "setStatus",
+  "setWidget",
+  "setTitle",
+  "set_editor_text",
+]);
 
 export class TurnWatchdog {
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -29,6 +50,11 @@ export class TurnWatchdog {
   // The brain is legitimately blocked (running a tool, or awaiting a modal),
   // so silence is expected and must not be mistaken for a stall.
   private paused = false;
+  // pi is summarizing the conversation. It streams nothing until
+  // compaction_end, and a local model can take minutes (#603). Tracked, and
+  // timed, even with no turn in flight: pi runs its post-turn threshold
+  // compaction after agent_end, and a manual /compact has no turn either.
+  private compacting = false;
   // Power state is independent of tool/modal waits and survives stop(). Brain
   // events can still arrive after the OS announces suspend; none may rearm us.
   private suspended = false;
@@ -61,10 +87,23 @@ export class TurnWatchdog {
   /**
    * Observe a brain -> shell event by its `type`. Resets the silence window on
    * normal activity, pauses across tool/modal waits, and disarms on terminal
-   * events. No-ops when no turn is in flight.
+   * events. Only compaction state is tracked when no turn is in flight.
+   * `uiMethod` is an extension_ui_request's method.
    */
-  observe(eventType: string): void {
+  observe(eventType: string, uiMethod?: string): void {
+    if (eventType === "compaction_start" || eventType === "compaction_end") {
+      this.compacting = eventType === "compaction_start";
+      if (eventType === "compaction_end") this.paused = false;
+      this.arm();
+      return;
+    }
     if (!this.active) return;
+    // A status line or toast neither blocks the brain nor shows the model is
+    // still streaming; letting it pause would switch off a running
+    // compaction's limit until compaction_end.
+    if (eventType === "extension_ui_request" && FIRE_AND_FORGET_UI_METHODS.has(uiMethod ?? "")) {
+      return;
+    }
     switch (eventType) {
       case "agent_end":
       case "error":
@@ -96,22 +135,42 @@ export class TurnWatchdog {
     }
   }
 
-  /** Disarm entirely (process stop/restart, or after firing). */
+  /** The turn is over (or never started); stop watching it. A running compaction stays timed. */
   stop(): void {
-    this.clearTimer();
     this.active = false;
     this.paused = false;
+    this.arm();
+  }
+
+  /**
+   * The brain died and may be silently restarted. Its compaction died with it,
+   * but a turn the renderer is still waiting on keeps its own limit.
+   */
+  brainExited(): void {
+    if (!this.compacting) return;
+    this.compacting = false;
+    this.arm();
+  }
+
+  /** The brain process is gone, so nothing it was doing is still running. */
+  reset(): void {
+    this.compacting = false;
+    this.stop();
   }
 
   private arm(): void {
     this.clearTimer();
-    if (!this.active || this.paused || this.suspended) return;
+    if (!(this.active || this.compacting) || this.paused || this.suspended) return;
+    const stalled = this.compacting ? "compaction" : "turn";
+    const timeoutMs = this.compacting ? this.config.compactionTimeoutMs : this.config.timeoutMs;
+    if (timeoutMs === undefined) return;
     this.timer = setTimeout(() => {
       this.timer = null;
       this.active = false;
       this.paused = false;
-      this.config.onTimeout();
-    }, this.config.timeoutMs);
+      this.compacting = false;
+      this.config.onTimeout(stalled);
+    }, timeoutMs);
   }
 
   private clearTimer(): void {

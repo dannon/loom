@@ -1,27 +1,22 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import {
-  resetState,
-  initSessionArtifacts,
-  getNotebookPath,
-  stopWatchingNotebook,
-} from "./state.js";
-import { startGalaxyPoller, stopGalaxyPoller } from "./galaxy-poller.js";
-import { armGalaxyLivePanel, disarmGalaxyLivePanel } from "./galaxy-live-source.js";
+import { resetState, initSessionArtifacts, getNotebookPath, stopWatchingNotebook } from "./state";
+import { startGalaxyPoller, stopGalaxyPoller } from "./galaxy-poller";
+import { armGalaxyLivePanel, disarmGalaxyLivePanel } from "./galaxy-live-source";
 import {
   createFollowUpDelivery,
   isAutoResumeEnabled,
   setActiveFollowUpDelivery,
-} from "./auto-resume.js";
-import { initGalaxyPageSync, flushNotebookToGalaxy } from "./galaxy-page-sync.js";
+} from "./auto-resume";
+import { initGalaxyPageSync, flushNotebookToGalaxy } from "./galaxy-page-sync";
 import {
   upsertSessionSummaryBlock,
   readNotebook,
   withNotebookLock,
   writeNotebook,
   type SessionSummaryYaml,
-} from "./notebook-writer.js";
-import { activeGalaxyStatus, type ActiveGalaxyStatus } from "./profiles.js";
-import { recordStore } from "./record-store.js";
+} from "./notebook-writer";
+import { activeGalaxyStatus, type ActiveGalaxyStatus } from "./profiles";
+import { recordStore } from "./record-store";
 import * as fs from "fs";
 import * as path from "path";
 import { readEnv } from "../../shared/orbit-env.js";
@@ -30,8 +25,8 @@ import {
   closeSessionRegistry,
   openSessionRegistry,
   recordActiveAtShutdown,
-} from "./registry-runtime.js";
-import { getGalaxyConfig } from "./galaxy-api.js";
+} from "./registry-runtime";
+import { getGalaxyConfig } from "./galaxy-api";
 
 // Tracked across the session so the shutdown handler can write a complete
 // `loom-session` block. ctx is per-event; we can't read it on shutdown

@@ -17,7 +17,7 @@
 
 import fs from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getConfigPath, loadConfig, saveConfig } from "./config.js";
+import { getConfigPath, loadConfig, saveConfig } from "./config";
 import { readEnv } from "../../shared/orbit-env.js";
 
 // Tester codes are opaque, non-secret strings (e.g. "orbit-007"). Constrain the

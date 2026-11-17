@@ -17,7 +17,7 @@
  */
 
 import fs from "node:fs";
-import { getConfigPath, loadConfig, saveConfig } from "../config.js";
+import { getConfigPath, loadConfig, saveConfig } from "../config";
 import { envNames } from "../../../shared/orbit-env.js";
 
 export interface LessonsSwitch {
