@@ -99,6 +99,25 @@ describe("stopping the agent is not a chat error (#564)", () => {
     expect(window.webContents.send).toHaveBeenCalledWith("agent:status", "stopped", undefined);
   });
 
+  it.each([
+    ["exits cleanly", 0, null],
+    ["is killed by a signal", null, "SIGKILL"],
+    ["crashes and is restarted", 1, null],
+  ])(
+    "agent:prompt resolves quietly when the brain %s mid-preflight",
+    async (_label, code, signal) => {
+      const { manager, proc } = await startedManager();
+      const { registerIpcHandlers } = await import("../app/src/main/ipc-handlers.js");
+      registerIpcHandlers(manager);
+      const prompt = handlers.get("agent:prompt")!({}, "hello");
+      // A clean exit resets the turn UI through the "stopped" status; after a crash
+      // the watchdog's stall error is what reports the lost turn.
+      proc.emit("exit", code, signal);
+      await expect(prompt).resolves.toBeUndefined();
+      manager.stop();
+    },
+  );
+
   it("agent:prompt still rejects on a real preflight failure", async () => {
     const { manager, proc } = await startedManager();
     const { registerIpcHandlers } = await import("../app/src/main/ipc-handlers.js");

@@ -326,6 +326,77 @@ describe("TurnWatchdog", () => {
     expect(onTimeout).not.toHaveBeenCalled();
   });
 
+  it("counts the compaction limit from compaction_start, not from the last event", () => {
+    const onTimeout = vi.fn();
+    const watchdog = new TurnWatchdog({
+      timeoutMs: TIMEOUT,
+      compactionTimeoutMs: TIMEOUT * 20,
+      onTimeout,
+    });
+    watchdog.observe("compaction_start");
+    vi.advanceTimersByTime(TIMEOUT * 15);
+    // A user poking at a wedged compaction must not keep postponing the cancel.
+    watchdog.promptSent();
+    watchdog.observe("response");
+    watchdog.stop();
+
+    vi.advanceTimersByTime(TIMEOUT * 5 - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onTimeout).toHaveBeenCalledWith("compaction");
+  });
+
+  it("doesn't count system sleep against the compaction limit", () => {
+    const onTimeout = vi.fn();
+    const watchdog = new TurnWatchdog({
+      timeoutMs: TIMEOUT,
+      compactionTimeoutMs: TIMEOUT * 20,
+      onTimeout,
+    });
+    watchdog.observe("compaction_start");
+    vi.advanceTimersByTime(TIMEOUT * 15);
+    watchdog.suspend();
+    vi.advanceTimersByTime(TIMEOUT * 100);
+    watchdog.resume();
+
+    vi.advanceTimersByTime(TIMEOUT * 20 - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it("times a compaction again once the dialog that paused it is answered", () => {
+    const onTimeout = vi.fn();
+    const watchdog = new TurnWatchdog({
+      timeoutMs: TIMEOUT,
+      compactionTimeoutMs: TIMEOUT * 20,
+      onTimeout,
+    });
+    watchdog.promptSent();
+    watchdog.observe("compaction_start");
+    watchdog.observe("extension_ui_request", "confirm");
+    vi.advanceTimersByTime(TIMEOUT * 60);
+    expect(onTimeout).not.toHaveBeenCalled();
+
+    // The brain says nothing until compaction_end, so only the answer can lift the pause.
+    watchdog.dialogAnswered();
+    vi.advanceTimersByTime(TIMEOUT * 20 - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onTimeout).toHaveBeenCalledWith("compaction");
+  });
+
+  it("stays paused when a dialog is answered while a tool is still running", () => {
+    const { watchdog, onTimeout } = make();
+    watchdog.promptSent();
+    watchdog.observe("tool_execution_start");
+    watchdog.observe("extension_ui_request", "confirm");
+    watchdog.dialogAnswered();
+
+    vi.advanceTimersByTime(TIMEOUT * 5);
+    expect(onTimeout).not.toHaveBeenCalled();
+  });
+
   it("keeps a compaction armed when a prompt sent during it starts no turn", () => {
     const onTimeout = vi.fn();
     const watchdog = new TurnWatchdog({
@@ -371,6 +442,26 @@ describe("TurnWatchdog", () => {
     watchdog.observe("extension_ui_request", "setStatus");
     vi.advanceTimersByTime(TIMEOUT * 5);
     expect(onTimeout).not.toHaveBeenCalled();
+  });
+
+  it("gives the next prompt the normal window after a compaction stall with no compaction_end", () => {
+    const onTimeout = vi.fn();
+    const watchdog = new TurnWatchdog({
+      timeoutMs: TIMEOUT,
+      compactionTimeoutMs: TIMEOUT * 20,
+      onTimeout,
+    });
+    watchdog.promptSent();
+    watchdog.observe("compaction_start");
+    vi.advanceTimersByTime(TIMEOUT * 20);
+    expect(onTimeout).toHaveBeenCalledWith("compaction");
+
+    // The abort never landed, so the user retries against the same wedged brain.
+    watchdog.promptSent();
+    vi.advanceTimersByTime(TIMEOUT - 1);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    expect(onTimeout).toHaveBeenLastCalledWith("turn");
   });
 
   it("forgets a compaction when the brain process goes away", () => {

@@ -131,8 +131,9 @@ const NODE_BIN = resolveNodeBin();
 export type AgentStatus = "running" | "stopped" | "error";
 
 /**
- * Rejection for commands still in flight when stop() kills the brain. Typed so
- * callers can tell a stop they (or a restart) asked for apart from a failure.
+ * Rejection for commands still in flight when the brain goes away, whether
+ * stop() killed it or it exited on its own. Typed so callers can tell it apart
+ * from a failure: the status change or the stall watchdog reports the outcome.
  */
 export class AgentStoppedError extends Error {
   constructor() {
@@ -455,23 +456,29 @@ export class AgentManager {
       }
     }
 
-    const rl = createInterface({
-      input: this.process.stdout!,
-      terminal: false,
-    });
-
-    rl.on("line", (line) => this.handleLine(line));
-
-    this.process.stderr?.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      this.stderr = appendStderr(this.stderr, text);
-      log("stderr:", text.trimEnd());
-    });
-
     // Capture the spawned process so the exit handler doesn't clobber a newer one
     // (race: stop() spawns a new process, then the OLD process's exit fires later
     // and wipes this.process to null even though the new one is alive).
     const spawnedProcess = this.process;
+
+    const rl = createInterface({
+      input: spawnedProcess.stdout!,
+      terminal: false,
+    });
+
+    // Node can flush a crashed brain's stdout after 'exit'; a late compaction_start
+    // from it would put the replacement's watchdog into compaction mode (#616).
+    rl.on("line", (line) => {
+      if (this.process === spawnedProcess) this.handleLine(line);
+    });
+
+    spawnedProcess.stderr?.on("data", (chunk: Buffer) => {
+      const text = chunk.toString();
+      log("stderr:", text.trimEnd());
+      // Late stderr from a dead brain must not land in its replacement's crash summary.
+      if (this.process && this.process !== spawnedProcess) return;
+      this.stderr = appendStderr(this.stderr, text);
+    });
 
     spawnedProcess.on("exit", (code, signal) => {
       log("agent exited, code:", code, "signal:", signal, "pid:", spawnedProcess.pid);
@@ -482,6 +489,10 @@ export class AgentManager {
       this.process = null;
       // The crash-restart path below never reaches setStatus's reset().
       this.watchdog.brainExited();
+      // Its stdout is no longer read, so nothing else would ever settle these.
+      // Settle them as a stop (#564): a clean exit resets the turn UI through
+      // the "stopped" status, and after a crash the watchdog reports the lost turn.
+      this.rejectPendingResponses();
 
       // Clean exit (intentional stop, or normal termination).
       if (code === 0 || code === null) {
@@ -594,6 +605,10 @@ export class AgentManager {
     }
     this.pinnedSessionFile = null;
     this.setStatus("stopped");
+    this.rejectPendingResponses();
+  }
+
+  private rejectPendingResponses(): void {
     for (const [id, pending] of this.pendingResponses) {
       log("rejecting pending response:", id);
       pending.reject(new AgentStoppedError());
@@ -613,6 +628,8 @@ export class AgentManager {
     // for a silent stall. Other commands (abort, set_model, ...) don't.
     if (obj.type === "prompt") {
       this.watchdog.promptSent();
+    } else if (obj.type === "extension_ui_response") {
+      this.watchdog.dialogAnswered();
     }
   }
 
