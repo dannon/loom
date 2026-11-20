@@ -516,8 +516,9 @@ describe("Orbit on pi-host", () => {
       // policy's shown-page reset (session_start) and the Galaxy version capture (session_start,
       // tool_result), which is where observations get the Galaxy version. The empty-completion
       // check adds three (session_start, input, agent_end). The history guard's owner lookup
-      // forgets the signed-in user on session_start.
-      on: 71 + 7 + 1 + 2 + 3 + 1,
+      // forgets the signed-in user on session_start. The tool retry breaker adds five
+      // (session_start, session_tree, session_shutdown, turn_start, tool_result).
+      on: 71 + 7 + 1 + 2 + 3 + 1 + 5,
       // Orbit's own tools; the Galaxy family (the browser entry's 42 operations, the shell's three
       // extras, and Orbit's list_jobs and get_job_logs bridges); galaxy_read_output beside it; and
       // the probe. mcp_read_output is MCP-only.
@@ -576,7 +577,7 @@ describe("Orbit on pi-host", () => {
     const silent = Object.fromEntries(
       notes.flatMap((n) => (n.kind === "silent" ? [[n.event, n.handlers]] : [])),
     );
-    expect(silent).toEqual({ session_tree: 3 });
+    expect(silent).toEqual({ session_tree: 4 });
   });
 
   /**

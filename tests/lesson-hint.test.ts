@@ -490,6 +490,16 @@ describe("registration order", () => {
     expect(hintAt).toBeGreaterThan(redactAt);
   });
 
+  // The breaker strips the hint to compare errors, and its note has to come
+  // after everything else the model reads.
+  it("registers the tool-retry breaker after the lesson hint", () => {
+    const hintAt = source.indexOf("registerLessonHint(pi)");
+    const breakerAt = source.indexOf("registerToolRetryBreaker(pi)");
+    expect(hintAt).toBeGreaterThan(-1);
+    expect(breakerAt).toBeGreaterThan(-1);
+    expect(breakerAt).toBeGreaterThan(hintAt);
+  });
+
   it("registers the lesson hint after the observation triggers, whenever they exist", () => {
     const hintAt = source.indexOf("registerLessonHint(pi)");
     const triggersAt = source.indexOf("registerObservationTriggers(pi)");

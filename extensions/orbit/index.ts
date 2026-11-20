@@ -52,6 +52,7 @@ import { capabilityProfile } from "../../shared/capability-profile.js";
 import { galaxyCredentials } from "./galaxy-api";
 import { registerSecretRedaction } from "./secret-redaction";
 import { registerLessonHint } from "./lesson-hint";
+import { registerToolRetryBreaker } from "./tool-retry-breaker";
 import { registerLessonsSearchTool } from "./lessons/search-tool";
 import { isLessonReplayEnabled, registerLessonReplay } from "./lessons/replay";
 import { registerObservationTriggers } from "./observation-triggers";
@@ -159,6 +160,9 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // redactor. After the oversized-output recovery, so it lands after the
   // preview the model actually reads.
   registerLessonHint(pi);
+  // Last of the result rewriters: it strips the hint above to compare errors,
+  // and its note goes after everything else the model reads.
+  registerToolRetryBreaker(pi);
 
   // brc-analytics is the one MCP server Orbit brings; a shell with no MCP layer
   // at all (the browser worker) says so with mcpServers.
