@@ -4,6 +4,15 @@ Notable, user-facing changes to Orbit (called Loom before 0.9). Each release lis
 highlights; the full commit-level notes live on the GitHub release pages. Add a
 new `## [<version>] - <date>` block with a `### Highlights` list at release time.
 
+## [0.9.1] - 2026-11-22
+
+### Highlights
+
+- Windows: the agent can propose Galaxy runs again. In 0.9.0 every proposal failed with "no notebook is open" while the notebook was right there in the panel, because Orbit loaded its own modules twice on Windows and the two copies disagreed about which notebook was open. The same double load touched other parts of Orbit, so other Windows-only oddities may clear up with it
+- Local models on a custom endpoint: Orbit now asks a llama.cpp or vLLM server how big its context window is instead of assuming 128K, and leaves headroom, so a server started with a 64K window compacts in time instead of wedging once the conversation outgrows it. Ollama and LM Studio don't report their window, so an endpoint in `~/.orbit/config.json` can set `contextWindow` by hand. A slow summary also gets up to two hours instead of being cut off after two minutes of silence, and if it does time out the chat says so
+- When a model keeps resending the same tool call and getting the same error, Orbit tells it after three turns to stop and either change approach or ask you. This mostly helps small local models, which could grind on a call that can never succeed
+- Galaxy: when Galaxy rejects a request (a collection id that doesn't exist, say), Orbit reports that instead of calling it a dropped connection, so the agent stops retrying a question Galaxy already answered. Downloading a dataset creates the destination folder if it's missing, and a path starting with `~` or `$HOME` is refused with a clear message instead of landing in a folder literally named `~`
+
 ## [0.9.0] - 2026-11-02
 
 ### Highlights
