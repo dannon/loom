@@ -5,7 +5,7 @@ import { pipeline } from "node:stream/promises";
 import { execSync, execFileSync } from "node:child_process";
 import type { ForgeConfig } from "@electron-forge/shared-types";
 import { VitePlugin } from "@electron-forge/plugin-vite";
-import { prepareSpeech, SPEECH_STAGE_DIR } from "./scripts/prepare-speech.mjs";
+import { prepareSpeech, SPEECH_STAGE_DIR, tarCommand } from "./scripts/prepare-speech.mjs";
 
 const APP_DIR = __dirname;
 const REPO_ROOT = path.resolve(APP_DIR, "..");
@@ -156,6 +156,13 @@ function downloadFile(url: string, dest: string): Promise<void> {
   });
 }
 
+// Windows' own tar is bsdtar, which reads zips; tarCommand() picks it over Git
+// Bash's GNU tar, which doesn't. Not Expand-Archive: under a pwsh parent,
+// Windows PowerShell loads PowerShell 7's Archive module and fails.
+function extractZipOnWindows(zipPath: string, destDir: string): void {
+  execFileSync(tarCommand(), ["-xf", zipPath, "-C", destDir], { stdio: "inherit" });
+}
+
 // Bundle the Node runtime so native module ABI stays aligned at runtime.
 // Targets the package platform/arch (passed by electron-forge's prePackage
 // hook), which lets a single host produce arch-specific artifacts.
@@ -181,10 +188,7 @@ async function stageNodeBundle(platform: string, arch: string): Promise<void> {
 
   console.log(`[orbit-stage] extracting ${filename}`);
   if (platform === "win32") {
-    execSync(
-      `powershell -Command "Expand-Archive -Path '${tarballPath}' -DestinationPath '${ORBIT_STAGE_PARENT}'"`,
-      { stdio: "inherit" },
-    );
+    extractZipOnWindows(tarballPath, ORBIT_STAGE_PARENT);
   } else {
     execSync(`tar -xf "${tarballPath}" -C "${ORBIT_STAGE_PARENT}"`, { stdio: "inherit" });
   }
@@ -238,10 +242,7 @@ async function stageUvBundle(platform: string, arch: string): Promise<void> {
 
   console.log(`[orbit-stage] extracting ${filename}`);
   if (isWin) {
-    execSync(
-      `powershell -Command "Expand-Archive -Path '${tarballPath}' -DestinationPath '${UV_STAGE_DIR}'"`,
-      { stdio: "inherit" },
-    );
+    extractZipOnWindows(tarballPath, UV_STAGE_DIR);
   } else {
     // Tarball lays out as uv-<target>/uv + uv-<target>/uvx; --strip-components=1
     // flattens that into UV_STAGE_DIR/uv + UV_STAGE_DIR/uvx.
