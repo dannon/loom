@@ -17,8 +17,8 @@ import {
   appendStderr,
 } from "../../../shared/brain-exit.js";
 import { noLocalShellSpawnExtras } from "./local-shell.js";
-import { TurnWatchdog } from "./turn-watchdog.js";
-import { promptStartsNoTurn } from "../../../shared/handled-prompt.js";
+import { TurnWatchdog, type StallKind } from "./turn-watchdog.js";
+import { isSlashCommandPrompt, promptStartsNoTurn } from "../../../shared/handled-prompt.js";
 import { formatWindowTitle } from "./window-title.js";
 import { isOAuthOnlyProvider } from "./oauth-handler.js";
 import { DESKTOP_SHELL_KIND, readEnv, writeEnv } from "../../../shared/orbit-env.js";
@@ -40,6 +40,14 @@ export const TURN_SILENCE_TIMEOUT_MS = 120_000;
  * hung.
  */
 export const COMPACTION_SILENCE_TIMEOUT_MS = 2 * 60 * 60_000;
+
+/**
+ * How long a slash command may run before Orbit stops waiting on it (#674). pi
+ * answers the prompt only once the handler returns, and /approve, /sync and
+ * /reconcile make several Galaxy round-trips first, each of which can sit out
+ * undici's five-minute header timeout against a slow server.
+ */
+export const COMMAND_SILENCE_TIMEOUT_MS = 15 * 60_000;
 
 const PROVIDER_ENV_MAP: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
@@ -221,7 +229,8 @@ export class AgentManager {
     this.watchdog = new TurnWatchdog({
       timeoutMs: TURN_SILENCE_TIMEOUT_MS,
       compactionTimeoutMs: COMPACTION_SILENCE_TIMEOUT_MS,
-      onTimeout: (stalled) => this.handleTurnStalled(stalled),
+      commandTimeoutMs: COMMAND_SILENCE_TIMEOUT_MS,
+      onTimeout: (stalled, label) => this.handleTurnStalled(stalled, label),
     });
     this.refreshWindowTitle();
   }
@@ -627,7 +636,13 @@ export class AgentManager {
     // A prompt (including streamed steer/followUp) starts a turn we must watch
     // for a silent stall. Other commands (abort, set_model, ...) don't.
     if (obj.type === "prompt") {
-      this.watchdog.promptSent();
+      // Without an id the command's response can't be matched, so an id-less
+      // slash prompt stays on the turn limit.
+      const command =
+        typeof obj.id === "string" && isSlashCommandPrompt(obj.message)
+          ? { id: obj.id, label: obj.message.split(/\s/, 1)[0] }
+          : undefined;
+      this.watchdog.promptSent(command);
     } else if (obj.type === "extension_ui_response") {
       this.watchdog.dialogAnswered();
     }
@@ -721,23 +736,31 @@ export class AgentManager {
    * turn done, and best-effort tell the brain to abort so its streaming state
    * clears and the next prompt isn't queued behind a dead turn.
    */
-  private handleTurnStalled(stalled: "turn" | "compaction"): void {
-    const limitMs =
-      stalled === "compaction" ? COMPACTION_SILENCE_TIMEOUT_MS : TURN_SILENCE_TIMEOUT_MS;
-    log(`${stalled} stalled: no brain activity for`, limitMs, "ms");
+  private handleTurnStalled(stalled: StallKind, label?: string): void {
+    const limitMs = {
+      turn: TURN_SILENCE_TIMEOUT_MS,
+      compaction: COMPACTION_SILENCE_TIMEOUT_MS,
+      command: COMMAND_SILENCE_TIMEOUT_MS,
+    }[stalled];
+    const minutes = Math.round(limitMs / 60_000);
+    log(`${stalled} stalled: no brain activity for`, limitMs, "ms", label ?? "");
     this.turnActive = false;
     if (!this.window.isDestroyed()) {
-      this.window.webContents.send("agent:event", {
-        type: "error",
-        message:
-          stalled === "compaction"
-            ? `Summarizing the conversation to free up context took more than ` +
-              `${Math.round(limitMs / 60_000)} minutes, so Orbit cancelled it. ` +
-              "Please try again."
-            : "The assistant stopped responding for two minutes, so Orbit cancelled " +
-              "the request. Please try again.",
-      });
+      const message = {
+        compaction:
+          `Summarizing the conversation to free up context took more than ` +
+          `${minutes} minutes, so Orbit cancelled it. Please try again.`,
+        turn:
+          "The assistant stopped responding for two minutes, so Orbit cancelled " +
+          "the request. Please try again.",
+        command:
+          `${label ?? "The command"} still hasn't finished after ${minutes} minutes, ` +
+          "so Orbit stopped waiting for it. It may still finish, and say so, on its own.",
+      }[stalled];
+      this.window.webContents.send("agent:event", { type: "error", message });
     }
+    // pi's abort doesn't reach a command handler, and no turn is running.
+    if (stalled === "command") return;
     // Best-effort: unstick pi's streaming state so the next prompt runs. If the
     // brain is wedged on a dead socket this may not land, but the UI is already
     // recovered either way.
@@ -762,6 +785,9 @@ export class AgentManager {
     // Any line from the brain is a sign of life: reset/pause/disarm the stall
     // watchdog before we act on (or early-return from) this event.
     this.watchdog.observe(type, (data as { method?: string }).method);
+    if (type === "response" && data.command === "prompt" && typeof data.id === "string") {
+      this.watchdog.commandSettled(data.id);
+    }
 
     // send() armed the watchdog for this prompt, but a handled command or a
     // rejected prompt means no turn follows -- left armed, it would report a

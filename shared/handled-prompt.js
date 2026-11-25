@@ -24,3 +24,14 @@ export function promptStartsNoTurn(event) {
     (event.success === false || isHandledPrompt(event))
   );
 }
+
+/**
+ * pi's test for a prompt that may be an extension command: it runs the handler
+ * to completion before it answers the prompt. Untrimmed, as pi checks it.
+ *
+ * @param {unknown} message
+ * @returns {message is string}
+ */
+export function isSlashCommandPrompt(message) {
+  return typeof message === "string" && message.startsWith("/");
+}

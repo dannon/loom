@@ -510,6 +510,176 @@ describe("AgentManager", () => {
       }
     });
 
+    describe("slash commands doing slow I/O (#674)", () => {
+      async function boot() {
+        const proc = makeProcess(101);
+        spawnMock.mockReturnValue(proc);
+        const mod = await import("../app/src/main/agent.js");
+        const { agentPromptPayload } = await import("../shared/agent-prompt.js");
+        const window = {
+          isDestroyed: () => false,
+          setTitle: vi.fn(),
+          webContents: { send: vi.fn() },
+        };
+        const manager = new mod.AgentManager(window as any, "/analysis");
+        manager.start();
+        const aborts = () =>
+          proc.stdin.write.mock.calls.filter(([line]) => /"type":"abort"/.test(line as string));
+        // The renderer's path: ipc-handlers awaits sendCommand, which tags an id.
+        const prompt = (message: string) => {
+          const reply = manager.sendCommand(agentPromptPayload(message));
+          const id = JSON.parse(proc.stdin.write.mock.calls.at(-1)![0]).id as string;
+          return { reply, id };
+        };
+        const respond = (id: string, data: Record<string, unknown>) =>
+          lineHandler?.(
+            JSON.stringify({ type: "response", id, command: "prompt", success: true, data }),
+          );
+        return { ...mod, proc, window, manager, aborts, prompt, respond };
+      }
+
+      it("does not cancel a command that takes minutes to reach its dialog", async () => {
+        vi.useFakeTimers();
+        try {
+          const { TURN_SILENCE_TIMEOUT_MS, window, aborts, prompt, respond, manager } =
+            await boot();
+          lineHandler?.(JSON.stringify({ type: "agent_settled", aborted: false }));
+
+          // Scott's log: /approve re-fetches the template and checks formats
+          // against a rate-limited Galaxy before it confirms.
+          const { reply, id } = prompt("/approve prop-m6zts1");
+          vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS * 3);
+          expect(errorEvents(window)).toHaveLength(0);
+          expect(aborts()).toHaveLength(0);
+
+          lineHandler?.(
+            JSON.stringify({ type: "extension_ui_request", id: "ui1", method: "confirm" }),
+          );
+          manager.send({ type: "extension_ui_response", id: "ui1", confirmed: true });
+          respond(id, { disposition: "handled" });
+          await expect(reply).resolves.toEqual({ disposition: "handled" });
+          vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS * 3);
+          expect(errorEvents(window)).toHaveLength(0);
+          expect(aborts()).toHaveLength(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("isn't fooled by a reply to some other request mid-command", async () => {
+        vi.useFakeTimers();
+        try {
+          const { TURN_SILENCE_TIMEOUT_MS, window, aborts, prompt, manager, proc } = await boot();
+
+          prompt("/sync push");
+          const state = manager.sendCommand({ type: "get_state" });
+          const stateId = JSON.parse(proc.stdin.write.mock.calls.at(-1)![0]).id;
+          lineHandler?.(
+            JSON.stringify({ type: "response", id: stateId, command: "get_state", success: true }),
+          );
+          await state;
+          vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS * 3);
+
+          expect(errorEvents(window)).toHaveLength(0);
+          expect(aborts()).toHaveLength(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("still catches a hung turn behind a slash prompt that wasn't a command", async () => {
+        vi.useFakeTimers();
+        try {
+          const { TURN_SILENCE_TIMEOUT_MS, window, aborts, prompt, respond } = await boot();
+
+          // pi only knows "/data/reads.fq looks odd" isn't a command once it
+          // looks; then it starts an ordinary turn.
+          const { id } = prompt("/data/reads.fq looks odd");
+          respond(id, { disposition: "started" });
+          lineHandler?.(JSON.stringify({ type: "agent_start" }));
+          vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS + 1);
+
+          const errors = errorEvents(window);
+          expect(errors).toHaveLength(1);
+          expect((errors[0][1] as { message?: string }).message).toMatch(/stopped responding/i);
+          expect(aborts()).toHaveLength(1);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("still catches a model turn that stalls while a command is running", async () => {
+        vi.useFakeTimers();
+        try {
+          const { TURN_SILENCE_TIMEOUT_MS, window, aborts, prompt, manager } = await boot();
+
+          manager.sendCommand({ type: "prompt", message: "summarize my history" });
+          lineHandler?.(JSON.stringify({ type: "agent_start" }));
+          prompt("/reconcile");
+          vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS + 1);
+
+          expect(errorEvents(window)).toHaveLength(1);
+          expect(aborts()).toHaveLength(1);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("gives up on a command that never finishes, without claiming to cancel it", async () => {
+        vi.useFakeTimers();
+        try {
+          const { COMMAND_SILENCE_TIMEOUT_MS, window, aborts, prompt, manager } = await boot();
+
+          prompt("/approve prop-m6zts1");
+          vi.advanceTimersByTime(COMMAND_SILENCE_TIMEOUT_MS - 1);
+          expect(errorEvents(window)).toHaveLength(0);
+          vi.advanceTimersByTime(1);
+
+          const errors = errorEvents(window);
+          expect(errors).toHaveLength(1);
+          const message = (errors[0][1] as { message?: string }).message;
+          expect(message).toMatch(/\/approve/);
+          expect(message).not.toMatch(/cancel/i);
+          // pi's abort can't stop a command handler, so don't pretend it does.
+          expect(aborts()).toHaveLength(0);
+          expect(manager.getStatusSnapshot().turnActive).toBe(false);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("forgets a crashed brain's commands before the silent restart", async () => {
+        vi.useFakeTimers();
+        try {
+          const first = makeProcess(101);
+          const second = makeProcess(202);
+          spawnMock.mockReturnValueOnce(first).mockReturnValueOnce(second);
+          const { AgentManager, TURN_SILENCE_TIMEOUT_MS } =
+            await import("../app/src/main/agent.js");
+          const window = {
+            isDestroyed: () => false,
+            setTitle: vi.fn(),
+            webContents: { send: vi.fn() },
+          };
+          const manager = new AgentManager(window as any, "/analysis");
+          manager.start();
+
+          const reply = manager.sendCommand({ type: "prompt", message: "/approve prop-x" });
+          first.emit("exit", 1, null);
+          await expect(reply).rejects.toThrow("Agent stopped");
+          vi.advanceTimersByTime(200);
+          expect(spawnMock).toHaveBeenCalledTimes(2);
+
+          // The dead command's hold must not shield the new brain's prompt.
+          manager.send({ type: "prompt", message: "hello again" });
+          vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS + 1);
+          expect(errorEvents(window)).toHaveLength(1);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+    });
+
     it("keeps watching a running turn when a queued prompt is handled", async () => {
       vi.useFakeTimers();
       try {

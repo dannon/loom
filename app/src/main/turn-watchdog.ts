@@ -13,9 +13,13 @@
  * brain goes completely silent for `timeoutMs`. It deliberately pauses for the
  * whole tool-execution window, while a UI modal is open, and across a context
  * compaction, since those are legitimate long/indefinite waits rather than a
- * stalled provider call. System sleep is excluded too; waking starts a fresh
+ * stalled provider call. A slash command is one too: pi runs its handler before
+ * it answers the prompt, and a handler can spend minutes on Galaxy before it
+ * shows anything (#674). System sleep is excluded too; waking starts a fresh
  * silence window for recovery.
  */
+export type StallKind = "turn" | "compaction" | "command";
+
 export interface TurnWatchdogConfig {
   /** How long the brain may stay silent mid-turn before we treat it as stalled. */
   timeoutMs: number;
@@ -27,10 +31,17 @@ export interface TurnWatchdogConfig {
    */
   compactionTimeoutMs?: number;
   /**
-   * Invoked when a turn or compaction stalls, saying which limit ran out. The
-   * watchdog is already disarmed when this runs.
+   * How long a slash command may run with no turn going. pi's abort can't
+   * reach a command handler, so this only stops the shell waiting on one
+   * whose request hung. Omit to wait indefinitely.
    */
-  onTimeout: (stalled: "turn" | "compaction") => void;
+  commandTimeoutMs?: number;
+  /**
+   * Invoked when a turn, compaction or command stalls, saying which limit ran
+   * out; for a command, `label` is the one that ran longest. The watchdog is
+   * already disarmed when this runs.
+   */
+  onTimeout: (stalled: StallKind, label?: string) => void;
 }
 
 // pi's RPC UI calls that expect no reply. Only the dialogs (select, confirm,
@@ -60,17 +71,37 @@ export class TurnWatchdog {
   // Power state is independent of tool/modal waits and survives stop(). Brain
   // events can still arrive after the OS announces suspend; none may rearm us.
   private suspended = false;
+  // agent_start seen for the watched prompt. A running turn keeps the silence
+  // window even with a command in flight: the command doesn't block the model.
+  private turnRunning = false;
+  // Slash-command prompts pi hasn't answered yet, by RPC id. Outlives stop():
+  // a command typed mid-turn can still be running after that turn ends.
+  private commands = new Map<string, { label: string; startedAt: number }>();
 
   constructor(private readonly config: TurnWatchdogConfig) {}
 
-  /** A user prompt was dispatched to the brain; begin watching for a stall. */
-  promptSent(): void {
+  /**
+   * A user prompt was dispatched to the brain; begin watching for a stall.
+   * Pass `command` for a slash command: its silence is then the handler's, and
+   * it is timed against the command limit until commandSettled(id).
+   */
+  promptSent(command?: { id: string; label: string }): void {
     // A fresh user prompt means the machine is awake. Clearing here keeps a
     // dropped powerMonitor `resume` from disabling the watchdog for good.
-    if (this.suspended) this.restartCompactionClock();
+    if (this.suspended) this.restartClocks();
     this.suspended = false;
     this.active = true;
     this.paused = false;
+    if (command) this.commands.set(command.id, { label: command.label, startedAt: Date.now() });
+    this.arm();
+  }
+
+  /**
+   * pi answered a prompt, which for a slash command means its handler has
+   * returned. Unknown ids (plain prompts, other requests) change nothing.
+   */
+  commandSettled(id: string): void {
+    if (!this.commands.delete(id)) return;
     this.arm();
   }
 
@@ -84,7 +115,7 @@ export class TurnWatchdog {
   resume(): void {
     if (!this.suspended) return;
     this.suspended = false;
-    this.restartCompactionClock();
+    this.restartClocks();
     this.arm();
   }
 
@@ -102,10 +133,10 @@ export class TurnWatchdog {
       this.arm();
       return;
     }
-    if (!this.active) return;
-    // A prompt's response only says pi accepted or ran it; a reply to get_state
-    // or set_model says nothing about the turn. Neither may lift a tool or
-    // dialog pause.
+    if (!this.active && this.commands.size === 0) return;
+    // A prompt's own response settles through commandSettled(); a reply to
+    // get_state or set_model says nothing about the turn and must not lift a
+    // tool or dialog pause.
     if (eventType === "response") return;
     // A status line or toast neither blocks the brain nor shows the model is
     // still streaming; letting it pause would switch off a running
@@ -114,6 +145,11 @@ export class TurnWatchdog {
       return;
     }
     switch (eventType) {
+      case "agent_start":
+        this.turnRunning = true;
+        this.paused = false;
+        this.arm();
+        return;
       case "agent_end":
       case "error":
         // Turn resolved (success or surfaced error) -- nothing to guard.
@@ -151,15 +187,20 @@ export class TurnWatchdog {
    * so the pause holds until tool_execution_end.
    */
   dialogAnswered(): void {
-    if (!this.compacting || !this.paused) return;
+    if (!this.paused) return;
+    // The dialog belonged to a command if no turn is running; the handler
+    // carries on with no events until it returns, so it starts its clock over.
+    const commandOnly = !this.turnRunning && this.commands.size > 0;
+    if (!this.compacting && !commandOnly) return;
     this.paused = false;
-    this.restartCompactionClock();
+    this.restartClocks();
     this.arm();
   }
 
   /** The turn is over (or never started); stop watching it. A running compaction stays timed. */
   stop(): void {
     this.active = false;
+    this.turnRunning = false;
     this.paused = false;
     this.arm();
   }
@@ -169,39 +210,68 @@ export class TurnWatchdog {
    * but a turn the renderer is still waiting on keeps its own limit.
    */
   brainExited(): void {
-    if (!this.compacting) return;
+    if (!this.compacting && this.commands.size === 0) return;
     this.compacting = false;
+    this.commands.clear();
     this.arm();
   }
 
   /** The brain process is gone, so nothing it was doing is still running. */
   reset(): void {
     this.compacting = false;
+    this.commands.clear();
     this.stop();
   }
 
-  // Sleep is excluded from the compaction ceiling as it is from the silence window.
-  private restartCompactionClock(): void {
-    if (this.compacting) this.compactionStartedAt = Date.now();
+  // Sleep is excluded from the fixed ceilings as it is from the silence window.
+  private restartClocks(): void {
+    const now = Date.now();
+    if (this.compacting) this.compactionStartedAt = now;
+    for (const command of this.commands.values()) command.startedAt = now;
+  }
+
+  // The command that has run longest, which is the one the ceiling is timing.
+  private oldestCommand(): { label: string; startedAt: number } | undefined {
+    let oldest: { label: string; startedAt: number } | undefined;
+    for (const command of this.commands.values()) {
+      if (!oldest || command.startedAt < oldest.startedAt) oldest = command;
+    }
+    return oldest;
   }
 
   private arm(): void {
     this.clearTimer();
-    if (!(this.active || this.compacting) || this.paused || this.suspended) return;
-    const stalled = this.compacting ? "compaction" : "turn";
-    const limitMs = this.compacting ? this.config.compactionTimeoutMs : this.config.timeoutMs;
+    if (this.paused || this.suspended) return;
+    // A compaction outranks everything: prompts typed at it can't postpone it.
+    // Then a watched turn, unless all that's in flight is a command's handler.
+    const command = this.oldestCommand();
+    let stalled: StallKind;
+    if (this.compacting) stalled = "compaction";
+    else if (this.active && (this.turnRunning || !command)) stalled = "turn";
+    else if (command) stalled = "command";
+    else return;
+    const limitMs = {
+      turn: this.config.timeoutMs,
+      compaction: this.config.compactionTimeoutMs,
+      command: this.config.commandTimeoutMs,
+    }[stalled];
     if (limitMs === undefined) return;
-    // The compaction ceiling counts from compaction_start; anything that re-arms
-    // meanwhile (a handled command, a queued prompt) gets only what's left.
-    const timeoutMs = this.compacting
-      ? Math.max(0, limitMs - (Date.now() - this.compactionStartedAt))
-      : limitMs;
+    // The ceilings count from compaction_start or the command's dispatch;
+    // anything that re-arms meanwhile gets only what's left.
+    const startedAt =
+      stalled === "compaction" ? this.compactionStartedAt : (command?.startedAt ?? 0);
+    const timeoutMs =
+      stalled === "turn" ? limitMs : Math.max(0, limitMs - (Date.now() - startedAt));
+    const label = stalled === "command" ? command?.label : undefined;
     this.timer = setTimeout(() => {
       this.timer = null;
       this.active = false;
+      this.turnRunning = false;
       this.paused = false;
       this.compacting = false;
-      this.config.onTimeout(stalled);
+      this.commands.clear();
+      if (label === undefined) this.config.onTimeout(stalled);
+      else this.config.onTimeout(stalled, label);
     }, timeoutMs);
   }
 
