@@ -18,8 +18,6 @@
  * shows anything (#674). System sleep is excluded too; waking starts a fresh
  * silence window for recovery.
  */
-export type StallKind = "turn" | "compaction" | "command";
-
 export interface TurnWatchdogConfig {
   /** How long the brain may stay silent mid-turn before we treat it as stalled. */
   timeoutMs: number;
@@ -43,6 +41,8 @@ export interface TurnWatchdogConfig {
    */
   onTimeout: (stalled: StallKind, label?: string) => void;
 }
+
+export type StallKind = "turn" | "compaction" | "command";
 
 // pi's RPC UI calls that expect no reply. Only the dialogs (select, confirm,
 // input, editor) leave the brain waiting on the user.
@@ -182,8 +182,8 @@ export class TurnWatchdog {
         this.arm();
         return;
       default:
-        // Normal turn lifecycle / streaming (agent_start, message_*, turn_*,
-        // text_*). Any such event also implicitly resumes after a modal.
+        // Normal turn lifecycle / streaming (message_*, turn_*, text_*). Any
+        // such event also implicitly resumes after a modal.
         this.paused = false;
         this.arm();
         return;

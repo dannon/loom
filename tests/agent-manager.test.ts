@@ -541,12 +541,19 @@ describe("AgentManager", () => {
       it("does not cancel a command that takes minutes to reach its dialog", async () => {
         vi.useFakeTimers();
         try {
-          const { TURN_SILENCE_TIMEOUT_MS, window, aborts, prompt, respond, manager } =
-            await boot();
+          const {
+            TURN_SILENCE_TIMEOUT_MS,
+            COMMAND_SILENCE_TIMEOUT_MS,
+            window,
+            aborts,
+            prompt,
+            respond,
+            manager,
+          } = await boot();
           lineHandler?.(JSON.stringify({ type: "agent_settled", aborted: false }));
 
-          // Scott's log: /approve re-fetches the template and checks formats
-          // against a rate-limited Galaxy before it confirms.
+          // /approve re-fetches the template and checks formats against a
+          // rate-limited Galaxy before it confirms.
           const { reply, id } = prompt("/approve prop-m6zts1");
           vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS * 3);
           expect(errorEvents(window)).toHaveLength(0);
@@ -558,7 +565,27 @@ describe("AgentManager", () => {
           manager.send({ type: "extension_ui_response", id: "ui1", confirmed: true });
           respond(id, { disposition: "handled" });
           await expect(reply).resolves.toEqual({ disposition: "handled" });
+          // Past the command's own ceiling too: the answer has to settle it.
+          vi.advanceTimersByTime(COMMAND_SILENCE_TIMEOUT_MS * 2);
+          expect(errorEvents(window)).toHaveLength(0);
+          expect(aborts()).toHaveLength(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("doesn't cut off a command sent after an ordinary turn has finished", async () => {
+        vi.useFakeTimers();
+        try {
+          const { TURN_SILENCE_TIMEOUT_MS, window, aborts, prompt, manager } = await boot();
+
+          // Chat with the model, then approve what it proposed.
+          manager.sendCommand({ type: "prompt", message: "run fastp on the reads" });
+          lineHandler?.(JSON.stringify({ type: "agent_start" }));
+          lineHandler?.(JSON.stringify({ type: "agent_end" }));
+          prompt("/approve prop-m6zts1");
           vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS * 3);
+
           expect(errorEvents(window)).toHaveLength(0);
           expect(aborts()).toHaveLength(0);
         } finally {
@@ -609,19 +636,24 @@ describe("AgentManager", () => {
         }
       });
 
-      it("isn't fooled by a reply to some other request mid-command", async () => {
+      it("isn't fooled by a reply to some other request during a command's dialog", async () => {
         vi.useFakeTimers();
         try {
-          const { TURN_SILENCE_TIMEOUT_MS, window, aborts, prompt, manager, proc } = await boot();
+          const { COMMAND_SILENCE_TIMEOUT_MS, window, aborts, prompt, manager, proc } =
+            await boot();
 
           prompt("/sync push");
+          lineHandler?.(
+            JSON.stringify({ type: "extension_ui_request", id: "ui1", method: "confirm" }),
+          );
           const state = manager.sendCommand({ type: "get_state" });
           const stateId = JSON.parse(proc.stdin.write.mock.calls.at(-1)![0]).id;
           lineHandler?.(
             JSON.stringify({ type: "response", id: stateId, command: "get_state", success: true }),
           );
           await state;
-          vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS * 3);
+          // The user is still reading the dialog.
+          vi.advanceTimersByTime(COMMAND_SILENCE_TIMEOUT_MS * 2);
 
           expect(errorEvents(window)).toHaveLength(0);
           expect(aborts()).toHaveLength(0);
@@ -651,6 +683,23 @@ describe("AgentManager", () => {
         }
       });
 
+      it("leaves nothing to time out once a non-command slash prompt's turn ends", async () => {
+        vi.useFakeTimers();
+        try {
+          const { COMMAND_SILENCE_TIMEOUT_MS, window, prompt, respond } = await boot();
+
+          const { id } = prompt("/data/reads.fq looks odd");
+          respond(id, { disposition: "started" });
+          lineHandler?.(JSON.stringify({ type: "agent_start" }));
+          lineHandler?.(JSON.stringify({ type: "agent_end" }));
+          vi.advanceTimersByTime(COMMAND_SILENCE_TIMEOUT_MS * 2);
+
+          expect(errorEvents(window)).toHaveLength(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
       it("still catches a model turn that stalls while a command is running", async () => {
         vi.useFakeTimers();
         try {
@@ -663,6 +712,46 @@ describe("AgentManager", () => {
 
           expect(errorEvents(window)).toHaveLength(1);
           expect(aborts()).toHaveLength(1);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("keeps a slash prompt sent without an id on the turn limit", async () => {
+        vi.useFakeTimers();
+        try {
+          const { TURN_SILENCE_TIMEOUT_MS, window, manager } = await boot();
+
+          // No id means no response to settle it by, so it can't be held off.
+          manager.send({ type: "prompt", message: "/approve prop-m6zts1" });
+          vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS + 1);
+
+          expect(errorEvents(window)).toHaveLength(1);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("settles a slash prompt that pi rejects", async () => {
+        vi.useFakeTimers();
+        try {
+          const { COMMAND_SILENCE_TIMEOUT_MS, window, prompt } = await boot();
+
+          // Not a command, and pi won't start a turn mid-compaction.
+          const { reply, id } = prompt("/data/reads.fq looks odd");
+          lineHandler?.(
+            JSON.stringify({
+              type: "response",
+              id,
+              command: "prompt",
+              success: false,
+              error: "Cannot submit a prompt while compaction is in progress.",
+            }),
+          );
+          await expect(reply).rejects.toThrow(/compaction/);
+          vi.advanceTimersByTime(COMMAND_SILENCE_TIMEOUT_MS * 2);
+
+          expect(errorEvents(window)).toHaveLength(0);
         } finally {
           vi.useRealTimers();
         }

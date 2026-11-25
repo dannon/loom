@@ -503,6 +503,17 @@ describe("TurnWatchdog", () => {
       expect(onTimeout).not.toHaveBeenCalled();
     });
 
+    it("gives a command sent after a finished turn the command limit", () => {
+      const { watchdog, onTimeout } = makeWithCommands();
+      watchdog.promptSent();
+      watchdog.observe("agent_start");
+      watchdog.observe("agent_end");
+      watchdog.promptSent(approve);
+      vi.advanceTimersByTime(TIMEOUT * 5);
+
+      expect(onTimeout).not.toHaveBeenCalled();
+    });
+
     it("puts a slash prompt that starts a turn back on the turn limit", () => {
       const { watchdog, onTimeout } = makeWithCommands();
       watchdog.promptSent({ id: "cmd_1", label: "/data/reads.fq" });
@@ -634,6 +645,42 @@ describe("TurnWatchdog", () => {
       vi.advanceTimersByTime(TIMEOUT);
 
       expect(onTimeout).toHaveBeenCalledWith("turn");
+    });
+
+    it("waits on the dialog of a command that outlived its turn", () => {
+      const { watchdog, onTimeout } = makeWithCommands();
+      watchdog.promptSent();
+      watchdog.observe("agent_start");
+      watchdog.promptSent({ id: "cmd_2", label: "/sync" });
+      watchdog.observe("agent_end");
+      vi.advanceTimersByTime(COMMAND - 2);
+      watchdog.observe("extension_ui_request", "confirm");
+      vi.advanceTimersByTime(COMMAND * 5);
+
+      expect(onTimeout).not.toHaveBeenCalled();
+    });
+
+    it("names the command that has run longest when two overlap", () => {
+      const { watchdog, onTimeout } = makeWithCommands();
+      watchdog.promptSent(approve);
+      vi.advanceTimersByTime(COMMAND / 2);
+      watchdog.promptSent({ id: "cmd_10", label: "/sync" });
+      vi.advanceTimersByTime(COMMAND / 2);
+
+      expect(onTimeout).toHaveBeenCalledWith("command", "/approve");
+    });
+
+    it("times the later of two commands from its own dispatch once the first settles", () => {
+      const { watchdog, onTimeout } = makeWithCommands();
+      watchdog.promptSent(approve);
+      vi.advanceTimersByTime(COMMAND / 2);
+      watchdog.promptSent({ id: "cmd_10", label: "/sync" });
+      watchdog.commandSettled("cmd_9");
+      vi.advanceTimersByTime(COMMAND - 1);
+      expect(onTimeout).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+
+      expect(onTimeout).toHaveBeenCalledWith("command", "/sync");
     });
 
     it("doesn't let a command postpone a compaction's ceiling", () => {
