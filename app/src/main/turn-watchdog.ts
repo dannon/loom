@@ -74,8 +74,12 @@ export class TurnWatchdog {
   // agent_start seen and no agent_end yet. A running turn keeps the silence
   // window even with a command in flight: the command doesn't block the model.
   private turnRunning = false;
-  // Slash-command prompts pi hasn't answered yet, by RPC id. Outlives stop():
-  // a command typed mid-turn can still be running after that turn ends.
+  // A plain prompt hasn't reached agent_start yet. It keeps the turn limit even
+  // with a command in flight, since pi can wedge before the run starts.
+  private promptAwaitingTurn = false;
+  // Slash-command prompts pi hasn't answered yet, by RPC id. Outlives stop()
+  // and a stalled turn: a command typed mid-turn can still be running after
+  // that turn ends or is aborted.
   private commands = new Map<string, { label: string; startedAt: number }>();
   // A command settled with no turn running. Its handler may have queued a run
   // (/approve, /execute) that reaches agent_start only after pi's "handled"
@@ -98,6 +102,7 @@ export class TurnWatchdog {
     this.paused = false;
     this.commandMayStartTurn = false;
     if (command) this.commands.set(command.id, { label: command.label, startedAt: Date.now() });
+    else this.promptAwaitingTurn = true;
     this.arm();
   }
 
@@ -156,6 +161,7 @@ export class TurnWatchdog {
         // Whoever started it, the renderer now shows a running turn.
         this.active = true;
         this.commandMayStartTurn = false;
+        this.promptAwaitingTurn = false;
         this.turnRunning = true;
         this.paused = false;
         this.arm();
@@ -211,6 +217,7 @@ export class TurnWatchdog {
   stop(): void {
     this.active = false;
     this.turnRunning = false;
+    this.promptAwaitingTurn = false;
     this.paused = false;
     this.arm();
   }
@@ -243,10 +250,10 @@ export class TurnWatchdog {
   }
 
   // The command that has run longest, which is the one the ceiling is timing.
-  private oldestCommand(): { label: string; startedAt: number } | undefined {
-    let oldest: { label: string; startedAt: number } | undefined;
-    for (const command of this.commands.values()) {
-      if (!oldest || command.startedAt < oldest.startedAt) oldest = command;
+  private oldestCommand(): { id: string; label: string; startedAt: number } | undefined {
+    let oldest: { id: string; label: string; startedAt: number } | undefined;
+    for (const [id, command] of this.commands) {
+      if (!oldest || command.startedAt < oldest.startedAt) oldest = { id, ...command };
     }
     return oldest;
   }
@@ -259,8 +266,9 @@ export class TurnWatchdog {
     const command = this.oldestCommand();
     let stalled: StallKind;
     if (this.compacting) stalled = "compaction";
-    else if (this.active && (this.turnRunning || !command)) stalled = "turn";
-    else if (command) stalled = "command";
+    else if (this.active && (this.turnRunning || this.promptAwaitingTurn || !command)) {
+      stalled = "turn";
+    } else if (command) stalled = "command";
     else return;
     const limitMs = {
       turn: this.config.timeoutMs,
@@ -277,14 +285,18 @@ export class TurnWatchdog {
     const label = stalled === "command" ? command?.label : undefined;
     this.timer = setTimeout(() => {
       this.timer = null;
+      // Drop only what ran out. pi's abort doesn't reach a command handler, so
+      // other commands are still running and keep their own ceilings.
+      if (stalled === "command" && command) this.commands.delete(command.id);
+      else this.compacting = false;
       this.active = false;
       this.turnRunning = false;
+      this.promptAwaitingTurn = false;
       this.paused = false;
-      this.compacting = false;
-      this.commands.clear();
       this.commandMayStartTurn = false;
       if (label === undefined) this.config.onTimeout(stalled);
       else this.config.onTimeout(stalled, label);
+      this.arm();
     }, timeoutMs);
   }
 

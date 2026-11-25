@@ -518,8 +518,11 @@ describe("TurnWatchdog", () => {
       const { watchdog, onTimeout } = makeWithCommands();
       watchdog.promptSent({ id: "cmd_1", label: "/data/reads.fq" });
       vi.advanceTimersByTime(TIMEOUT * 2);
+      // "started", and then pi wedges before agent_start.
       watchdog.commandSettled("cmd_1");
-      vi.advanceTimersByTime(TIMEOUT);
+      vi.advanceTimersByTime(TIMEOUT - 1);
+      expect(onTimeout).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
 
       expect(onTimeout).toHaveBeenCalledTimes(1);
       expect(onTimeout).toHaveBeenCalledWith("turn");
@@ -673,14 +676,73 @@ describe("TurnWatchdog", () => {
     it("times the later of two commands from its own dispatch once the first settles", () => {
       const { watchdog, onTimeout } = makeWithCommands();
       watchdog.promptSent(approve);
-      vi.advanceTimersByTime(COMMAND / 2);
+      vi.advanceTimersByTime(COMMAND / 4);
       watchdog.promptSent({ id: "cmd_10", label: "/sync" });
+      vi.advanceTimersByTime(COMMAND / 2);
       watchdog.commandSettled("cmd_9");
-      vi.advanceTimersByTime(COMMAND - 1);
+      watchdog.stop();
+      vi.advanceTimersByTime(COMMAND / 2 - 1);
       expect(onTimeout).not.toHaveBeenCalled();
       vi.advanceTimersByTime(1);
 
       expect(onTimeout).toHaveBeenCalledWith("command", "/sync");
+    });
+
+    it("gives up on only the command that ran out", () => {
+      const { watchdog, onTimeout } = makeWithCommands();
+      watchdog.promptSent(approve);
+      vi.advanceTimersByTime(COMMAND / 2);
+      watchdog.promptSent({ id: "cmd_10", label: "/sync" });
+      vi.advanceTimersByTime(COMMAND / 2);
+      expect(onTimeout).toHaveBeenLastCalledWith("command", "/approve");
+
+      vi.advanceTimersByTime(COMMAND / 2 - 1);
+      expect(onTimeout).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1);
+      expect(onTimeout).toHaveBeenLastCalledWith("command", "/sync");
+    });
+
+    it("keeps timing a command after the turn it was typed into stalls", () => {
+      const { watchdog, onTimeout } = makeWithCommands();
+      watchdog.promptSent();
+      watchdog.observe("agent_start");
+      watchdog.promptSent(approve);
+      vi.advanceTimersByTime(TIMEOUT);
+      expect(onTimeout).toHaveBeenLastCalledWith("turn");
+
+      // The abort stopped the turn, not /approve's handler.
+      vi.advanceTimersByTime(COMMAND - TIMEOUT - 1);
+      expect(onTimeout).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1);
+      expect(onTimeout).toHaveBeenLastCalledWith("command", "/approve");
+    });
+
+    it("watches the run a command queues after the turn it was typed into stalled", () => {
+      const { watchdog, onTimeout } = makeWithCommands();
+      watchdog.promptSent();
+      watchdog.observe("agent_start");
+      watchdog.promptSent(approve);
+      vi.advanceTimersByTime(TIMEOUT);
+      watchdog.observe("agent_end");
+      watchdog.commandSettled("cmd_9");
+      watchdog.stop();
+      watchdog.observe("agent_start");
+      vi.advanceTimersByTime(TIMEOUT);
+
+      expect(onTimeout).toHaveBeenCalledTimes(2);
+      expect(onTimeout).toHaveBeenLastCalledWith("turn");
+    });
+
+    it("keeps a plain prompt on the turn limit while a command is running", () => {
+      const { watchdog, onTimeout } = makeWithCommands();
+      watchdog.promptSent(approve);
+      vi.advanceTimersByTime(TIMEOUT * 3);
+      watchdog.promptSent();
+      vi.advanceTimersByTime(TIMEOUT - 1);
+      expect(onTimeout).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+
+      expect(onTimeout).toHaveBeenCalledWith("turn");
     });
 
     it("doesn't let a command postpone a compaction's ceiling", () => {
