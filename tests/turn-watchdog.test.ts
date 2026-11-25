@@ -593,6 +593,49 @@ describe("TurnWatchdog", () => {
       expect(onTimeout).toHaveBeenCalledWith("command", "/sync");
     });
 
+    it("watches the turn a command starts once pi has answered it", () => {
+      const { watchdog, onTimeout } = makeWithCommands();
+      watchdog.promptSent(approve);
+      watchdog.observe("extension_ui_request", "confirm");
+      watchdog.dialogAnswered();
+      // /approve queues the approved run and returns; pi answers "handled"
+      // before that run reaches agent_start.
+      watchdog.commandSettled("cmd_9");
+      watchdog.stop();
+      watchdog.observe("agent_start");
+      vi.advanceTimersByTime(TIMEOUT);
+
+      expect(onTimeout).toHaveBeenCalledTimes(1);
+      expect(onTimeout).toHaveBeenCalledWith("turn");
+    });
+
+    it("watches only the first run after a command, not every unprompted one", () => {
+      const { watchdog, onTimeout } = makeWithCommands();
+      watchdog.promptSent(approve);
+      watchdog.commandSettled("cmd_9");
+      watchdog.stop();
+      watchdog.observe("agent_start");
+      watchdog.observe("agent_end");
+      // A later run nobody prompted, like a poller's auto-resume.
+      watchdog.observe("agent_start");
+      vi.advanceTimersByTime(TIMEOUT * 5);
+
+      expect(onTimeout).not.toHaveBeenCalled();
+    });
+
+    it("times a run that starts behind a command outliving its turn as a turn", () => {
+      const { watchdog, onTimeout } = makeWithCommands();
+      watchdog.promptSent();
+      watchdog.observe("agent_start");
+      watchdog.promptSent({ id: "cmd_2", label: "/sync" });
+      watchdog.observe("agent_end");
+      // pi retries the failed attempt with a fresh run.
+      watchdog.observe("agent_start");
+      vi.advanceTimersByTime(TIMEOUT);
+
+      expect(onTimeout).toHaveBeenCalledWith("turn");
+    });
+
     it("doesn't let a command postpone a compaction's ceiling", () => {
       const { watchdog, onTimeout } = makeWithCommands(TIMEOUT * 20);
       watchdog.observe("compaction_start");

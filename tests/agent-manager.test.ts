@@ -566,6 +566,49 @@ describe("AgentManager", () => {
         }
       });
 
+      it("still catches a hung turn that a command starts after pi answers it", async () => {
+        vi.useFakeTimers();
+        try {
+          const { TURN_SILENCE_TIMEOUT_MS, window, aborts, prompt, respond, manager } =
+            await boot();
+
+          const { id } = prompt("/approve prop-m6zts1");
+          lineHandler?.(
+            JSON.stringify({ type: "extension_ui_request", id: "ui1", method: "confirm" }),
+          );
+          manager.send({ type: "extension_ui_response", id: "ui1", confirmed: true });
+          respond(id, { disposition: "handled" });
+          // The approved run /approve queued, starting after the handled reply.
+          lineHandler?.(JSON.stringify({ type: "agent_start" }));
+          vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS + 1);
+
+          const errors = errorEvents(window);
+          expect(errors).toHaveLength(1);
+          expect((errors[0][1] as { message?: string }).message).toMatch(/stopped responding/i);
+          expect(aborts()).toHaveLength(1);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("stands down once the turn a command started ends", async () => {
+        vi.useFakeTimers();
+        try {
+          const { COMMAND_SILENCE_TIMEOUT_MS, window, aborts, prompt, respond } = await boot();
+
+          const { id } = prompt("/execute");
+          respond(id, { disposition: "handled" });
+          lineHandler?.(JSON.stringify({ type: "agent_start" }));
+          lineHandler?.(JSON.stringify({ type: "agent_end" }));
+          vi.advanceTimersByTime(COMMAND_SILENCE_TIMEOUT_MS * 2);
+
+          expect(errorEvents(window)).toHaveLength(0);
+          expect(aborts()).toHaveLength(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
       it("isn't fooled by a reply to some other request mid-command", async () => {
         vi.useFakeTimers();
         try {

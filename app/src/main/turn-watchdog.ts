@@ -56,7 +56,7 @@ const FIRE_AND_FORGET_UI_METHODS = new Set([
 
 export class TurnWatchdog {
   private timer: ReturnType<typeof setTimeout> | null = null;
-  // A user prompt is in flight (turn started, not yet terminal).
+  // A user prompt, or a run a command queued, is in flight (not yet terminal).
   private active = false;
   // The brain is legitimately blocked (running a tool, or awaiting a modal),
   // so silence is expected and must not be mistaken for a stall.
@@ -71,12 +71,16 @@ export class TurnWatchdog {
   // Power state is independent of tool/modal waits and survives stop(). Brain
   // events can still arrive after the OS announces suspend; none may rearm us.
   private suspended = false;
-  // agent_start seen for the watched prompt. A running turn keeps the silence
+  // agent_start seen and no agent_end yet. A running turn keeps the silence
   // window even with a command in flight: the command doesn't block the model.
   private turnRunning = false;
   // Slash-command prompts pi hasn't answered yet, by RPC id. Outlives stop():
   // a command typed mid-turn can still be running after that turn ends.
   private commands = new Map<string, { label: string; startedAt: number }>();
+  // A command settled with no turn running. Its handler may have queued a run
+  // (/approve, /execute) that reaches agent_start only after pi's "handled"
+  // reply has stood the prompt down, and the user is still waiting on it.
+  private commandMayStartTurn = false;
 
   constructor(private readonly config: TurnWatchdogConfig) {}
 
@@ -92,6 +96,7 @@ export class TurnWatchdog {
     this.suspended = false;
     this.active = true;
     this.paused = false;
+    this.commandMayStartTurn = false;
     if (command) this.commands.set(command.id, { label: command.label, startedAt: Date.now() });
     this.arm();
   }
@@ -102,6 +107,7 @@ export class TurnWatchdog {
    */
   commandSettled(id: string): void {
     if (!this.commands.delete(id)) return;
+    if (!this.turnRunning) this.commandMayStartTurn = true;
     this.arm();
   }
 
@@ -122,7 +128,8 @@ export class TurnWatchdog {
   /**
    * Observe a brain -> shell event by its `type`. Resets the silence window on
    * normal activity, pauses across tool/modal waits, and disarms on terminal
-   * events. Only compaction state is tracked when no turn is in flight.
+   * events. With no turn, command or command-queued run in flight, only
+   * compaction state is tracked.
    * `uiMethod` is an extension_ui_request's method.
    */
   observe(eventType: string, uiMethod?: string): void {
@@ -133,7 +140,7 @@ export class TurnWatchdog {
       this.arm();
       return;
     }
-    if (!this.active && this.commands.size === 0) return;
+    if (!this.active && this.commands.size === 0 && !this.commandMayStartTurn) return;
     // A prompt's own response settles through commandSettled(); a reply to
     // get_state or set_model says nothing about the turn and must not lift a
     // tool or dialog pause.
@@ -146,6 +153,9 @@ export class TurnWatchdog {
     }
     switch (eventType) {
       case "agent_start":
+        // Whoever started it, the renderer now shows a running turn.
+        this.active = true;
+        this.commandMayStartTurn = false;
         this.turnRunning = true;
         this.paused = false;
         this.arm();
@@ -210,9 +220,10 @@ export class TurnWatchdog {
    * but a turn the renderer is still waiting on keeps its own limit.
    */
   brainExited(): void {
-    if (!this.compacting && this.commands.size === 0) return;
+    if (!this.compacting && this.commands.size === 0 && !this.commandMayStartTurn) return;
     this.compacting = false;
     this.commands.clear();
+    this.commandMayStartTurn = false;
     this.arm();
   }
 
@@ -220,6 +231,7 @@ export class TurnWatchdog {
   reset(): void {
     this.compacting = false;
     this.commands.clear();
+    this.commandMayStartTurn = false;
     this.stop();
   }
 
@@ -270,6 +282,7 @@ export class TurnWatchdog {
       this.paused = false;
       this.compacting = false;
       this.commands.clear();
+      this.commandMayStartTurn = false;
       if (label === undefined) this.config.onTimeout(stalled);
       else this.config.onTimeout(stalled, label);
     }, timeoutMs);
