@@ -654,8 +654,15 @@ describe("AgentManager", () => {
           await state;
           // The user is still reading the dialog.
           vi.advanceTimersByTime(COMMAND_SILENCE_TIMEOUT_MS * 2);
-
           expect(errorEvents(window)).toHaveLength(0);
+          expect(aborts()).toHaveLength(0);
+
+          // The reply didn't settle /sync either: it's timed again once answered.
+          manager.send({ type: "extension_ui_response", id: "ui1", confirmed: true });
+          vi.advanceTimersByTime(COMMAND_SILENCE_TIMEOUT_MS - 1);
+          expect(errorEvents(window)).toHaveLength(0);
+          vi.advanceTimersByTime(1);
+          expect(errorEvents(window)).toHaveLength(1);
           expect(aborts()).toHaveLength(0);
         } finally {
           vi.useRealTimers();
@@ -735,9 +742,11 @@ describe("AgentManager", () => {
       it("settles a slash prompt that pi rejects", async () => {
         vi.useFakeTimers();
         try {
-          const { COMMAND_SILENCE_TIMEOUT_MS, window, prompt } = await boot();
+          const { COMMAND_SILENCE_TIMEOUT_MS, COMPACTION_SILENCE_TIMEOUT_MS, window, prompt } =
+            await boot();
 
           // Not a command, and pi won't start a turn mid-compaction.
+          lineHandler?.(JSON.stringify({ type: "compaction_start", reason: "manual" }));
           const { reply, id } = prompt("/data/reads.fq looks odd");
           lineHandler?.(
             JSON.stringify({
@@ -750,8 +759,13 @@ describe("AgentManager", () => {
           );
           await expect(reply).rejects.toThrow(/compaction/);
           vi.advanceTimersByTime(COMMAND_SILENCE_TIMEOUT_MS * 2);
-
           expect(errorEvents(window)).toHaveLength(0);
+
+          // Standing the prompt down left the compaction's own ceiling running.
+          vi.advanceTimersByTime(COMPACTION_SILENCE_TIMEOUT_MS);
+          const errors = errorEvents(window);
+          expect(errors).toHaveLength(1);
+          expect((errors[0][1] as { message?: string }).message).toMatch(/summariz/i);
         } finally {
           vi.useRealTimers();
         }
@@ -760,7 +774,14 @@ describe("AgentManager", () => {
       it("gives up on a command that never finishes, without claiming to cancel it", async () => {
         vi.useFakeTimers();
         try {
-          const { COMMAND_SILENCE_TIMEOUT_MS, window, aborts, prompt, manager } = await boot();
+          const {
+            TURN_SILENCE_TIMEOUT_MS,
+            COMMAND_SILENCE_TIMEOUT_MS,
+            window,
+            aborts,
+            prompt,
+            manager,
+          } = await boot();
 
           prompt("/approve prop-m6zts1");
           vi.advanceTimersByTime(COMMAND_SILENCE_TIMEOUT_MS - 1);
@@ -775,6 +796,14 @@ describe("AgentManager", () => {
           // pi's abort can't stop a command handler, so don't pretend it does.
           expect(aborts()).toHaveLength(0);
           expect(manager.getStatusSnapshot().turnActive).toBe(false);
+
+          // The hung command is forgotten: no repeat, and the next prompt is timed.
+          vi.advanceTimersByTime(COMMAND_SILENCE_TIMEOUT_MS * 2);
+          expect(errorEvents(window)).toHaveLength(1);
+          manager.sendCommand({ type: "prompt", message: "is Galaxy up?" });
+          vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS + 1);
+          expect(errorEvents(window)).toHaveLength(2);
+          expect(aborts()).toHaveLength(1);
         } finally {
           vi.useRealTimers();
         }
@@ -786,7 +815,7 @@ describe("AgentManager", () => {
           const first = makeProcess(101);
           const second = makeProcess(202);
           spawnMock.mockReturnValueOnce(first).mockReturnValueOnce(second);
-          const { AgentManager, TURN_SILENCE_TIMEOUT_MS } =
+          const { AgentManager, TURN_SILENCE_TIMEOUT_MS, COMMAND_SILENCE_TIMEOUT_MS } =
             await import("../app/src/main/agent.js");
           const window = {
             isDestroyed: () => false,
@@ -802,10 +831,19 @@ describe("AgentManager", () => {
           vi.advanceTimersByTime(200);
           expect(spawnMock).toHaveBeenCalledTimes(2);
 
-          // The dead command's hold must not shield the new brain's prompt.
+          // The lost /approve is reported like any turn a crash took, on the
+          // turn limit, and the dead command leaves no ceiling behind.
+          vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS);
+          const lost = errorEvents(window);
+          expect(lost).toHaveLength(1);
+          expect((lost[0][1] as { message?: string }).message).toMatch(/stopped responding/i);
+          vi.advanceTimersByTime(COMMAND_SILENCE_TIMEOUT_MS * 2);
+          expect(errorEvents(window)).toHaveLength(1);
+
+          // The new brain's first prompt is on the turn limit too.
           manager.send({ type: "prompt", message: "hello again" });
           vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS + 1);
-          expect(errorEvents(window)).toHaveLength(1);
+          expect(errorEvents(window)).toHaveLength(2);
         } finally {
           vi.useRealTimers();
         }
