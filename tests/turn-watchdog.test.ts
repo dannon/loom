@@ -475,4 +475,13 @@ describe("TurnWatchdog", () => {
 
     expect(onTimeout).toHaveBeenCalledTimes(1);
   });
+
+  it("doesn't let a reply to another request lift a tool's pause", () => {
+    const { watchdog, onTimeout } = make();
+    watchdog.promptSent();
+    watchdog.observe("tool_execution_start");
+    watchdog.observe("response");
+    vi.advanceTimersByTime(TIMEOUT * 5);
+    expect(onTimeout).not.toHaveBeenCalled();
+  });
 });

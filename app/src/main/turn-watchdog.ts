@@ -103,6 +103,10 @@ export class TurnWatchdog {
       return;
     }
     if (!this.active) return;
+    // A prompt's response only says pi accepted or ran it; a reply to get_state
+    // or set_model says nothing about the turn. Neither may lift a tool or
+    // dialog pause.
+    if (eventType === "response") return;
     // A status line or toast neither blocks the brain nor shows the model is
     // still streaming; letting it pause would switch off a running
     // compaction's limit until compaction_end.
